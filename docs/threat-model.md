@@ -90,7 +90,7 @@ backends are described in [backends.md](backends.md).
 | L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state` |
 | L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace` |
 | L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components` |
-| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | component walk | parse bound only: `CapPathParseTests.Rejects_paths_and_components_that_are_too_long` |
+| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused` |
 
 `..` deserves a note. The obvious implementation — collapse `a/../b` to `b` before touching
 the disk — is **wrong**, because if `a` is a symlink to `/etc` then the kernel resolves
@@ -104,16 +104,16 @@ alone — is in [paths.md](paths.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| S1 | Symlink to an absolute path outside the sandbox | Rejected by default | symlink policy; all backends | |
-| S2 | Relative symlink escaping via `..` | Rejected | component walk | |
-| S3 | Symlink chain that stays inside | Followed | component walk | |
-| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | |
-| S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | |
+| S1 | Symlink to an absolute path outside the sandbox | Rejected by default | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk` |
+| S2 | Relative symlink escaping via `..` | Rejected | component walk | `PortableWalkTests.A_link_that_climbs_out_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk` |
+| S3 | Symlink chain that stays inside | Followed | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_links_target_is_resolved_from_where_the_link_lives` |
+| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped` |
+| S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is` |
 | S6 | Dangling symlink pointing outside | Reported as not-found **without** revealing whether the target exists | symlink policy | |
-| S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend, and explicitly in the walk | Linux backends | |
+| S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | |
 | S8 | Windows junction / mount point (always absolute) | Rejected | Windows backend | |
-| S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend | |
-| S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress harness | |
+| S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend; component walk | walk half only: `PortableWalkTests.A_reparse_point_that_is_not_a_link_is_never_followed` |
+| S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress harness | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it` |
 
 ### 4.3 Windows name handling
 
@@ -148,7 +148,7 @@ property of the OS and has grown before. Windows name validation therefore also 
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| T1 | Mount point or bind mount appearing under the sandbox | Documented; `RESOLVE_NO_XDEV` available as a policy | `openat2` backend | |
+| T1 | Mount point or bind mount appearing under the sandbox | Documented; refusing to cross one available as a policy on every backend | `openat2` backend; component walk | `PortableWalkTests.A_mount_point_can_be_refused` |
 | T2 | Hardlink creation crossing the sandbox boundary | Requires a capability on *both* sides | `Dir` API | |
 | T3 | Rename crossing the boundary | Same: both `Dir`s required | `Dir` API | |
 | T4 | Pre-existing hardlink to an outside file, planted inside | **Not defendable** — see §6.3 | — | |
@@ -192,6 +192,15 @@ of scope. A caller holding a `Dir` can fill the volume. (Handle exhaustion *beha
 scope to the extent that running out of descriptors must not cause a containment failure —
 the stress harness covers it — but preventing exhaustion is not.)
 
+One narrow exception, which is about the library's own appetite rather than the caller's.
+The component-by-component resolver holds a handle open for every directory level it has
+descended through, so the descriptors one resolution consumes are a function of the path it
+was handed. It therefore refuses a path that nests deeper than a fixed limit, and it closes
+every handle it opened on every exit including the failing ones. Neither is a defence
+against a caller who wants to exhaust descriptors — they can, and that is still out of
+scope. They stop a single crafted *path* from doing it, which would otherwise make opens
+fail in code that never went near this library.
+
 ### 5.4 Not a confidentiality boundary for what the handle already reveals
 
 The sandbox root's own device and inode numbers, its timestamps, and the fact of its
@@ -220,8 +229,15 @@ sandbox may be able to steer an operation to a different object that is also ins
 sandbox.** They cannot steer it outside. For most uses — untrusted archive extraction,
 per-tenant storage — that is the property that matters.
 
-The stress harness must **quantify** this window rather than describe it, and the result
-belongs in this document.
+What an attacker *can* do through that window, and what they cannot, is asserted directly
+rather than argued: the walk is driven against a simulated filesystem that mutates at the
+exact instant between two steps, in
+`PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape` and
+`.A_rename_under_the_walk_does_not_redirect_it`. Both show resolution continuing into
+whatever was substituted and both show it staying beneath the root.
+
+The stress harness must additionally **quantify** the window rather than describe it, and
+the result belongs in this document.
 
 ### 6.2 `..` on the fallback path
 
@@ -229,6 +245,13 @@ Parent traversal is handled by popping a handle off a stack we already hold, nev
 `openat(fd, "..")`. This matters: `openat(fd, "..")` asks the kernel to resolve the parent
 of whatever `fd` currently refers to, which a concurrent rename can change. Popping a held
 handle cannot be raced.
+
+The consequence to be aware of is that after a rename the two answers genuinely differ. A
+walk that has descended into `a` and then meets `..` returns to the directory it came from,
+even if `a` has since been moved somewhere else entirely and the kernel would now say its
+parent is elsewhere. That is the answer the sandbox needs — the directory it returns to is
+one it has already established is beneath the root — but it is not always the answer the
+filesystem would give.
 
 ### 6.3 Hardlinks planted before the sandbox was opened
 

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Cap.Primitives.Interop;
 using Microsoft.Win32.SafeHandles;
 
@@ -29,6 +30,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     private readonly FakeFileSystem _fileSystem;
     private readonly Dictionary<nint, FakeNode> _open = [];
+    private readonly List<SafeHandle> _issued = [];
     private nint _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
 
@@ -44,8 +46,34 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public long ConfinedOpenAttempts => _confinedOpenAttempts;
 
-    /// <summary>How many handles this instance has produced and not seen released.</summary>
-    public int OpenHandleCount => _open.Count;
+    /// <summary>
+    /// How many of the handles this instance has produced are still open.
+    /// </summary>
+    /// <remarks>
+    /// A walk holds a handle for every directory it has descended through, so that upward
+    /// movement can step back through one rather than ask the kernel to resolve a parent.
+    /// Every exit from it therefore has handles to close, including the error exits — which
+    /// are the ones a hostile input is trying to take. Descriptors are a process-wide
+    /// resource, so a leak there is not a slow leak inside the walk; it is a way to make
+    /// unrelated opens elsewhere in the program start failing. Counting is how a test can
+    /// insist the walk unwound rather than assume it.
+    /// </remarks>
+    public int OpenHandleCount
+    {
+        get
+        {
+            int live = 0;
+            foreach (SafeHandle handle in _issued)
+            {
+                if (!handle.IsClosed)
+                {
+                    live++;
+                }
+            }
+
+            return live;
+        }
+    }
 
     /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
@@ -117,7 +145,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.IsADirectory));
         }
 
-        return CapResult<SafeFileHandle>.Ok(new SafeFileHandle(NextHandle(node), ownsHandle: false));
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(node));
     }
 
     /// <inheritdoc/>
@@ -158,7 +186,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         return node!.Type == CapNodeType.Directory
             ? CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.IsADirectory))
-            : CapResult<SafeFileHandle>.Ok(new SafeFileHandle(NextHandle(node), ownsHandle: false));
+            : CapResult<SafeFileHandle>.Ok(RegisterFile(node));
     }
 
     /// <inheritdoc/>
@@ -226,7 +254,18 @@ internal sealed class FakePlatformOps : IPlatformOps
         access is CapAccess.None or CapAccess.Read;
 
     private SafeDirHandle Register(FakeNode node, CapAccess access) =>
-        new(NextHandle(node), ownsHandle: false, access);
+        Track(new SafeDirHandle(NextHandle(node), ownsHandle: false, access));
+
+    private SafeFileHandle RegisterFile(FakeNode node) =>
+        Track(new SafeFileHandle(NextHandle(node), ownsHandle: false));
+
+    /// <summary>Remembers a handle so that its eventual closing can be observed.</summary>
+    private T Track<T>(T handle)
+        where T : SafeHandle
+    {
+        _issued.Add(handle);
+        return handle;
+    }
 
     private nint NextHandle(FakeNode node)
     {

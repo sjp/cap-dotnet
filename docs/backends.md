@@ -48,6 +48,63 @@ Two knobs select it, checked in this order:
 A switch, not a `#if`. The binary that is tested with the fallback forced is bit-identical
 to the one users ship, which is the only way the fallback leg in CI means anything.
 
+## What the component-by-component walk does
+
+The walk is one loop. Every operation that names something beneath a directory handle goes
+through it, and they differ only in what happens to the last component — a deliberate
+constraint, because two resolution loops eventually disagree about what `..` means and the
+disagreement is only ever found by whoever exploits it.
+
+**Every step refuses to follow a link.** Not as a default but as a rule with no exception:
+an intermediate open that followed one would have handed the containment decision to the
+kernel, which does not know where the sandbox root is. Links are read explicitly instead,
+and their targets are walked by the same loop under the same root test, so a component a
+link introduced is checked exactly like one the caller wrote.
+
+**Moving up steps back through a handle.** The walk keeps every directory it has descended
+through open, and `..` closes the top one. It never asks the kernel to resolve a parent,
+because the parent of an open directory is whatever a concurrent rename last made it. A
+`..` at the root is refused rather than clamped to the root: a caller that asked to go above
+it has been handed a path that tries to escape, and quietly resolving it to something else
+would hide that while leaving the path working for whoever supplied it.
+
+**Nothing is collapsed as text.** `link/..` resolves to the parent of the link's *target*,
+which is where the kernel would land and is not where string arithmetic would.
+
+The policy it applies to links is the same one the kernel-atomic backend is asked for, so
+that the two are observably identical and a forced-fallback run is testing the same
+semantics:
+
+| Case | Behaviour |
+|---|---|
+| Relative link whose target stays inside the root | Followed |
+| Relative link whose target climbs out through `..` | Refused as an escape |
+| Absolute link target, in any of its spellings | Refused as an escape |
+| Chain within budget, all inside | Followed |
+| Chain exceeding the budget, or a cycle | Refused as a link loop |
+| Reparse point whose tag is not a filesystem link | Refused, never read as a link |
+| Mount point inside the root | Crossed, unless the caller asked not to cross one |
+
+An absolute target is refused rather than re-read as though the sandbox root were the
+filesystem root. The re-reading is defensible — it is what `chroot` does — but it silently
+changes which file a link means, and nothing in the result tells a caller which reading they
+got.
+
+Two limits bound the work a single path can cost, and they are separate because they bound
+different things:
+
+- **Forty symbolic links per resolution.** The number Linux applies to its own resolution,
+  chosen so that a tree resolving on one backend and not on another is not a difference
+  anyone discovers in production.
+- **Two hundred and fifty-six directory levels.** The walk holds a handle per level, so
+  depth spends descriptors. Far deeper than any real tree, and well under the allowance a
+  process is normally given, so one crafted path cannot exhaust it and break opens
+  elsewhere in the program.
+
+Every exit from the walk closes the handles it opened, including the failing exits — which
+are the ones a hostile path is trying to take. That is asserted rather than assumed, from
+the kernel's own descriptor list as well as from the library's bookkeeping.
+
 ## Observability
 
 Silently taking a weaker backend is, per [SECURITY.md](../SECURITY.md), a vulnerability in

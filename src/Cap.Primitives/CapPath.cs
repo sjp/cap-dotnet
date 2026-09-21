@@ -86,6 +86,17 @@ public readonly struct CapPath
     public ReadOnlySpan<char> Raw => _raw;
 
     /// <summary>
+    /// The caller's own string, for code that has to keep the path across calls rather than
+    /// read it in one pass.
+    /// </summary>
+    /// <remarks>
+    /// The resolver needs this: it walks components one at a time with syscalls in between,
+    /// and a span cannot survive that. It is the original instance and not a copy, so
+    /// reaching for it costs nothing.
+    /// </remarks>
+    internal string Text => _raw ?? string.Empty;
+
+    /// <summary>
     /// How many components the path names, after <c>.</c> and repeated separators are
     /// dropped. Any <c>..</c> that survived parsing counts as one.
     /// </summary>
@@ -197,7 +208,15 @@ public readonly struct CapPath
     /// <inheritdoc/>
     public override string ToString() => _raw ?? string.Empty;
 
-    private static bool IsSeparator(char c, CapPathSyntax syntax) =>
+    /// <summary>
+    /// Whether <paramref name="c"/> separates components under <paramref name="syntax"/>.
+    /// </summary>
+    /// <remarks>
+    /// Shared with the resolver rather than restated there. Two definitions of what divides
+    /// a path would eventually differ, and the difference would be a name this type had
+    /// checked as one component being split into two by whatever opened it.
+    /// </remarks>
+    internal static bool IsSeparator(char c, CapPathSyntax syntax) =>
         c == '/' || (syntax == CapPathSyntax.Windows && c == '\\');
 
     /// <summary>

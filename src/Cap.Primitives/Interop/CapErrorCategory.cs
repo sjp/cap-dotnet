@@ -104,6 +104,16 @@ internal enum CapErrorCategory
     /// <summary>A name, or the whole path, was longer than the filesystem accepts.</summary>
     NameTooLong,
 
+    /// <summary>
+    /// A path nested more deeply than a walk is willing to descend. Produced only by the
+    /// component-at-a-time backend, which holds one open handle per level so that upward
+    /// movement can be a step back through handles it already has rather than a question put
+    /// to the kernel. That makes depth a consumer of the process's descriptors, and a bound
+    /// on it is what stops one hostile path from exhausting them and breaking opens
+    /// elsewhere in the program.
+    /// </summary>
+    PathTooDeep,
+
     /// <summary>The process or the system is out of file descriptors or handles.</summary>
     OutOfHandles,
 
