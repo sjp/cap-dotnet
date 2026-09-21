@@ -184,6 +184,32 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------------
+  # Cap.Primitives is the containment core: every line of it is either a resolution step
+  # or a parse decision, so a silent drop in coverage there means an untested path through
+  # the part of the tree that the whole guarantee rests on. The other assemblies are thin
+  # by comparison and are not gated.
+  # ---------------------------------------------------------------------------------
+  coverage-gate:
+    name: coverage gate (Cap.Primitives)
+    runs-on: ubuntu-latest
+    needs: build-test
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage
+          merge-multiple: true
+      - name: Fail on a coverage drop in Cap.Primitives
+        run: |
+          echo "TODO: read the cobertura reports under coverage/, take the line and branch"
+          echo "rate for Cap.Primitives, and fail if either falls below the committed"
+          echo "threshold. Blocked until Cap.Primitives has code: a rate computed over an"
+          echo "empty assembly is not a number worth gating on."
+          exit 1
+
+  # ---------------------------------------------------------------------------------
   lint:
     name: format + analyzers
     runs-on: ubuntu-latest
@@ -201,13 +227,14 @@ jobs:
 # are deliberately *not* commented out: a job that does not exist is a job nobody
 # remembers to write. Each one drops its `continue-on-error` line once the code it exercises exists:
 #
-#   filesystems  -> the escape corpus
-#   no-openat2   -> the openat2 capability probe
-#   nativeaot    -> AOT + trimming validation
+#   filesystems   -> the escape corpus
+#   no-openat2    -> the openat2 capability probe
+#   nativeaot     -> AOT + trimming validation
+#   coverage-gate -> any code in Cap.Primitives to measure
 #   the openat2-counter assertion in build-test -> the openat2 call counter
 #
 # Still to add:
-#   - a coverage gate that fails on a drop in Cap.Primitives;
-#   - a nightly schedule for TOCTOU stress (>=1e6 iterations) and fuzzing,
-#     which are far too slow for per-PR.
+#   - a nightly schedule for TOCTOU stress (>=1e6 iterations) and fuzzing, which are far
+#     too slow for per-PR. Both are recorded as acceptance criteria on their own work,
+#     so this note is a convenience rather than the only record.
 # ---------------------------------------------------------------------------------------
