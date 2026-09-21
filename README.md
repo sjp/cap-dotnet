@@ -53,9 +53,12 @@ dotnet build CapDotnet.slnx
 dotnet test  CapDotnet.slnx
 ```
 
-Requires the .NET 10 SDK (see `global.json`). Tests run on
-Microsoft.Testing.Platform and **must not be run elevated** — every test assembly asserts
-this, because negative containment tests pass for the wrong reason as root.
+Requires the .NET 10 SDK (see `global.json`). Tests run on Microsoft.Testing.Platform and
+**must not be run with the power to bypass file permissions** — every test assembly asserts
+this at startup, because negative containment tests can pass for the wrong reason when the
+process outranks the permission system. On Unix that means not running as root. On Windows
+an administrator token is fine, and in fact necessary to create the symlinks the suite
+attacks; what must not be enabled is a backup, restore or take-ownership privilege.
 
 ## Security
 

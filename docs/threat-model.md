@@ -169,8 +169,16 @@ must never be described as one.
 
 An attacker with `CAP_SYS_ADMIN`, `CAP_DAC_OVERRIDE`, `SeBackupPrivilege`,
 `SeRestorePrivilege`, or the ability to mount filesystems or modify the sandbox root's own
-ancestors defeats the model. This is also why the test suite asserts it is **not** running
-elevated: as root, several negative tests would pass for the wrong reason.
+ancestors defeats the model. This is also why every test assembly asserts at startup that
+it holds no such power: several negative tests would otherwise pass for the wrong reason,
+having been stopped by a privilege check that never ran rather than by containment.
+
+Note that this is not the same assertion on both platforms. Unix root bypasses DAC outright,
+so the check is euid. A Windows administrator bypasses nothing by being one — ACLs are still
+evaluated against an elevated token — so the check is whether an ACL-bypassing privilege is
+*enabled* in the token. The distinction is not pedantry: the corpus needs an elevated token
+on Windows in order to create symbolic links at all, so a blanket "must not be elevated"
+rule would forbid exactly the tests this section exists to protect.
 
 ### 5.3 No resource limits
 

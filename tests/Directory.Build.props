@@ -7,6 +7,13 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <!--
+      The source-generated marshalling that [LibraryImport] emits is built on pointers, so
+      it does not compile without this. Required because SYSLIB1054 is an error repo-wide:
+      the shared privilege guard has to read the process token through Win32, and
+      [DllImport] is not an option.
+    -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!--
       No InvariantGlobalization here, and none in the root props either: the macOS
       normalization cases in the escape tests need real ICU. Turning it on would make
       String.Normalize misbehave and the tests would pass for the wrong reason.
