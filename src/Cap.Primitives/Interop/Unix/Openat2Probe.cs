@@ -109,7 +109,7 @@ internal readonly struct Openat2Probe
 
         if (result >= 0)
         {
-            using SafeDirHandle probeHandle = new((nint)result, ownsHandle: true);
+            using SafeDirHandle probeHandle = new((nint)result, ownsHandle: true, CapAccess.Read);
             return new Openat2Probe(true, 0, null);
         }
 

@@ -48,8 +48,13 @@ internal sealed class FakePlatformOps : IPlatformOps
     public int OpenHandleCount => _open.Count;
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path)
+    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
+        if (!IsDirectoryAccess(access))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         FakeNode? node = _fileSystem.Find(path);
         if (node is null)
         {
@@ -57,13 +62,21 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         return node.Type == CapNodeType.Directory
-            ? CapResult<SafeDirHandle>.Ok(Register(node))
+            ? CapResult<SafeDirHandle>.Ok(Register(node, access))
             : CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotADirectory));
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapResult<SafeDirHandle> OpenChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapAccess access)
     {
+        if (!IsDirectoryAccess(access))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         CapError error = ResolveChild(parent, name, out FakeNode? node);
         if (error.IsFailure)
         {
@@ -81,7 +94,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         return node.Type == CapNodeType.Directory
-            ? CapResult<SafeDirHandle>.Ok(Register(node))
+            ? CapResult<SafeDirHandle>.Ok(Register(node, access))
             : CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotADirectory));
     }
 
@@ -111,8 +124,14 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapResult<SafeDirHandle> OpenConfinedDirectory(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
+        CapAccess access,
         ConfinedResolveOptions options)
     {
+        if (!IsDirectoryAccess(access))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         CapError error = ResolveConfined(root, path, options, out FakeNode? node);
         if (error.IsFailure)
         {
@@ -120,7 +139,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         return node!.Type == CapNodeType.Directory
-            ? CapResult<SafeDirHandle>.Ok(Register(node))
+            ? CapResult<SafeDirHandle>.Ok(Register(node, access))
             : CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotADirectory));
     }
 
@@ -191,10 +210,23 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        return CapResult<SafeDirHandle>.Ok(Register(node!));
+        return CapResult<SafeDirHandle>.Ok(Register(node!, handle.Access));
     }
 
-    private SafeDirHandle Register(FakeNode node) => new(NextHandle(node), ownsHandle: false);
+    /// <summary>
+    /// Whether the authority asked of a directory is one a directory can carry.
+    /// </summary>
+    /// <remarks>
+    /// The simulation does not model permission bits, so the two it accepts behave alike
+    /// here. It still refuses the third, because a caller asking to write a directory has
+    /// made a mistake that every real implementation reports, and a simulation that accepted
+    /// it would let that mistake pass unnoticed in exactly the tests written to catch it.
+    /// </remarks>
+    private static bool IsDirectoryAccess(CapAccess access) =>
+        access is CapAccess.None or CapAccess.Read;
+
+    private SafeDirHandle Register(FakeNode node, CapAccess access) =>
+        new(NextHandle(node), ownsHandle: false, access);
 
     private nint NextHandle(FakeNode node)
     {

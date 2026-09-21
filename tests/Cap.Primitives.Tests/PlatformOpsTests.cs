@@ -46,7 +46,8 @@ public sealed class PlatformOpsTests : IDisposable
     [Fact]
     public void An_ambient_path_that_names_nothing_is_reported_as_missing()
     {
-        CapResult<SafeDirHandle> result = Ops.OpenAmbientDirectory(Path.Combine(_root, "absent"));
+        CapResult<SafeDirHandle> result =
+            Ops.OpenAmbientDirectory(Path.Combine(_root, "absent"), CapAccess.Read);
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.NotFound, result.Error.Category);
     }
@@ -58,11 +59,11 @@ public sealed class PlatformOpsTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root, "child"));
 
         using SafeDirHandle root = OpenRoot();
-        CapResult<SafeDirHandle> child = Ops.OpenChildDirectory(root, "child");
+        CapResult<SafeDirHandle> child = Ops.OpenChildDirectory(root, "child", CapAccess.Read);
         Assert.True(child.IsSuccess, child.Error.FailureDescription);
         child.Value.Dispose();
 
-        CapResult<SafeDirHandle> missing = Ops.OpenChildDirectory(root, "absent");
+        CapResult<SafeDirHandle> missing = Ops.OpenChildDirectory(root, "absent", CapAccess.Read);
         Assert.False(missing.IsSuccess);
         Assert.Equal(CapErrorCategory.NotFound, missing.Error.Category);
     }
@@ -74,7 +75,7 @@ public sealed class PlatformOpsTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "plain.txt"), "content");
 
         using SafeDirHandle root = OpenRoot();
-        CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "plain.txt");
+        CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "plain.txt", CapAccess.Read);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.NotADirectory, result.Error.Category);
@@ -117,7 +118,7 @@ public sealed class PlatformOpsTests : IDisposable
         }
 
         using SafeDirHandle root = OpenRoot();
-        CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "link");
+        CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "link", CapAccess.Read);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.SymbolicLink, result.Error.Category);
@@ -172,7 +173,7 @@ public sealed class PlatformOpsTests : IDisposable
         using SafeDirHandle root = OpenRoot();
         Assert.True(Ops.StatChild(root, "child", out CapNodeInfo byName).IsSuccess);
 
-        CapResult<SafeDirHandle> opened = Ops.OpenChildDirectory(root, "child");
+        CapResult<SafeDirHandle> opened = Ops.OpenChildDirectory(root, "child", CapAccess.Read);
         Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
 
         using SafeDirHandle child = opened.Value;
@@ -198,7 +199,7 @@ public sealed class PlatformOpsTests : IDisposable
         root.Dispose();
 
         // Closing one must not close the other: the copy is still a capability.
-        CapResult<SafeDirHandle> child = Ops.OpenChildDirectory(copy, "child");
+        CapResult<SafeDirHandle> child = Ops.OpenChildDirectory(copy, "child", CapAccess.Read);
         Assert.True(child.IsSuccess, child.Error.FailureDescription);
         child.Value.Dispose();
     }
@@ -212,13 +213,13 @@ public sealed class PlatformOpsTests : IDisposable
         SafeDirHandle root = OpenRoot();
         root.Dispose();
 
-        CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "child");
+        CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "child", CapAccess.Read);
         Assert.False(result.IsSuccess);
     }
 
     private SafeDirHandle OpenRoot()
     {
-        CapResult<SafeDirHandle> result = Ops.OpenAmbientDirectory(_root);
+        CapResult<SafeDirHandle> result = Ops.OpenAmbientDirectory(_root, CapAccess.Read);
         Assert.True(result.IsSuccess, result.Error.FailureDescription);
         return result.Value;
     }

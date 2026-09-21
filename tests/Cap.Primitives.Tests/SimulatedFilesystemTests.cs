@@ -42,7 +42,7 @@ public sealed class SimulatedFilesystemTests
         FakePlatformOps ops = new(fs);
         using SafeDirHandle root = OpenRoot(ops, fs);
 
-        CapResult<SafeDirHandle> result = ops.OpenChildDirectory(root, "link");
+        CapResult<SafeDirHandle> result = ops.OpenChildDirectory(root, "link", CapAccess.Read);
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.SymbolicLink, result.Error.Category);
 
@@ -63,7 +63,7 @@ public sealed class SimulatedFilesystemTests
         FakePlatformOps ops = new(fs);
         using SafeDirHandle root = OpenRoot(ops, fs);
 
-        CapResult<SafeDirHandle> result = ops.OpenChildDirectory(root, "alias");
+        CapResult<SafeDirHandle> result = ops.OpenChildDirectory(root, "alias", CapAccess.Read);
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.Reparse, result.Error.Category);
     }
@@ -85,12 +85,13 @@ public sealed class SimulatedFilesystemTests
         Assert.True(mounted.CrossesVolumeBoundaryFrom(plain));
 
         CapResult<SafeDirHandle> crossed =
-            ops.OpenConfinedDirectory(root, "mounted", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "mounted", CapAccess.Read, ConfinedResolveOptions.None);
         Assert.True(crossed.IsSuccess, crossed.Error.FailureDescription);
         crossed.Value.Dispose();
 
         CapResult<SafeDirHandle> refused =
-            ops.OpenConfinedDirectory(root, "mounted", ConfinedResolveOptions.RefuseMountCrossing);
+            ops.OpenConfinedDirectory(
+                root, "mounted", CapAccess.Read, ConfinedResolveOptions.RefuseMountCrossing);
         Assert.False(refused.IsSuccess);
         Assert.Equal(CapErrorCategory.CrossDevice, refused.Error.Category);
     }
@@ -112,7 +113,7 @@ public sealed class SimulatedFilesystemTests
         FakePlatformOps ops = new(fs);
         using SafeDirHandle root = OpenRoot(ops, fs);
 
-        CapResult<SafeDirHandle> first = ops.OpenChildDirectory(root, "a");
+        CapResult<SafeDirHandle> first = ops.OpenChildDirectory(root, "a", CapAccess.Read);
         Assert.True(first.IsSuccess, first.Error.FailureDescription);
         using SafeDirHandle a = first.Value;
 
@@ -133,7 +134,7 @@ public sealed class SimulatedFilesystemTests
             }
         };
 
-        CapResult<SafeDirHandle> second = ops.OpenChildDirectory(a, "b");
+        CapResult<SafeDirHandle> second = ops.OpenChildDirectory(a, "b", CapAccess.Read);
         Assert.False(second.IsSuccess);
         Assert.Equal(CapErrorCategory.SymbolicLink, second.Error.Category);
     }
@@ -153,12 +154,12 @@ public sealed class SimulatedFilesystemTests
         using SafeDirHandle root = OpenRoot(ops, fs);
 
         CapResult<SafeDirHandle> inside =
-            ops.OpenConfinedDirectory(root, "a/b/../sibling", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "a/b/../sibling", CapAccess.Read, ConfinedResolveOptions.None);
         Assert.True(inside.IsSuccess, inside.Error.FailureDescription);
         inside.Value.Dispose();
 
         CapResult<SafeDirHandle> outside =
-            ops.OpenConfinedDirectory(root, "a/../..", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "a/../..", CapAccess.Read, ConfinedResolveOptions.None);
         Assert.False(outside.IsSuccess);
         Assert.Equal(CapErrorCategory.Escaped, outside.Error.Category);
     }
@@ -179,7 +180,7 @@ public sealed class SimulatedFilesystemTests
         using SafeDirHandle root = OpenRoot(ops, fs);
 
         CapResult<SafeDirHandle> result =
-            ops.OpenConfinedDirectory(root, "a/b/up", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "a/b/up", CapAccess.Read, ConfinedResolveOptions.None);
 
         Assert.True(result.IsSuccess, result.Error.FailureDescription);
         using SafeDirHandle resolved = result.Value;
@@ -198,7 +199,7 @@ public sealed class SimulatedFilesystemTests
         using SafeDirHandle root = OpenRoot(ops, fs);
 
         CapResult<SafeDirHandle> result =
-            ops.OpenConfinedDirectory(root, "escape", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "escape", CapAccess.Read, ConfinedResolveOptions.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.Escaped, result.Error.Category);
@@ -215,7 +216,7 @@ public sealed class SimulatedFilesystemTests
         using SafeDirHandle root = OpenRoot(ops, fs);
 
         CapResult<SafeDirHandle> result =
-            ops.OpenConfinedDirectory(root, "loop", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "loop", CapAccess.Read, ConfinedResolveOptions.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.SymbolicLinkLoop, result.Error.Category);
@@ -236,7 +237,7 @@ public sealed class SimulatedFilesystemTests
 
         using SafeDirHandle root = OpenRoot(ops, fs);
         CapResult<SafeDirHandle> result =
-            ops.OpenConfinedDirectory(root, "a", ConfinedResolveOptions.None);
+            ops.OpenConfinedDirectory(root, "a", CapAccess.Read, ConfinedResolveOptions.None);
 
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.NotSupported, result.Error.Category);
@@ -244,7 +245,7 @@ public sealed class SimulatedFilesystemTests
 
     private static SafeDirHandle OpenRoot(FakePlatformOps ops, FakeFileSystem fs)
     {
-        CapResult<SafeDirHandle> result = ops.OpenAmbientDirectory(string.Empty);
+        CapResult<SafeDirHandle> result = ops.OpenAmbientDirectory(string.Empty, CapAccess.Read);
         Assert.True(result.IsSuccess, result.Error.FailureDescription);
         _ = fs;
         return result.Value;

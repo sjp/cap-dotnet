@@ -39,9 +39,14 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     public long ConfinedOpenAttempts => 0;
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path)
+    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
         ArgumentNullException.ThrowIfNull(path);
+
+        if (!IsDirectoryAccess(access))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
         using UnixPathBuffer encoded = UnixPathBuffer.Create(path, scratch);
@@ -56,12 +61,20 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         // links into a private subtree, so refusing to follow one would refuse the most
         // ordinary root a caller could ask for.
         int flags = DarwinConstants.O_RDONLY | DarwinConstants.O_DIRECTORY | DarwinConstants.O_CLOEXEC;
-        return OpenDirectoryDescriptor(DarwinConstants.AT_FDCWD, encoded, flags, noFollow: false);
+        return OpenDirectoryDescriptor(DarwinConstants.AT_FDCWD, encoded, flags, noFollow: false, access);
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapResult<SafeDirHandle> OpenChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapAccess access)
     {
+        if (!IsDirectoryAccess(access))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
@@ -78,7 +91,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
 
         int flags = DarwinConstants.O_RDONLY | DarwinConstants.O_DIRECTORY |
                     DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC;
-        return OpenDirectoryDescriptor(lease.Descriptor, encoded, flags, noFollow: true);
+        return OpenDirectoryDescriptor(lease.Descriptor, encoded, flags, noFollow: true, access);
     }
 
     /// <inheritdoc/>
@@ -130,6 +143,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     public CapResult<SafeDirHandle> OpenConfinedDirectory(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
+        CapAccess access,
         ConfinedResolveOptions options) =>
         CapResult<SafeDirHandle>.Fail(ConfinedOpenUnavailable);
 
@@ -282,11 +296,31 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(DarwinErrno.ToError(Marshal.GetLastPInvokeError()));
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true));
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
     }
 
     private static CapError ConfinedOpenUnavailable =>
         CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, DarwinErrno.ENOSYS);
+
+    /// <summary>
+    /// Whether the authority asked of a directory is one a directory can carry.
+    /// </summary>
+    /// <remarks>
+    /// This platform has no way to open a directory for traversal alone: every directory
+    /// descriptor it can produce also permits the directory to be listed. So a request for
+    /// the narrower handle is honoured by returning the wider one — narrower is what the
+    /// caller would prefer, not what it depends on — and only the request no directory open
+    /// can satisfy, to write one, is refused.
+    ///
+    /// The difference is visible in one place. A directory that grants execute permission
+    /// without read permission can be walked through on a kernel offering a traversal-only
+    /// open and cannot be opened at all here, so a tree using that permission pattern is
+    /// reachable on one platform and not on this one. That is a property of the platform
+    /// rather than a choice made here, and it is recorded so that it is not mistaken for a
+    /// resolution bug.
+    /// </remarks>
+    private static bool IsDirectoryAccess(CapAccess access) =>
+        access is CapAccess.None or CapAccess.Read;
 
     private static int AccessFlags(CapAccess access) => access switch
     {
@@ -313,7 +347,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         int directoryFd,
         in UnixPathBuffer encoded,
         int flags,
-        bool noFollow)
+        bool noFollow,
+        CapAccess access)
     {
         int fd;
         int errno = 0;
@@ -332,7 +367,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         return fd < 0
             ? CapResult<SafeDirHandle>.Fail(
                 TranslateOpenFailure(directoryFd, encoded.Bytes, errno, noFollow))
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
     }
 
     /// <summary>

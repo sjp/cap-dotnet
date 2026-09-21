@@ -29,17 +29,6 @@ namespace Cap.Primitives.Interop.Unix;
 [SupportedOSPlatform("linux")]
 internal sealed class LinuxPlatformOps : IPlatformOps
 {
-    /// <summary>
-    /// How many times a confined open is retried when the kernel reports that resolution
-    /// raced with a concurrent rename.
-    /// </summary>
-    /// <remarks>
-    /// Bounded rather than unbounded: anything that can write inside the sandbox can keep a
-    /// rename loop running indefinitely, and an unbounded retry would turn that into a hang
-    /// in the calling application rather than an error it can report.
-    /// </remarks>
-    private const int RaceRetryLimit = 16;
-
     /// <summary>Scratch space for a single component or a short path, before renting.</summary>
     private const int PathScratchBytes = 512;
 
@@ -51,6 +40,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
     private readonly Openat2Probe _probe = Openat2Probe.Run();
     private long _confinedOpenAttempts;
+    private long _confinedOpenRaceRetries;
+    private long _componentOpens;
 
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities =>
@@ -72,10 +63,43 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// <summary>Why the confined open is unavailable, in words, or <see langword="null"/>.</summary>
     public string? ConfinedOpenUnavailableReason => _probe.Reason;
 
+    /// <summary>
+    /// How many single-name opens have been issued beneath an existing handle.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of the confined-open counter, and it exists for the mirror-image
+    /// reason. That one lets a run prove it never reached the fast path; this one lets a run
+    /// prove the fast path did not quietly become a walk. A confined resolution is supposed
+    /// to be one operation no matter how many names the path has, and the only way to tell
+    /// that from outside — without a tracer, which not every host will permit — is to count
+    /// the opens that a walk would have had to make and find none.
+    ///
+    /// Opening the first handle by an ordinary path is not counted: it resolves a whole path
+    /// with the process's own authority and is not a step in anything.
+    /// </remarks>
+    public long ComponentOpens => Interlocked.Read(ref _componentOpens);
+
+    /// <summary>
+    /// How many times a confined open has been retried after the kernel reported that
+    /// resolution lost a race.
+    /// </summary>
+    /// <remarks>
+    /// The retry is invisible from the outside by design — a caller sees a successful open,
+    /// not the race that preceded it — and something invisible is something no test can
+    /// insist happened. This is how a test that provokes the race can tell the difference
+    /// between having exercised the retry and merely having run the loop once.
+    /// </remarks>
+    public long ConfinedOpenRaceRetries => Interlocked.Read(ref _confinedOpenRaceRetries);
+
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path)
+    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
         ArgumentNullException.ThrowIfNull(path);
+
+        if (!TryDirectoryAccessFlag(access, out int accessFlag))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
         using UnixPathBuffer encoded = UnixPathBuffer.Create(path, scratch);
@@ -88,13 +112,21 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         // the ambient step, before any capability exists: the caller named a directory by an
         // ordinary path and expects ordinary resolution, and several conventional locations
         // -- the temporary directory among them -- are links on some systems.
-        int flags = LinuxConstants.O_RDONLY | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC;
-        return OpenDirectoryDescriptor(LinuxConstants.AT_FDCWD, encoded, flags, noFollow: false);
+        int flags = accessFlag | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC;
+        return OpenDirectoryDescriptor(LinuxConstants.AT_FDCWD, encoded, flags, noFollow: false, access);
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapResult<SafeDirHandle> OpenChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapAccess access)
     {
+        if (!TryDirectoryAccessFlag(access, out int accessFlag))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
@@ -109,9 +141,15 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        int flags = LinuxConstants.O_RDONLY | LinuxConstants.O_DIRECTORY |
+        Interlocked.Increment(ref _componentOpens);
+
+        // O_DIRECTORY is what keeps the traversal-only open honest about links. Without it,
+        // a no-follow open of that kind succeeds on a symbolic link and hands back a
+        // descriptor to the link itself, which a walk would then treat as the directory it
+        // asked for. With it, the same case is refused.
+        int flags = accessFlag | LinuxConstants.O_DIRECTORY |
                     LinuxConstants.O_NOFOLLOW | LinuxConstants.O_CLOEXEC;
-        return OpenDirectoryDescriptor(lease.Descriptor, encoded, flags, noFollow: true);
+        return OpenDirectoryDescriptor(lease.Descriptor, encoded, flags, noFollow: true, access);
     }
 
     /// <inheritdoc/>
@@ -130,6 +168,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         {
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
+
+        Interlocked.Increment(ref _componentOpens);
 
         int flags = AccessFlags(access) | LinuxConstants.O_NOFOLLOW | LinuxConstants.O_CLOEXEC |
                     LinuxConstants.O_NONBLOCK;
@@ -160,13 +200,19 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     public CapResult<SafeDirHandle> OpenConfinedDirectory(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
+        CapAccess access,
         ConfinedResolveOptions options)
     {
-        int flags = LinuxConstants.O_RDONLY | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC;
+        if (!TryDirectoryAccessFlag(access, out int accessFlag))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        int flags = accessFlag | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC;
         CapError error = OpenConfinedDescriptor(root, path, flags, options, out int fd);
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
     }
 
     /// <inheritdoc/>
@@ -313,13 +359,17 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         // started between the duplication and a later attempt to set it would inherit the
         // directory -- and with it the authority the handle carries. F_DUPFD_CLOEXEC does
         // both in one step and leaves no such window.
+        //
+        // A duplicate shares the original's access mode rather than being opened afresh, so
+        // a copy of a traversal-only handle is traversal-only too. Nothing here can widen
+        // what it was handed.
         int fd = LinuxNative.Fcntl(lease.Descriptor, LinuxConstants.F_DUPFD_CLOEXEC, 0);
         if (fd < 0)
         {
             return CapResult<SafeDirHandle>.Fail(LinuxErrno.ToError(Marshal.GetLastPInvokeError()));
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true));
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
     }
 
     private static int AccessFlags(CapAccess access) => access switch
@@ -328,6 +378,38 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         CapAccess.Write => LinuxConstants.O_WRONLY,
         _ => LinuxConstants.O_RDONLY,
     };
+
+    /// <summary>
+    /// Translates the authority asked of a directory into the flag that expresses it.
+    /// </summary>
+    /// <returns>
+    /// False when no directory open can mean what was asked, which is the case for any
+    /// request to write one.
+    /// </returns>
+    /// <remarks>
+    /// The traversal-only flag is not a smaller version of the read flag; it produces a
+    /// descriptor with no data access at all, which can be resolved against but never
+    /// listed. Asking for it is how an open says it wants a position in the tree rather than
+    /// a directory to read — and on a directory that grants execute permission without read
+    /// permission, it is the only open that succeeds.
+    /// </remarks>
+    private static bool TryDirectoryAccessFlag(CapAccess access, out int flag)
+    {
+        switch (access)
+        {
+            case CapAccess.None:
+                flag = LinuxConstants.O_PATH;
+                return true;
+
+            case CapAccess.Read:
+                flag = LinuxConstants.O_RDONLY;
+                return true;
+
+            default:
+                flag = 0;
+                return false;
+        }
+    }
 
     /// <summary>
     /// Removes the non-blocking flag the open was issued with.
@@ -351,7 +433,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         int directoryFd,
         in UnixPathBuffer encoded,
         int flags,
-        bool noFollow)
+        bool noFollow,
+        CapAccess access)
     {
         int fd;
         int errno;
@@ -367,7 +450,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         return fd < 0
             ? CapResult<SafeDirHandle>.Fail(
                 TranslateOpenFailure(directoryFd, encoded.Bytes, errno, noFollow))
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
     }
 
     /// <summary>
@@ -523,8 +606,9 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             // longer trustworthy. That is the expected outcome of resolving a path in a
             // directory something else is renaming inside, and the answer is to start again,
             // not to report a failure the caller cannot act on.
-            if (errno == LinuxErrno.EAGAIN && attempt < RaceRetryLimit)
+            if (ConfinedRetryPolicy.ShouldRetry(errno, attempt))
             {
+                Interlocked.Increment(ref _confinedOpenRaceRetries);
                 continue;
             }
 

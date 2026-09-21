@@ -38,12 +38,6 @@ namespace Cap.Primitives.Interop;
 /// </remarks>
 internal sealed partial class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
-    /// <summary>Creates an unset handle for a native call to fill in.</summary>
-    public SafeDirHandle()
-        : base(ownsHandle: true)
-    {
-    }
-
     /// <summary>
     /// Wraps an already-open descriptor or handle.
     /// </summary>
@@ -54,11 +48,28 @@ internal sealed partial class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
     /// closing them through the OS would close whatever real object happened to share the
     /// number.
     /// </param>
-    public SafeDirHandle(nint handle, bool ownsHandle)
+    /// <param name="access">The authority the open was granted.</param>
+    public SafeDirHandle(nint handle, bool ownsHandle, CapAccess access)
         : base(ownsHandle)
     {
+        Access = access;
         SetHandle(handle);
     }
+
+    /// <summary>
+    /// The authority this handle was opened with.
+    /// </summary>
+    /// <remarks>
+    /// Carried on the handle because there is at least one operation — producing a second,
+    /// independent handle to the same directory — that has to reproduce it rather than
+    /// choose it. Where that is done by re-opening the object, a copy made without knowing
+    /// what the original carried would be granted whatever the directory's permissions
+    /// allow, which for a handle deliberately opened with no read access is not a copy at
+    /// all but a promotion. Recording it makes reproducing it possible; nothing consults it
+    /// to decide whether an operation is permitted, which remains the operating system's
+    /// judgement rather than ours.
+    /// </remarks>
+    public CapAccess Access { get; }
 
     /// <summary>
     /// Pins the handle open for the duration of a native call.

@@ -54,7 +54,7 @@ internal interface IPlatformOps
     /// promises begins after this call returns; the path is resolved with the same rules,
     /// and the same exposure, as any other program opening any other path.
     /// </remarks>
-    CapResult<SafeDirHandle> OpenAmbientDirectory(string path);
+    CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access);
 
     /// <summary>
     /// Opens the directory named by <paramref name="name"/> directly beneath
@@ -65,7 +65,7 @@ internal interface IPlatformOps
     /// rather than following it, and with <see cref="CapErrorCategory.NotADirectory"/> when
     /// it is not a directory. Both are ordinary outcomes during a walk.
     /// </remarks>
-    CapResult<SafeDirHandle> OpenChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name);
+    CapResult<SafeDirHandle> OpenChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name, CapAccess access);
 
     /// <summary>
     /// Opens the file named by <paramref name="name"/> directly beneath
@@ -88,6 +88,7 @@ internal interface IPlatformOps
     /// A relative path of one or more components. Unlike every other member, this one is not
     /// limited to a single component — resolving the whole path at once is the entire point.
     /// </param>
+    /// <param name="access">The authority the resulting handle carries.</param>
     /// <param name="options">Policy applied on top of confinement.</param>
     /// <remarks>
     /// <para>
@@ -112,6 +113,7 @@ internal interface IPlatformOps
     CapResult<SafeDirHandle> OpenConfinedDirectory(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
+        CapAccess access,
         ConfinedResolveOptions options);
 
     /// <summary>

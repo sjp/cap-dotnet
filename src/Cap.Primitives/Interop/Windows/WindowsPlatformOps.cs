@@ -42,6 +42,20 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         NtConstants.FILE_LIST_DIRECTORY | NtConstants.FILE_TRAVERSE |
         NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE;
 
+    /// <summary>
+    /// Access enough to resolve names beneath a directory, and to ask what it is, but not to
+    /// list it.
+    /// </summary>
+    /// <remarks>
+    /// This platform draws the same line the kernel path walk draws everywhere: traversing a
+    /// directory and listing its contents are separate rights, granted separately, and a
+    /// handle held only in order to resolve further names needs the first and not the second.
+    /// Asking for only what is needed keeps an anchor handle from being usable as a
+    /// directory listing if it is passed somewhere it should not have been.
+    /// </remarks>
+    private const uint TraverseAccess =
+        NtConstants.FILE_TRAVERSE | NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE;
+
     /// <summary>Access enough to ask what something is, and nothing more.</summary>
     private const uint QueryAccess = NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE;
 
@@ -53,9 +67,14 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     public long ConfinedOpenAttempts => 0;
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path)
+    public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
         ArgumentNullException.ThrowIfNull(path);
+
+        if (!TryDirectoryAccessMask(access, out uint mask))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
 
         // The Win32 call, deliberately, and only here. It understands drive letters, the
         // per-process working directory and the rest of the user-facing path syntax, which
@@ -63,7 +82,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // reachable once a capability exists.
         nint raw = NtNative.CreateFile(
             path,
-            DirectoryAccess,
+            mask,
             NtConstants.FILE_SHARE_ALL,
             securityAttributes: 0,
             NtConstants.OPEN_EXISTING,
@@ -75,16 +94,24 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(Win32Errors.ToError(Marshal.GetLastWin32Error()));
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true));
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true, access));
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> OpenChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapResult<SafeDirHandle> OpenChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapAccess access)
     {
+        if (!TryDirectoryAccessMask(access, out uint mask))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         CapError error = OpenRelative(
             parent,
             name,
-            DirectoryAccess,
+            mask,
             NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
             NtConstants.FILE_OPEN_REPARSE_POINT,
             out nint raw);
@@ -94,7 +121,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(error);
         }
 
-        SafeDirHandle handle = new(raw, ownsHandle: true);
+        SafeDirHandle handle = new(raw, ownsHandle: true, access);
         CapError linkCheck = RefuseIfReparsePoint(handle);
         if (linkCheck.IsFailure)
         {
@@ -136,6 +163,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     public CapResult<SafeDirHandle> OpenConfinedDirectory(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
+        CapAccess access,
         ConfinedResolveOptions options) =>
         CapResult<SafeDirHandle>.Fail(ConfinedOpenUnavailable);
 
@@ -162,7 +190,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<string>.Fail(error);
         }
 
-        using SafeDirHandle handle = new(raw, ownsHandle: true);
+        using SafeDirHandle handle = new(raw, ownsHandle: true, CapAccess.None);
         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReparseData.MaximumBufferSize);
         try
         {
@@ -231,7 +259,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return error;
         }
 
-        using SafeDirHandle handle = new(raw, ownsHandle: true);
+        using SafeDirHandle handle = new(raw, ownsHandle: true, CapAccess.None);
         return Describe(handle, out info);
     }
 
@@ -251,21 +279,58 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // The empty name with the handle as the resolution root re-opens the object the
         // handle already refers to. Nothing is named a second time, so nothing a concurrent
         // rename could do changes what comes back.
+        //
+        // Re-opening is what gives the copy an independent position for enumeration, and it
+        // is also why the access has to be asked for again explicitly. The rights a re-open
+        // is granted come from the directory's own permissions, not from the handle it
+        // started at, so copying a handle opened for traversal alone without restating that
+        // would hand back a handle that could list the directory. A copy must carry the
+        // authority of its original and not the authority its original could have had.
+        if (!TryDirectoryAccessMask(handle.Access, out uint mask))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         CapError error = OpenRelative(
             handle,
             ReadOnlySpan<char>.Empty,
-            DirectoryAccess,
+            mask,
             NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
             NtConstants.FILE_OPEN_REPARSE_POINT,
             out nint raw);
 
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true, handle.Access));
     }
 
     private static CapError ConfinedOpenUnavailable =>
         CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NOT_SUPPORTED);
+
+    /// <summary>
+    /// Translates the authority asked of a directory into the rights the open requests.
+    /// </summary>
+    /// <returns>
+    /// False when no directory open can mean what was asked, which is the case for any
+    /// request to write one.
+    /// </returns>
+    private static bool TryDirectoryAccessMask(CapAccess access, out uint mask)
+    {
+        switch (access)
+        {
+            case CapAccess.None:
+                mask = TraverseAccess;
+                return true;
+
+            case CapAccess.Read:
+                mask = DirectoryAccess;
+                return true;
+
+            default:
+                mask = 0;
+                return false;
+        }
+    }
 
     private static uint FileAccessMask(CapAccess access)
     {

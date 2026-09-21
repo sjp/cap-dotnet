@@ -36,6 +36,38 @@ internal static class LinuxConstants
 
     // --- Architecture-independent open flags ----------------------------------------------
 
+    /// <summary>
+    /// Open the object as a position in the tree rather than as something to read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The descriptor it produces carries no data access at all: it can be resolved against,
+    /// asked what it is, and duplicated, and it cannot be read, written or enumerated. That
+    /// is the whole authority a directory needs in order to be a place other names are
+    /// resolved from, and asking for no more of it than that is the point.
+    /// </para>
+    /// <para>
+    /// It is also the only way to express the permission the kernel itself uses when it walks
+    /// a path. Traversing a directory needs execute permission, not read permission, so a
+    /// directory with mode <c>0111</c> can be walked through by the kernel but cannot be
+    /// opened for reading. A walk that opened intermediate directories readably would fail on
+    /// such a tree where the kernel's own resolution succeeds — the same path yielding
+    /// different answers depending on which backend was in use.
+    /// </para>
+    /// <para>
+    /// It comes with a sharp edge. Combined with the flag that refuses to follow links, and
+    /// <em>without</em> the flag demanding a directory, it stops resolving at a symbolic link
+    /// and hands back a descriptor to the link itself rather than failing. Every directory
+    /// open here passes both flags, which turns that case back into a refusal.
+    /// </para>
+    /// <para>
+    /// Nor may it be combined with much: the kernel rejects it outright alongside any flag
+    /// other than the close-on-exec, directory and no-follow ones. Adding a status flag to a
+    /// traversal open is therefore not a harmless extra request, it is an invalid one.
+    /// </para>
+    /// </remarks>
+    public const int O_PATH = 0x200000;
+
     public const int O_RDONLY = 0x0000;
     public const int O_WRONLY = 0x0001;
     public const int O_RDWR = 0x0002;
