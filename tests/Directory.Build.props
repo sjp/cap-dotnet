@@ -36,4 +36,14 @@
              Link="Shared/%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!--
+    The simulated filesystem in tests/Fakes. Opt-in rather than shared by every assembly,
+    because it implements an internal contract of Cap.Primitives and so only compiles where
+    that assembly has granted access. A project that needs it sets CapUsesPlatformFake.
+  -->
+  <ItemGroup Condition="'$(CapUsesPlatformFake)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)Fakes/*.cs"
+             Link="Fakes/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

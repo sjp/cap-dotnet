@@ -3,6 +3,8 @@
   <PropertyGroup>
     <RootNamespace>Cap.Primitives.Tests</RootNamespace>
     <AssemblyName>Cap.Primitives.Tests</AssemblyName>
+    <!-- Brings in tests/Fakes: the simulated filesystem the resolution tests run against. -->
+    <CapUsesPlatformFake>true</CapUsesPlatformFake>
   </PropertyGroup>
 
   <ItemGroup>

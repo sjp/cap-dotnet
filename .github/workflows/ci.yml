@@ -59,20 +59,15 @@ jobs:
       - name: Test
         env:
           # See docs/backends.md. Read by the capability probe in Cap.Primitives.
+          #
+          # On the forced-fallback leg the suite itself asserts that the atomic backend was
+          # not selected and that its attempt counter stayed at zero. A forced-fallback run
+          # that quietly kept taking the fast path would duplicate the ordinary leg and
+          # cover nothing, and the counter is what makes that visible.
           CAPDOTNET_DISABLE_OPENAT2: ${{ matrix.disable_openat2 }}
         run: >
           dotnet test CapDotnet.slnx --configuration Release --no-build
           -- --coverage --coverage-output-format cobertura
-
-      - name: Assert the fallback leg really did not call openat2
-        # A forced-fallback job that quietly keeps using openat2 tests nothing. The openat2
-        # backend must expose a counter for this. Non-blocking until it does, but it stays visible
-        # rather than being deleted and forgotten.
-        if: matrix.disable_openat2 == '1'
-        continue-on-error: true
-        run: |
-          echo "TODO: assert the openat2 call counter is zero, or strace the run."
-          exit 1
 
       - name: Upload coverage
         if: always()
@@ -228,10 +223,9 @@ jobs:
 # remembers to write. Each one drops its `continue-on-error` line once the code it exercises exists:
 #
 #   filesystems   -> the escape corpus
-#   no-openat2    -> the openat2 capability probe
+#   no-openat2    -> a seccomp harness that can deny openat2 both ways
 #   nativeaot     -> AOT + trimming validation
-#   coverage-gate -> any code in Cap.Primitives to measure
-#   the openat2-counter assertion in build-test -> the openat2 call counter
+#   coverage-gate -> a committed threshold to gate on
 #
 # Still to add:
 #   - a nightly schedule for TOCTOU stress (>=1e6 iterations) and fuzzing, which are far
