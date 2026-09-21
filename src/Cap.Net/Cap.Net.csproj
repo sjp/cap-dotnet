@@ -2,12 +2,12 @@
 
   <PropertyGroup>
     <RootNamespace>Cap.Net</RootNamespace>
-    <Description>Capability-based sockets. See 0019 -- this is deliberately the least-settled part of the port.</Description>
+    <Description>Capability-based sockets. This is deliberately the least-settled part of the port.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Unix domain sockets are named by a filesystem path, so they are a Dir capability,
-         not a Pool capability. That is why this references Cap.Std. See 0019. -->
+         not a Pool capability. That is why this references Cap.Std. -->
     <ProjectReference Include="../Cap.Std/Cap.Std.csproj" />
   </ItemGroup>
 

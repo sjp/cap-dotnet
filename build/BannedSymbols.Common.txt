@@ -4,14 +4,14 @@
 
 T:System.IO.File;Ambient authority. Open through a Cap.Std.Dir instead.
 T:System.IO.Directory;Ambient authority. Open through a Cap.Std.Dir instead.
-T:System.IO.FileInfo;Ambient authority. Use Cap.Std.CapMetadata (0015).
-T:System.IO.DirectoryInfo;Ambient authority. Use Cap.Std.Dir (0010).
-T:System.IO.FileSystemInfo;Ambient authority. Use Cap.Std.CapMetadata (0015).
+T:System.IO.FileInfo;Ambient authority. Use Cap.Std.CapMetadata.
+T:System.IO.DirectoryInfo;Ambient authority. Use Cap.Std.Dir.
+T:System.IO.FileSystemInfo;Ambient authority. Use Cap.Std.CapMetadata.
 T:System.IO.DriveInfo;Ambient authority, and drive enumeration is not a capability.
 T:System.IO.FileSystemWatcher;Ambient authority; watches by path, not by handle.
-T:System.Random;Not a capability and not a CSPRNG. Use Cap.Rand (0021).
-T:System.Net.Dns;Name resolution is itself an authority. See 0019.
+T:System.Random;Not a capability and not a CSPRNG. Use Cap.Rand.
+T:System.Net.Dns;Name resolution is itself an authority.
 P:System.Environment.CurrentDirectory;The process CWD is ambient authority.
-M:System.IO.Path.GetTempPath;Ambient authority. Use Cap.Std.CapTempDir (0017).
-M:System.IO.Path.GetTempFileName;Ambient authority and racy. Use Cap.Std.CapTempFile (0017).
-M:System.IO.Path.GetFullPath(System.String);Resolves against the process CWD and collapses `..` lexically, which is wrong under symlinks. See 0004.
+M:System.IO.Path.GetTempPath;Ambient authority. Use Cap.Std.CapTempDir.
+M:System.IO.Path.GetTempFileName;Ambient authority and racy. Use Cap.Std.CapTempFile.
+M:System.IO.Path.GetFullPath(System.String);Resolves against the process CWD and collapses `..` lexically, which is wrong under symlinks.

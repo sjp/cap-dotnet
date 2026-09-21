@@ -17,7 +17,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------------
-  # The three resolution backends (0006 openat2, 0007 portable walk, 0008 Windows) are
+  # The three resolution backends (openat2, portable walk, Windows) are
   # genuinely different implementations of the same guarantee. A green Ubuntu build says
   # nothing about the other two, so every leg here is load-bearing.
   # ---------------------------------------------------------------------------------
@@ -32,7 +32,7 @@ jobs:
             os: ubuntu-latest
           - name: linux-x64 (forced fallback)
             os: ubuntu-latest
-            # Exercises 0007 on a kernel that would otherwise take the openat2 fast path.
+            # Exercises the portable walk on a kernel that would otherwise take the openat2 fast path.
             # An AppContext switch rather than a #if, so this is the *same binary* users
             # ship -- and so users can disable openat2 themselves if a kernel regresses.
             disable_openat2: "1"
@@ -65,13 +65,13 @@ jobs:
           -- --coverage --coverage-output-format cobertura
 
       - name: Assert the fallback leg really did not call openat2
-        # A forced-fallback job that quietly keeps using openat2 tests nothing. 0006 must
-        # expose a counter for this. Non-blocking until 0006 lands, but it stays visible
+        # A forced-fallback job that quietly keeps using openat2 tests nothing. The openat2
+        # backend must expose a counter for this. Non-blocking until it does, but it stays visible
         # rather than being deleted and forgotten.
         if: matrix.disable_openat2 == '1'
         continue-on-error: true
         run: |
-          echo "TODO(0006): assert the openat2 call counter is zero, or strace the run."
+          echo "TODO: assert the openat2 call counter is zero, or strace the run."
           exit 1
 
       - name: Upload coverage
@@ -90,7 +90,7 @@ jobs:
   filesystems:
     name: escape corpus on ${{ matrix.fs }}
     runs-on: ubuntu-latest
-    # Non-blocking until 0023 has a corpus to run. See the note at the end of this file.
+    # Non-blocking until the escape corpus has cases to run. See the note at the end of this file.
     continue-on-error: true
     strategy:
       fail-fast: false
@@ -135,7 +135,7 @@ jobs:
 
       - name: Run the escape corpus against ${{ matrix.fs }}
         env:
-          # 0023 reads this to place its fixtures.
+          # The escape corpus reads this to place its fixtures.
           CAPDOTNET_TEST_ROOT: /mnt/captest
         run: >
           dotnet test tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj
@@ -157,14 +157,13 @@ jobs:
           global-json-file: global.json
       - name: Run under a seccomp profile that denies openat2
         run: |
-          echo "TODO(0003/0006): run the suite under a seccomp profile returning EPERM for"
+          echo "TODO: run the suite under a seccomp profile returning EPERM for"
           echo "openat2, and separately one returning ENOSYS. The probe must cache *both*"
           echo "and must not retry per call."
           exit 1
 
   # ---------------------------------------------------------------------------------
   # Passing the escape corpus under NativeAOT is the real test; merely linking is not.
-  # See 0028.
   # ---------------------------------------------------------------------------------
   nativeaot:
     name: NativeAOT (${{ matrix.os }})
@@ -181,7 +180,7 @@ jobs:
           global-json-file: global.json
       - name: Publish AOT and run the corpus against the AOT binary
         run: |
-          echo "TODO(0028): publish tests/Cap.Escape.Tests with PublishAot=true and run it."
+          echo "TODO: publish tests/Cap.Escape.Tests with PublishAot=true and run it."
           exit 1
 
   # ---------------------------------------------------------------------------------
@@ -200,15 +199,15 @@ jobs:
 # Jobs marked `continue-on-error: true` are scaffolded ahead of the code they test and
 # currently fail on purpose. They are non-blocking so that a trivial PR is green, but they
 # are deliberately *not* commented out: a job that does not exist is a job nobody
-# remembers to write. Each one drops its `continue-on-error` line when its issue lands:
+# remembers to write. Each one drops its `continue-on-error` line once the code it exercises exists:
 #
-#   filesystems  -> 0023 (escape corpus)
-#   no-openat2   -> 0006 (capability probe) and 0003
-#   nativeaot    -> 0028 (AOT + trimming)
-#   the openat2-counter assertion in build-test -> 0006
+#   filesystems  -> the escape corpus
+#   no-openat2   -> the openat2 capability probe
+#   nativeaot    -> AOT + trimming validation
+#   the openat2-counter assertion in build-test -> the openat2 call counter
 #
-# Still to add, per 0003:
+# Still to add:
 #   - a coverage gate that fails on a drop in Cap.Primitives;
-#   - a nightly schedule for 0024 (TOCTOU stress, >=1e6 iterations) and 0025 (fuzzing),
+#   - a nightly schedule for TOCTOU stress (>=1e6 iterations) and fuzzing,
 #     which are far too slow for per-PR.
 # ---------------------------------------------------------------------------------------

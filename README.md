@@ -7,10 +7,9 @@ A `Dir` handle *is* the authority to reach what is under it. Code holding one ca
 `config/app.json`; code holding one cannot open `/etc/passwd`, `../../secrets`, or the
 target of a symlink pointing out of the tree, whatever string it is handed.
 
-> **Status: planning.** No functional code yet. The design lives in [`issues/`](issues/),
-> the security posture in [`docs/threat-model.md`](docs/threat-model.md), and this README
-> is a placeholder until [0029](issues/0029-docs-samples.md) replaces it with one that
-> leads with the problem rather than the API.
+> **Status: planning.** No functional code yet. The security posture is in
+> [`docs/threat-model.md`](docs/threat-model.md), and this README is a placeholder until a
+> fuller one leads with the problem rather than the API.
 
 ## Why
 
@@ -38,14 +37,13 @@ documentation declines to make a security claim.
 src/Cap.Primitives/    path parsing, interop, resolution algorithms (internal)
 src/Cap.Std/           the public API: Dir, CapFile, CapMetadata
 src/Cap.Fs.Ext/        atomic writes, walks, handle-to-handle copy
-src/Cap.Net/           capability sockets               (see 0019 -- may be deferred)
-src/Cap.Time/          clock capabilities               (see 0020 -- likely wraps TimeProvider)
+src/Cap.Net/           capability sockets               (may be deferred)
+src/Cap.Time/          clock capabilities               (likely wraps TimeProvider)
 src/Cap.Rand/          randomness capabilities
 src/Cap.Directories/   well-known project directories as Dir handles
 src/Cap.Analyzers/     Roslyn analyzers banning ambient System.IO in consuming code
 tests/                 unit, adversarial escape corpus, TOCTOU stress
 bench/                 BenchmarkDotNet, each operation against its System.IO baseline
-issues/                the plan
 ```
 
 ## Building

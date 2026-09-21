@@ -3,7 +3,7 @@
   <PropertyGroup>
     <RootNamespace>Cap.Primitives</RootNamespace>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Description>Internal path parsing, platform interop and sandboxed resolution algorithms for cap-dotnet. Not intended to be referenced directly; see 0030.</Description>
+    <Description>Internal path parsing, platform interop and sandboxed resolution algorithms for cap-dotnet. Not intended to be referenced directly.</Description>
     <!-- Adds build/BannedSymbols.Primitives.txt on top of the common list. -->
     <CapBanSystemIoPath>true</CapBanSystemIoPath>
   </PropertyGroup>

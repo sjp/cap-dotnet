@@ -9,7 +9,7 @@ internal static class TestEnvironment
     /// True when the test process is running as root (Unix) or elevated (Windows).
     /// </summary>
     /// <remarks>
-    /// This matters more than it looks. Most of the escape corpus (0023) consists of
+    /// This matters more than it looks. Most of the escape corpus consists of
     /// negative tests -- "this operation must fail". Running as root makes several of
     /// them pass for entirely the wrong reason: a DAC permission check that would have
     /// stopped the attack in a normal process is skipped, so the test goes green without

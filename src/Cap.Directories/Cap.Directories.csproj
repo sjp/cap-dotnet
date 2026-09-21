@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Cap.Directories</RootNamespace>
-    <Description>Well-known project directories (config, data, cache, state) returned as Dir capabilities rather than strings. See 0022.</Description>
+    <Description>Well-known project directories (config, data, cache, state) returned as Dir capabilities rather than strings.</Description>
   </PropertyGroup>
 
   <ItemGroup>

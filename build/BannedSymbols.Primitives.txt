@@ -5,6 +5,6 @@
 #     which is the wrong answer whenever `a` is a symlink.
 #   - On Windows it strips trailing dots and spaces, so a string that has been
 #     validated is not the string that reaches the filesystem.
-# Cap.Primitives parses paths itself (0004) and never re-enters this type.
+# Cap.Primitives parses paths itself and never re-enters this type.
 
-T:System.IO.Path;Cap.Primitives must parse paths itself. See 0004 and build/BannedSymbols.Primitives.txt for why.
+T:System.IO.Path;Cap.Primitives must parse paths itself. See the notes in build/BannedSymbols.Primitives.txt for why.

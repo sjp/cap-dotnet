@@ -1,6 +1,6 @@
 # Samples
 
-Empty until [0029](../issues/0029-docs-samples.md). Planned:
+Empty for now. Planned:
 
 - **Sandboxed file server** — serve a directory tree where a crafted request path is
   structurally incapable of escaping it.

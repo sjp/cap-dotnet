@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Cap.Rand</RootNamespace>
-    <Description>Randomness capabilities over RandomNumberGenerator. See 0021.</Description>
+    <Description>Randomness capabilities over RandomNumberGenerator.</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -10,7 +10,7 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
   </PropertyGroup>
 
-  <!-- Trimming / AOT. Every shipping assembly must stay analysable; see 0028. -->
+  <!-- Trimming / AOT. Every shipping assembly must stay analysable. -->
   <PropertyGroup>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
@@ -19,7 +19,7 @@
     <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
   </PropertyGroup>
 
-  <!-- Deterministic, source-linked builds. See 0030. -->
+  <!-- Deterministic, source-linked builds. -->
   <PropertyGroup>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
@@ -50,8 +50,8 @@
     <Authors>cap-dotnet contributors</Authors>
     <Product>cap-dotnet</Product>
     <PackageProjectUrl>https://github.com/bytecodealliance/cap-std</PackageProjectUrl>
-    <!-- TODO(0030): licence is not settled. cap-std is Apache-2.0-WITH-LLVM-exception OR
-         Apache-2.0 OR MIT; we must confirm before 0023 copies any upstream test data.
+    <!-- TODO: licence is not settled. cap-std is Apache-2.0-WITH-LLVM-exception OR
+         Apache-2.0 OR MIT; we must confirm before any upstream test data is copied.
          Deliberately left unset so `dotnet pack` fails loudly until it is decided. -->
   </PropertyGroup>
 

@@ -6,11 +6,11 @@ runs changes the security properties — specifically, whether the residual TOCT
 exists at all — so it is observable, selectable, and tested in CI rather than being an
 implementation detail.
 
-| Backend | Platform | Issue | TOCTOU |
-|---|---|---|---|
-| `openat2(RESOLVE_BENEATH)` | Linux ≥ 5.6, when not blocked by seccomp | [0006](../issues/0006-linux-openat2.md) | none — resolution is kernel-atomic |
-| Component-by-component walk | Linux fallback, macOS | [0007](../issues/0007-portable-component-walk.md) | narrowed, not eliminated |
-| `NtCreateFile` with `RootDirectory` | Windows | [0008](../issues/0008-windows-resolution.md) | narrowed, not eliminated |
+| Backend | Platform | TOCTOU |
+|---|---|---|
+| `openat2(RESOLVE_BENEATH)` | Linux ≥ 5.6, when not blocked by seccomp | none — resolution is kernel-atomic |
+| Component-by-component walk | Linux fallback, macOS | narrowed, not eliminated |
+| `NtCreateFile` with `RootDirectory` | Windows | narrowed, not eliminated |
 
 ## Forcing the fallback
 
@@ -57,7 +57,7 @@ its own right. So:
   `openat2` call count is zero. A forced-fallback job that quietly keeps using `openat2`
   tests nothing at all.
 
-> **TODO(0006):** name the public accessor for the active backend and the call counter here
+> **TODO:** name the public accessor for the active backend and the call counter here
 > once they exist.
 
 ## A note on struct layout
@@ -67,5 +67,5 @@ match the kernel's, the syscall returns `EINVAL` — which the probe would read 
 available", demoting every caller to the fallback permanently and silently. The fast path
 would then never run again, on any machine, and every test would still pass.
 
-This is why [0005](../issues/0005-interop-shim-layer.md) requires per-architecture struct
+This is why the interop layer requires per-architecture struct
 layout tests, and why the arm64 leg exists in CI.

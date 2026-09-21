@@ -16,7 +16,7 @@ Use GitHub's private vulnerability reporting on this repository
 (*Security* → *Report a vulnerability*), which opens a private advisory visible only to
 maintainers.
 
-> **TODO(0030):** add a fallback email address and its PGP key here before the first
+> **TODO:** add a fallback email address and its PGP key here before the first
 > public release. GitHub private reporting alone is not enough for reporters who do not
 > have, or do not want, a GitHub account.
 
@@ -43,7 +43,7 @@ A useful report contains:
   input or attacker-controlled on-disk link structure.
 - Anything that causes the API to be *silently* less contained than documented — for
   example, a capability probe that fails open, or an `openat2` demotion to the fallback
-  that goes unreported.
+  that goes unreported (threat model §6.5).
 
 That last one is worth emphasising: a change that makes containment weaker without failing
 loudly is treated as a vulnerability even if no escape has been demonstrated.
@@ -77,14 +77,13 @@ escapes, and publish a GitHub Security Advisory when the fix ships.
 
 ## Supported versions
 
-Pre-1.0, only the latest released version is supported. See
-[issues/0030](issues/0030-packaging-release.md) for the versioning policy — note in
+Pre-1.0, only the latest released version is supported. Note in
 particular that **a containment fix may change behaviour in a patch release**. Code that
 depended on an escape working was depending on a bug.
 
 ## A note on the test suite
 
-The adversarial corpus ([0023](issues/0023-escape-test-corpus.md)) and the TOCTOU stress
-harness ([0024](issues/0024-toctou-stress.md)) are the primary defence here, and they are
+The adversarial escape corpus and the TOCTOU stress
+harness are the primary defence here, and they are
 public. If you find an escape, the fix is expected to land together with the test case that
 would have caught it.

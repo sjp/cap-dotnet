@@ -8,7 +8,7 @@
     <IsPackable>false</IsPackable>
     <!--
       No InvariantGlobalization here, and none in the root props either: the macOS
-      normalization cases in 0023 need real ICU. Turning it on would make
+      normalization cases in the escape tests need real ICU. Turning it on would make
       String.Normalize misbehave and the tests would pass for the wrong reason.
     -->
   </PropertyGroup>

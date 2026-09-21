@@ -42,7 +42,7 @@ dotnet_diagnostic.RS0031.severity = error
 dotnet_diagnostic.RS0035.severity = error
 
 # --- Trimming / AOT ------------------------------------------------------------------
-# See 0028. These are errors in product code because a suppression is a design decision,
+# These are errors in product code because a suppression is a design decision,
 # not a build annoyance.
 dotnet_diagnostic.IL2026.severity = error
 dotnet_diagnostic.IL2091.severity = error
@@ -50,7 +50,7 @@ dotnet_diagnostic.IL3050.severity = error
 
 # --- Interop -------------------------------------------------------------------------
 # SYSLIB1054: use [LibraryImport] rather than [DllImport]. Source-generated marshalling is
-# the only AOT-safe option and it is what 0005 assumes throughout.
+# the only AOT-safe option and it is what the interop layer assumes throughout.
 dotnet_diagnostic.SYSLIB1054.severity = error
 # CA1416: platform-compatibility. Cap.Primitives is full of per-OS code paths and every
 # one of them must be guarded, not assumed.
