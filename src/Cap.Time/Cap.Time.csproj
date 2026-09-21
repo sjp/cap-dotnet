@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Time</RootNamespace>
+    <Description>Clock capabilities. See 0020 -- expected to be a thin, AmbientAuthority-gated adapter over System.TimeProvider rather than a parallel abstraction.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Fs.Ext</RootNamespace>
+    <Description>Convenience layer over Cap.Std: atomic writes, recursive walks, handle-to-handle copy, sandbox-scoped globbing.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Cap.Std/Cap.Std.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cap.Escape.Tests" />
+  </ItemGroup>
+
+</Project>

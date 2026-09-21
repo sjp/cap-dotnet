@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Ambient-authority ban (0001, early stand-in for the analyzer in 0026).
+
+    build/BannedSymbols.Common.txt  applies to every assembly under src/.
+    build/BannedSymbols.Primitives.txt  additionally bans System.IO.Path, which silently
+    rewrites paths (lexical `..` collapsing, Windows trailing-dot stripping) and is
+    therefore unusable for containment decisions. See 0004.
+  -->
+  <ItemGroup Condition="'$(CapIsProductCode)' == 'true'">
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)build/BannedSymbols.Common.txt" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)build/BannedSymbols.Primitives.txt"
+                     Condition="'$(CapBanSystemIoPath)' == 'true'" />
+  </ItemGroup>
+
+</Project>

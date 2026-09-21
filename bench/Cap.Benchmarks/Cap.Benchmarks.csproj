@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cap.Benchmarks</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- BenchmarkDotNet needs an optimised build to produce meaningful numbers. -->
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+  </ItemGroup>
+
+</Project>

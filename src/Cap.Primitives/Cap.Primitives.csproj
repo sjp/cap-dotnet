@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Primitives</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Description>Internal path parsing, platform interop and sandboxed resolution algorithms for cap-dotnet. Not intended to be referenced directly; see 0030.</Description>
+    <!-- Adds build/BannedSymbols.Primitives.txt on top of the common list. -->
+    <CapBanSystemIoPath>true</CapBanSystemIoPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Cap.Primitives has (deliberately) almost no public surface: the resolution
+      algorithms are internal and reached through these assemblies only.
+    -->
+    <InternalsVisibleTo Include="Cap.Std" />
+    <InternalsVisibleTo Include="Cap.Fs.Ext" />
+    <InternalsVisibleTo Include="Cap.Net" />
+    <InternalsVisibleTo Include="Cap.Time" />
+    <InternalsVisibleTo Include="Cap.Rand" />
+    <InternalsVisibleTo Include="Cap.Directories" />
+    <InternalsVisibleTo Include="Cap.Primitives.Tests" />
+    <InternalsVisibleTo Include="Cap.Escape.Tests" />
+    <InternalsVisibleTo Include="Cap.Stress.Tests" />
+    <InternalsVisibleTo Include="Cap.Benchmarks" />
+  </ItemGroup>
+
+</Project>

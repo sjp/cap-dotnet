@@ -1,0 +1,58 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+
+  <!-- Trimming / AOT. Every shipping assembly must stay analysable; see 0028. -->
+  <PropertyGroup>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+  </PropertyGroup>
+
+  <!-- Deterministic, source-linked builds. See 0030. -->
+  <PropertyGroup>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <!--
+    Directory-scoped defaults. `CapIsProductCode` marks the assemblies that are subject to
+    the ambient-authority ban; tests, benchmarks and samples deliberately use ambient
+    System.IO in order to *set up* the scenarios they then attack.
+  -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.StartsWith('$(MSBuildThisFileDirectory)src'))">
+    <CapIsProductCode>true</CapIsProductCode>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CapIsProductCode)' != 'true'">
+    <IsPackable>false</IsPackable>
+    <IsTrimmable>false</IsTrimmable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(CapIsProductCode)' == 'true'">
+    <Authors>cap-dotnet contributors</Authors>
+    <Product>cap-dotnet</Product>
+    <PackageProjectUrl>https://github.com/bytecodealliance/cap-std</PackageProjectUrl>
+    <!-- TODO(0030): licence is not settled. cap-std is Apache-2.0-WITH-LLVM-exception OR
+         Apache-2.0 OR MIT; we must confirm before 0023 copies any upstream test data.
+         Deliberately left unset so `dotnet pack` fails loudly until it is decided. -->
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,32 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Cap.Primitives/Cap.Primitives.csproj" />
+    <Project Path="src/Cap.Std/Cap.Std.csproj" />
+    <Project Path="src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+    <Project Path="src/Cap.Net/Cap.Net.csproj" />
+    <Project Path="src/Cap.Time/Cap.Time.csproj" />
+    <Project Path="src/Cap.Rand/Cap.Rand.csproj" />
+    <Project Path="src/Cap.Directories/Cap.Directories.csproj" />
+    <Project Path="src/Cap.Analyzers/Cap.Analyzers.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Cap.Primitives.Tests/Cap.Primitives.Tests.csproj" />
+    <Project Path="tests/Cap.Std.Tests/Cap.Std.Tests.csproj" />
+    <Project Path="tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj" />
+    <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/Cap.Benchmarks/Cap.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/solution items/">
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Build.targets" />
+    <File Path="Directory.Packages.props" />
+    <File Path=".editorconfig" />
+    <File Path="global.json" />
+    <File Path="build/BannedSymbols.Common.txt" />
+    <File Path="build/BannedSymbols.Primitives.txt" />
+    <File Path="SECURITY.md" />
+    <File Path="docs/threat-model.md" />
+  </Folder>
+</Solution>

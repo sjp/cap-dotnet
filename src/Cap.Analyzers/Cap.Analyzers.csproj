@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Roslyn analyzers must target netstandard2.0 to load in every host. -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Cap.Analyzers</RootNamespace>
+    <Description>Roslyn analyzers that flag ambient-authority APIs in consuming code. See 0026.</Description>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <!-- Ships inside Cap.Std rather than as its own package (0030). -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,32 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- xunit v3 test projects are self-executing. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!--
+      No InvariantGlobalization here, and none in the root props either: the macOS
+      normalization cases in 0023 need real ICU. Turning it on would make
+      String.Normalize misbehave and the tests would pass for the wrong reason.
+    -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <!-- Self-registers into the MTP host; it must stay a normal compile-time reference. -->
+    <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Guards that must hold in every test assembly. See tests/Shared. -->
+    <Compile Include="$(MSBuildThisFileDirectory)Shared/*.cs"
+             Link="Shared/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

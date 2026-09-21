@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Stress.Tests</RootNamespace>
+    <AssemblyName>Cap.Stress.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+  </ItemGroup>
+
+</Project>

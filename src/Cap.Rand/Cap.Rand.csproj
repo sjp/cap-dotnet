@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Rand</RootNamespace>
+    <Description>Randomness capabilities over RandomNumberGenerator. See 0021.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" />
+  </ItemGroup>
+
+</Project>

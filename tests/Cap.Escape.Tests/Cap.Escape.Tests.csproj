@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Escape.Tests</RootNamespace>
+    <AssemblyName>Cap.Escape.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+  </ItemGroup>
+
+</Project>
