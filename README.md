@@ -7,9 +7,9 @@ A `Dir` handle *is* the authority to reach what is under it. Code holding one ca
 `config/app.json`; code holding one cannot open `/etc/passwd`, `../../secrets`, or the
 target of a symlink pointing out of the tree, whatever string it is handed.
 
-> **Status: planning.** No functional code yet. The security posture is in
-> [`docs/threat-model.md`](docs/threat-model.md), and this README is a placeholder until a
-> fuller one leads with the problem rather than the API.
+> **Status: early.** Path parsing is implemented; nothing opens a file yet. The security
+> posture is in [`docs/threat-model.md`](docs/threat-model.md), and this README is a
+> placeholder until a fuller one leads with the problem rather than the API.
 
 ## Why
 
@@ -65,3 +65,6 @@ attacks; what must not be enabled is a backup, restore or take-ownership privile
 Escapes are vulnerabilities; please report them privately. See
 [SECURITY.md](SECURITY.md) and [docs/threat-model.md](docs/threat-model.md), whose §5
 ("Explicit non-goals") is the part most worth reading first.
+
+[docs/paths.md](docs/paths.md) is the parsing contract — what a path is allowed to be, and
+what is deliberately never rewritten on the way through.

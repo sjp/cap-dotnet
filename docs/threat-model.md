@@ -73,8 +73,10 @@ replace.
 ## 4. In scope: attacks that must be defended
 
 Each row must, by the time the adversarial escape corpus lands, name the test that covers
-it. The **Test** column is intentionally empty for now; leaving it blank is a visible
-reminder that the claim is unverified. Prose in its place would hide the same gap.
+it. A blank **Test** column is a visible reminder that the claim is unverified; prose in its
+place would hide the same gap. The rows filled in so far are the ones decided by parsing the
+path alone — everything that needs a resolver working against a real directory handle is
+still open.
 
 The **Where** column names the component responsible for the defence. The three resolution
 backends are described in [backends.md](backends.md).
@@ -83,17 +85,20 @@ backends are described in [backends.md](backends.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| L1 | `..` component in caller input | Rejected at parse time; never collapsed lexically | path parsing | |
-| L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | |
-| L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | |
-| L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | |
-| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | |
-| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | component walk | |
+| L1 | `..` component in caller input | Rejected at parse time; never collapsed lexically | path parsing | `CapPathParseTests.Rejects_parent_links_by_default` |
+| L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute` |
+| L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state` |
+| L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace` |
+| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components` |
+| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | component walk | parse bound only: `CapPathParseTests.Rejects_paths_and_components_that_are_too_long` |
 
 `..` deserves a note. The obvious implementation — collapse `a/../b` to `b` before touching
 the disk — is **wrong**, because if `a` is a symlink to `/etc` then the kernel resolves
 `a/../b` to `/b`, not `./b`. `System.IO.Path.GetFullPath` does exactly this collapsing,
 which is why it is banned inside `Cap.Primitives` by the build.
+
+The full parsing contract — what is accepted, what is refused, and what is deliberately left
+alone — is in [paths.md](paths.md).
 
 ### 4.2 Symlinks
 
@@ -119,13 +124,13 @@ bullet.
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| W1 | Reserved device names: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` | Rejected | Windows name validation | |
-| W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | |
-| W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | |
-| W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | |
-| W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | |
+| W1 | Reserved device names: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused` |
+| W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`, `.Trailing_dots_and_spaces_do_not_hide_a_device` |
+| W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | `WindowsReservedNameTests.ReservedStems` |
+| W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Stream_syntax_is_refused` |
+| W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | `CapPathParseTests.Rejects_trailing_dot_or_space` |
 | W6 | 8.3 short names (`PROGRA~1`) aliasing a long name | Policy stated and enforced consistently | Windows backend | |
-| W7 | Wildcards `* ? < > "` reaching `NtCreateFile` | Rejected | Windows name validation | |
+| W7 | Wildcards `* ? < > "` reaching `NtCreateFile` | Rejected | Windows name validation | `CapPathParseTests.Rejects_invalid_windows_characters` |
 
 A parse-time blocklist is necessary but **not sufficient**: the set of device names is a
 property of the OS and has grown before. Windows name validation therefore also requires a
@@ -135,7 +140,7 @@ property of the OS and has grown before. Windows name validation therefore also 
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | |
+| M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | parser half only: `CapPathComponentTests.Components_are_returned_verbatim` |
 | M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | |
 | M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | |
 
