@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Interop;
@@ -206,6 +207,46 @@ internal interface IPlatformOps
     /// reassign.
     /// </remarks>
     CapError StatHandle(SafeDirHandle handle, out CapNodeInfo info);
+
+    /// <summary>
+    /// Reports everything a caller is told about the entry named by <paramref name="name"/>
+    /// beneath <paramref name="parent"/>, without following it if it is a link.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The richer sibling of <see cref="StatChild"/>, and separate from it because the two
+    /// are asked in different circumstances. <see cref="StatChild"/> is on the path of every
+    /// component a walk takes, asks for the least the walk can decide from, and accepts
+    /// whatever a network filesystem has cached — a type and an identity do not go stale in
+    /// a way that matters, and a walk that forced a revalidation per component would make a
+    /// deep path expensive in round trips rather than in syscalls. This one is asked once,
+    /// on purpose, by a caller who wants the length and the times to be current, so it
+    /// accepts the revalidation.
+    /// </para>
+    /// <para>
+    /// It also distinguishes more kinds. A walk collapses sockets, pipes and device nodes
+    /// into a single "cannot be stepped through" case; a caller has reasons to tell them
+    /// apart, and this is where the distinction survives.
+    /// </para>
+    /// </remarks>
+    CapError DescribeChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeStat stat);
+
+    /// <summary>
+    /// Reports everything a caller is told about what an already-open handle refers to.
+    /// </summary>
+    /// <param name="handle">
+    /// An open directory or file handle. Both are accepted because the question is the same
+    /// one and the answer comes from the same call; what distinguishes them is a field of
+    /// the answer rather than a different way of asking.
+    /// </param>
+    /// <param name="stat">The snapshot, when this succeeds.</param>
+    /// <remarks>
+    /// Asked of the object rather than of a name, so nothing here re-resolves anything and
+    /// the answer describes what was opened even if the name it was opened by now belongs to
+    /// something else — or to nothing at all, a handle to an unlinked file being perfectly
+    /// answerable.
+    /// </remarks>
+    CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat);
 
     /// <summary>
     /// Asks the system what path an open directory handle is currently reachable by.

@@ -54,6 +54,15 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(32, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.Inode)).ToInt32());
         Assert.Equal(136, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.DeviceMajor)).ToInt32());
         Assert.Equal(140, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.DeviceMinor)).ToInt32());
+
+        // The fields a caller's metadata is read from. The four timestamps are the same
+        // shape and sit next to each other, so a declaration one field out reports the
+        // access time as the creation time -- a wrong answer that looks entirely reasonable.
+        Assert.Equal(40, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.Size)).ToInt32());
+        Assert.Equal(64, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.AccessTime)).ToInt32());
+        Assert.Equal(80, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.BirthTime)).ToInt32());
+        Assert.Equal(96, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.ChangeTime)).ToInt32());
+        Assert.Equal(112, Marshal.OffsetOf<StatxBuffer>(nameof(StatxBuffer.ModifyTime)).ToInt32());
     }
 
     /// <summary>
@@ -69,6 +78,13 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(4, Marshal.OffsetOf<DarwinStat>(nameof(DarwinStat.Mode)).ToInt32());
         Assert.Equal(8, Marshal.OffsetOf<DarwinStat>(nameof(DarwinStat.Inode)).ToInt32());
         Assert.Equal(96, Marshal.OffsetOf<DarwinStat>(nameof(DarwinStat.Size)).ToInt32());
+
+        // The timestamps, for the reason the Linux ones are asserted: four identically
+        // shaped fields in a row, where being one out is a wrong answer that reads as a
+        // right one.
+        Assert.Equal(32, Marshal.OffsetOf<DarwinStat>(nameof(DarwinStat.AccessTime)).ToInt32());
+        Assert.Equal(48, Marshal.OffsetOf<DarwinStat>(nameof(DarwinStat.ModifyTime)).ToInt32());
+        Assert.Equal(80, Marshal.OffsetOf<DarwinStat>(nameof(DarwinStat.BirthTime)).ToInt32());
     }
 
     /// <summary>
@@ -153,6 +169,107 @@ public sealed class InteropStructLayoutTests
 
         Assert.Equal(arm64 ? 291 : 332, LinuxConstants.SYS_statx);
         Assert.Equal(437, LinuxConstants.SYS_openat2);
+    }
+
+    /// <summary>
+    /// The Windows reply carrying the times, the length and the attributes is 56 bytes, with
+    /// the creation time first.
+    /// </summary>
+    /// <remarks>
+    /// The four timestamps are four identical 64-bit fields in a row, so a declaration that
+    /// omitted one or reordered them would report one time under another's name and never
+    /// fail. The trailing padding matters separately: the system is told the size of the
+    /// buffer, and one declared four bytes short is one it refuses to fill.
+    /// </remarks>
+    [Fact]
+    public void Windows_times_and_size_reply_matches_the_native_layout()
+    {
+        Assert.Equal(56, FileNetworkOpenInformation.StructSize);
+
+        Assert.Equal(
+            0,
+            Marshal.OffsetOf<FileNetworkOpenInformation>(
+                nameof(FileNetworkOpenInformation.CreationTime)).ToInt32());
+        Assert.Equal(
+            8,
+            Marshal.OffsetOf<FileNetworkOpenInformation>(
+                nameof(FileNetworkOpenInformation.LastAccessTime)).ToInt32());
+        Assert.Equal(
+            16,
+            Marshal.OffsetOf<FileNetworkOpenInformation>(
+                nameof(FileNetworkOpenInformation.LastWriteTime)).ToInt32());
+        Assert.Equal(
+            24,
+            Marshal.OffsetOf<FileNetworkOpenInformation>(
+                nameof(FileNetworkOpenInformation.ChangeTime)).ToInt32());
+        Assert.Equal(
+            40,
+            Marshal.OffsetOf<FileNetworkOpenInformation>(
+                nameof(FileNetworkOpenInformation.EndOfFile)).ToInt32());
+        Assert.Equal(
+            48,
+            Marshal.OffsetOf<FileNetworkOpenInformation>(
+                nameof(FileNetworkOpenInformation.FileAttributes)).ToInt32());
+    }
+
+    /// <summary>
+    /// The identity reply carries both halves of the 128-bit identifier, the high one after
+    /// the low one.
+    /// </summary>
+    /// <remarks>
+    /// Asserted because the identifier is 128 bits precisely so that it is unique on the
+    /// filesystems where 64 are not enough, and a reader that kept only the low half would
+    /// report two distinct files on such a filesystem as one file with two names. Silently,
+    /// and on exactly the filesystems nobody runs the test suite against.
+    /// </remarks>
+    [Fact]
+    public void Windows_identity_reply_carries_both_halves_of_the_identifier()
+    {
+        Assert.Equal(24, Marshal.SizeOf<FileIdInformation>());
+
+        Assert.Equal(
+            0,
+            Marshal.OffsetOf<FileIdInformation>(nameof(FileIdInformation.VolumeSerialNumber)).ToInt32());
+        Assert.Equal(
+            8,
+            Marshal.OffsetOf<FileIdInformation>(nameof(FileIdInformation.FileIdLow)).ToInt32());
+        Assert.Equal(
+            16,
+            Marshal.OffsetOf<FileIdInformation>(nameof(FileIdInformation.FileIdHigh)).ToInt32());
+    }
+
+    /// <summary>
+    /// The framework's Unix mode enumeration is numbered exactly as the mode bits are, so
+    /// masking is the whole of the conversion.
+    /// </summary>
+    /// <remarks>
+    /// The conversion is a cast, which cannot fail and cannot be wrong in a way anything
+    /// notices: every file would simply be reported with somebody else's permissions. So the
+    /// assumption behind the cast is asserted directly, bit by bit.
+    /// </remarks>
+    [Fact]
+    public void Unix_mode_bits_line_up_with_the_framework_enumeration()
+    {
+        Assert.Equal(UnixFileMode.OtherExecute, UnixFileTypes.PermissionsFromMode(0b000_000_001));
+        Assert.Equal(UnixFileMode.OtherWrite, UnixFileTypes.PermissionsFromMode(0b000_000_010));
+        Assert.Equal(UnixFileMode.OtherRead, UnixFileTypes.PermissionsFromMode(0b000_000_100));
+        Assert.Equal(UnixFileMode.GroupExecute, UnixFileTypes.PermissionsFromMode(0b000_001_000));
+        Assert.Equal(UnixFileMode.GroupWrite, UnixFileTypes.PermissionsFromMode(0b000_010_000));
+        Assert.Equal(UnixFileMode.GroupRead, UnixFileTypes.PermissionsFromMode(0b000_100_000));
+        Assert.Equal(UnixFileMode.UserExecute, UnixFileTypes.PermissionsFromMode(0b001_000_000));
+        Assert.Equal(UnixFileMode.UserWrite, UnixFileTypes.PermissionsFromMode(0b010_000_000));
+        Assert.Equal(UnixFileMode.UserRead, UnixFileTypes.PermissionsFromMode(0b100_000_000));
+
+        Assert.Equal(UnixFileMode.StickyBit, UnixFileTypes.PermissionsFromMode(0b001_000_000_000));
+        Assert.Equal(UnixFileMode.SetGroup, UnixFileTypes.PermissionsFromMode(0b010_000_000_000));
+        Assert.Equal(UnixFileMode.SetUser, UnixFileTypes.PermissionsFromMode(0b100_000_000_000));
+
+        // The type bits sit above all of these and are not permissions. A mode carrying both
+        // must report only the lower half, or a directory would be reported as having
+        // permissions no caller could ever have asked for.
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            UnixFileTypes.PermissionsFromMode(UnixFileTypes.S_IFDIR | 0b111_000_000));
     }
 
     /// <summary>

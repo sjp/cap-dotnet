@@ -431,6 +431,12 @@ internal static class NtConstants
     public const uint FileIdInformationClass = 59;
 
     /// <summary>
+    /// Ask for the times, the length and the attributes in one reply. Cheaper than asking
+    /// separately, and the fields then describe one instant rather than several.
+    /// </summary>
+    public const uint FileNetworkOpenInformationClass = 34;
+
+    /// <summary>
     /// Asks a directory read for each entry's name, attributes and reparse tag.
     /// </summary>
     /// <remarks>

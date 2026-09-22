@@ -377,6 +377,34 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     public CapError StatHandle(SafeDirHandle handle, out CapNodeInfo info) => Describe(handle, out info);
 
     /// <inheritdoc/>
+    public CapError DescribeChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeStat stat)
+    {
+        stat = default;
+
+        // Opened for attributes alone and without following a reparse point, so what is
+        // described is the name's own entry. A link here is reported as a link rather than
+        // as whatever it leads to, which is the same answer every other member gives for the
+        // name it is handed.
+        CapError error = OpenRelative(
+            parent,
+            name,
+            QueryAccess,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        using SafeDirHandle handle = new(raw, ownsHandle: true, CapAccess.None);
+        return DescribeStat(handle, out stat);
+    }
+
+    /// <inheritdoc/>
+    public CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat) => DescribeStat(handle, out stat);
+
+    /// <inheritdoc/>
     /// <remarks>
     /// The reply is normally spelled with the extended-length prefix the system uses
     /// internally, and it is handed back that way rather than tidied: this is a diagnostic,
@@ -1784,6 +1812,108 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             &value,
             (uint)sizeof(FileAttributeTagInformation),
             NtConstants.FileAttributeTagInformationClass);
+
+        if (NtStatusCodes.IsFailure(nt))
+        {
+            return NtStatusCodes.ToError(nt);
+        }
+
+        result = value;
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// Fills a caller-facing snapshot from an open handle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two requests in the ordinary case and three when the object redirects. The first
+    /// carries the times, the length and the attributes together, so those describe one
+    /// instant rather than several; the second carries the identity, which no single reply
+    /// combines with the rest. The reparse tag is asked for only when the attributes say
+    /// there is one, because the whole reason to want it — telling a symbolic link from a
+    /// structure of unknown shape that merely looks like one — does not arise otherwise.
+    /// </para>
+    /// <para>
+    /// The identifier is carried at its full width here, unlike in the description
+    /// resolution uses. Resolution compares two things it has just looked at, moments apart
+    /// and on the same volume, where the low half separates them; a caller may be comparing
+    /// across a whole subtree on a filesystem that issues identifiers needing all 128 bits,
+    /// and two distinct files that compared equal would be reported as one file with two
+    /// names.
+    /// </para>
+    /// </remarks>
+    private static CapError DescribeStat(SafeHandle handle, out CapNodeStat stat)
+    {
+        stat = default;
+
+        CapError error = QueryNetworkOpen(handle, out FileNetworkOpenInformation basic);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        error = QueryId(handle, out FileIdInformation id);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        CapFileType type;
+        if ((basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        {
+            error = QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo);
+            if (error.IsFailure)
+            {
+                return error;
+            }
+
+            type = ReparseTags.IsFilesystemLink(tagInfo.ReparseTag)
+                ? CapFileType.Symlink
+                : CapFileType.ReparsePoint;
+        }
+        else
+        {
+            type = (basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0
+                ? CapFileType.Directory
+                : CapFileType.File;
+        }
+
+        stat = new CapNodeStat(
+            type,
+            id.VolumeSerialNumber,
+            new UInt128(id.FileIdHigh, id.FileIdLow),
+            basic.EndOfFile,
+            FileTimes.ToDateTimeOffset(basic.LastAccessTime),
+            FileTimes.ToDateTimeOffset(basic.LastWriteTime),
+            // Zero is how this platform says a creation time was never recorded, and it is
+            // reported as absent rather than as the start of 1601.
+            basic.CreationTime > 0 ? FileTimes.ToDateTimeOffset(basic.CreationTime) : null,
+            unixMode: null,
+            (FileAttributes)basic.FileAttributes);
+
+        return CapError.Success;
+    }
+
+    private static unsafe CapError QueryNetworkOpen(SafeHandle handle, out FileNetworkOpenInformation result)
+    {
+        result = default;
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+        }
+
+        IoStatusBlock status = default;
+        FileNetworkOpenInformation value = default;
+        int nt = NtNative.NtQueryInformationFile(
+            lease.Raw,
+            &status,
+            &value,
+            (uint)sizeof(FileNetworkOpenInformation),
+            NtConstants.FileNetworkOpenInformationClass);
 
         if (NtStatusCodes.IsFailure(nt))
         {

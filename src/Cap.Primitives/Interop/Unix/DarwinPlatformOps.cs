@@ -400,6 +400,105 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapError DescribeChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeStat stat)
+    {
+        stat = default;
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        DarwinStat raw = default;
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                result = DarwinNative.FStatAt(
+                    lease.Descriptor, path, &raw, DarwinConstants.AT_SYMLINK_NOFOLLOW);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (result < 0)
+        {
+            return DarwinErrno.ToError(errno);
+        }
+
+        stat = Describe(in raw);
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat)
+    {
+        stat = default;
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        DarwinStat raw = default;
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            result = DarwinNative.FStat(lease.Descriptor, &raw);
+            if (result < 0)
+            {
+                errno = Marshal.GetLastPInvokeError();
+            }
+        }
+
+        if (result < 0)
+        {
+            return DarwinErrno.ToError(errno);
+        }
+
+        stat = Describe(in raw);
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// Turns what the kernel wrote into the caller-facing snapshot.
+    /// </summary>
+    /// <remarks>
+    /// This platform keeps a creation time in the same structure as every other timestamp,
+    /// so nothing in the reply says whether the filesystem holding the object actually
+    /// maintains one. A filesystem that does not leaves the field at zero, and that is read
+    /// here as "no creation time" rather than as the start of 1970 — a file created at the
+    /// instant the epoch began is not a thing that happens, and reporting one would be a
+    /// worse answer than reporting none.
+    /// </remarks>
+    private static CapNodeStat Describe(in DarwinStat raw) => new(
+        UnixFileTypes.FromMode(raw.Mode),
+        raw.VolumeId,
+        raw.Inode,
+        raw.Size,
+        UnixTimestamps.FromParts(raw.AccessTime.Seconds, raw.AccessTime.Nanoseconds),
+        UnixTimestamps.FromParts(raw.ModifyTime.Seconds, raw.ModifyTime.Nanoseconds),
+        raw.BirthTime.Seconds > 0
+            ? UnixTimestamps.FromParts(raw.BirthTime.Seconds, raw.BirthTime.Nanoseconds)
+            : null,
+        UnixFileTypes.PermissionsFromMode(raw.Mode),
+        windowsAttributes: null);
+
+    /// <inheritdoc/>
     /// <remarks>
     /// The platform answers this one directly from the descriptor, with no process
     /// filesystem in the way. The answer is still a snapshot and still only one of the names

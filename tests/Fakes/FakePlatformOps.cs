@@ -281,6 +281,33 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapError DescribeChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeStat stat)
+    {
+        stat = default;
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        stat = node!.Stat;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat)
+    {
+        stat = default;
+        if (handle is not SafeDirHandle directory || !TryResolveHandle(directory, out FakeNode? node))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        stat = node!.Stat;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
     /// <remarks>
     /// Refused, because the simulation has no ambient namespace for an answer to be a name
     /// in. Its nodes exist only relative to the root it was built with, so any path it

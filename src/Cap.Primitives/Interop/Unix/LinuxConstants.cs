@@ -215,8 +215,31 @@ internal static class LinuxConstants
     public const uint STATX_MODE = 0x0002;
     public const uint STATX_INO = 0x0100;
 
+    public const uint STATX_ATIME = 0x0020;
+    public const uint STATX_MTIME = 0x0040;
+    public const uint STATX_SIZE = 0x0200;
+
+    /// <summary>
+    /// Ask for the creation time. Set apart from the rest because it is the one field the
+    /// kernel routinely declines: several filesystems do not record when a file was created,
+    /// and the reply's own mask is the only way to find out whether this one did.
+    /// </summary>
+    public const uint STATX_BTIME = 0x0800;
+
     /// <summary>Do not force a network filesystem to revalidate; the cached answer is enough.</summary>
     public const int AT_STATX_DONT_SYNC = 0x4000;
+
+    /// <summary>
+    /// Answer as an ordinary stat would, revalidating against the server where there is one.
+    /// </summary>
+    /// <remarks>
+    /// Zero, so passing it is the same as passing nothing — it is spelled out because the
+    /// choice between this and <see cref="AT_STATX_DONT_SYNC"/> is a real one and an absent
+    /// flag would read as an oversight. A length and a modification time are exactly the
+    /// fields a cached answer gets wrong, and a caller asking for them has asked once and on
+    /// purpose, so the round trip is what they are paying for.
+    /// </remarks>
+    public const int AT_STATX_SYNC_AS_STAT = 0x0000;
 
     // --- File type bits ------------------------------------------------------------------------
 

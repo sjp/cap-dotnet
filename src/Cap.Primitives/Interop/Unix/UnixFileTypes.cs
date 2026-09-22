@@ -23,6 +23,18 @@ internal static class UnixFileTypes
     /// <summary>The bits of a mode that say what the node is.</summary>
     public const ushort S_IFMT = 0xF000;
 
+    /// <summary>
+    /// The bits of a mode that say who may do what: the nine permission bits, plus the
+    /// set-user, set-group and sticky bits above them.
+    /// </summary>
+    /// <remarks>
+    /// The framework's own <see cref="UnixFileMode"/> is numbered to match these exactly, so
+    /// masking is the whole of the conversion. That is not a coincidence worth relying on
+    /// silently — it is checked by a test, because a mismatch would silently report every
+    /// file's permissions as some other file's.
+    /// </remarks>
+    public const ushort S_IPERM = 0x0FFF;
+
     public const ushort S_IFIFO = 0x1000;
     public const ushort S_IFCHR = 0x2000;
     public const ushort S_IFDIR = 0x4000;
@@ -82,6 +94,9 @@ internal static class UnixFileTypes
     public static bool AlwaysLookUpKind =>
         (AppContext.TryGetSwitch(AlwaysLookUpKindSwitchName, out bool enabled) && enabled) ||
         Environment.GetEnvironmentVariable(AlwaysLookUpKindVariableName) is "1" or "true" or "TRUE";
+
+    /// <summary>Reads the permission, set-id and sticky bits of a mode.</summary>
+    public static UnixFileMode PermissionsFromMode(ushort mode) => (UnixFileMode)(mode & S_IPERM);
 
     /// <summary>Reads the type bits of a mode.</summary>
     public static CapFileType FromMode(ushort mode) => (mode & S_IFMT) switch

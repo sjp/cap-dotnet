@@ -150,3 +150,48 @@ internal struct FileIdInformation
     /// <summary>High half of the 128-bit file identifier.</summary>
     public ulong FileIdHigh;
 }
+
+/// <summary>The reply to a request for a file's times, size and attributes together.</summary>
+/// <remarks>
+/// <para>
+/// Named for the case it was added for — answering an open over the network without actually
+/// opening anything — but it is the cheapest way to get all of this in one call on any
+/// filesystem, which is what it is used for here. The alternative is two requests, one for
+/// the times and one for the size, and two requests are two instants.
+/// </para>
+/// <para>
+/// The trailing field is padding the native declaration spells out, and it is declared here
+/// for the same reason every other reserved field is: the structure's size is part of the
+/// contract, and one declared short is one the system writes past.
+/// </para>
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileNetworkOpenInformation
+{
+    /// <summary>When the file was created, or zero where nothing recorded it.</summary>
+    public long CreationTime;
+
+    /// <summary>When the file's contents were last read.</summary>
+    public long LastAccessTime;
+
+    /// <summary>When the file's contents were last written.</summary>
+    public long LastWriteTime;
+
+    /// <summary>When the file's metadata last changed.</summary>
+    public long ChangeTime;
+
+    /// <summary>The space reserved for the file, which is not its length.</summary>
+    public long AllocationSize;
+
+    /// <summary>The file's length in bytes.</summary>
+    public long EndOfFile;
+
+    /// <summary>The file attribute bits.</summary>
+    public uint FileAttributes;
+
+    /// <summary>Padding the native declaration carries. Never read.</summary>
+    public uint Reserved;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileNetworkOpenInformation);
+}

@@ -427,6 +427,116 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapError DescribeChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeStat stat)
+    {
+        stat = default;
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int flags = LinuxConstants.AT_SYMLINK_NOFOLLOW | LinuxConstants.AT_NO_AUTOMOUNT;
+        return DescribeInto(lease.Descriptor, encoded.Bytes, flags, out stat);
+    }
+
+    /// <inheritdoc/>
+    public CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat)
+    {
+        stat = default;
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        ReadOnlySpan<byte> empty = [0];
+        return DescribeInto(lease.Descriptor, empty, LinuxConstants.AT_EMPTY_PATH, out stat);
+    }
+
+    /// <summary>
+    /// Fills a caller-facing snapshot from one <c>statx</c> call.
+    /// </summary>
+    /// <remarks>
+    /// Asked with the synchronising flag rather than the cached one, which is the difference
+    /// from <see cref="StatInto"/>: the fields a caller wants here are the length and the
+    /// times, and those are exactly the fields a network filesystem's cached answer is wrong
+    /// about.
+    /// </remarks>
+    private static CapError DescribeInto(int directoryFd, ReadOnlySpan<byte> path, int flags, out CapNodeStat stat)
+    {
+        stat = default;
+
+        const uint Wanted =
+            LinuxConstants.STATX_TYPE | LinuxConstants.STATX_MODE | LinuxConstants.STATX_INO |
+            LinuxConstants.STATX_SIZE | LinuxConstants.STATX_ATIME | LinuxConstants.STATX_MTIME |
+            LinuxConstants.STATX_BTIME;
+
+        StatxBuffer buffer = default;
+        long result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* name = path)
+            {
+                result = LinuxNative.Statx(
+                    LinuxConstants.SYS_statx,
+                    directoryFd,
+                    name,
+                    flags | LinuxConstants.AT_STATX_SYNC_AS_STAT,
+                    Wanted,
+                    &buffer);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (result < 0)
+        {
+            return LinuxErrno.ToError(errno);
+        }
+
+        // Everything but the creation time is required, for the same reason the resolution
+        // stat requires its own fields: a value the kernel did not fill in reads as zero,
+        // and a zero length or a zero inode is a plausible-looking answer rather than an
+        // obviously missing one. The creation time is the exception because it is genuinely
+        // optional on this platform, and it is reported as absent rather than as the epoch.
+        const uint Required = Wanted & ~LinuxConstants.STATX_BTIME;
+        if ((buffer.Mask & Required) != Required)
+        {
+            return CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, LinuxErrno.EOPNOTSUPP);
+        }
+
+        DateTimeOffset? created = (buffer.Mask & LinuxConstants.STATX_BTIME) != 0
+            ? UnixTimestamps.FromParts(buffer.BirthTime.Seconds, buffer.BirthTime.Nanoseconds)
+            : null;
+
+        stat = new CapNodeStat(
+            UnixFileTypes.FromMode(buffer.Mode),
+            buffer.VolumeId,
+            buffer.Inode,
+            (long)Math.Min(buffer.Size, long.MaxValue),
+            UnixTimestamps.FromParts(buffer.AccessTime.Seconds, buffer.AccessTime.Nanoseconds),
+            UnixTimestamps.FromParts(buffer.ModifyTime.Seconds, buffer.ModifyTime.Nanoseconds),
+            created,
+            UnixFileTypes.PermissionsFromMode(buffer.Mode),
+            windowsAttributes: null);
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
     /// <remarks>
     /// Answered by asking the process filesystem what the descriptor points at. That is the
     /// only mechanism this platform offers, and it is exactly as approximate as the contract

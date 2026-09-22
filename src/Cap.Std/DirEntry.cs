@@ -174,6 +174,50 @@ public readonly struct DirEntry
         Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, out file);
 
     /// <summary>
+    /// Describes what the entry's name holds now.
+    /// </summary>
+    /// <returns>A snapshot of the entry, taken at the moment of the call.</returns>
+    /// <remarks>
+    /// <para>
+    /// Not free, and not part of the enumeration. A directory read answers what each entry is
+    /// and nothing else, so everything beyond <see cref="Type"/> — the length, the times, the
+    /// permissions — costs a separate lookup of the name. That is why it is a method rather
+    /// than a property, and why an enumeration that does not call it pays nothing for it.
+    /// </para>
+    /// <para>
+    /// The name is looked up again rather than answered from the read, so what comes back
+    /// describes the entry as it is now and not as it was when the directory was listed. The
+    /// two can disagree, including about what kind of thing the name holds; the snapshot is
+    /// the more recent answer and <see cref="Type"/> is left as the enumeration reported it.
+    /// </para>
+    /// <para>
+    /// A link is described as a link, not as what it leads to, exactly as it is when the same
+    /// name is described through the handle this entry came from.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
+    /// <exception cref="ArgumentException">The name is not one this platform will open.</exception>
+    /// <exception cref="FileNotFoundException">The entry is gone.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the question.</exception>
+    /// <exception cref="CapIOException">The question could not be answered.</exception>
+    /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
+    public CapMetadata GetMetadata() => Owner.GetMetadata(Name);
+
+    /// <summary>
+    /// Describes what the entry's name holds now, reporting failure rather than throwing.
+    /// </summary>
+    /// <param name="metadata">The snapshot, when this returns true.</param>
+    /// <returns>True when the entry was described.</returns>
+    /// <remarks>
+    /// The form to prefer here, for the reason the opening members give: an entry that has
+    /// gone between the read and the lookup is an ordinary outcome of listing a directory
+    /// something else is writing to.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
+    /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
+    public bool TryGetMetadata(out CapMetadata metadata) => Owner.TryGetMetadata(Name, out metadata);
+
+    /// <summary>
     /// The handle this entry was read through, which is where its authority comes from.
     /// </summary>
     /// <remarks>

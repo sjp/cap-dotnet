@@ -98,6 +98,35 @@ public sealed class CapFile : IDisposable
     }
 
     /// <summary>
+    /// Describes the file this handle refers to.
+    /// </summary>
+    /// <returns>A snapshot of the file, taken at the moment of the call.</returns>
+    /// <remarks>
+    /// <para>
+    /// Asked of the object rather than of a name, so there is no path to resolve and nothing
+    /// for a rename to interfere with. A file whose last name has been removed while this
+    /// handle was held still answers, and the length it reports is the length of the object
+    /// this handle writes to, not of whatever now holds the name it was opened by.
+    /// </para>
+    /// <para>
+    /// The richer form of <see cref="Length"/>, and one call rather than several: the length,
+    /// the times and the permissions all come from the same query, so they describe one
+    /// instant. Where only the length is wanted, <see cref="Length"/> is the cheaper
+    /// question.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the question.</exception>
+    /// <exception cref="CapIOException">The question could not be answered.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
+    public CapMetadata GetMetadata()
+    {
+        Demand();
+
+        CapError error = PlatformOps.Current.DescribeHandle(_handle, out CapNodeStat stat);
+        return error.IsSuccess ? new CapMetadata(stat) : throw FailureTranslation.ToHandleException(error);
+    }
+
+    /// <summary>
     /// Sets the file's length, truncating it or extending it with zeroes.
     /// </summary>
     /// <param name="length">The length in bytes.</param>

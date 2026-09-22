@@ -207,6 +207,32 @@ internal static class FailureTranslation
     };
 
     /// <summary>
+    /// Builds the exception for a failure to describe what an open handle refers to.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the path-taking form for the reason the enumeration one is: there is no
+    /// path to quote. The question was asked of an object, not of a name, so a message
+    /// naming one would have to invent it — and the object may well have no name left, a
+    /// handle to an unlinked file being perfectly answerable.
+    /// </remarks>
+    public static Exception ToHandleException(CapError error) => error.Category switch
+    {
+        CapErrorCategory.PermissionDenied =>
+            new UnauthorizedAccessException(
+                $"The filesystem would not describe what this handle refers to. ({error})"),
+
+        // The object is readable and the platform will not answer the question. Reported
+        // rather than papered over with whatever partial answer could be assembled, because
+        // a snapshot with some fields quietly left at zero is worse than none.
+        CapErrorCategory.NotSupported =>
+            new CapIOException(
+                $"The filesystem does not report what this handle refers to in the form this " +
+                $"library reads. ({error})"),
+
+        _ => new CapIOException($"What this handle refers to could not be described. ({error})"),
+    };
+
+    /// <summary>
     /// Builds the exception for a path the parser refused, before anything was opened.
     /// </summary>
     /// <param name="error">Why the path was refused.</param>

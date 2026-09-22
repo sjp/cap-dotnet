@@ -56,11 +56,51 @@ internal sealed class FakeNode
     /// </remarks>
     public CapFileType? EntryType { get; set; }
 
+    /// <summary>The length the simulation reports for this object.</summary>
+    public long Length { get; set; }
+
+    /// <summary>When this object's contents were last read.</summary>
+    public DateTimeOffset LastAccessTime { get; set; }
+
+    /// <summary>When this object's contents were last changed.</summary>
+    public DateTimeOffset LastWriteTime { get; set; }
+
+    /// <summary>When this object was created, or null to model a filesystem that does not say.</summary>
+    public DateTimeOffset? CreationTime { get; set; }
+
+    /// <summary>
+    /// The Unix mode bits, when the simulation is standing in for a Unix platform.
+    /// </summary>
+    /// <remarks>
+    /// Set by default so that the common case needs no arranging. A test that wants the
+    /// other kind of platform clears this and sets <see cref="WindowsAttributes"/>; the two
+    /// are never both reported, because no real platform reports both.
+    /// </remarks>
+    public UnixFileMode? UnixMode { get; set; } =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+    /// <summary>
+    /// The Windows attribute bits, when the simulation is standing in for Windows.
+    /// </summary>
+    public FileAttributes? WindowsAttributes { get; set; }
+
     /// <summary>Entries, when this is a directory.</summary>
     public Dictionary<string, FakeNode> Entries { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Its description, as the platform layer would report it.</summary>
     public CapNodeInfo Info => new(Type, VolumeId, NodeId, ReparseTag);
+
+    /// <summary>Its full description, as the metadata layer would report it.</summary>
+    public CapNodeStat Stat => new(
+        FileType,
+        VolumeId,
+        NodeId,
+        Length,
+        LastAccessTime,
+        LastWriteTime,
+        CreationTime,
+        UnixMode,
+        UnixMode is null ? WindowsAttributes : null);
 
     /// <summary>Its kind, as a caller reading the directory is told it.</summary>
     public CapFileType FileType => EntryType ?? Type switch
