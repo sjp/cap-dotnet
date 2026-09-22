@@ -269,6 +269,51 @@ recorded here so that the failure is recognisable when it appears, because nothi
 error says the cause is the permission on a directory being passed through rather than on
 the file being opened.
 
+## Describing what a name holds
+
+Asking what a file is costs one call per platform, and the three platforms answer with
+different calls:
+
+| Platform | Call | Notes |
+|---|---|---|
+| Linux | `statx` | One fixed layout on every architecture, unlike `struct stat` |
+| macOS | `fstatat` / `fstat`, 64-bit-inode form | The entry point is chosen by architecture; on Intel the undecorated name still means the old layout |
+| Windows | `NtQueryInformationFile` | Two queries normally, three when the entry redirects |
+
+The same question is asked twice in this library, in two different ways, and the difference
+is deliberate. Resolution asks it of every component of every path, wants only the type and
+the identity, and passes the flag that lets a network filesystem answer from its cache — a
+type and an inode number do not go stale in a way a walk can act on, and revalidating per
+component would turn a deep path into a series of round trips. A caller asking what a file
+is asks once, on purpose, and wants the length and the timestamps to be current, so that
+call synchronises. A caller who notices that listing a directory is cheap and describing
+every entry in it is not has found this, and the difference is the network round trip.
+
+Windows needs more than one query because no single reply combines the times, the length,
+the attributes and the identity. The times, the length and the attributes come together, so
+those describe one instant; the identity is a second query; and the reparse tag is asked for
+only when the attributes say the entry redirects, which is what separates a symbolic link
+from a structure of unknown shape that merely looks like one.
+
+**The identity is carried at 128 bits.** Windows issues identifiers that wide because the
+64-bit ones it used to issue are not unique on every filesystem it supports, so a reader that
+kept the low half would report two distinct files as one file under two names — silently, and
+only on the filesystems nobody has mounted on a build agent. Resolution's own identity check
+compares two things it looked at moments apart on one volume and does use the low half; the
+comparison offered to callers does not.
+
+**A creation time is absent rather than invented.** Linux reports per call whether the
+filesystem supplied one, and several do not. macOS and Windows have nowhere to say so and
+leave the field at zero instead, which is read as absence: a file created at the start of
+1970, or of 1601, is not a thing that happens, and reporting one would be a worse answer than
+reporting none.
+
+**Timestamps outside the range the framework can hold are clamped, not refused.** Anything
+that can write a file can set its timestamps, and a filesystem image can be crafted with any
+value at all, so an absurd one is ordinary hostile input. Failing the call instead would
+report nothing about a file whose other fields were perfectly readable, and would give anyone
+who can write inside a sandbox a way to stop a caller's walk.
+
 ## A note on struct layout
 
 `openat2` takes a pointer to `struct open_how` plus its size. If our declared size does not

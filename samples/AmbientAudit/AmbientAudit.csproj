@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>AmbientAudit</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Turns the recording of authority acquisitions on for this process. Done here rather
+      than in code because this form is in effect before the first line of Main runs, which
+      is where a dependency's static initializer would take authority if it were going to.
+    -->
+    <RuntimeHostConfigurationOption Include="Cap.Primitives.RecordAmbientAuthority" Value="true" />
+  </ItemGroup>
+
+</Project>

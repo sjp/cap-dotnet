@@ -15,6 +15,9 @@
     <Project Path="tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj" />
     <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
   </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/AmbientAudit/AmbientAudit.csproj" />
+  </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Cap.Benchmarks/Cap.Benchmarks.csproj" />
   </Folder>

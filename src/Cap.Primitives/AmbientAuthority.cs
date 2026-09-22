@@ -30,6 +30,13 @@ namespace Cap.Primitives;
 /// through three layers still names the line that took it rather than the line that used it.
 /// </para>
 /// <para>
+/// The same sites can be collected for the whole process rather than one at a time. With
+/// the recording switched on, every acquisition is recorded against its call site, and
+/// <see cref="DescribeRecordedSites"/> answers what the search through the source answers,
+/// for the program as it actually ran — including any authority taken inside a dependency
+/// whose source nobody searched. See <see cref="RecordingSwitchName"/>.
+/// </para>
+/// <para>
 /// <c>default(AmbientAuthority)</c> is not a token. A structure that could be conjured from
 /// nothing would make the parameter a formality, so the only value that satisfies a
 /// requirement for one is a value <see cref="Acquire"/> produced; anything else is refused
@@ -39,16 +46,74 @@ namespace Cap.Primitives;
 /// </remarks>
 public readonly struct AmbientAuthority
 {
+    /// <summary>
+    /// The application context switch that turns the recording of acquisition sites on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Set it in the application's project file, which is the form that covers authority
+    /// taken before the first line of user code runs:
+    /// </para>
+    /// <code>
+    /// &lt;RuntimeHostConfigurationOption Include="Cap.Primitives.RecordAmbientAuthority" Value="true" /&gt;
+    /// </code>
+    /// <para>
+    /// or from code, before anything takes authority:
+    /// <c>AppContext.SetSwitch(AmbientAuthority.RecordingSwitchName, true)</c>. Read afresh
+    /// at each acquisition, so it can also be turned on around one suspect phase of
+    /// start-up; what was recorded while it was on stays recorded when it goes off.
+    /// </para>
+    /// </remarks>
+    public const string RecordingSwitchName = "Cap.Primitives.RecordAmbientAuthority";
+
+    /// <summary>
+    /// The environment variable that turns the recording of acquisition sites on, for an
+    /// operator who cannot rebuild: <c>CAPDOTNET_RECORD_AMBIENT_AUTHORITY=1</c>.
+    /// </summary>
+    /// <remarks>
+    /// Read once, when the recording is first consulted, so it cannot be changed under a
+    /// running process.
+    /// </remarks>
+    public const string RecordingVariableName = "CAPDOTNET_RECORD_AMBIENT_AUTHORITY";
+
     private readonly bool _acquired;
     private readonly string? _file;
     private readonly int _line;
+    private readonly string? _member;
 
-    private AmbientAuthority(string? file, int line)
+    private AmbientAuthority(string? file, int line, string? member)
     {
         _acquired = true;
         _file = file;
         _line = line;
+        _member = member;
     }
+
+    /// <summary>
+    /// Whether an acquisition happening now would be added to the recorded sites.
+    /// </summary>
+    public static bool IsRecording => AmbientAuthorityLog.IsRecording;
+
+    /// <summary>
+    /// Every place this process has taken ambient authority, in the order the places first
+    /// did so, or an empty list when nothing was recorded.
+    /// </summary>
+    /// <remarks>
+    /// Empty is not the same answer as "nothing took any": with the recording off, which is
+    /// the default, nothing is recorded however much authority is taken. Check
+    /// <see cref="IsRecording"/> before reading anything into an empty list.
+    /// </remarks>
+    public static IReadOnlyList<AmbientAuthoritySite> RecordedSites => AmbientAuthorityLog.Sites;
+
+    /// <summary>
+    /// The recorded sites as a report to print — typically once, after start-up, so that a
+    /// deployment states in its own log what it reached for.
+    /// </summary>
+    /// <remarks>
+    /// Says so plainly when the recording is off, rather than producing an empty report that
+    /// reads like a clean bill of health.
+    /// </remarks>
+    public static string DescribeRecordedSites() => AmbientAuthorityLog.Describe();
 
     /// <summary>
     /// Takes ambient authority, recording the call site.
@@ -58,15 +123,28 @@ public readonly struct AmbientAuthority
     /// possible and pointless; the value is used only for diagnostics.
     /// </param>
     /// <param name="line">Filled in by the compiler with the line of the call.</param>
+    /// <param name="member">
+    /// Filled in by the compiler with the member the call was written in. Kept alongside the
+    /// line because it is the half of the location that survives the file being edited.
+    /// </param>
     /// <remarks>
-    /// Costs nothing and checks nothing. The call is the declaration: this line is where the
-    /// process reaches past what it was given, and it is meant to be findable by searching
-    /// for this method by name.
+    /// Checks nothing, and costs nothing beyond a switch lookup. The call is the
+    /// declaration: this line is where the process reaches past what it was given, and it is
+    /// meant to be findable both by searching for this method by name and, at run time,
+    /// through <see cref="RecordedSites"/>.
     /// </remarks>
     public static AmbientAuthority Acquire(
         [CallerFilePath] string? file = null,
-        [CallerLineNumber] int line = 0) =>
-        new(file, line);
+        [CallerLineNumber] int line = 0,
+        [CallerMemberName] string? member = null)
+    {
+        if (AmbientAuthorityLog.IsRecording)
+        {
+            AmbientAuthorityLog.Add(file, line, member);
+        }
+
+        return new AmbientAuthority(file, line, member);
+    }
 
     /// <summary>
     /// Where this token was acquired, or a note that it was never acquired at all.
@@ -75,12 +153,24 @@ public readonly struct AmbientAuthority
     /// For logs and assertion messages. Nothing parses it, and the exact wording is not part
     /// of the contract.
     /// </remarks>
-    public override string ToString() =>
-        _acquired
-            ? _file is null
+    public override string ToString()
+    {
+        if (!_acquired)
+        {
+            return "ambient authority (never acquired)";
+        }
+
+        if (_file is null)
+        {
+            return _member is null
                 ? "ambient authority"
-                : $"ambient authority acquired at {_file}:{_line}"
-            : "ambient authority (never acquired)";
+                : $"ambient authority acquired in {_member}";
+        }
+
+        return _member is null
+            ? $"ambient authority acquired at {_file}:{_line}"
+            : $"ambient authority acquired at {_file}:{_line} in {_member}";
+    }
 
     /// <summary>
     /// True when this value came from <see cref="Acquire"/> rather than from

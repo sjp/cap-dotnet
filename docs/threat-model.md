@@ -351,6 +351,11 @@ Opening the first `Dir` requires an `AmbientAuthority` token and resolves an ord
 with ordinary ambient rules. Everything the model promises begins *after* that. The token
 exists to make that moment greppable and auditable, not to make it safe.
 
+Auditable includes at run time: a process can be told to record every acquisition against
+its call site and print the list, which covers the acquisitions a search through the
+application's own source does not — the ones inside its dependencies. See
+[ambient-authority.md](ambient-authority.md).
+
 ### 6.5 Silently weakening containment is itself a vulnerability
 
 A capability probe that fails open, or a demotion from the kernel-atomic backend to a walk

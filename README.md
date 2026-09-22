@@ -69,3 +69,6 @@ Escapes are vulnerabilities; please report them privately. See
 
 [docs/paths.md](docs/paths.md) is the parsing contract — what a path is allowed to be, and
 what is deliberately never rewritten on the way through.
+
+[docs/ambient-authority.md](docs/ambient-authority.md) covers the one way authority enters a
+process from outside, and how to make a running process list every place it did.
