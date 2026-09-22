@@ -12,11 +12,13 @@ namespace Cap.Primitives.Interop;
 /// handle differ from every other object on the system — a surprise, not a defence.
 /// </para>
 /// <para>
-/// <see cref="OwnerOnly"/> exists for the one case where that reasoning does not hold:
-/// where this library, rather than the caller, picked the place. A scratch directory made in
-/// the system temporary location is put somewhere shared by every account on the machine,
-/// nobody asked for it to be there, and so closing it to everybody else is part of putting
-/// it there at all.
+/// <see cref="OwnerOnly"/> exists for the case where that reasoning does not hold: where
+/// this library, rather than the caller, picked the place. A scratch directory made in the
+/// system temporary location is put somewhere shared by every account on the machine, nobody
+/// asked for it to be there, and so closing it to everybody else is part of putting it there
+/// at all. An application's configuration, data, cache and state directories are the other
+/// instance: their location comes from the platform's conventions, and on Unix those
+/// conventions ask for exactly this mode.
 /// </para>
 /// </remarks>
 internal enum CreationVisibility : byte

@@ -1126,8 +1126,8 @@ public sealed partial class Dir : IDisposable
     /// <remarks>
     /// Internal, and narrower than the public creation on purpose. Asking for permissions
     /// other than the system's own is right only where this library rather than the caller
-    /// chose the location, which is true of a scratch directory and of nothing else the
-    /// public surface offers.
+    /// chose the location: a scratch directory, and the per-application directories placed
+    /// by the platform's conventions.
     /// </remarks>
     internal CapError CreateOwnedDir(string name, out Dir? dir)
     {
@@ -1141,6 +1141,35 @@ public sealed partial class Dir : IDisposable
 
         return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
     }
+
+    /// <summary>
+    /// Opens a directory beneath this one, creating it so that no other account can look
+    /// into it if it is not there.
+    /// </summary>
+    /// <param name="name">A single component.</param>
+    /// <returns>A handle on the directory, carrying this handle's policy.</returns>
+    /// <remarks>
+    /// <see cref="OpenOrCreateDir"/> with the owner-only mode of <see cref="CreateOwnedDir"/>,
+    /// and the same restriction on who may ask for it. A directory already there is opened
+    /// as it is: its permissions were somebody's decision, and this does not revisit it.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="name"/> is not a usable name.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the operation.</exception>
+    /// <exception cref="CapIOException">The name is held by something that is not a directory.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    internal Dir OpenOrCreateOwnedDir(string name) =>
+        Produce(
+            CreateDirCore(
+                name,
+                exclusive: false,
+                CreationVisibility.OwnerOnly,
+                out Dir? dir,
+                out CapError error,
+                out ExpectedTarget expected),
+            name,
+            dir,
+            error,
+            expected);
 
     /// <summary>
     /// Resolves everything ahead of a path's last component, and hands back that component

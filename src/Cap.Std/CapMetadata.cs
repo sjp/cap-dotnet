@@ -111,6 +111,17 @@ public readonly struct CapMetadata
     public CapFileId FileId => new(_stat.VolumeId, _stat.NodeId);
 
     /// <summary>
+    /// The user id of the account that owns the object, or null on a platform that records
+    /// ownership some other way.
+    /// </summary>
+    /// <remarks>
+    /// Internal because the only thing that asks is this library's own check on a location
+    /// it did not create and is about to trust. A public owner would need a portable shape
+    /// for it, and a Windows owner is a security identifier, not a number.
+    /// </remarks>
+    internal uint? UnixOwnerId => _stat.UnixOwnerId;
+
+    /// <summary>
     /// Whether this and <paramref name="other"/> describe the same filesystem object.
     /// </summary>
     /// <param name="other">The other snapshot.</param>

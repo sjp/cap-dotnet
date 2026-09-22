@@ -10,9 +10,9 @@ using Dir workspace = Dir.Open("/srv/reports", AmbientAuthority.Acquire());
 ```
 
 Every API that reaches outside the capability graph — opening the first directory by an
-ordinary path, asking the system where scratch files go, and in time the system clock, the
-operating system's entropy, a socket, a well-known user directory — takes one of these
-tokens, and no API that does so omits it.
+ordinary path, asking the system where scratch files go, finding an application's
+configuration and data directories, and in time the system clock, the operating system's
+entropy, a socket — takes one of these tokens, and no API that does so omits it.
 
 ```csharp
 using CapTempDir scratch = CapTempDir.New(AmbientAuthority.Acquire());

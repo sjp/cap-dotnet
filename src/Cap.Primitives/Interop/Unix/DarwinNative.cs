@@ -199,6 +199,11 @@ internal static unsafe partial class DarwinNative
     /// <summary>Reports on an open descriptor.</summary>
     internal static int FStat(int fd, DarwinStat* result) =>
         UsesPlainStatSymbols ? FStatPlain(fd, result) : FStatInode64(fd, result);
+
+    /// <summary>The account this process acts as when the filesystem checks permissions.</summary>
+    /// <remarks>Cannot fail, so there is no error to collect.</remarks>
+    [LibraryImport("libc", EntryPoint = "geteuid")]
+    internal static partial uint GetEffectiveUserId();
 }
 
 /// <summary>

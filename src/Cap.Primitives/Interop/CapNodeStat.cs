@@ -38,7 +38,8 @@ internal readonly struct CapNodeStat
         DateTimeOffset lastWriteTime,
         DateTimeOffset? creationTime,
         UnixFileMode? unixMode,
-        FileAttributes? windowsAttributes)
+        FileAttributes? windowsAttributes,
+        uint? unixOwnerId = null)
     {
         Type = type;
         VolumeId = volumeId;
@@ -49,6 +50,7 @@ internal readonly struct CapNodeStat
         CreationTime = creationTime;
         UnixMode = unixMode;
         WindowsAttributes = windowsAttributes;
+        UnixOwnerId = unixOwnerId;
     }
 
     /// <summary>What the object is, in the full set of kinds a caller can be told apart.</summary>
@@ -96,4 +98,16 @@ internal readonly struct CapNodeStat
     /// The Windows file attribute bits, or null on a platform that has none.
     /// </summary>
     public FileAttributes? WindowsAttributes { get; }
+
+    /// <summary>
+    /// The user id of the account that owns the object, or null on a platform that records
+    /// ownership some other way.
+    /// </summary>
+    /// <remarks>
+    /// Needed where a location's safety depends on who owns it rather than on what its mode
+    /// allows: a directory whose mode shuts everybody else out still belongs to whoever
+    /// created it, and if that is not the current account then everything placed inside it
+    /// is readable by them.
+    /// </remarks>
+    public uint? UnixOwnerId { get; }
 }

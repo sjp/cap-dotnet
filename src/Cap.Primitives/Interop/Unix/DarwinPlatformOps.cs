@@ -500,7 +500,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             ? UnixTimestamps.FromParts(raw.BirthTime.Seconds, raw.BirthTime.Nanoseconds)
             : null,
         UnixFileTypes.PermissionsFromMode(raw.Mode),
-        windowsAttributes: null);
+        windowsAttributes: null,
+        raw.UserId);
 
     /// <inheritdoc/>
     /// <remarks>

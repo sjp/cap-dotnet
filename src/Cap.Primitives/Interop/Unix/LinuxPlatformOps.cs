@@ -562,7 +562,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         const uint Wanted =
             LinuxConstants.STATX_TYPE | LinuxConstants.STATX_MODE | LinuxConstants.STATX_INO |
             LinuxConstants.STATX_SIZE | LinuxConstants.STATX_ATIME | LinuxConstants.STATX_MTIME |
-            LinuxConstants.STATX_BTIME;
+            LinuxConstants.STATX_UID | LinuxConstants.STATX_BTIME;
 
         StatxBuffer buffer = default;
         long result;
@@ -614,7 +614,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             UnixTimestamps.FromParts(buffer.ModifyTime.Seconds, buffer.ModifyTime.Nanoseconds),
             created,
             UnixFileTypes.PermissionsFromMode(buffer.Mode),
-            windowsAttributes: null);
+            windowsAttributes: null,
+            buffer.UserId);
 
         return CapError.Success;
     }

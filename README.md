@@ -88,3 +88,8 @@ library's own.
 [docs/randomness.md](docs/randomness.md) covers the randomness capability: the operating
 system's generator, handed out only against a token, the seeded stream for tests that cannot
 be passed where the secure one is required, and the exact algorithm that stream is fixed to.
+
+[docs/directories.md](docs/directories.md) covers the project-directories capability: an
+application's configuration, data, cache, state and runtime directories, found once by the
+platform's conventions and handed out as `Dir` handles that are created only when first
+asked for.

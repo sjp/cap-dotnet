@@ -9,4 +9,8 @@
     <ProjectReference Include="../Cap.Std/Cap.Std.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cap.Directories.Tests" />
+  </ItemGroup>
+
 </Project>

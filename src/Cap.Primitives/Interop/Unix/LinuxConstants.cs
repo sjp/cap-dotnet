@@ -263,6 +263,7 @@ internal static class LinuxConstants
     /// <summary>Ask only for the fields resolution uses: the type, the mode and the inode.</summary>
     public const uint STATX_TYPE = 0x0001;
     public const uint STATX_MODE = 0x0002;
+    public const uint STATX_UID = 0x0008;
     public const uint STATX_INO = 0x0100;
 
     public const uint STATX_ATIME = 0x0020;

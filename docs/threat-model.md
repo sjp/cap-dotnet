@@ -251,6 +251,19 @@ being left to the caller.
 | SC4 | Planting a symlink inside a tree that is about to be deleted, aimed at a file outside it | Cleanup descends by handle and unlinks by name; a link is removed as a link and never followed | scratch directory disposal | `CapTempDirTests.Disposal_removes_a_link_without_reaching_what_it_points_at` |
 | SC5 | Replacing the scratch directory, or a directory inside it, after it was created | Nothing is reached by name after creation: the handle refers to the object, and a name swapped for a link is refused by the open rather than followed | scratch directory helper | `DirSymlinkPolicyTests` covers the refusal the descent relies on |
 
+### 4.7 Well-known project directories
+
+An application's configuration, data, cache, state and runtime directories are found from the
+environment once, at start-up, and handed out as handles. Where the environment points is
+trusted, as it is for every other program the account runs; what follows from it is not.
+
+| # | Attack | Required behaviour | Where | Test |
+|---|---|---|---|---|
+| PD1 | Another account reading what an application keeps in its own directories | On Unix every directory the library creates, parents included, is mode `0700`; existing directories are left as they are | project directories | `ProjectDirsTests.Every_directory_created_is_closed_to_other_accounts`, `.A_directory_that_already_exists_keeps_its_permissions` |
+| PD2 | A runtime directory owned by another account, or open to one, so that sockets and locks placed there can be reached or pre-empted | The directory is checked on the open handle — a directory, owned by the effective user, no group or other permission bits — and is not used at all otherwise | project directories | `ProjectDirsTests.A_runtime_directory_open_to_other_accounts_is_not_used`, `.A_runtime_directory_must_be_owned_by_the_user_and_closed_to_everybody_else` |
+| PD3 | Renaming or replacing a location after it was found, to redirect where the application's directories get created | Whatever is missing is created through the handle opened at start-up, never by path | project directories | `ProjectDirsTests.Nothing_is_resolved_by_path_after_the_directories_are_found` |
+| PD4 | A project name carrying a separator, NUL or `..`, to place the directory somewhere else | Refused before anything is opened | project directories | `ProjectLayoutTests.A_name_that_is_not_a_single_component_is_refused`, `.An_application_name_that_names_no_new_directory_is_refused` |
+
 ## 5. Explicit non-goals
 
 These are not oversights. Each one is a place where a reader might reasonably expect a

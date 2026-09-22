@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Directories.Tests</RootNamespace>
+    <AssemblyName>Cap.Directories.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Directories/Cap.Directories.csproj" />
+  </ItemGroup>
+
+</Project>

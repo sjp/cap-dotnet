@@ -169,4 +169,9 @@ internal static unsafe partial class LinuxNative
     /// <remarks><paramref name="number"/> must be <see cref="LinuxConstants.SYS_statx"/>.</remarks>
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
     internal static partial long Statx(long number, int directoryFd, byte* path, int flags, uint mask, StatxBuffer* result);
+
+    /// <summary>The account this process acts as when the filesystem checks permissions.</summary>
+    /// <remarks>Cannot fail, so there is no error to collect.</remarks>
+    [LibraryImport("libc", EntryPoint = "geteuid")]
+    internal static partial uint GetEffectiveUserId();
 }
