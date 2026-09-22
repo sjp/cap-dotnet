@@ -24,9 +24,9 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirSurfaceTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-surface-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
     /// <summary>There is no public member that hands back a path.</summary>
     /// <remarks>
@@ -53,11 +53,11 @@ public sealed class DirSurfaceTests : IDisposable
     [Fact]
     public void The_string_form_is_not_a_path()
     {
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         string text = root.ToString()!;
 
-        Assert.DoesNotContain(_root, text, StringComparison.Ordinal);
+        Assert.DoesNotContain(_tree.HostPath, text, StringComparison.Ordinal);
         Assert.Equal(typeof(Dir).ToString(), text);
     }
 

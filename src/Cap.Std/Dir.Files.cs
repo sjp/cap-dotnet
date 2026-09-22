@@ -524,6 +524,22 @@ public sealed partial class Dir
     /// resolving the prefix and taking the name, and on the platform that can resolve a whole
     /// path in one operation that instant is exactly what the operation was chosen to remove.
     /// </remarks>
+    /// <summary>
+    /// Creates a file with no name in any directory, taking its storage from this one.
+    /// </summary>
+    /// <remarks>
+    /// Internal because the decision about what to do when the platform has no such facility
+    /// belongs with the scratch-file helper rather than with every caller. The failure is
+    /// handed back as a value for the same reason: an answer of "this system does not do
+    /// that" is something to act on, and building an exception for it would make the
+    /// ordinary case on those systems the expensive one.
+    /// </remarks>
+    internal CapResult<SafeFileHandle> OpenAnonymousFile()
+    {
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+        return PlatformOps.Current.OpenAnonymousChildFile(_handle, FileAccess.ReadWrite);
+    }
+
     private CapPathError OpenFileCore(
         string path,
         in FileOpenRequest request,

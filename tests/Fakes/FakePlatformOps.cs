@@ -348,7 +348,10 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapError CreateChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CreationVisibility visibility)
     {
         CapError error = ResolveDirectory(parent, out FakeNode? directory);
         if (error.IsFailure)
@@ -367,8 +370,90 @@ internal sealed class FakePlatformOps : IPlatformOps
             Type = CapNodeType.Directory,
             VolumeId = directory.VolumeId,
             NodeId = _fileSystem.NextNodeId(),
+            UnixMode = visibility == CreationVisibility.OwnerOnly ? OwnerOnlyMode : SharedMode,
         };
 
+        return CapError.Success;
+    }
+
+    /// <summary>What the simulation records for a directory only its owner may reach.</summary>
+    private const UnixFileMode OwnerOnlyMode =
+        UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
+    /// <summary>What it records for one created with the usual permissions.</summary>
+    private const UnixFileMode SharedMode =
+        OwnerOnlyMode |
+        UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+        UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+
+    /// <inheritdoc/>
+    public CapResult<string> GetSystemTemporaryDirectory() =>
+        _fileSystem.TemporaryDirectory is { } location
+            ? CapResult<string>.Ok(location)
+            : CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.NotFound));
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Simulated only where a test asks for it, so that both answers — a platform that
+    /// produces nameless files and one that does not — can be exercised on whichever machine
+    /// the suite happens to be running on. The file is created with no entry in any
+    /// directory, which is the property under test.
+    /// </remarks>
+    public CapResult<SafeFileHandle> OpenAnonymousChildFile(SafeDirHandle parent, FileAccess access)
+    {
+        if (!_fileSystem.SupportsAnonymousFiles)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
+        }
+
+        if (access == FileAccess.Read)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        if (error.IsFailure)
+        {
+            return CapResult<SafeFileHandle>.Fail(error);
+        }
+
+        FakeNode created = new()
+        {
+            Type = CapNodeType.File,
+            VolumeId = directory!.VolumeId,
+            NodeId = _fileSystem.NextNodeId(),
+        };
+
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(created));
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Models the platform where a flag on the object can refuse its own removal. A node the
+    /// test has not marked that way has nothing to clear, and the answer is the one the
+    /// platforms without such a flag give.
+    /// </remarks>
+    public CapError ClearChildRemovalBlock(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        if (!node!.RefusesRemoval)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        // An object the platform will not let anything change at all keeps its refusal, which
+        // is how a test produces a name that genuinely cannot be removed.
+        if (node.Unreadable)
+        {
+            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+        }
+
+        node.RefusesRemoval = false;
         return CapError.Success;
     }
 
@@ -384,6 +469,11 @@ internal sealed class FakePlatformOps : IPlatformOps
         if (node!.Type == CapNodeType.Directory)
         {
             return CapError.FromCategory(CapErrorCategory.IsADirectory);
+        }
+
+        if (node.RefusesRemoval)
+        {
+            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
         }
 
         _ = Parent(parent).Entries.Remove(name.ToString());
@@ -407,6 +497,11 @@ internal sealed class FakePlatformOps : IPlatformOps
         if (node.Entries.Count > 0)
         {
             return CapError.FromCategory(CapErrorCategory.NotEmpty);
+        }
+
+        if (node.RefusesRemoval)
+        {
+            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
         }
 
         _ = Parent(parent).Entries.Remove(name.ToString());

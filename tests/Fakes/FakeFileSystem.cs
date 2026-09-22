@@ -56,6 +56,21 @@ internal sealed class FakeFileSystem
     /// </remarks>
     public bool SupportsConfinedOpen { get; set; }
 
+    /// <summary>
+    /// Whether the simulated platform can create a file with no name in any directory.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, which is the answer most platforms give. A test that wants the other
+    /// answer turns it on, so both the nameless file and the fallback for its absence are
+    /// exercised wherever the suite runs.
+    /// </remarks>
+    public bool SupportsAnonymousFiles { get; set; }
+
+    /// <summary>
+    /// Where the simulated platform says scratch files go, or null when it says nowhere.
+    /// </summary>
+    public string? TemporaryDirectory { get; set; } = "/tmp";
+
     /// <summary>Creates a directory, and any missing directories above it.</summary>
     public FakeNode AddDirectory(string path) => Create(path, CapNodeType.Directory, null, 0);
 

@@ -22,9 +22,9 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirPathLookupTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-whereami-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
     /// <summary>Where an answer is available, it names the directory that was opened.</summary>
     /// <remarks>
@@ -36,10 +36,10 @@ public sealed class DirPathLookupTests : IDisposable
     [Fact]
     public void A_handle_can_say_what_directory_it_was_opened_on()
     {
-        string nested = Path.Combine(_root, "somewhere");
+        string nested = Path.Combine(_tree.HostPath, "somewhere");
         Directory.CreateDirectory(nested);
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir child = root.OpenDir("somewhere");
 
         if (!child.TryGetPath(AmbientAuthority.Acquire(), out string? path))
@@ -54,7 +54,7 @@ public sealed class DirPathLookupTests : IDisposable
     [Fact]
     public void A_copy_answers_the_same_way_as_the_handle_it_came_from()
     {
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir copy = root.Clone();
 
         if (!root.TryGetPath(AmbientAuthority.Acquire(), out string? original))
@@ -78,9 +78,9 @@ public sealed class DirPathLookupTests : IDisposable
     [Fact]
     public void The_answer_follows_a_rename_rather_than_recording_the_name_it_was_opened_by()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "before"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "before"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir child = root.OpenDir("before");
 
         if (!child.TryGetPath(AmbientAuthority.Acquire(), out string? opened))
@@ -90,7 +90,7 @@ public sealed class DirPathLookupTests : IDisposable
 
         Assert.EndsWith("before", opened.TrimEnd('/', '\\'), StringComparison.Ordinal);
 
-        Directory.Move(Path.Combine(_root, "before"), Path.Combine(_root, "after"));
+        Directory.Move(Path.Combine(_tree.HostPath, "before"), Path.Combine(_tree.HostPath, "after"));
 
         Assert.True(child.TryGetPath(AmbientAuthority.Acquire(), out string? renamed));
         Assert.EndsWith("after", renamed.TrimEnd('/', '\\'), StringComparison.Ordinal);

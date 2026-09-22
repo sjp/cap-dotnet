@@ -130,6 +130,37 @@ internal struct FileAttributeTagInformation
     public uint ReparseTag;
 }
 
+/// <summary>An open object's four timestamps and its attribute bits.</summary>
+/// <remarks>
+/// Written as well as read, which is what the zero convention in the timestamps is for: a
+/// field left at zero asks for that time to be left as it is, so the attributes can be
+/// changed without the call also deciding when the file was created or last written.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileBasicInformation
+{
+    /// <summary>When the file was created, or zero to leave it as it is.</summary>
+    public long CreationTime;
+
+    /// <summary>When the file's contents were last read, or zero to leave it as it is.</summary>
+    public long LastAccessTime;
+
+    /// <summary>When the file's contents were last written, or zero to leave it as it is.</summary>
+    public long LastWriteTime;
+
+    /// <summary>When the file's metadata last changed, or zero to leave it as it is.</summary>
+    public long ChangeTime;
+
+    /// <summary>The file attribute bits.</summary>
+    public uint FileAttributes;
+
+    /// <summary>Padding the native declaration carries. Never read.</summary>
+    public uint Reserved;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileBasicInformation);
+}
+
 /// <summary>The reply to a request for a file's identity.</summary>
 /// <remarks>
 /// The identifier is 128 bits because the 64-bit one it replaced is not unique on every

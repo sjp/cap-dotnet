@@ -26,17 +26,17 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirLifetimeTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-lifetime-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
     /// <summary>Closing a handle leaves everything derived from it working.</summary>
     [Fact]
     public void Disposing_a_handle_does_not_invalidate_handles_derived_from_it()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "child", "grandchild"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child", "grandchild"));
 
-        Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         Dir child = root.OpenDir("child");
 
         root.Dispose();
@@ -54,9 +54,9 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Disposing_a_handle_does_not_invalidate_a_copy_of_it()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "child"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
-        Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir copy = root.Clone();
 
         root.Dispose();
@@ -69,9 +69,9 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Disposing_a_copy_does_not_invalidate_the_handle_it_came_from()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "child"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         root.Clone().Dispose();
 
         using Dir child = root.OpenDir("child");
@@ -87,7 +87,7 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Disposing_twice_is_harmless()
     {
-        Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         root.Dispose();
         root.Dispose();
     }
@@ -100,9 +100,9 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Operations_on_a_closed_handle_report_it()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "child"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
-        Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         root.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => root.OpenDir("child"));
@@ -126,7 +126,7 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void A_copy_carries_the_authority_of_the_handle_it_came_from()
     {
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir copy = root.Clone();
 
         SafeDirHandle original = (SafeDirHandle)root.UnsafeGetHandle();
@@ -151,9 +151,9 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Concurrent_use_of_one_handle_is_safe()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "child", "grandchild"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child", "grandchild"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         Parallel.For(0, 128, iteration =>
         {

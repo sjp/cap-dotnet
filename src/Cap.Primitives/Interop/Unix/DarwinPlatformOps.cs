@@ -77,6 +77,10 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<string> GetSystemTemporaryDirectory() =>
+        CapResult<string>.Ok(UnixTemporaryDirectory.Location);
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenChildDirectory(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
@@ -600,7 +604,10 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapError CreateChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CreationVisibility visibility)
     {
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
@@ -621,8 +628,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         {
             fixed (byte* path = encoded.Bytes)
             {
-                result = DarwinNative.MkdirAt(
-                    lease.Descriptor, path, DarwinConstants.DirectoryCreateMode);
+                result = DarwinNative.MkdirAt(lease.Descriptor, path, CreateMode(visibility));
                 if (result < 0)
                 {
                     errno = Marshal.GetLastPInvokeError();
@@ -632,6 +638,37 @@ internal sealed class DarwinPlatformOps : IPlatformOps
 
         return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
     }
+
+    /// <summary>
+    /// The permissions a directory creation asks the kernel for.
+    /// </summary>
+    /// <remarks>
+    /// The umask narrows whichever of these is chosen and never widens it, so the owner-only
+    /// request stays owner-only whatever the process is configured to clear.
+    /// </remarks>
+    private static uint CreateMode(CreationVisibility visibility) =>
+        visibility == CreationVisibility.OwnerOnly
+            ? DarwinConstants.OwnerOnlyDirectoryCreateMode
+            : DarwinConstants.DirectoryCreateMode;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// This system has no facility for it. A file with no name is a Linux extension, and the
+    /// approximations available here — a name created and immediately unlinked — are a
+    /// different object with a different exposure, so the answer is that there is none
+    /// rather than something that looks like one.
+    /// </remarks>
+    public CapResult<SafeFileHandle> OpenAnonymousChildFile(SafeDirHandle parent, FileAccess access) =>
+        CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// There is no such flag on this platform. Whether a name can be removed is decided by
+    /// the permissions on the directory holding it rather than by anything on the object the
+    /// name holds, so a removal that failed here failed for a reason this would not address.
+    /// </remarks>
+    public CapError ClearChildRemovalBlock(SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
 
     /// <inheritdoc/>
     public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name) =>

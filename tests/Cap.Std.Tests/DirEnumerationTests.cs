@@ -30,7 +30,7 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed partial class DirEnumerationTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-enumerate-").FullName;
+    private readonly ScratchTree _tree = new();
 
     /// <summary>A name planted as raw bytes, which the framework's own cleanup cannot remove.</summary>
     private byte[]? _rawName;
@@ -45,12 +45,12 @@ public sealed partial class DirEnumerationTests : IDisposable
             UnlinkRaw(_rawName);
         }
 
-        Directory.Delete(_root, recursive: true);
+        _tree.Dispose();
     }
 
-    private Dir OpenRoot() => Dir.Open(_root, AmbientAuthority.Acquire());
+    private Dir OpenRoot() => Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
-    private string Host(params string[] parts) => Path.Combine([_root, .. parts]);
+    private string Host(params string[] parts) => Path.Combine([_tree.HostPath, .. parts]);
 
     // --- what comes back --------------------------------------------------------------------
 
@@ -523,7 +523,7 @@ public sealed partial class DirEnumerationTests : IDisposable
 
     private void Seed(int count, string? within = null)
     {
-        string directory = within is null ? _root : Host(within);
+        string directory = within is null ? _tree.HostPath : Host(within);
         for (int i = 0; i < count; i++)
         {
             File.WriteAllText(
@@ -540,7 +540,7 @@ public sealed partial class DirEnumerationTests : IDisposable
     /// </remarks>
     private void CreateRawName(byte[] name)
     {
-        byte[] path = [.. System.Text.Encoding.UTF8.GetBytes(_root), (byte)'/', .. name, 0];
+        byte[] path = [.. System.Text.Encoding.UTF8.GetBytes(_tree.HostPath), (byte)'/', .. name, 0];
 
         _rawName = path;
 

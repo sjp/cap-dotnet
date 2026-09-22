@@ -26,13 +26,13 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class CapFileTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-file-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
-    private Dir OpenRoot() => Dir.Open(_root, AmbientAuthority.Acquire());
+    private Dir OpenRoot() => Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
-    private string Host(string name) => Path.Combine(_root, name);
+    private string Host(string name) => Path.Combine(_tree.HostPath, name);
 
     // --- positional reads and writes -----------------------------------------------------------
 

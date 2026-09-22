@@ -411,6 +411,18 @@ internal static class NtConstants
     public const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
     public const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
 
+    /// <summary>
+    /// The flag that makes an object refuse to be written to or removed, whatever the
+    /// account attempting it is otherwise entitled to do.
+    /// </summary>
+    /// <remarks>
+    /// Not a permission: it lives on the object rather than in its security descriptor, and
+    /// anybody who may change attributes may clear it and then proceed. That is why emptying
+    /// a directory of files somebody else marked this way is a matter of clearing the flag
+    /// rather than of acquiring rights.
+    /// </remarks>
+    public const uint FILE_ATTRIBUTE_READONLY = 0x00000001;
+
     // --- Information classes ------------------------------------------------------------------
 
     /// <summary>
@@ -426,6 +438,16 @@ internal static class NtConstants
 
     /// <summary>Asks for the attribute bits and the reparse tag together.</summary>
     public const uint FileAttributeTagInformationClass = 35;
+
+    /// <summary>
+    /// Reads or writes the four timestamps and the attribute bits of an open object.
+    /// </summary>
+    /// <remarks>
+    /// Writing it is how an attribute is cleared. A timestamp field left at zero asks for
+    /// that timestamp to be left alone, which is what makes it possible to change the
+    /// attributes without also deciding when the file was last written.
+    /// </remarks>
+    public const uint FileBasicInformationClass = 4;
 
     /// <summary>Asks for the volume serial and the 128-bit file identifier.</summary>
     public const uint FileIdInformationClass = 59;

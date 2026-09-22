@@ -33,13 +33,13 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirMutationTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-mutate-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
-    private Dir OpenRoot() => Dir.Open(_root, AmbientAuthority.Acquire());
+    private Dir OpenRoot() => Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
-    private string Host(params string[] parts) => Path.Combine([_root, .. parts]);
+    private string Host(params string[] parts) => Path.Combine([_tree.HostPath, .. parts]);
 
     // --- creating directories ---------------------------------------------------------------
 

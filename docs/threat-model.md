@@ -225,7 +225,7 @@ half that matters, `.Changing_the_case_of_a_refused_name_does_not_get_past_the_r
 |---|---|---|---|---|
 | M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | parser half only: `CapPathComponentTests.Components_are_returned_verbatim` |
 | M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | Windows half only: `WindowsResolutionOnDiskTests.Changing_the_case_of_a_refused_name_does_not_get_past_the_refusal` |
-| M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | |
+| M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | `CapTempDirTests.The_directory_sits_beneath_the_system_temporary_location_under_its_own_name` |
 
 ### 4.5 Filesystem topology
 
@@ -235,6 +235,21 @@ half that matters, `.Changing_the_case_of_a_refused_name_does_not_get_past_the_r
 | T2 | Hardlink creation crossing the sandbox boundary | Requires a capability on *both* sides | `Dir` API | |
 | T3 | Rename crossing the boundary | Same: both `Dir`s required | `Dir` API | |
 | T4 | Pre-existing hardlink to an outside file, planted inside | **Not defendable** — see §6.3 | — | |
+
+### 4.6 Shared scratch space
+
+The system temporary directory is writable by every account on the machine, so anything this
+library puts there is created next to objects an attacker controls. These are the attacks
+that follow from that, and they are the reason the scratch helpers exist at all rather than
+being left to the caller.
+
+| # | Attack | Required behaviour | Where | Test |
+|---|---|---|---|---|
+| SC1 | Guessing the name a scratch object is about to be created under, and creating it first as a symlink | Names drawn from the system's cryptographic generator, wide enough not to be searched | scratch directory and file helpers | `CapTempDirTests.A_name_is_wide_and_spelled_in_one_case`, `.Names_are_not_repeated` |
+| SC2 | Taking the name between the check that it is free and its creation | No such sequence exists: the name is claimed by one exclusive operation, which either makes the object or reports the name as taken | scratch directory and file helpers | `DirMutationTests.Creating_refuses_a_name_that_is_already_taken`, `DirFileOpenTests.Claiming_a_name_refuses_one_that_is_taken` |
+| SC3 | Reading what a process writes to its own scratch directory | Created reachable only by the account that made it, where the system records that per object | scratch directory helper | `CapTempDirTests.A_scratch_directory_is_closed_to_other_accounts`, `TemporaryHelperSimulationTests.A_scratch_directory_is_asked_for_closed_to_everybody_else` |
+| SC4 | Planting a symlink inside a tree that is about to be deleted, aimed at a file outside it | Cleanup descends by handle and unlinks by name; a link is removed as a link and never followed | scratch directory disposal | `CapTempDirTests.Disposal_removes_a_link_without_reaching_what_it_points_at` |
+| SC5 | Replacing the scratch directory, or a directory inside it, after it was created | Nothing is reached by name after creation: the handle refers to the object, and a name swapped for a link is refused by the open rather than followed | scratch directory helper | `DirSymlinkPolicyTests` covers the refusal the descent relies on |
 
 ## 5. Explicit non-goals
 

@@ -10,8 +10,21 @@ using Dir workspace = Dir.Open("/srv/reports", AmbientAuthority.Acquire());
 ```
 
 Every API that reaches outside the capability graph — opening the first directory by an
-ordinary path, and in time the system clock, the operating system's entropy, a socket, a
-well-known user directory — takes one of these tokens, and no API that does so omits it.
+ordinary path, asking the system where scratch files go, and in time the system clock, the
+operating system's entropy, a socket, a well-known user directory — takes one of these
+tokens, and no API that does so omits it.
+
+```csharp
+using CapTempDir scratch = CapTempDir.New(AmbientAuthority.Acquire());
+```
+
+The other half of that pattern needs no token at all, and the difference is worth seeing
+side by side: a scratch directory created inside a handle the caller already holds reaches
+nothing they could not already reach, so nothing about it is ambient.
+
+```csharp
+using CapTempDir scratch = CapTempDir.NewIn(workspace);
+```
 
 ## It is an audit, not a lock
 

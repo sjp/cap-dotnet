@@ -3,6 +3,13 @@
   <PropertyGroup>
     <RootNamespace>Cap.Std.Tests</RootNamespace>
     <AssemblyName>Cap.Std.Tests</AssemblyName>
+    <!--
+      The simulated filesystem. Some of what the public layer promises is only observable
+      against a platform a test can drive: what a creation asks the system for, what happens
+      when a removal is refused by the object itself, and both answers to "can this system
+      make a file with no name". A real machine gives one answer to each.
+    -->
+    <CapUsesPlatformFake>true</CapUsesPlatformFake>
   </PropertyGroup>
 
   <ItemGroup>

@@ -34,6 +34,17 @@ internal sealed class FakeNode
     public bool Unreadable { get; set; }
 
     /// <summary>
+    /// True when removing this object's name should be refused until the refusal is cleared.
+    /// </summary>
+    /// <remarks>
+    /// Models the Windows read-only attribute, which lives on the object rather than in its
+    /// security descriptor and stops the object being deleted by an account otherwise
+    /// entitled to delete it. Anything that empties a directory has to deal with it, and
+    /// simulating it is the only way to exercise that on a machine that is not Windows.
+    /// </remarks>
+    public bool RefusesRemoval { get; set; }
+
+    /// <summary>
     /// True when a read of the directory holding this entry should decline to say what it
     /// is, leaving the kind to be looked up separately.
     /// </summary>

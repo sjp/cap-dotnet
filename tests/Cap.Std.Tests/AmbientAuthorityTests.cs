@@ -24,15 +24,15 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class AmbientAuthorityTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-ambient-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
     /// <summary>A token that was taken opens the directory it is presented for.</summary>
     [Fact]
     public void An_acquired_token_is_accepted()
     {
-        using Dir dir = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir dir = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         Assert.False(dir.UnsafeGetHandle().IsInvalid);
     }
 
@@ -41,7 +41,7 @@ public sealed class AmbientAuthorityTests : IDisposable
     public void A_default_value_is_refused()
     {
         ArgumentException thrown = Assert.Throws<ArgumentException>(
-            () => Dir.Open(_root, default));
+            () => Dir.Open(_tree.HostPath, default));
 
         Assert.Equal("authority", thrown.ParamName);
     }
@@ -58,14 +58,14 @@ public sealed class AmbientAuthorityTests : IDisposable
     [Fact]
     public void A_default_value_is_refused_by_the_reporting_form_as_well()
     {
-        Assert.Throws<ArgumentException>(() => Dir.TryOpen(_root, default, out _));
+        Assert.Throws<ArgumentException>(() => Dir.TryOpen(_tree.HostPath, default, out _));
     }
 
     /// <summary>The same applies to asking a handle where it is.</summary>
     [Fact]
     public void A_default_value_is_refused_when_asking_for_a_path()
     {
-        using Dir dir = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir dir = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         Assert.Throws<ArgumentException>(() => dir.TryGetPath(default, out _));
     }
 
@@ -117,7 +117,10 @@ public sealed class AmbientAuthorityTests : IDisposable
         Justification = "As above: the types being reflected over are whatever the assembly exports.")]
     public void No_exported_member_produces_a_handle_from_nothing()
     {
-        Type[] authorities = [typeof(Dir), typeof(CapFile)];
+        // The scratch helpers count as authority-bearing even though neither is a handle:
+        // each owns one and hands it out, so a static member producing one from nothing would
+        // be a way in exactly as a member producing a handle would.
+        Type[] authorities = [typeof(Dir), typeof(CapFile), typeof(CapTempDir), typeof(CapTempFile)];
         List<string> examined = [];
 
         foreach (Type exported in typeof(Dir).Assembly.GetExportedTypes())
@@ -150,6 +153,9 @@ public sealed class AmbientAuthorityTests : IDisposable
         // passing after the members it is about were renamed out from under it.
         Assert.Contains($"{nameof(Dir)}.{nameof(Dir.Open)}", examined);
         Assert.Contains($"{nameof(Dir)}.{nameof(Dir.TryOpen)}", examined);
+        Assert.Contains($"{nameof(CapTempDir)}.{nameof(CapTempDir.New)}", examined);
+        Assert.Contains($"{nameof(CapTempDir)}.{nameof(CapTempDir.NewIn)}", examined);
+        Assert.Contains($"{nameof(CapTempFile)}.{nameof(CapTempFile.NewAnonymous)}", examined);
 
         static bool Produces(MethodBase member, Type[] authorities) => member switch
         {
@@ -202,7 +208,7 @@ public sealed class AmbientAuthorityTests : IDisposable
             Assert.Skip("The recording is forced on for this whole run, so the default cannot be observed.");
         }
 
-        using Dir dir = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir dir = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         Assert.Empty(AmbientAuthority.RecordedSites);
 

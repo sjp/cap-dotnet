@@ -131,6 +131,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<string> GetSystemTemporaryDirectory() =>
+        CapResult<string>.Ok(UnixTemporaryDirectory.Location);
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenChildDirectory(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
@@ -216,6 +220,85 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         return FinishFileOpen(fd, in request);
     }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// The name handed to the kernel is the directory itself, because that is the whole of
+    /// what this open names: the flag asks for storage from the filesystem holding that
+    /// directory and for no entry in it. Nothing is resolved, so there is no component for a
+    /// link to be planted in and nothing for the confinement rules to decide.
+    /// </para>
+    /// <para>
+    /// Older kernels and filesystems without an implementation refuse the flag, and they do
+    /// not agree on how. What they have in common is that the file was not created, so every
+    /// one of those answers is reported as <see cref="CapErrorCategory.NotSupported"/> and a
+    /// caller that has a fallback can take it.
+    /// </para>
+    /// </remarks>
+    public CapResult<SafeFileHandle> OpenAnonymousChildFile(SafeDirHandle parent, FileAccess access)
+    {
+        int accessFlag = access switch
+        {
+            FileAccess.ReadWrite => LinuxConstants.O_RDWR,
+            FileAccess.Write => LinuxConstants.O_WRONLY,
+
+            // A file nothing can open and nobody has written is empty and will stay empty,
+            // so a read-only handle on one describes no operation.
+            _ => -1,
+        };
+
+        if (accessFlag < 0)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.Create(
+                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+        }
+
+        int flags = accessFlag | LinuxConstants.O_TMPFILE | LinuxConstants.O_CLOEXEC;
+
+        int fd;
+        int errno;
+        unsafe
+        {
+            ReadOnlySpan<byte> here = [(byte)'.', 0];
+            fixed (byte* path = here)
+            {
+                fd = LinuxNative.OpenAtWithMode(
+                    lease.Descriptor, path, flags, LinuxConstants.OwnerOnlyFileCreateMode);
+                errno = fd < 0 ? Marshal.GetLastPInvokeError() : 0;
+            }
+        }
+
+        if (fd < 0)
+        {
+            return CapResult<SafeFileHandle>.Fail(AnonymousOpenFailure(errno));
+        }
+
+        return CapResult<SafeFileHandle>.Ok(new SafeFileHandle(fd, ownsHandle: true));
+    }
+
+    /// <summary>
+    /// Reads the refusal of a nameless-file open.
+    /// </summary>
+    /// <remarks>
+    /// Three errors mean the same thing here and none of them says so plainly. A kernel that
+    /// predates the flag sees a request to open a directory for writing and says so; a
+    /// kernel that knows the flag but meets a filesystem without an implementation says the
+    /// operation is unsupported; and some report the combination as simply invalid. All
+    /// three are "this filesystem will not give you one", which is the distinction a caller
+    /// with a fallback needs to draw, so they are drawn as that and everything else is left
+    /// as the platform reported it.
+    /// </remarks>
+    private static CapError AnonymousOpenFailure(int errno) =>
+        errno is PosixErrno.EISDIR or PosixErrno.EINVAL or LinuxErrno.EOPNOTSUPP
+            ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
+            : LinuxErrno.ToError(errno);
 
     /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenConfinedDirectory(
@@ -630,7 +713,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    public CapError CreateChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CreationVisibility visibility)
     {
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
@@ -651,8 +737,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         {
             fixed (byte* path = encoded.Bytes)
             {
-                result = LinuxNative.MkdirAt(
-                    lease.Descriptor, path, LinuxConstants.DirectoryCreateMode);
+                result = LinuxNative.MkdirAt(lease.Descriptor, path, CreateMode(visibility));
                 if (result < 0)
                 {
                     errno = Marshal.GetLastPInvokeError();
@@ -662,6 +747,29 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
     }
+
+    /// <summary>
+    /// The permissions a directory creation asks the kernel for.
+    /// </summary>
+    /// <remarks>
+    /// The umask narrows whichever of these is chosen, and never widens it, so the owner-only
+    /// request stays owner-only in a process configured to create nothing group-readable.
+    /// </remarks>
+    private static uint CreateMode(CreationVisibility visibility) =>
+        visibility == CreationVisibility.OwnerOnly
+            ? LinuxConstants.OwnerOnlyDirectoryCreateMode
+            : LinuxConstants.DirectoryCreateMode;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// There is no such flag on this platform. Whether a name can be removed is decided by
+    /// the permissions on the directory holding it, so a removal that failed here failed for
+    /// a reason clearing something on the object would not address, and saying so is better
+    /// than succeeding at nothing and letting the caller retry a removal that will fail the
+    /// same way.
+    /// </remarks>
+    public CapError ClearChildRemovalBlock(SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
 
     /// <inheritdoc/>
     public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name) =>

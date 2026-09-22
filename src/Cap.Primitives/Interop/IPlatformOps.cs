@@ -58,6 +58,25 @@ internal interface IPlatformOps
     CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access);
 
     /// <summary>
+    /// The place this system puts scratch files, as an ordinary path.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Ambient, like <see cref="OpenAmbientDirectory"/> and for the same reason: the answer
+    /// comes from the process's own environment, so a caller that acts on it is reaching for
+    /// something nobody handed it. It is a member here rather than a framework call because
+    /// each platform answers from a different place — an environment variable the platform
+    /// names, and a fallback the platform decides — and because the answer has to be
+    /// substitutable for a test that has no real filesystem.
+    /// </para>
+    /// <para>
+    /// The path is not checked, resolved or opened. What comes back is a string to open, and
+    /// whether it names a directory at all is answered by opening it.
+    /// </para>
+    /// </remarks>
+    CapResult<string> GetSystemTemporaryDirectory();
+
+    /// <summary>
     /// Opens the directory named by <paramref name="name"/> directly beneath
     /// <paramref name="parent"/>.
     /// </summary>
@@ -97,6 +116,32 @@ internal interface IPlatformOps
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
         in FileOpenRequest request);
+
+    /// <summary>
+    /// Creates a file directly beneath <paramref name="parent"/> that has no name.
+    /// </summary>
+    /// <param name="parent">The directory the file's storage comes from.</param>
+    /// <param name="access">The data access the handle carries.</param>
+    /// <remarks>
+    /// <para>
+    /// Not a file with a name nobody knows: a file with no entry in any directory at all.
+    /// Nothing can open it, rename it, replace it or plant a link where it sits, because
+    /// there is nowhere for any of that to be aimed — the handle returned is the only
+    /// reference to it, and when the last such handle closes the storage goes back. That
+    /// makes it the only kind of scratch file no other account on the machine can interfere
+    /// with, whatever the permissions on the directory it came from.
+    /// </para>
+    /// <para>
+    /// <strong>Reports <see cref="CapErrorCategory.NotSupported"/> wherever a nameless file
+    /// is not what the platform actually produces.</strong> That includes platforms with no
+    /// such facility and filesystems that do not implement it, and it is reported rather than
+    /// approximated: a named file created and immediately unlinked is a different object with
+    /// a different exposure, and quietly substituting one would hand a caller who asked for
+    /// the unattackable thing something attackable. Falling back is the caller's decision to
+    /// make, in the open.
+    /// </para>
+    /// </remarks>
+    CapResult<SafeFileHandle> OpenAnonymousChildFile(SafeDirHandle parent, FileAccess access);
 
     /// <summary>
     /// Resolves a whole relative path beneath <paramref name="root"/> in one operation that
@@ -305,7 +350,40 @@ internal interface IPlatformOps
     /// not change the answer, and the refusal comes from the one call that makes the
     /// directory rather than from a lookup before it.
     /// </remarks>
-    CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name);
+    /// <param name="parent">The directory the new one is created in.</param>
+    /// <param name="name">The single component to claim.</param>
+    /// <param name="visibility">
+    /// How much of the rest of the machine may see into the new directory. Asked for in the
+    /// same call that creates it, so there is no instant in which it exists more widely
+    /// readable than it was meant to be.
+    /// </param>
+    CapError CreateChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CreationVisibility visibility);
+
+    /// <summary>
+    /// Clears the flag that makes the entry named by <paramref name="name"/> beneath
+    /// <paramref name="parent"/> refuse to be removed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For Windows, where the read-only attribute is a property of the file itself and stops
+    /// the file being deleted by an account that is otherwise entitled to delete it. Clearing
+    /// it is what every tool that empties a directory has to do, and it is a separate call
+    /// because it is worth paying for only on the removal that has already failed.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotSupported"/> where no such flag exists. On Unix
+    /// there is none to clear: whether a name can be removed is decided by the permissions on
+    /// the directory holding it and not by the mode of the object it names, so a removal that
+    /// failed there did so for a reason this would not fix.
+    /// </para>
+    /// <para>
+    /// Acts on the name and never on what the name points at, like every other member here.
+    /// </para>
+    /// </remarks>
+    CapError ClearChildRemovalBlock(SafeDirHandle parent, ReadOnlySpan<char> name);
 
     /// <summary>
     /// Removes the non-directory entry named by <paramref name="name"/> directly beneath

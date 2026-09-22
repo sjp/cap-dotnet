@@ -33,13 +33,13 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirMetadataTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-metadata-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
-    private Dir OpenRoot() => Dir.Open(_root, AmbientAuthority.Acquire());
+    private Dir OpenRoot() => Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
-    private string Host(params string[] parts) => Path.Combine([_root, .. parts]);
+    private string Host(params string[] parts) => Path.Combine([_tree.HostPath, .. parts]);
 
     // --- what a snapshot says -----------------------------------------------------------------
 
@@ -218,7 +218,7 @@ public sealed class DirMetadataTests : IDisposable
         File.WriteAllText(Host("pointee"), "content");
         File.CreateSymbolicLink(Host("indirect"), "pointee");
 
-        using Dir permissive = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.FollowWithinSandbox);
+        using Dir permissive = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.FollowWithinSandbox);
         using Dir strict = permissive.Restrict(SymlinkPolicy.Deny);
 
         Assert.Equal(CapFileType.Symlink, permissive.GetMetadata("indirect").Type);
@@ -240,7 +240,7 @@ public sealed class DirMetadataTests : IDisposable
         File.WriteAllText(Host("actual", "leaf"), "x");
         Directory.CreateSymbolicLink(Host("hop"), "actual");
 
-        using Dir permissive = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.FollowWithinSandbox);
+        using Dir permissive = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.FollowWithinSandbox);
         using Dir strict = permissive.Restrict(SymlinkPolicy.Deny);
 
         Assert.Equal(CapFileType.File, permissive.GetMetadata("hop/leaf").Type);

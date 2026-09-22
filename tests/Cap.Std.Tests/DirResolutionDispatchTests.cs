@@ -26,9 +26,9 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirResolutionDispatchTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-dispatch-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
     /// <summary>
     /// Where the kernel can resolve a whole path under confinement, that is what runs.
@@ -50,9 +50,9 @@ public sealed class DirResolutionDispatchTests : IDisposable
                 $"strategy here. Reason: {ops.ConfinedOpenUnavailableReason}");
         }
 
-        Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c", "d"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c", "d"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         long confinedBefore = ops.ConfinedOpenAttempts;
         long componentsBefore = ops.ComponentOpens;
@@ -87,9 +87,9 @@ public sealed class DirResolutionDispatchTests : IDisposable
             Assert.Skip("This kernel offers the confined open, so the walk is not what dispatch chooses.");
         }
 
-        Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c", "d"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c", "d"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         long confinedBefore = ops.ConfinedOpenAttempts;
         long componentsBefore = ops.ComponentOpens;
@@ -138,11 +138,11 @@ public sealed class DirResolutionDispatchTests : IDisposable
                 $"strategy here. Reason: {ops.ConfinedOpenUnavailableReason}");
         }
 
-        Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c"));
-        File.WriteAllText(Path.Combine(_root, "a", "b", "c", "doomed"), "contents");
-        File.WriteAllText(Path.Combine(_root, "alone"), "contents");
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
+        File.WriteAllText(Path.Combine(_tree.HostPath, "a", "b", "c", "doomed"), "contents");
+        File.WriteAllText(Path.Combine(_tree.HostPath, "alone"), "contents");
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         long confinedBefore = ops.ConfinedOpenAttempts;
         long componentsBefore = ops.ComponentOpens;

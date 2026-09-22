@@ -34,6 +34,32 @@ internal static class LinuxConstants
     /// <summary>Refuse the open if the final component is a symbolic link.</summary>
     public static int O_NOFOLLOW => IsArm64 ? 0x8000 : 0x20000;
 
+    /// <summary>
+    /// Create a file with no name in any directory, taking its storage from the directory
+    /// the open is made against.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The handle returned is the only reference to the file, and closing the last one
+    /// returns the storage. Nothing can open it, replace it or plant a link where it sits,
+    /// because it has no place in any directory for that to be aimed at.
+    /// </para>
+    /// <para>
+    /// Architecture-dependent, because the flag is the directory flag with one further bit
+    /// set, and the directory flag is one of the two whose value AArch64 did not inherit
+    /// from x86-64. Getting it wrong on one architecture would not fail: the kernel would
+    /// see a combination of flags it does understand, and the open would produce something
+    /// other than what was asked for.
+    /// </para>
+    /// <para>
+    /// Not supported by every filesystem. A filesystem that has no implementation refuses
+    /// the open rather than approximating it, which is the answer the caller needs — the
+    /// whole value of the flag is that there is no name, so an approximation with a name
+    /// would be a different thing entirely.
+    /// </para>
+    /// </remarks>
+    public static int O_TMPFILE => 0x400000 | O_DIRECTORY;
+
     // --- Architecture-independent open flags ----------------------------------------------
 
     /// <summary>
@@ -172,6 +198,20 @@ internal static class LinuxConstants
     /// </remarks>
     public const uint DirectoryCreateMode = 0x1FF;
 
+    /// <summary>
+    /// The permissions a directory this library chose the location of is asked for, before
+    /// the process umask is applied to them.
+    /// </summary>
+    /// <remarks>
+    /// Read, write and search for the owning account and nothing for anybody else, which is
+    /// what <c>mkdtemp</c> asks for. The reasoning that makes the wider mode right elsewhere
+    /// runs the other way here: a caller who names a directory has chosen where it goes and
+    /// should get what any other program creating it there would get, whereas a scratch
+    /// directory is put in a location shared with every account on the machine without the
+    /// caller naming anywhere at all. Closing it is therefore part of putting it there.
+    /// </remarks>
+    public const uint OwnerOnlyDirectoryCreateMode = 0x1C0;
+
     // --- open with creation ------------------------------------------------------------------
 
     /// <summary>
@@ -188,6 +228,16 @@ internal static class LinuxConstants
     /// substitute for the filesystem's own access control.
     /// </remarks>
     public const uint FileCreateMode = 0x1B6;
+
+    /// <summary>
+    /// The permissions a file with no name is asked for.
+    /// </summary>
+    /// <remarks>
+    /// Owner-only, and the choice costs nothing: a file with no entry in any directory
+    /// cannot be opened by anybody at all, so the mode is a statement about what it would be
+    /// if it were ever given a name rather than about what it is now.
+    /// </remarks>
+    public const uint OwnerOnlyFileCreateMode = 0x180;
 
     /// <summary>
     /// Reserve space behind the file without moving the end of it.

@@ -250,7 +250,13 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public Dir CreateDir(string path) =>
         Produce(
-            CreateDirCore(path, exclusive: true, out Dir? dir, out CapError error, out ExpectedTarget expected),
+            CreateDirCore(
+                path,
+                exclusive: true,
+                CreationVisibility.SystemDefault,
+                out Dir? dir,
+                out CapError error,
+                out ExpectedTarget expected),
             path,
             dir,
             error,
@@ -270,7 +276,10 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateDir(string path, [NotNullWhen(true)] out Dir? dir) =>
-        Succeeded(CreateDirCore(path, exclusive: true, out dir, out CapError error, out _), error);
+        Succeeded(
+            CreateDirCore(
+                path, exclusive: true, CreationVisibility.SystemDefault, out dir, out CapError error, out _),
+            error);
 
     /// <summary>
     /// Opens a directory beneath this one, creating it if it is not there.
@@ -304,7 +313,13 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public Dir OpenOrCreateDir(string path) =>
         Produce(
-            CreateDirCore(path, exclusive: false, out Dir? dir, out CapError error, out ExpectedTarget expected),
+            CreateDirCore(
+                path,
+                exclusive: false,
+                CreationVisibility.SystemDefault,
+                out Dir? dir,
+                out CapError error,
+                out ExpectedTarget expected),
             path,
             dir,
             error,
@@ -319,7 +334,10 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryOpenOrCreateDir(string path, [NotNullWhen(true)] out Dir? dir) =>
-        Succeeded(CreateDirCore(path, exclusive: false, out dir, out CapError error, out _), error);
+        Succeeded(
+            CreateDirCore(
+                path, exclusive: false, CreationVisibility.SystemDefault, out dir, out CapError error, out _),
+            error);
 
     /// <summary>
     /// Removes a name beneath this handle. The name must not be a directory.
@@ -1044,6 +1062,87 @@ public sealed partial class Dir : IDisposable
     internal ConfinedResolveOptions Options => _options;
 
     /// <summary>
+    /// Removes a name beneath this handle, reporting the platform's own answer.
+    /// </summary>
+    /// <param name="name">A single component.</param>
+    /// <remarks>
+    /// For the callers that have to tell one failure from another and must not pay for an
+    /// exception to do it. The public members answer with an exception or with a bare
+    /// <see langword="bool"/>; a walk that removes a tree needs the middle ground, because
+    /// "that was the other kind of object" is something it acts on rather than reports.
+    /// </remarks>
+    internal CapError DeleteFileCore(string name)
+    {
+        CapPathError pathError = DeleteCore(name, directory: false, out CapError error, out _);
+        return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
+    }
+
+    /// <summary>
+    /// Removes an empty directory beneath this handle, reporting the platform's own answer.
+    /// </summary>
+    /// <param name="name">A single component.</param>
+    internal CapError DeleteDirCore(string name)
+    {
+        CapPathError pathError = DeleteCore(name, directory: true, out CapError error, out _);
+        return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
+    }
+
+    /// <summary>
+    /// Clears whatever the platform records on an object itself to stop it being removed.
+    /// </summary>
+    /// <param name="name">A single component.</param>
+    /// <remarks>
+    /// Windows keeps a read-only flag on the object which refuses a deletion that the
+    /// account is otherwise entitled to make. Clearing it is a separate step because it is
+    /// worth taking only on a removal that has already failed, and it reports
+    /// <see cref="CapErrorCategory.NotSupported"/> where there is no such flag to clear.
+    /// </remarks>
+    internal CapError ClearRemovalBlock(string name)
+    {
+        CapPathError pathError = Locate(name, out NameLookup lookup, out CapError error);
+        using (lookup)
+        {
+            if (pathError != CapPathError.None)
+            {
+                return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+            }
+
+            return error.IsFailure
+                ? error
+                : PlatformOps.Current.ClearChildRemovalBlock(lookup.Directory, lookup.Name);
+        }
+    }
+
+    /// <summary>
+    /// Creates a directory beneath this one that no other account can look into, and opens
+    /// it.
+    /// </summary>
+    /// <param name="name">A single component, which must not already be taken.</param>
+    /// <param name="dir">A handle on the new directory, on success.</param>
+    /// <returns>
+    /// The platform's answer, so that a caller can tell the name being taken from every
+    /// other reason the creation did not happen.
+    /// </returns>
+    /// <remarks>
+    /// Internal, and narrower than the public creation on purpose. Asking for permissions
+    /// other than the system's own is right only where this library rather than the caller
+    /// chose the location, which is true of a scratch directory and of nothing else the
+    /// public surface offers.
+    /// </remarks>
+    internal CapError CreateOwnedDir(string name, out Dir? dir)
+    {
+        CapPathError pathError = CreateDirCore(
+            name,
+            exclusive: true,
+            CreationVisibility.OwnerOnly,
+            out dir,
+            out CapError error,
+            out _);
+
+        return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
+    }
+
+    /// <summary>
     /// A directory a name is about to be used against, and that name.
     /// </summary>
     /// <remarks>
@@ -1230,6 +1329,7 @@ public sealed partial class Dir : IDisposable
     private CapPathError CreateDirCore(
         string path,
         bool exclusive,
+        CreationVisibility visibility,
         out Dir? dir,
         out CapError error,
         out ExpectedTarget expected)
@@ -1246,7 +1346,8 @@ public sealed partial class Dir : IDisposable
                 return pathError;
             }
 
-            error = PlatformOps.Current.CreateChildDirectory(lookup.Directory, lookup.Name);
+            error = PlatformOps.Current.CreateChildDirectory(
+                lookup.Directory, lookup.Name, visibility);
             if (error.IsFailure && (exclusive || error.Category != CapErrorCategory.AlreadyExists))
             {
                 return CapPathError.None;

@@ -25,17 +25,17 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirDerivationTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-derive-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
-    private Dir OpenRoot() => Dir.Open(_root, AmbientAuthority.Acquire());
+    private Dir OpenRoot() => Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
     /// <summary>A path of several names resolves to the directory it names.</summary>
     [Fact]
     public void A_nested_path_opens_the_directory_it_names()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
 
         using Dir root = OpenRoot();
         using Dir nested = root.OpenDir("a/b/c");
@@ -48,7 +48,7 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void Redundant_separators_and_dot_components_are_ignored()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "a", "b"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
 
         using Dir root = OpenRoot();
         using Dir viaTidyPath = root.OpenDir("a/b");
@@ -72,7 +72,7 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void A_file_is_not_a_directory()
     {
-        File.WriteAllText(Path.Combine(_root, "file.txt"), "contents");
+        File.WriteAllText(Path.Combine(_tree.HostPath, "file.txt"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -94,7 +94,7 @@ public sealed class DirDerivationTests : IDisposable
     [InlineData("a/../../sibling")]
     public void A_path_that_climbs_out_is_refused(string path)
     {
-        Directory.CreateDirectory(Path.Combine(_root, "a"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a"));
 
         using Dir root = OpenRoot();
 
@@ -188,10 +188,10 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void A_derived_handle_resolves_under_the_policy_its_root_was_opened_with()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "a", "b"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
 
         CapError error = Dir.OpenRootCore(
-            _root, AmbientAuthority.Acquire(), ConfinedResolveOptions.RefuseSymlinks, out Dir? root);
+            _tree.HostPath, AmbientAuthority.Acquire(), ConfinedResolveOptions.RefuseSymlinks, out Dir? root);
         Assert.True(error.IsSuccess, error.FailureDescription);
 
         using Dir opened = root!;

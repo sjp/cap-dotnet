@@ -25,9 +25,9 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class DirSymlinkPolicyTests : IDisposable
 {
-    private readonly string _root = Directory.CreateTempSubdirectory("cap-symlink-").FullName;
+    private readonly ScratchTree _tree = new();
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose() => _tree.Dispose();
 
     /// <summary>A root opened without saying follows links that stay inside the subtree.</summary>
     /// <remarks>
@@ -42,7 +42,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
         RequireSymbolicLinks();
         Build();
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         Assert.Equal(SymlinkPolicy.FollowWithinSandbox, root.SymlinkPolicy);
         using Dir reached = root.OpenDir("inside-link");
@@ -61,7 +61,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
         RequireSymbolicLinks();
         Build();
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
 
         Assert.Equal(SymlinkPolicy.Deny, root.SymlinkPolicy);
 
@@ -87,10 +87,10 @@ public sealed class DirSymlinkPolicyTests : IDisposable
         RequireSymbolicLinks();
         Build();
 
-        using Dir following = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir following = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         Assert.Throws<SandboxEscapeException>(() => following.OpenDir("escape-link"));
 
-        using Dir denying = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+        using Dir denying = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
         Exception thrown = Assert.ThrowsAny<IOException>(() => denying.OpenDir("escape-link"));
         Assert.IsNotType<SandboxEscapeException>(thrown);
     }
@@ -99,9 +99,9 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void Deriving_a_handle_carries_the_policy_across()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "plain", "deeper"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain", "deeper"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
         using Dir child = root.OpenDir("plain");
         using Dir grandchild = child.OpenDir("deeper");
         using Dir copy = child.Clone();
@@ -118,7 +118,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
         RequireSymbolicLinks();
         Build();
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
 
         Assert.Equal(SymlinkPolicy.Deny, strict.SymlinkPolicy);
@@ -135,9 +135,9 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_handle_derived_from_a_restricted_one_is_restricted_too()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "plain", "deeper"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain", "deeper"));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
         using Dir child = strict.OpenDir("plain");
         using Dir grandchild = child.OpenDir("deeper");
@@ -155,7 +155,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void Restricting_cannot_loosen_the_policy()
     {
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
 
         ArgumentException thrown =
             Assert.Throws<ArgumentException>(() => root.Restrict(SymlinkPolicy.FollowWithinSandbox));
@@ -176,7 +176,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void Restricting_to_the_policy_already_in_force_is_a_copy()
     {
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
 
         Assert.True(root.TryRestrict(SymlinkPolicy.Deny, out Dir? same));
         using Dir copy = same!;
@@ -194,9 +194,9 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_restricted_handle_outlives_the_handle_it_came_from()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "plain"));
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
 
-        Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
         root.Dispose();
 
@@ -216,12 +216,12 @@ public sealed class DirSymlinkPolicyTests : IDisposable
         const SymlinkPolicy Undefined = (SymlinkPolicy)7;
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => Dir.Open(_root, AmbientAuthority.Acquire(), Undefined));
+            () => Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), Undefined));
 
         Assert.Throws<ArgumentOutOfRangeException>(
-            () => Dir.TryOpen(_root, AmbientAuthority.Acquire(), out _, Undefined));
+            () => Dir.TryOpen(_tree.HostPath, AmbientAuthority.Acquire(), out _, Undefined));
 
-        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         Assert.Throws<ArgumentOutOfRangeException>(() => root.Restrict(Undefined));
         Assert.Throws<ArgumentOutOfRangeException>(() => root.TryRestrict(Undefined, out _));
     }
@@ -230,7 +230,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void The_non_throwing_open_takes_the_policy()
     {
-        Assert.True(Dir.TryOpen(_root, AmbientAuthority.Acquire(), out Dir? opened, SymlinkPolicy.Deny));
+        Assert.True(Dir.TryOpen(_tree.HostPath, AmbientAuthority.Acquire(), out Dir? opened, SymlinkPolicy.Deny));
         using Dir root = opened!;
 
         Assert.Equal(SymlinkPolicy.Deny, root.SymlinkPolicy);
@@ -240,7 +240,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void Restricting_a_disposed_handle_is_refused()
     {
-        Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+        Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         root.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => root.Restrict(SymlinkPolicy.Deny));
@@ -257,9 +257,9 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     /// </remarks>
     private void Build()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "plain"));
-        Directory.CreateSymbolicLink(Path.Combine(_root, "inside-link"), "plain");
-        Directory.CreateSymbolicLink(Path.Combine(_root, "escape-link"), "..");
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
+        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "inside-link"), "plain");
+        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "escape-link"), "..");
     }
 
     /// <summary>
@@ -273,7 +273,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     /// </remarks>
     private void RequireSymbolicLinks()
     {
-        string probe = Path.Combine(_root, "link-probe");
+        string probe = Path.Combine(_tree.HostPath, "link-probe");
 
         try
         {

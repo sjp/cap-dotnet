@@ -94,6 +94,19 @@ internal static class DarwinConstants
     public const uint DirectoryCreateMode = 0x1FF;
 
     /// <summary>
+    /// The permissions a directory this library chose the location of is asked for, before
+    /// the process umask is applied.
+    /// </summary>
+    /// <remarks>
+    /// Read, write and search for the owning account alone, which is what <c>mkdtemp</c>
+    /// asks for. A caller who names a directory should get what any other program creating
+    /// it there would get; a scratch directory is put in a location shared with every
+    /// account on the machine without the caller naming anywhere, so closing it to everybody
+    /// else is part of putting it there.
+    /// </remarks>
+    public const uint OwnerOnlyDirectoryCreateMode = 0x1C0;
+
+    /// <summary>
     /// The permissions a newly created file is asked for, before the process umask is
     /// applied. The same request every file-creating program on the system makes, so a file
     /// created through a capability is not quietly different from any other.

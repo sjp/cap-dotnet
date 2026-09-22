@@ -158,6 +158,39 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// The variables this system's own temporary-path lookup consults, in its order: the one
+    /// a caller sets for a single program, the one set for the session, and the account's
+    /// own directory as the last resort. Reading them directly rather than calling that
+    /// lookup keeps the answer to a directory somebody configured — the alternative ends at
+    /// a machine-wide directory shared with every other account, which is the one place a
+    /// scratch directory should not silently land.
+    /// </para>
+    /// <para>
+    /// A process with none of them set has no temporary directory, and that is reported
+    /// rather than guessed at.
+    /// </para>
+    /// </remarks>
+    public CapResult<string> GetSystemTemporaryDirectory()
+    {
+        foreach (string variable in TemporaryDirectoryVariables)
+        {
+            string? configured = Environment.GetEnvironmentVariable(variable);
+            if (!string.IsNullOrEmpty(configured))
+            {
+                return CapResult<string>.Ok(configured);
+            }
+        }
+
+        return CapResult<string>.Fail(CapError.Create(
+            CapErrorCategory.NotFound, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_PATH_NOT_FOUND));
+    }
+
+    /// <summary>Where this system records the temporary directory, in the order it is consulted.</summary>
+    private static readonly string[] TemporaryDirectoryVariables = ["TMP", "TEMP", "USERPROFILE"];
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenChildDirectory(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
@@ -543,7 +576,19 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    /// <remarks>
+    /// The visibility asked for is not expressible in a create on this system. Access here
+    /// is decided by a security descriptor, the new directory inherits the one belonging to
+    /// the directory it is made in, and building a descriptor of our own would mean deciding
+    /// on behalf of a caller what their account, their groups and their administrators may
+    /// do — a much larger claim than the one being made. The place this matters, the
+    /// temporary directory, is already per-account here, so the protection the request is
+    /// after is present without the request.
+    /// </remarks>
+    public CapError CreateChildDirectory(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CreationVisibility visibility)
     {
         CapError error = CreateRelative(
             parent,
@@ -562,6 +607,81 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // result and nothing here wants to keep it.
         _ = NtNative.NtClose(raw);
         return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// There is no such thing here. The nearest facility — a file that is removed when its
+    /// last handle closes — still holds a name for as long as it is open, so it can be
+    /// opened by anything with access to the directory and it is not the object this member
+    /// promises. Reporting that plainly leaves the decision to fall back on the caller,
+    /// where it belongs.
+    /// </remarks>
+    public CapResult<SafeFileHandle> OpenAnonymousChildFile(SafeDirHandle parent, FileAccess access) =>
+        CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// Clears the read-only attribute and leaves every other bit as it was, including the
+    /// ones this library has no opinion about. The timestamps are left alone too, which is
+    /// what the zeroes in the structure ask for.
+    /// </para>
+    /// <para>
+    /// The name is opened without following a reparse point, so a link marked read-only has
+    /// its own flag cleared and whatever it points at is neither reached nor changed.
+    /// </para>
+    /// </remarks>
+    public unsafe CapError ClearChildRemovalBlock(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = OpenRelative(
+            parent,
+            name,
+            NtConstants.FILE_READ_ATTRIBUTES | NtConstants.FILE_WRITE_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        try
+        {
+            CapError kind = QueryAttributeTag(raw, out FileAttributeTagInformation info);
+            if (kind.IsFailure)
+            {
+                return kind;
+            }
+
+            uint remaining = info.FileAttributes & ~NtConstants.FILE_ATTRIBUTE_READONLY;
+            if (remaining == info.FileAttributes)
+            {
+                return CapError.Success;
+            }
+
+            // An attribute set that has been emptied is written as the bit meaning "nothing
+            // in particular", because zero means "change nothing" to this call rather than
+            // "clear everything".
+            FileBasicInformation basic = new()
+            {
+                FileAttributes = remaining == 0 ? NtConstants.FILE_ATTRIBUTE_NORMAL : remaining,
+            };
+
+            IoStatusBlock status = default;
+            int nt = NtNative.NtSetInformationFile(
+                raw,
+                &status,
+                &basic,
+                (uint)FileBasicInformation.StructSize,
+                NtConstants.FileBasicInformationClass);
+
+            return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
     }
 
     /// <inheritdoc/>
