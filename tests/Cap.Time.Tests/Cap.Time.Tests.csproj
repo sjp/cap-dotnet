@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Time.Tests</RootNamespace>
+    <AssemblyName>Cap.Time.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Time/Cap.Time.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The fake a consumer of the clock capability is expected to test with. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+</Project>

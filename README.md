@@ -39,7 +39,7 @@ src/Cap.Primitives/    path parsing, interop, resolution algorithms (internal)
 src/Cap.Std/           the public API: Dir, CapFile, CapMetadata
 src/Cap.Fs.Ext/        atomic writes, walks, handle-to-handle copy
 src/Cap.Net/           capability sockets: a Pool of permitted endpoints
-src/Cap.Time/          clock capabilities               (likely wraps TimeProvider)
+src/Cap.Time/          the system clock as a TimeProvider, behind a token
 src/Cap.Rand/          randomness capabilities
 src/Cap.Directories/   well-known project directories as Dir handles
 src/Cap.Analyzers/     Roslyn analyzers banning ambient System.IO in consuming code
@@ -80,3 +80,7 @@ matching — including the table of what a copy does with each kind of object it
 [docs/network.md](docs/network.md) covers the socket capability, and leads with what it does
 not promise: unlike a directory handle, a pool of permitted endpoints is not enforced by the
 operating system and is not a containment boundary. Read that section before the API.
+
+[docs/time.md](docs/time.md) covers the clock capability: the system `TimeProvider`, handed
+out only against a token, and why that type is used rather than a clock type of this
+library's own.

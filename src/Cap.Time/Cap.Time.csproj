@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Cap.Time</RootNamespace>
-    <Description>Clock capabilities. Expected to be a thin, AmbientAuthority-gated adapter over System.TimeProvider rather than a parallel abstraction.</Description>
+    <Description>Clock capabilities: the system TimeProvider, handed out only against an AmbientAuthority token.</Description>
   </PropertyGroup>
 
   <ItemGroup>

@@ -15,3 +15,14 @@ P:System.Environment.CurrentDirectory;The process CWD is ambient authority.
 M:System.IO.Path.GetTempPath;Ambient authority. Use Cap.Std.CapTempDir.
 M:System.IO.Path.GetTempFileName;Ambient authority and racy. Use Cap.Std.CapTempFile.
 M:System.IO.Path.GetFullPath(System.String);Resolves against the process CWD and collapses `..` lexically, which is wrong under symlinks.
+P:System.DateTime.Now;The system clock is ambient authority. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTime.UtcNow;The system clock is ambient authority. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTime.Today;The system clock is ambient authority. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTimeOffset.Now;The system clock is ambient authority. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTimeOffset.UtcNow;The system clock is ambient authority. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.TimeProvider.System;The system clock is ambient authority. Take it from Cap.Time.CapClock, behind a token.
+M:System.Threading.Thread.Sleep;Waits on the ambient clock. Use Task.Delay with a TimeProvider that was passed in.
+M:System.Threading.Tasks.Task.Delay(System.Int32);Waits on the ambient clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken);Waits on the ambient clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan);Waits on the ambient clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken);Waits on the ambient clock. Use the overload that takes a TimeProvider.
