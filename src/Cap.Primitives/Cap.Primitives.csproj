@@ -20,6 +20,7 @@
     <InternalsVisibleTo Include="Cap.Rand" />
     <InternalsVisibleTo Include="Cap.Directories" />
     <InternalsVisibleTo Include="Cap.Primitives.Tests" />
+    <InternalsVisibleTo Include="Cap.Std.Tests" />
     <InternalsVisibleTo Include="Cap.Escape.Tests" />
     <InternalsVisibleTo Include="Cap.Stress.Tests" />
     <InternalsVisibleTo Include="Cap.Benchmarks" />

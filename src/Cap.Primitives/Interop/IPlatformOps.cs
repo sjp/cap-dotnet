@@ -156,6 +156,28 @@ internal interface IPlatformOps
     CapError StatHandle(SafeDirHandle handle, out CapNodeInfo info);
 
     /// <summary>
+    /// Asks the system what path an open directory handle is currently reachable by.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For diagnostics alone, and the one member here whose answer must never be acted on.
+    /// Nothing in this library resolves anything against it: a path is a name for an object
+    /// rather than the object itself, and by the time the answer is read the name may belong
+    /// to something else, may have been unlinked, or may be one of several the object
+    /// answers to. Every guarantee this layer makes rests on handles for exactly that
+    /// reason, and a call that turned a handle back into a string and then reopened it would
+    /// undo all of them.
+    /// </para>
+    /// <para>
+    /// Answering also requires reaching outside the subtree — the reply names the object
+    /// from the root of a filesystem the handle confers no authority over — so this is
+    /// authority the caller must have obtained separately. It is reported as
+    /// <see cref="CapErrorCategory.NotSupported"/> where the platform has no way to ask.
+    /// </para>
+    /// </remarks>
+    CapResult<string> GetHandlePath(SafeDirHandle handle);
+
+    /// <summary>
     /// Produces a second, independent handle to the same directory.
     /// </summary>
     /// <remarks>

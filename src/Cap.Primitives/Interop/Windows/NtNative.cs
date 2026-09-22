@@ -100,6 +100,28 @@ internal static unsafe partial class NtNative
     [LibraryImport("kernel32.dll", SetLastError = true)]
     internal static partial uint GetFileType(nint handle);
 
+    /// <summary>
+    /// Asks the system which path an open handle is currently reachable by.
+    /// </summary>
+    /// <remarks>
+    /// A Win32 call taking a handle, so there is no string for the Win32 layer to rewrite on
+    /// the way down; the rewriting that matters here happens on the way back, and is wanted.
+    /// The reply is the object's own long name, spelled in the user-facing syntax, which is
+    /// what makes it useful in a log — the native call's answer is a path from the root of
+    /// the volume and names no drive.
+    /// </remarks>
+    /// <returns>
+    /// The length written, not counting the terminator, on success; a length including the
+    /// terminator when the buffer was too small; zero on failure.
+    /// </returns>
+    [LibraryImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial uint GetFinalPathNameByHandle(
+        nint file,
+        char* path,
+        uint pathLength,
+        uint flags);
+
     /// <summary>Issues a filesystem control code against an open handle. Used to read a reparse point.</summary>
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -178,6 +200,14 @@ internal static class NtConstants
     public const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
 
     public const nint INVALID_HANDLE_VALUE = -1;
+
+    // --- GetFinalPathNameByHandleW -----------------------------------------------------------
+
+    /// <summary>
+    /// Ask for the object's own name, spelled with a drive letter: the normalised long name
+    /// and the DOS volume name, which are both the zero value of their respective fields.
+    /// </summary>
+    public const uint FILE_NAME_NORMALIZED_VOLUME_NAME_DOS = 0x0;
 
     // --- Object kinds ---------------------------------------------------------------------
 

@@ -278,6 +278,59 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The platform answers this one directly from the descriptor, with no process
+    /// filesystem in the way. The answer is still a snapshot and still only one of the names
+    /// the object may have — a hard-linked file has several and this call names one of them
+    /// — which is why it is good for a log line and for nothing else.
+    /// </remarks>
+    public CapResult<string> GetHandlePath(SafeDirHandle handle)
+    {
+        using HandleLease lease = handle.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<string>.Fail(CapError.Create(
+                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+        }
+
+        // Exactly the size the platform demands. The call is not told how much room it has,
+        // so anything smaller would be written past.
+        Span<byte> buffer = stackalloc byte[DarwinConstants.MaxPathBytes];
+        buffer.Clear();
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* target = buffer)
+            {
+                result = DarwinNative.FcntlBuffer(
+                    lease.Descriptor, DarwinConstants.F_GETPATH, target);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (result < 0)
+        {
+            return CapResult<string>.Fail(DarwinErrno.ToError(errno));
+        }
+
+        int length = buffer.IndexOf((byte)0);
+        if (length <= 0)
+        {
+            // No terminator, or an empty answer. Either way the reply is not a path, and
+            // inventing one from a buffer whose contents are unaccounted for would be worse
+            // than saying so.
+            return CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.Unknown));
+        }
+
+        return CapResult<string>.Ok(PathEncoding.GetString(buffer[..length]));
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         using HandleLease lease = handle.Lease();

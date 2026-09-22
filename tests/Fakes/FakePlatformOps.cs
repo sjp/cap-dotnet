@@ -231,6 +231,24 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Refused, because the simulation has no ambient namespace for an answer to be a name
+    /// in. Its nodes exist only relative to the root it was built with, so any path it
+    /// produced would be a path in a filesystem that does not exist, and code that logged it
+    /// would be logging fiction. Callers must cope with having no answer in any case: the
+    /// question has no answer on a real host either when the process filesystem is missing.
+    /// </remarks>
+    public CapResult<string> GetHandlePath(SafeDirHandle handle)
+    {
+        if (!TryResolveHandle(handle, out _))
+        {
+            return CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        return CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         if (!TryResolveHandle(handle, out FakeNode? node))

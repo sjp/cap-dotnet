@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Unix;
 using Cap.Tests;
 
 namespace Cap.Primitives.Tests;
@@ -122,6 +123,16 @@ public sealed class Openat2DemotionTests
         // on the filter this process is running under rather than the one it was asked to
         // install.
         start.Environment.Remove(SeccompFilter.DenyOpenat2Variable);
+
+        // Nor the switch that turns the confined open off outright. This run exists to watch
+        // the probe meet a refusal and record which one it was; a child told not to attempt
+        // the syscall never issues it, reports no code, and would make the whole case pass
+        // or fail according to how the suite was launched rather than according to what the
+        // kernel did.
+        if (OperatingSystem.IsLinux())
+        {
+            start.Environment.Remove(Openat2Probe.DisableVariableName);
+        }
 
         using Process child = Process.Start(start) ??
             throw new InvalidOperationException("The probe child did not start.");

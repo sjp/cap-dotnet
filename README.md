@@ -7,9 +7,10 @@ A `Dir` handle *is* the authority to reach what is under it. Code holding one ca
 `config/app.json`; code holding one cannot open `/etc/passwd`, `../../secrets`, or the
 target of a symlink pointing out of the tree, whatever string it is handed.
 
-> **Status: early.** Path parsing is implemented; nothing opens a file yet. The security
-> posture is in [`docs/threat-model.md`](docs/threat-model.md), and this README is a
-> placeholder until a fuller one leads with the problem rather than the API.
+> **Status: early.** Path parsing and confined resolution are implemented, and a `Dir`
+> handle can be opened and directories derived from it; nothing opens a file yet. The
+> security posture is in [`docs/threat-model.md`](docs/threat-model.md), and this README is
+> a placeholder until a fuller one leads with the problem rather than the API.
 
 ## Why
 

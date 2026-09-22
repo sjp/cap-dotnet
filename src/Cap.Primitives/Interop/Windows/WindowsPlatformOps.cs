@@ -346,6 +346,77 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     public CapError StatHandle(SafeDirHandle handle, out CapNodeInfo info) => Describe(handle, out info);
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The reply is normally spelled with the extended-length prefix the system uses
+    /// internally, and it is handed back that way rather than tidied: this is a diagnostic,
+    /// and a prefix that tells the reader which layer answered is more use than one that has
+    /// been quietly removed. A directory reached through a mount point with no drive letter
+    /// is named by its volume identifier instead, which is the same answer any other tool
+    /// would give for it.
+    /// </remarks>
+    public CapResult<string> GetHandlePath(SafeDirHandle handle)
+    {
+        using HandleLease lease = handle.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<string>.Fail(CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE));
+        }
+
+        // The call reports the room it needs when the buffer is too small, so the loop runs
+        // at most twice -- and is a loop rather than two calls because a rename between them
+        // can make the second answer longer than the first said it would be.
+        int capacity = 512;
+        while (true)
+        {
+            char[] buffer = ArrayPool<char>.Shared.Rent(capacity);
+            try
+            {
+                uint written;
+                int error = 0;
+                unsafe
+                {
+                    fixed (char* target = buffer)
+                    {
+                        written = NtNative.GetFinalPathNameByHandle(
+                            lease.Raw,
+                            target,
+                            (uint)buffer.Length,
+                            NtConstants.FILE_NAME_NORMALIZED_VOLUME_NAME_DOS);
+                        if (written == 0)
+                        {
+                            error = Marshal.GetLastWin32Error();
+                        }
+                    }
+                }
+
+                if (written == 0)
+                {
+                    return CapResult<string>.Fail(Win32Errors.ToError(error));
+                }
+
+                if (written < buffer.Length)
+                {
+                    return CapResult<string>.Ok(new string(buffer, 0, (int)written));
+                }
+
+                // Did not fit: the value is the room required, terminator included.
+                capacity = (int)written;
+            }
+            finally
+            {
+                ArrayPool<char>.Shared.Return(buffer);
+            }
+
+            if (capacity > NameReplyLimit)
+            {
+                return CapResult<string>.Fail(CapError.Create(
+                    CapErrorCategory.NameTooLong, CapErrorSource.Win32, Win32Errors.ERROR_FILENAME_EXCED_RANGE));
+            }
+        }
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         using HandleLease lease = handle.Lease();

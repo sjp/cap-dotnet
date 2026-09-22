@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
@@ -251,11 +252,22 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        // readlinkat truncates rather than reporting that the target did not fit, so a
-        // completely full buffer is indistinguishable from an exact fit and the only safe
-        // reading is "try again with more room". A truncated symlink target is not a shorter
-        // target; it is a different path, and acting on one would be acting on a name nobody
-        // wrote.
+        return ReadLinkText(lease.Descriptor, encoded.Bytes);
+    }
+
+    /// <summary>
+    /// Reads the link at <paramref name="path"/> relative to <paramref name="directoryFd"/>,
+    /// growing the buffer until the target fits.
+    /// </summary>
+    /// <remarks>
+    /// The growth is not an optimisation detail. <c>readlinkat</c> truncates rather than
+    /// reporting that the target did not fit, so a completely full buffer is
+    /// indistinguishable from an exact fit and the only safe reading is "try again with more
+    /// room". A truncated target is not a shorter target; it is a different path, and acting
+    /// on one would be acting on a name nobody wrote.
+    /// </remarks>
+    private static CapResult<string> ReadLinkText(int directoryFd, ReadOnlySpan<byte> path)
+    {
         int capacity = InitialLinkBufferBytes;
         while (true)
         {
@@ -266,10 +278,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 int errno = 0;
                 unsafe
                 {
-                    fixed (byte* path = encoded.Bytes)
+                    fixed (byte* name = path)
                     fixed (byte* target = buffer)
                     {
-                        written = LinuxNative.ReadLinkAt(lease.Descriptor, path, target, (nuint)capacity);
+                        written = LinuxNative.ReadLinkAt(directoryFd, name, target, (nuint)capacity);
                         if (written < 0)
                         {
                             errno = Marshal.GetLastPInvokeError();
@@ -343,6 +355,45 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         // again would ask about whatever holds that name now, not about what was opened.
         ReadOnlySpan<byte> empty = [0];
         return StatInto(lease.Descriptor, empty, LinuxConstants.AT_EMPTY_PATH, out info);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Answered by asking the process filesystem what the descriptor points at. That is the
+    /// only mechanism this platform offers, and it is exactly as approximate as the contract
+    /// says: the reply is the path the object is reachable by at that moment, one of
+    /// possibly several, suffixed by the kernel with a note of its own when the object has
+    /// been unlinked. Where the process filesystem is not mounted — a minimal container,
+    /// most often — there is no answer at all and the call fails rather than guessing.
+    /// </remarks>
+    public CapResult<string> GetHandlePath(SafeDirHandle handle)
+    {
+        using HandleLease lease = handle.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<string>.Fail(CapError.Create(
+                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+        }
+
+        // Built on the stack rather than interpolated, so that asking a handle where it is
+        // does not allocate anything but the answer.
+        const string Prefix = "/proc/self/fd/";
+        Span<char> name = stackalloc char[Prefix.Length + 16];
+        Prefix.CopyTo(name);
+        if (!lease.Descriptor.TryFormat(
+                name[Prefix.Length..], out int digits, provider: CultureInfo.InvariantCulture))
+        {
+            return CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name[..(Prefix.Length + digits)], scratch);
+        if (!encoded.IsValid)
+        {
+            return CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        return ReadLinkText(LinuxConstants.AT_FDCWD, encoded.Bytes);
     }
 
     /// <inheritdoc/>

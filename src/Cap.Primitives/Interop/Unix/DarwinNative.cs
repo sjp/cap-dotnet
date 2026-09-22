@@ -27,6 +27,17 @@ internal static unsafe partial class DarwinNative
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int Fcntl(int fd, int command, int argument);
 
+    /// <summary>
+    /// The same call, for the commands whose argument is a buffer rather than a number.
+    /// </summary>
+    /// <remarks>
+    /// Declared separately because the C function is variadic and this platform passes a
+    /// pointer and an integer differently; one declaration serving both would put the wrong
+    /// kind of value in the register the kernel reads.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    internal static partial int FcntlBuffer(int fd, int command, byte* buffer);
+
     /// <summary>Reports on a name relative to a directory descriptor. Apple silicon spelling.</summary>
     [LibraryImport("libc", EntryPoint = "fstatat", SetLastError = true)]
     private static partial int FStatAtPlain(int directoryFd, byte* path, DarwinStat* result, int flags);

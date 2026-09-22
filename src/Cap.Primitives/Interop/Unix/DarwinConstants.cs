@@ -46,6 +46,22 @@ internal static class DarwinConstants
     /// <summary>Duplicate a descriptor with the close-on-exec flag already set.</summary>
     public const int F_DUPFD_CLOEXEC = 67;
 
+    /// <summary>
+    /// Ask a descriptor what path it is reachable by. The buffer must hold
+    /// <see cref="MaxPathBytes"/> bytes whatever the answer turns out to be.
+    /// </summary>
+    public const int F_GETPATH = 50;
+
+    /// <summary>
+    /// The size this platform requires of the buffer handed to <see cref="F_GETPATH"/>.
+    /// </summary>
+    /// <remarks>
+    /// Not a guess at how long the answer will be: the call writes into the buffer without
+    /// being told its size, so a smaller one is a buffer overrun rather than a truncated
+    /// reply. It is the platform's own <c>MAXPATHLEN</c>.
+    /// </remarks>
+    public const int MaxPathBytes = 1024;
+
     public const ushort S_IFMT = 0xF000;
     public const ushort S_IFREG = 0x8000;
     public const ushort S_IFDIR = 0x4000;
