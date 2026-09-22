@@ -38,7 +38,7 @@ documentation declines to make a security claim.
 src/Cap.Primitives/    path parsing, interop, resolution algorithms (internal)
 src/Cap.Std/           the public API: Dir, CapFile, CapMetadata
 src/Cap.Fs.Ext/        atomic writes, walks, handle-to-handle copy
-src/Cap.Net/           capability sockets               (may be deferred)
+src/Cap.Net/           capability sockets: a Pool of permitted endpoints
 src/Cap.Time/          clock capabilities               (likely wraps TimeProvider)
 src/Cap.Rand/          randomness capabilities
 src/Cap.Directories/   well-known project directories as Dir handles
@@ -76,3 +76,7 @@ process from outside, and how to make a running process list every place it did.
 [docs/convenience-layer.md](docs/convenience-layer.md) covers the ergonomic layer built on
 top of the core — atomic writes, walks, tree removal, handle-to-handle copy and pattern
 matching — including the table of what a copy does with each kind of object it meets.
+
+[docs/network.md](docs/network.md) covers the socket capability, and leads with what it does
+not promise: unlike a directory handle, a pool of permitted endpoints is not enforced by the
+operating system and is not a containment boundary. Read that section before the API.

@@ -1143,6 +1143,81 @@ public sealed partial class Dir : IDisposable
     }
 
     /// <summary>
+    /// Resolves everything ahead of a path's last component, and hands back that component
+    /// with a handle of its own on the directory that holds it.
+    /// </summary>
+    /// <param name="path">A path beneath this handle, of one or more components.</param>
+    /// <param name="holder">
+    /// On success, a handle on the directory the last component belongs to. The caller owns
+    /// it and must close it; it carries no more authority than this handle does.
+    /// </param>
+    /// <param name="name">On success, the last component, which has never been looked up.</param>
+    /// <param name="error">
+    /// What the resolution ran into, once the path itself was accepted. Reported separately
+    /// from the return value because the two are different kinds of answer: one is about the
+    /// string, the other about the filesystem, and they are turned into exceptions by
+    /// different overloads.
+    /// </param>
+    /// <returns>What the parser made of the path, which is <see cref="CapPathError.None"/>
+    /// whenever the string named something expressible beneath a handle — including when the
+    /// resolution then failed.</returns>
+    /// <remarks>
+    /// <para>
+    /// For the operations that cannot be expressed as an open at all. The rest of this type
+    /// finishes a resolution by making one call against the confined directory itself, and
+    /// so never needs to say where that directory is; an operation that has to hand the pair
+    /// to something outside this assembly needs the directory to keep, because the borrowed
+    /// one lives only as long as the resolution that produced it.
+    /// </para>
+    /// <para>
+    /// This is the end of what confinement can promise and the start of what the caller must
+    /// keep. The component comes back unresolved on purpose: the guarantee is that it names
+    /// something directly inside the returned directory or nothing at all, and whatever
+    /// consumes it has to preserve that by looking it up exactly once, in that directory,
+    /// without following a link.
+    /// </para>
+    /// <para>
+    /// A path spelled so that its target has to be a directory is refused, because nothing
+    /// that needs this pair acts on a directory.
+    /// </para>
+    /// </remarks>
+    internal CapPathError OpenNameHolder(
+        string path,
+        out SafeDirHandle? holder,
+        out string? name,
+        out CapError error)
+    {
+        holder = null;
+        name = null;
+
+        CapPathError pathError = Locate(path, out NameLookup lookup, out error);
+        using (lookup)
+        {
+            if (pathError != CapPathError.None || error.IsFailure)
+            {
+                return pathError;
+            }
+
+            if (lookup.RequiresDirectory)
+            {
+                error = CapError.FromCategory(CapErrorCategory.IsADirectory);
+                return CapPathError.None;
+            }
+
+            CapResult<SafeDirHandle> copy = PlatformOps.Current.DuplicateDirectory(lookup.Directory);
+            if (!copy.IsSuccess)
+            {
+                error = copy.Error;
+                return CapPathError.None;
+            }
+
+            holder = copy.Value;
+            name = lookup.Name.ToString();
+            return CapPathError.None;
+        }
+    }
+
+    /// <summary>
     /// A directory a name is about to be used against, and that name.
     /// </summary>
     /// <remarks>

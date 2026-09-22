@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Net.Tests</RootNamespace>
+    <AssemblyName>Cap.Net.Tests</AssemblyName>
+    <!-- The throwaway directory in tests/Scenarios: the Unix-domain suite needs a real
+         tree to create sockets in, and to plant the links it then attacks through. -->
+    <CapUsesScratchTree>true</CapUsesScratchTree>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Net/Cap.Net.csproj" />
+  </ItemGroup>
+
+</Project>

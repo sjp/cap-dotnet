@@ -11,4 +11,8 @@
     <ProjectReference Include="../Cap.Std/Cap.Std.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cap.Net.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -311,6 +311,38 @@ atomicity *is* provided — the exclusive create behind the temporary-file helpe
 behind the atomic-write helper — it is documented per-operation and is not a general
 property.
 
+### 5.6 The network pool is an auditing mechanism, not a containment one
+
+Everything above is about the filesystem, and everything above is enforced by the operating
+system: code that was never handed a `Dir` cannot reach what is beneath it, however it asks.
+
+`Cap.Net.Pool` is a different kind of thing wearing a similar shape. There is no equivalent
+of "you do not hold the descriptor" for a network address — code that can call anything can
+open a socket of its own, exactly as §5.1 says of the filesystem, except that here there is no
+kernel-enforced layer underneath to fall back on. A pool constrains sockets opened *through
+this library* by code that is cooperating.
+
+That is still worth building, for the same reason the ambient-authority token is worth
+carrying: it makes a component's network reach a value that is passed in and can be read off
+the call site that built it, rather than a property of the machine it happens to be running
+on. A host that genuinely enforces — a WASI runtime, a container network policy, a service
+mesh — can be configured from the same list, and the two then agree by construction. What it
+must never be called is a boundary.
+
+Three properties of it *are* security-relevant in the ordinary sense, because getting them
+wrong would make the audit lie about what was permitted rather than merely fail to enforce it:
+an address is reduced to one form before comparison, so the several spellings of one host
+cannot be used to pass a check and reach something else; nothing resolves a name, so the
+address checked is the address connected to; and a grant over a range never covers the
+addresses an interface configures for itself, so a broad grant cannot silently include the
+instance metadata service. These are in scope and are tested.
+
+Sockets in the Unix domain are the exception to all of the above. They are filesystem objects
+named by a path, they are reached through a `Dir` rather than a pool, and the guarantee in §2
+applies to them unchanged — which is why they are refused outright on platforms that offer no
+way to name one relative to an open directory, rather than implemented there by resolving a
+path and handing it to a socket call.
+
 ## 6. Residual risk
 
 ### 6.1 The fallback resolver narrows TOCTOU; it does not close it
