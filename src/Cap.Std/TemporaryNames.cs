@@ -75,7 +75,15 @@ internal static class TemporaryNames
     public static string Next()
     {
         Span<byte> entropy = stackalloc byte[EntropyBytes];
+
+        // The one place outside Cap.Rand allowed to take the operating system's entropy
+        // without a token. A scratch name is not a grant of anything: the caller already holds
+        // the directory the object goes in, and the bytes only decide what it is called there,
+        // never where it can reach. Asking for ambient authority to name a file inside a
+        // directory the caller was given would record, as an escape, something that is not one.
+#pragma warning disable RS0030
         RandomNumberGenerator.Fill(entropy);
+#pragma warning restore RS0030
 
         Span<char> name = stackalloc char[Prefix.Length + (EntropyBytes * 8 / 5)];
         Prefix.CopyTo(name);

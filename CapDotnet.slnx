@@ -15,6 +15,7 @@
     <Project Path="tests/Cap.Fs.Ext.Tests/Cap.Fs.Ext.Tests.csproj" />
     <Project Path="tests/Cap.Net.Tests/Cap.Net.Tests.csproj" />
     <Project Path="tests/Cap.Time.Tests/Cap.Time.Tests.csproj" />
+    <Project Path="tests/Cap.Rand.Tests/Cap.Rand.Tests.csproj" />
     <Project Path="tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj" />
     <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
   </Folder>

@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Rand.Tests</RootNamespace>
+    <AssemblyName>Cap.Rand.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Rand/Cap.Rand.csproj" />
+  </ItemGroup>
+
+</Project>

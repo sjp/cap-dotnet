@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <RootNamespace>Cap.Rand</RootNamespace>
-    <Description>Randomness capabilities over RandomNumberGenerator.</Description>
+    <Description>Randomness capabilities: the operating system's cryptographic generator, handed out only against an AmbientAuthority token, and a seeded sequence for tests that cannot be mistaken for it.</Description>
   </PropertyGroup>
 
   <ItemGroup>

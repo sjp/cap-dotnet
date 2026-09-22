@@ -40,7 +40,7 @@ src/Cap.Std/           the public API: Dir, CapFile, CapMetadata
 src/Cap.Fs.Ext/        atomic writes, walks, handle-to-handle copy
 src/Cap.Net/           capability sockets: a Pool of permitted endpoints
 src/Cap.Time/          the system clock as a TimeProvider, behind a token
-src/Cap.Rand/          randomness capabilities
+src/Cap.Rand/          OS entropy behind a token, and a seeded stream for tests
 src/Cap.Directories/   well-known project directories as Dir handles
 src/Cap.Analyzers/     Roslyn analyzers banning ambient System.IO in consuming code
 tests/                 unit, adversarial escape corpus, TOCTOU stress
@@ -84,3 +84,7 @@ operating system and is not a containment boundary. Read that section before the
 [docs/time.md](docs/time.md) covers the clock capability: the system `TimeProvider`, handed
 out only against a token, and why that type is used rather than a clock type of this
 library's own.
+
+[docs/randomness.md](docs/randomness.md) covers the randomness capability: the operating
+system's generator, handed out only against a token, the seeded stream for tests that cannot
+be passed where the secure one is required, and the exact algorithm that stream is fixed to.

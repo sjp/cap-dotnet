@@ -26,3 +26,8 @@ M:System.Threading.Tasks.Task.Delay(System.Int32);Waits on the ambient clock. Us
 M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken);Waits on the ambient clock. Use the overload that takes a TimeProvider.
 M:System.Threading.Tasks.Task.Delay(System.TimeSpan);Waits on the ambient clock. Use the overload that takes a TimeProvider.
 M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken);Waits on the ambient clock. Use the overload that takes a TimeProvider.
+T:System.Security.Cryptography.RandomNumberGenerator;The operating system's entropy is ambient authority. Take a Cap.Rand.CapRandom and pass it down.
+M:System.Guid.NewGuid;Draws on the operating system's entropy, which is ambient authority. Take a Cap.Rand.CapRandom and pass it down.
+M:System.Guid.CreateVersion7;Draws on the operating system's entropy and the system clock, both ambient authority.
+M:System.Guid.CreateVersion7(System.DateTimeOffset);Draws on the operating system's entropy, which is ambient authority.
+M:System.IO.Path.GetRandomFileName;Draws on the operating system's entropy, which is ambient authority.
