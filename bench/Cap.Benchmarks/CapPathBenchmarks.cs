@@ -29,6 +29,18 @@ public class CapPathBenchmarks
     private const string ShallowPath = "config/app.json";
     private const string DeepPath = "a/b/c/d/e/f/g/h/config.json";
 
+    /// <summary>
+    /// A path whose every component is a near-miss for a Windows device name, so that each
+    /// one runs the device comparisons to the end before being allowed through.
+    /// </summary>
+    /// <remarks>
+    /// The stem lengths are chosen to land on the arms that actually compare: three and four
+    /// characters for the console and port names, six and seven for the console input and
+    /// output streams. A component whose stem is any other length is dismissed on its length
+    /// alone and would measure nothing.
+    /// </remarks>
+    private const string DeviceLookalikePath = "cat/cold/config/content/lpto/console.log";
+
     [Params(CapPathSyntax.Unix, CapPathSyntax.Windows)]
     public CapPathSyntax Syntax { get; set; }
 
@@ -65,6 +77,31 @@ public class CapPathBenchmarks
 
         return characters;
     }
+
+    /// <summary>
+    /// The worst case for the Windows name rules, run under both syntaxes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Windows needs more of a component than POSIX does: every character is checked against
+    /// the set the platform forbids, the stem is cut out and matched against the device
+    /// table, and the last character is checked for the dot or space Windows would strip.
+    /// POSIX needs one thing, that the component holds no <c>U+0000</c>. This case is built
+    /// so that none of the Windows work can exit early, which makes the gap between the two
+    /// syntax rows the full price of those rules.
+    /// </para>
+    /// <para>
+    /// The row that matters is the POSIX one, and what it has to show is that it does not
+    /// move: the rules are selected by syntax rather than by the running OS, so a Unix caller
+    /// must not be paying for a defence against a platform it is not on. Comparing it against
+    /// <see cref="ParseDeep"/> under the same syntax is the comparison to make — two paths of
+    /// similar length, one of them adversarial only to Windows, and no difference between
+    /// them.
+    /// </para>
+    /// </remarks>
+    [Benchmark]
+    public bool ParseDeviceLookalikes() =>
+        CapPath.TryParse(DeviceLookalikePath, Syntax, ParentLinkPolicy.Reject, out _, out _);
 
     /// <summary>Validation straight off a span, for a caller that has no string to hand.</summary>
     [Benchmark]

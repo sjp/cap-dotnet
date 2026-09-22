@@ -55,12 +55,24 @@ namespace Cap.Primitives.Interop.Windows;
 /// is what it answers with.
 /// </para>
 /// <para>
-/// <strong>One call here goes through the Win32 layer,</strong> the one that opens the very
-/// first directory by an ordinary path. That is the ambient step, before any capability
-/// exists, and it needs exactly the drive-letter and working-directory handling the rest of
-/// this type avoids. It is also the one open whose result is interrogated before being
-/// handed back, because a user-facing path can name something that is not a directory on a
-/// filesystem at all.
+/// <strong>One call here hands the Win32 layer a path,</strong> the one that opens the very
+/// first directory by an ordinary path string. That is the ambient step, before any
+/// capability exists, and it needs exactly the drive-letter and working-directory handling
+/// the rest of this type avoids. It is also the one open that can name something which is not
+/// a directory on a filesystem at all, which is why its result is checked against what a user
+/// asked for and not merely against what a name may contain. Other Win32 calls appear here
+/// where they take a handle instead of a path; those carry no string for the layer to
+/// rewrite.
+/// </para>
+/// <para>
+/// <strong>Every handle produced here is asked whether it is on a filesystem</strong> and
+/// dropped if it is not. Refusing the reserved device names as strings is the first defence
+/// against them and it is a blocklist, which ages badly: the reserved set belongs to Windows
+/// and has grown before. A blocklist that has fallen behind fails open, and what it fails open
+/// on is a handle to the console or a serial port. So the object that was opened is asked what
+/// it is, one kind is accepted and everything else — including a kind this code has never
+/// heard of — is refused. Reaching that check means the names missed something, which is why
+/// it exists and why it should never fire.
 /// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
@@ -488,6 +500,16 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return NtStatusCodes.ToError(result);
             }
 
+            // Asked first, and of every handle this backend produces. It is the cheaper of
+            // the two questions, and the one whose answer decides whether the other is even
+            // meaningful: a device has no name of its own to compare against.
+            CapError kind = RefuseUnlessFilesystemObject(opened);
+            if (kind.IsFailure)
+            {
+                _ = NtNative.NtClose(opened);
+                return kind;
+            }
+
             CapError alias = RefuseAliasedName(opened, name);
             if (alias.IsFailure)
             {
@@ -602,6 +624,55 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <summary>
+    /// Refuses a handle that does not refer to an object on a filesystem.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the second of the two defences against Windows device names, and the only one
+    /// that does not depend on having anticipated the name. The first is a rule about
+    /// strings: a component spelling <c>CON</c>, <c>NUL</c>, <c>COM1</c> or any of their
+    /// disguises is refused while it is still a string, before anything is opened. That rule
+    /// is a blocklist of operating system behaviour, and the reserved set is the operating
+    /// system's to change — it has grown before. A blocklist that falls behind fails open,
+    /// which is the wrong direction for the one check standing between a caller and a handle
+    /// to the console.
+    /// </para>
+    /// <para>
+    /// So the object that was actually opened is asked what it is, and anything that is not a
+    /// file or directory on a filesystem is dropped. That question is answered by the system
+    /// from the handle, so it costs nothing to keep current and it does not care how the name
+    /// was spelled. A name nobody anticipated still cannot be used.
+    /// </para>
+    /// <para>
+    /// Anything other than a filesystem object is refused, rather than the known device kinds
+    /// being listed and refused. The distinction matters when the system reports a kind this
+    /// code has never heard of: refusing everything unrecognised means such a handle is
+    /// dropped, where listing what to refuse would mean it is handed back.
+    /// </para>
+    /// </remarks>
+    private static CapError RefuseUnlessFilesystemObject(nint handle) =>
+        NtNative.GetFileType(handle) == NtConstants.FILE_TYPE_DISK
+            ? CapError.Success
+            : CapError.FromCategory(CapErrorCategory.DeviceObject);
+
+    /// <inheritdoc cref="RefuseUnlessFilesystemObject(nint)"/>
+    /// <remarks>
+    /// Reachable from outside this type so that the defence can be aimed at a device handle
+    /// directly. Every route into it through ordinary resolution has a name refused before
+    /// an open is attempted, which is the point of the first defence and also means that
+    /// exercising the second one that way is impossible — the assertion would only ever
+    /// observe the parser.
+    /// </remarks>
+    internal static CapError RefuseUnlessFilesystemObject(SafeHandle handle)
+    {
+        using HandleLease lease = new(handle);
+        return lease.IsValid
+            ? RefuseUnlessFilesystemObject(lease.Raw)
+            : CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+    }
+
+    /// <summary>
     /// Confirms that a handle opened by an ordinary path is a directory on a filesystem.
     /// </summary>
     /// <remarks>
@@ -615,7 +686,13 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </remarks>
     private static CapError RefuseUnlessFilesystemDirectory(SafeDirHandle handle)
     {
-        CapError error = Describe(handle, out CapNodeInfo info);
+        CapError error = RefuseUnlessFilesystemObject(handle);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        error = Describe(handle, out CapNodeInfo info);
         if (error.IsFailure)
         {
             return error;

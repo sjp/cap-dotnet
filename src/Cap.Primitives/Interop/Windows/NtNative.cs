@@ -80,6 +80,26 @@ internal static unsafe partial class NtNative
         uint flagsAndAttributes,
         nint templateFile);
 
+    /// <summary>
+    /// Asks the system what kind of object an open handle refers to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A Win32 call, and safely so: it takes a handle rather than a path, so there is no
+    /// string for the Win32 layer to rewrite on the way down. What it reports is a property
+    /// of the object that was actually opened, which is the whole reason for asking.
+    /// </para>
+    /// <para>
+    /// It answers the exact question this library needs answered — is this a filesystem
+    /// object or a device — using the system's own classification. Reading the underlying
+    /// volume device type and mapping it here instead would mean maintaining a list of which
+    /// device types count as a filesystem, and such a list ages the same way the reserved
+    /// name list does.
+    /// </para>
+    /// </remarks>
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial uint GetFileType(nint handle);
+
     /// <summary>Issues a filesystem control code against an open handle. Used to read a reparse point.</summary>
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -158,6 +178,30 @@ internal static class NtConstants
     public const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
 
     public const nint INVALID_HANDLE_VALUE = -1;
+
+    // --- Object kinds ---------------------------------------------------------------------
+
+    /// <summary>
+    /// The handle could not be classified. Also what is reported when the call itself fails,
+    /// which is why nothing here treats it as a kind: it is the value a handle carries when
+    /// the system has told us nothing about it.
+    /// </summary>
+    public const uint FILE_TYPE_UNKNOWN = 0x0000;
+
+    /// <summary>
+    /// The handle refers to a file or directory on a filesystem — the only kind of object a
+    /// sandbox deals in.
+    /// </summary>
+    public const uint FILE_TYPE_DISK = 0x0001;
+
+    /// <summary>
+    /// The handle refers to a character device: a console, a serial or parallel port, the
+    /// null device. This is what a reserved device name reaches.
+    /// </summary>
+    public const uint FILE_TYPE_CHAR = 0x0002;
+
+    /// <summary>The handle refers to a named pipe or a socket.</summary>
+    public const uint FILE_TYPE_PIPE = 0x0003;
 
     // --- File attributes --------------------------------------------------------------------
 

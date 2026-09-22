@@ -88,7 +88,7 @@ backends are described in [backends.md](backends.md).
 | L1 | `..` component in caller input | Rejected at parse time; never collapsed lexically | path parsing | `CapPathParseTests.Rejects_parent_links_by_default` |
 | L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute` |
 | L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state` |
-| L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace` |
+| L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace`, `WindowsReservedNameTests.A_device_namespace_prefix_on_a_device_name_is_refused` |
 | L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components` |
 | L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused` |
 
@@ -129,17 +129,29 @@ bullet.
 | W1 | Reserved device names: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused` |
 | W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`, `.Trailing_dots_and_spaces_do_not_hide_a_device` |
 | W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | `WindowsReservedNameTests.ReservedStems` |
-| W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Stream_syntax_is_refused` |
+| W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Every_stream_spelling_of_a_reserved_name_is_refused` |
 | W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | `CapPathParseTests.Rejects_trailing_dot_or_space` |
 | W6 | 8.3 short names (`PROGRA~1`) aliasing a long name | Rejected. A component containing a tilde is opened and then asked what it is actually called; the handle is dropped if the two names disagree. A file genuinely named with a tilde answers with itself and is allowed | Windows backend | `WindowsResolutionOnDiskTests.A_short_name_alias_does_not_reach_the_object_it_aliases`, `.A_name_that_merely_contains_a_tilde_is_its_own_name` |
 | W7 | Wildcards `* ? < > "` reaching the native open | Rejected | Windows name validation | `CapPathParseTests.Rejects_invalid_windows_characters` |
 | W8 | A sandbox root named by a user-facing path that reaches a device rather than a directory | Rejected. The one open that resolves a path string interrogates the handle it got, rather than re-examining the path it was given | Windows backend | `WindowsResolutionOnDiskTests.The_first_directory_handle_refuses_what_is_not_a_filesystem_directory` |
+| W9 | A device name that gets past the rules in W1–W5 — a name added to the reserved set after this was written, or one a future parser bug lets through | Rejected. Every handle the Windows backend produces is asked what kind of object it is, and anything but a file or directory on a filesystem is dropped before it reaches a caller | Windows backend | `WindowsDeviceHandleTests.A_handle_to_a_device_is_refused`, `.A_device_name_as_a_component_does_not_reach_a_device` |
 
 A parse-time blocklist is necessary but **not sufficient**: the set of device names is a
-property of the OS and has grown before. Windows name validation therefore also requires a
-*post-open* device check, so that a name we failed to anticipate still cannot be used. W8 is
-the first instance of that check, applied where a path string is resolved by the system; the
-per-component check beneath a handle is required for the same reason.
+property of the OS and has grown before. Windows name validation is therefore backed by a
+*post-open* device check, so that a name we failed to anticipate still cannot be used. W8 and
+W9 are the two places it applies — the ambient open that resolves a path string, and every
+name resolved beneath a handle after it.
+
+W9 is the one that does not depend on having anticipated anything, and it is deliberately
+framed the other way round from W1–W5: rather than listing the kinds of object to refuse, it
+names the one kind to accept. A handle the system classifies as something we have never heard
+of is dropped, where a list of what to refuse would hand it back. The classification is the
+system's own — we ask what the handle is, rather than deriving it from the volume underneath —
+so there is no second list of ours to fall behind.
+
+A consequence worth stating: reaching W9 at all means W1–W5 missed something. It is not a
+condition any correct input produces, so a caller that sees it has found either a name we did
+not know about or a bug, and both are worth reporting.
 
 Case is not in this table because on Windows it is not an attack but a fact to build on. Two
 names differing only in case are one file, every open this library issues matches

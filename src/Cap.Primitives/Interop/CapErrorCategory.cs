@@ -141,6 +141,21 @@ internal enum CapErrorCategory
     AliasedName,
 
     /// <summary>
+    /// Windows: the handle that was opened refers to a device rather than to a file or
+    /// directory on a filesystem. A name that reaches a character device does not name
+    /// anything beneath the directory handle it was resolved against — the object manager
+    /// routes it elsewhere — so the handle is dropped rather than handed back.
+    /// </summary>
+    /// <remarks>
+    /// Reported distinctly because it is neither a missing file nor a malformed name, and
+    /// because seeing it at all is worth knowing about: every device name is refused while
+    /// still a string, so this category can only be reached by a name that got past those
+    /// rules. It is the second of two defences, and the one that does not depend on having
+    /// anticipated the name.
+    /// </remarks>
+    DeviceObject,
+
+    /// <summary>
     /// The platform reported a failure this layer has no portable reading of. The raw code
     /// is still carried; only the classification is missing.
     /// </summary>

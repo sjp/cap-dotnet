@@ -127,7 +127,7 @@ its own right. So:
 ## What the Windows walk does differently
 
 Windows has no confined open, so it follows the same component-at-a-time model with the same
-guarantee and the same residual race. Five things about it are specific to the platform, and
+guarantee and the same residual race. Six things about it are specific to the platform, and
 each is a decision rather than an implementation detail.
 
 **Names go to the filesystem as counted strings, never as paths.** The familiar Win32 layer
@@ -140,14 +140,36 @@ rewriting. Every open also asks for a reparse point itself rather than its targe
 whether to follow a link is decided here rather than by the object manager — which does not
 know where the sandbox root is.
 
-**Exactly one call goes through Win32**, the one that opens the very first directory from an
-ordinary path. That step is ambient by definition, and it needs precisely the drive-letter and
-working-directory handling the rest of the backend avoids. It is also the only place a name
-can reach something that is not a file at all — the path syntax reaches serial ports, volumes
-and pipes as readily as directories, and several of the names that do so look like ordinary
-filenames. So the handle it produces is interrogated before it is handed back, and refused
-unless it is a directory on a filesystem. What was opened is a fact; what a path was going to
-open is a guess.
+**Exactly one call hands Win32 a path**, the one that opens the very first directory from an
+ordinary path string. That step is ambient by definition, and it needs precisely the
+drive-letter and working-directory handling the rest of the backend avoids. It is also the
+only place a name can reach something that is not a file at all — the path syntax reaches
+serial ports, volumes and pipes as readily as directories, and several of the names that do so
+look like ordinary filenames. So the handle it produces is interrogated before it is handed
+back, and refused unless it is a directory on a filesystem. What was opened is a fact; what a
+path was going to open is a guess.
+
+Other Win32 calls are used where they take a handle rather than a path — reading a reparse
+point, asking what kind of object a handle refers to. Those are safe for the same reason the
+path-taking one is not: there is no string for the layer to rewrite.
+
+**Every handle is asked whether it is on a filesystem**, and dropped if it is not. Refusing
+the reserved device names while they are still strings is the first defence against them, and
+it is a blocklist — a shape that ages badly, because the reserved set belongs to Windows and
+has grown before. A blocklist that has fallen behind fails open, and what it fails open on is
+a handle to the console or a serial port, which is exactly the escape this backend exists to
+prevent.
+
+So the object that was opened is asked what it is, using the system's own classification, and
+anything that is not a file or directory on a filesystem is refused. The question is asked the
+way round that fails closed: one kind of object is accepted and everything else — including a
+kind this code has never heard of — is dropped. Deriving the answer from the volume underneath
+the handle instead would mean keeping a second list, of which device types count as a
+filesystem, and that list would age the same way the first one does.
+
+Reaching this check should be impossible, since the names it catches are refused earlier. That
+is the point of it. It costs one question per open and it is the only part of the device
+defence that does not depend on having anticipated the name.
 
 **Names are matched without regard to case.** That is what the rest of the system does, and
 therefore the only choice under which a name reaches the same file here as it does in every

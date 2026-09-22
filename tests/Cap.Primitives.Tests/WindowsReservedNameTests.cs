@@ -52,61 +52,138 @@ public sealed class WindowsReservedNameTests
     }
 
     /// <summary>
-    /// Each reserved name against each disguise. The extension cases are the surprising
-    /// ones: Windows matches the device before the extension, so <c>CON.txt</c> is the
-    /// console and not a text file.
+    /// Every disguise a device name can wear and still reach the device.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The extension cases are the surprising ones: Windows matches the device before the
+    /// extension, so <c>CON.txt</c> is the console and not a text file, and no number of
+    /// further extensions changes that.
+    /// </para>
+    /// <para>
+    /// The trailing dots and spaces are the subtle ones. They are stripped below the API,
+    /// which means a checker that treats <c>CON.</c> as an ordinary name is checking a name
+    /// that will never reach the filesystem. The same stripping happens between a name and
+    /// its extension, which is why <c>CON .txt</c> is the console too.
+    /// </para>
+    /// <para>
+    /// Position is in here as well. A device name is recognised wherever it occurs, not only
+    /// at the start of a path, so a reserved component with ordinary components on either
+    /// side of it is still reserved.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<string> Manglings(string stem)
+    {
+        yield return stem;
+        yield return stem.ToLowerInvariant();
+        yield return MixedCase(stem);
+
+        yield return stem + ".txt";
+        yield return stem.ToLowerInvariant() + ".TXT";
+        yield return stem + ".tar.gz";
+        yield return stem + " .txt";
+
+        yield return stem + ".";
+        yield return stem + "...";
+        yield return stem + " ";
+        yield return stem + "   ";
+        yield return stem + ". ";
+
+        yield return "dir\\" + stem;
+        yield return "dir/" + stem + ".txt";
+        yield return stem + "\\file.txt";
+        yield return "dir/" + stem + "/file.txt";
+        yield return "dir\\" + stem + ".\\file.txt";
+    }
+
+    /// <summary>
+    /// Every reserved name crossed with every disguise, all refused as the device they
+    /// reach.
     /// </summary>
     [Theory]
     [MemberData(nameof(ReservedStems))]
     public void Every_mangling_of_a_reserved_name_is_refused(string stem)
     {
-        string[] manglings =
-        [
-            stem,
-            stem.ToLowerInvariant(),
-            MixedCase(stem),
-            stem + ".txt",
-            stem.ToLowerInvariant() + ".TXT",
-            stem + " .txt",
-            stem + ".tar.gz",
-            "dir\\" + stem,
-            "dir/" + stem + ".txt",
-            stem + "\\file.txt",
-        ];
-
-        foreach (string mangling in manglings)
+        foreach (string mangling in Manglings(stem))
         {
             Assert.Equal(CapPathError.ReservedName, Parse(mangling));
         }
     }
 
     /// <summary>
-    /// Trailing dots and spaces are stripped below the API, so <c>CON.</c> and <c>CON </c>
-    /// are the console too. They are reported as the device they reach rather than as a
-    /// stray character, because that is the more useful half of the truth.
+    /// Every reserved name crossed with the alternate-data-stream spellings.
     /// </summary>
+    /// <remarks>
+    /// A stream is a second, hidden body of the same file, and naming one is how
+    /// <c>CON::$DATA</c> reaches the console. These are refused for the <c>:</c>, which is
+    /// checked before the name is matched against the device table — so the answer names the
+    /// character rather than the device. Either answer is a refusal, and the refusal is the
+    /// property: no spelling gets through.
+    /// </remarks>
     [Theory]
-    [InlineData("CON.")]
-    [InlineData("CON ")]
-    [InlineData("CON...")]
-    [InlineData("NUL   ")]
-    [InlineData("COM1.")]
-    public void Trailing_dots_and_spaces_do_not_hide_a_device(string raw)
+    [MemberData(nameof(ReservedStems))]
+    public void Every_stream_spelling_of_a_reserved_name_is_refused(string stem)
     {
-        Assert.Equal(CapPathError.ReservedName, Parse(raw));
+        string[] streams =
+        [
+            stem + ":",
+            stem + ":stream",
+            stem + "::$DATA",
+            stem + ":$DATA",
+            stem + ".txt:stream",
+            "dir/" + stem + "::$DATA",
+        ];
+
+        foreach (string raw in streams)
+        {
+            Assert.Equal(CapPathError.InvalidCharacter, Parse(raw));
+        }
     }
 
     /// <summary>
-    /// The alternate-data-stream forms are refused for the character, which happens first.
-    /// Either answer is a refusal; the point is that no spelling gets through.
+    /// A device-namespace prefix in front of a device name is refused for the prefix, which
+    /// is classified before any component is looked at.
     /// </summary>
+    /// <remarks>
+    /// These spellings hand the rest of the string to the object manager with the Win32
+    /// normalisation skipped, which is a way to reach a device that does not depend on the
+    /// name being reserved at all. Both separators reach the same place, so both are refused.
+    /// </remarks>
     [Theory]
-    [InlineData("CON::$DATA")]
-    [InlineData("COM1:")]
-    [InlineData("NUL:stream")]
-    public void Stream_syntax_is_refused(string raw)
+    [InlineData("\\\\.\\CON")]
+    [InlineData("\\\\.\\NUL")]
+    [InlineData("\\\\.\\COM1")]
+    [InlineData("\\\\?\\CON")]
+    [InlineData("\\\\?\\C:\\CON")]
+    [InlineData("//./CON")]
+    [InlineData("//?/NUL")]
+    [InlineData("\\\\./CONIN$")]
+    public void A_device_namespace_prefix_on_a_device_name_is_refused(string raw)
     {
-        Assert.Equal(CapPathError.InvalidCharacter, Parse(raw));
+        Assert.Equal(CapPathError.DeviceNamespace, Parse(raw));
+    }
+
+    /// <summary>
+    /// The same spellings in the middle of a path are not prefixes, and the name behind them
+    /// is still checked.
+    /// </summary>
+    /// <remarks>
+    /// <c>\\?\</c> and <c>\\.\</c> mean something only at the start of a path. Further in,
+    /// they are separators around a component of <c>?</c> or <c>.</c>, and each is dealt with
+    /// on its own terms: <c>?</c> is a character the native open would read as a pattern, and
+    /// <c>.</c> names the directory it is already in and is dropped. Either way the component
+    /// that follows gets the same scrutiny it would have had anywhere else, which is what
+    /// keeps the prefix classification from being the only thing between a caller and a
+    /// device.
+    /// </remarks>
+    [Theory]
+    [InlineData("dir\\\\?\\CON", CapPathError.InvalidCharacter)]
+    [InlineData("dir\\\\.\\CON", CapPathError.ReservedName)]
+    [InlineData("dir/./NUL", CapPathError.ReservedName)]
+    [InlineData("dir\\\\.\\ordinary.txt", CapPathError.None)]
+    public void A_device_namespace_spelling_inside_a_path_is_not_a_prefix(string raw, CapPathError expected)
+    {
+        Assert.Equal(expected, Parse(raw));
     }
 
     /// <summary>
