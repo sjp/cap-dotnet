@@ -89,28 +89,34 @@ internal static class PortableResolver
         CapAccess access,
         ConfinedResolveOptions options)
     {
-        CapError error = Walk(root, path, ResolutionTarget.Directory, access, options, out Outcome outcome);
+        CapError error = Walk(
+            root, path, ResolutionTarget.Directory, access, FileOpenRequest.Existing(FileAccess.Read),
+            options, out Outcome outcome);
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
             : CapResult<SafeDirHandle>.Ok(outcome.Directory!);
     }
 
     /// <summary>
-    /// Opens the existing file that <paramref name="path"/> names beneath
-    /// <paramref name="root"/>.
+    /// Opens the file that <paramref name="path"/> names beneath <paramref name="root"/>,
+    /// creating it if <paramref name="request"/> says it may be created.
     /// </summary>
     /// <remarks>
-    /// Existing, because creating is not something a walk can do: a create has to be able to
-    /// fail when the name is already taken, and that is a property of the one call that makes
-    /// it. Creating resolves to the parent instead and does its own final step.
+    /// The creation belongs to the last step and to nothing before it. Every component ahead
+    /// of the last is opened as something that already exists, so a path whose middle is
+    /// missing fails as missing rather than being brought into being a directory at a time —
+    /// and the one call that can create is the one call that can also refuse a name already
+    /// taken, which is what makes an exclusive create exclusive.
     /// </remarks>
     public static CapResult<SafeFileHandle> OpenFile(
         SafeDirHandle root,
         scoped in CapPath path,
-        CapAccess access,
+        scoped in FileOpenRequest request,
         ConfinedResolveOptions options)
     {
-        CapError error = Walk(root, path, ResolutionTarget.File, access, options, out Outcome outcome);
+        CapError error = Walk(
+            root, path, ResolutionTarget.File, CapAccess.None, in request, options, out Outcome outcome);
+
         return error.IsFailure
             ? CapResult<SafeFileHandle>.Fail(error)
             : CapResult<SafeFileHandle>.Ok(outcome.File!);
@@ -131,7 +137,9 @@ internal static class PortableResolver
         scoped in CapPath path,
         ConfinedResolveOptions options)
     {
-        CapError error = Walk(root, path, ResolutionTarget.Parent, CapAccess.None, options, out Outcome outcome);
+        CapError error = Walk(
+            root, path, ResolutionTarget.Parent, CapAccess.None, FileOpenRequest.Existing(FileAccess.Read),
+            options, out Outcome outcome);
         return error.IsFailure
             ? CapResult<ResolvedParent>.Fail(error)
             : CapResult<ResolvedParent>.Ok(new ResolvedParent(outcome.Directory!, outcome.Name!));
@@ -151,6 +159,7 @@ internal static class PortableResolver
         scoped in CapPath path,
         ResolutionTarget target,
         CapAccess access,
+        scoped in FileOpenRequest request,
         ConfinedResolveOptions options,
         out Outcome outcome)
     {
@@ -228,8 +237,8 @@ internal static class PortableResolver
                 }
 
                 CapError last = Finish(
-                    ops, ref stack, ref pending, component, path, target, access, options, ref linkBudget,
-                    out bool followedLink, out outcome);
+                    ops, ref stack, ref pending, component, path, target, access, in request, options,
+                    ref linkBudget, out bool followedLink, out outcome);
 
                 if (followedLink)
                 {
@@ -310,6 +319,7 @@ internal static class PortableResolver
         scoped in CapPath path,
         ResolutionTarget target,
         CapAccess access,
+        scoped in FileOpenRequest request,
         ConfinedResolveOptions options,
         ref int linkBudget,
         out bool followedLink,
@@ -388,7 +398,7 @@ internal static class PortableResolver
             }
         }
 
-        CapResult<SafeFileHandle> file = ops.OpenChildFile(stack.Top, name, access);
+        CapResult<SafeFileHandle> file = ops.OpenChildFile(stack.Top, name, in request);
         if (!file.IsSuccess)
         {
             return file.Error.Category == CapErrorCategory.SymbolicLink

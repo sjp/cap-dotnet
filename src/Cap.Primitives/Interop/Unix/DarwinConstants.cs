@@ -25,6 +25,39 @@ internal static class DarwinConstants
     /// <summary>Do not block waiting for the other end of a FIFO or device.</summary>
     public const int O_NONBLOCK = 0x0004;
 
+    /// <summary>
+    /// Move to the end of the file before every write, atomically with the write itself.
+    /// </summary>
+    /// <remarks>
+    /// A property of the open description rather than of a call, so a write given an explicit
+    /// offset still lands at the end on a handle opened this way. The kernel decides that,
+    /// not this library.
+    /// </remarks>
+    public const int O_APPEND = 0x0008;
+
+    /// <summary>
+    /// Do not return from a write until the data has reached the storage device.
+    /// </summary>
+    /// <remarks>
+    /// Spelled here as the older name for full synchronisation. The value is not the Linux
+    /// one, and the Linux value is this platform's "keep the descriptor only while the file
+    /// is being watched" flag, so borrowing it would produce an open that succeeds and does
+    /// something else entirely.
+    /// </remarks>
+    public const int O_SYNC = 0x0080;
+
+    /// <summary>Create the name if nothing holds it. Requires a mode argument.</summary>
+    public const int O_CREAT = 0x0200;
+
+    /// <summary>Discard the contents of a file that was already there.</summary>
+    public const int O_TRUNC = 0x0400;
+
+    /// <summary>
+    /// With <see cref="O_CREAT"/>, refuse the open if anything at all holds the name,
+    /// a symbolic link included and without consulting what it points at.
+    /// </summary>
+    public const int O_EXCL = 0x0800;
+
     /// <summary>Refuse the open if the final component is a symbolic link.</summary>
     public const int O_NOFOLLOW = 0x0100;
 
@@ -60,6 +93,13 @@ internal static class DarwinConstants
     /// </summary>
     public const uint DirectoryCreateMode = 0x1FF;
 
+    /// <summary>
+    /// The permissions a newly created file is asked for, before the process umask is
+    /// applied. The same request every file-creating program on the system makes, so a file
+    /// created through a capability is not quietly different from any other.
+    /// </summary>
+    public const uint FileCreateMode = 0x1B6;
+
     public const int F_GETFL = 3;
     public const int F_SETFL = 4;
 
@@ -71,6 +111,26 @@ internal static class DarwinConstants
     /// <see cref="MaxPathBytes"/> bytes whatever the answer turns out to be.
     /// </summary>
     public const int F_GETPATH = 50;
+
+    /// <summary>
+    /// Reserve space for a file. This platform's stand-in for the portable reservation call,
+    /// which it does not have.
+    /// </summary>
+    /// <remarks>
+    /// It reserves without extending: the file's length is unchanged and only the space
+    /// behind it is claimed, so a reservation has to be followed by a truncation to the
+    /// requested length for the result to mean what the caller asked for.
+    /// </remarks>
+    public const int F_PREALLOCATE = 42;
+
+    /// <summary>Reserve the space contiguously if the filesystem can.</summary>
+    public const uint F_ALLOCATECONTIG = 0x0002;
+
+    /// <summary>Reserve all of it or none of it, rather than as much as happens to fit.</summary>
+    public const uint F_ALLOCATEALL = 0x0004;
+
+    /// <summary>Measure the reservation from the end of the file.</summary>
+    public const int F_PEOFPOSMODE = 3;
 
     /// <summary>
     /// The size this platform requires of the buffer handed to <see cref="F_GETPATH"/>.

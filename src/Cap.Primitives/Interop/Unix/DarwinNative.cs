@@ -19,6 +19,24 @@ internal static unsafe partial class DarwinNative
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
     internal static partial int OpenAt(int directoryFd, byte* path, int flags);
 
+    /// <summary>
+    /// Opens a name relative to a directory descriptor, creating it with
+    /// <paramref name="mode"/> if the flags ask for creation.
+    /// </summary>
+    /// <remarks>
+    /// A separate import of the same entry point, because the C function is variadic and
+    /// reads the mode off the call stack only when the flags say creation was asked for. An
+    /// import that always passed one would be describing a different function, and the
+    /// three-argument form used with a creating flag hands the kernel whatever happened to
+    /// be in the register the mode is read from.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
+    internal static partial int OpenAtWithMode(int directoryFd, byte* path, int flags, uint mode);
+
+    /// <summary>Manipulates a descriptor with a structure argument, for the reservation call.</summary>
+    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    internal static partial int FcntlStore(int fd, int command, FileStore* store);
+
     /// <summary>Reads a symbolic link relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "readlinkat", SetLastError = true)]
     internal static partial nint ReadLinkAt(int directoryFd, byte* path, byte* buffer, nuint bufferSize);
@@ -109,4 +127,32 @@ internal static unsafe partial class DarwinNative
     /// <summary>Reports on an open descriptor.</summary>
     internal static int FStat(int fd, DarwinStat* result) =>
         UsesPlainStatSymbols ? FStatPlain(fd, result) : FStatInode64(fd, result);
+}
+
+/// <summary>
+/// The <c>fstore</c> argument to this platform's space-reservation request.
+/// </summary>
+/// <remarks>
+/// Laid out exactly as the header declares it: two 32-bit fields and then three 64-bit
+/// ones. Getting the layout wrong here does not fail loudly — the kernel reads whichever
+/// bytes land where it expects the length, so a shifted field asks for a reservation of an
+/// arbitrary size rather than reporting that the request was malformed.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileStore
+{
+    /// <summary>Whether the space must be contiguous, and whether a partial result is acceptable.</summary>
+    public uint Flags;
+
+    /// <summary>What the offset is measured from.</summary>
+    public int PositionMode;
+
+    /// <summary>Where the reservation starts, in the mode's own terms.</summary>
+    public long Offset;
+
+    /// <summary>How much to reserve.</summary>
+    public long Length;
+
+    /// <summary>How much was reserved, filled in by the kernel.</summary>
+    public long BytesAllocated;
 }

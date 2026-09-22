@@ -494,7 +494,7 @@ public sealed class PortableWalkTests
         Run(fs, (ops, root) =>
         {
             CapResult<SafeFileHandle> result =
-                PortableResolver.OpenFile(root, Parse("a/b/data"), CapAccess.Read, ConfinedResolveOptions.None);
+                PortableResolver.OpenFile(root, Parse("a/b/data"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
 
             Assert.True(result.IsSuccess, result.Error.FailureDescription);
             result.Value!.Dispose();
@@ -515,17 +515,17 @@ public sealed class PortableWalkTests
         Run(fs, (ops, root) =>
         {
             CapResult<SafeFileHandle> plain =
-                PortableResolver.OpenFile(root, Parse("data"), CapAccess.Read, ConfinedResolveOptions.None);
+                PortableResolver.OpenFile(root, Parse("data"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
             Assert.True(plain.IsSuccess, plain.Error.FailureDescription);
             plain.Value!.Dispose();
 
             CapResult<SafeFileHandle> slashed =
-                PortableResolver.OpenFile(root, Parse("data/"), CapAccess.Read, ConfinedResolveOptions.None);
+                PortableResolver.OpenFile(root, Parse("data/"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
             Assert.False(slashed.IsSuccess);
             Assert.Equal(CapErrorCategory.NotADirectory, slashed.Error.Category);
 
             CapResult<SafeFileHandle> directory =
-                PortableResolver.OpenFile(root, Parse("dir"), CapAccess.Read, ConfinedResolveOptions.None);
+                PortableResolver.OpenFile(root, Parse("dir"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
             Assert.False(directory.IsSuccess);
             Assert.Equal(CapErrorCategory.IsADirectory, directory.Error.Category);
         });

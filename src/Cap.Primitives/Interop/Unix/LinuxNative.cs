@@ -27,6 +27,34 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
     internal static partial int OpenAt(int directoryFd, byte* path, int flags);
 
+    /// <summary>
+    /// Opens a name relative to a directory descriptor, creating it with
+    /// <paramref name="mode"/> if the flags ask for creation.
+    /// </summary>
+    /// <remarks>
+    /// A second import of the same entry point rather than an optional argument, because the
+    /// C function is variadic: the mode is read off the call stack only when the flags say
+    /// creation was asked for, and an import that always passed one would be describing a
+    /// different function. Calling the three-argument form with a creating flag set is
+    /// therefore not merely untidy, it hands the kernel whatever happened to be in the
+    /// register the mode is read from.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
+    internal static partial int OpenAtWithMode(int directoryFd, byte* path, int flags, uint mode);
+
+    /// <summary>
+    /// Reserves space for a file, so that a later write cannot fail for want of room.
+    /// </summary>
+    /// <remarks>
+    /// This platform's own call rather than the portable one, because only this one can
+    /// reserve without also extending the file. The portable call leaves a file that reports
+    /// the reserved length as its contents, which is a different thing from an empty file
+    /// with room behind it — and the second is what every other platform's reservation
+    /// produces.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fallocate", SetLastError = true)]
+    internal static partial int Fallocate(int fd, int mode, long offset, long length);
+
     /// <summary>Reads a symbolic link relative to a directory descriptor.</summary>
     /// <returns>The number of bytes written, which is <em>not</em> null-terminated.</returns>
     [LibraryImport("libc", EntryPoint = "readlinkat", SetLastError = true)]

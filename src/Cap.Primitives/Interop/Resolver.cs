@@ -1,3 +1,5 @@
+using Microsoft.Win32.SafeHandles;
+
 namespace Cap.Primitives.Interop;
 
 /// <summary>
@@ -45,6 +47,39 @@ internal static class Resolver
         return ops.Capabilities.SupportsConfinedOpen
             ? ops.OpenConfinedDirectory(root, path.Raw, access, options)
             : PortableResolver.OpenDirectory(root, in path, access, options);
+    }
+
+    /// <summary>
+    /// Opens the file that <paramref name="path"/> names beneath <paramref name="root"/>,
+    /// by whichever strategy this platform provides.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Creation travels with the request rather than being split off into a step of its own.
+    /// A create expressed as "resolve the parent, then make the name" would be two operations
+    /// with an instant between them, and on the platform that can resolve a whole path
+    /// atomically that instant is precisely what it was chosen to remove. So the whole
+    /// request, disposition included, goes to the backend in one piece, and the walk applies
+    /// it to the last component and to no other.
+    /// </para>
+    /// <para>
+    /// The last component is followed if it is a symbolic link, subject to the same policy as
+    /// any other component, because an open of a link is an open of its target. What that
+    /// means for a create is that the file appears where the link points, and it appears
+    /// there only if the link stays inside the subtree.
+    /// </para>
+    /// </remarks>
+    public static CapResult<SafeFileHandle> OpenFile(
+        SafeDirHandle root,
+        scoped in CapPath path,
+        scoped in FileOpenRequest request,
+        ConfinedResolveOptions options)
+    {
+        IPlatformOps ops = PlatformOps.Current;
+
+        return ops.Capabilities.SupportsConfinedOpen
+            ? ops.OpenConfinedFile(root, path.Raw, in request, options)
+            : PortableResolver.OpenFile(root, in path, in request, options);
     }
 
     /// <summary>

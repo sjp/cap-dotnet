@@ -59,7 +59,7 @@ namespace Cap.Std;
 /// authority rather than a loan.
 /// </para>
 /// </remarks>
-public sealed class Dir : IDisposable
+public sealed partial class Dir : IDisposable
 {
     private readonly SafeDirHandle _handle;
     private readonly ConfinedResolveOptions _options;

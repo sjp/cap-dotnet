@@ -144,7 +144,7 @@ public sealed class WindowsDeviceHandleTests
             using SafeDirHandle directory = opened.Value!;
 
             CapResult<SafeFileHandle> file =
-                PlatformOps.Current.OpenChildFile(directory, name, CapAccess.Read);
+                PlatformOps.Current.OpenChildFile(directory, name, FileOpenRequest.Existing(FileAccess.Read));
             if (file.IsSuccess)
             {
                 file.Value!.Dispose();

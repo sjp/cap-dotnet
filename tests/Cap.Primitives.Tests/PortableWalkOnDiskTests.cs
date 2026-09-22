@@ -42,7 +42,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
 
         using SafeDirHandle root = OpenSandbox();
         CapResult<SafeFileHandle> file = PortableResolver.OpenFile(
-            root, Parse("inside/deeper/marker"), CapAccess.Read, ConfinedResolveOptions.None);
+            root, Parse("inside/deeper/marker"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
 
         Assert.True(file.IsSuccess, file.Error.FailureDescription);
         file.Value!.Dispose();
@@ -82,7 +82,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
 
         using SafeDirHandle root = OpenSandbox();
         CapResult<SafeFileHandle> file = PortableResolver.OpenFile(
-            root, Parse("shortcut/marker"), CapAccess.Read, ConfinedResolveOptions.None);
+            root, Parse("shortcut/marker"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
 
         Assert.True(file.IsSuccess, file.Error.FailureDescription);
         file.Value!.Dispose();
@@ -92,7 +92,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
         // Linux that is a descriptor with no data access, and whether the calls a walk makes
         // accept one is a property of the kernel rather than something this code can decide.
         CapResult<SafeFileHandle> nested = PortableResolver.OpenFile(
-            root, Parse("inside/nested/marker"), CapAccess.Read, ConfinedResolveOptions.None);
+            root, Parse("inside/nested/marker"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
 
         Assert.True(nested.IsSuccess, nested.Error.FailureDescription);
         nested.Value!.Dispose();
@@ -206,7 +206,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
         {
             using SafeDirHandle root = OpenSandbox();
             CapResult<SafeFileHandle> file = PortableResolver.OpenFile(
-                root, Parse("opaque/beyond/marker"), CapAccess.Read, ConfinedResolveOptions.None);
+                root, Parse("opaque/beyond/marker"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
 
             Assert.True(file.IsSuccess, file.Error.FailureDescription);
             file.Value!.Dispose();

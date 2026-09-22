@@ -111,7 +111,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     private const int NameReplyLimit = 64 * 1024;
 
     /// <inheritdoc/>
-    public PlatformCapabilities Capabilities => new(ResolutionBackend.WindowsRelativeOpen);
+    public PlatformCapabilities Capabilities =>
+        new(ResolutionBackend.WindowsRelativeOpen, overlappedFileHandles: true);
 
     /// <inheritdoc/>
     /// <remarks>Always zero: there is no confined open on this platform to attempt.</remarks>
@@ -192,22 +193,22 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeFileHandle> OpenChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, CapAccess access)
+    public CapResult<SafeFileHandle> OpenChildFile(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
     {
-        CapError error = OpenRelative(
-            parent,
-            name,
-            FileAccessMask(access),
-            NtConstants.FILE_NON_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
-            NtConstants.FILE_OPEN_REPARSE_POINT,
-            out nint raw);
-
+        CapError error = OpenFileRelative(parent, name, in request, out nint raw);
         if (error.IsFailure)
         {
             return CapResult<SafeFileHandle>.Fail(error);
         }
 
         SafeFileHandle handle = new(raw, ownsHandle: true);
+
+        // Asked after the open, and of the object rather than of the name. A reparse point
+        // opened as itself is a link this library will not hand back as a file, whatever the
+        // name said and whatever appeared at that name in the meantime.
         CapError linkCheck = RefuseIfReparsePoint(handle);
         if (linkCheck.IsFailure)
         {
@@ -230,7 +231,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     public CapResult<SafeFileHandle> OpenConfinedFile(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
-        CapAccess access,
+        in FileOpenRequest request,
         ConfinedResolveOptions options) =>
         CapResult<SafeFileHandle>.Fail(ConfinedOpenUnavailable);
 
@@ -452,6 +453,35 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
             : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true, handle.Access));
+    }
+
+    /// <inheritdoc/>
+    public unsafe CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE));
+        }
+
+        // Duplicated rather than re-opened by the empty name, which is how a directory copy
+        // is made here. A re-open is granted the rights the object's own permissions allow
+        // now, and would also re-run the checks that decide whether the object may be handed
+        // back at all; neither is wanted for a copy of a handle whose access has already been
+        // granted and whose object has already been vetted. A duplicate carries exactly the
+        // access the original was given.
+        //
+        // Not inheritable: a handle a child process receives is authority the child was never
+        // granted, which is the leak the whole design exists to prevent.
+        nint copy = 0;
+        nint process = NtNative.GetCurrentProcess();
+        bool duplicated = NtNative.DuplicateHandle(
+            process, lease.Raw, process, &copy, 0, inheritHandle: false, DuplicateSameAccess);
+
+        return duplicated
+            ? CapResult<SafeFileHandle>.Ok(new SafeFileHandle(copy, ownsHandle: true))
+            : CapResult<SafeFileHandle>.Fail(Win32Errors.ToError(Marshal.GetLastPInvokeError()));
     }
 
     /// <inheritdoc/>
@@ -1001,22 +1031,344 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return false;
         }
     }
+    /// <summary>
+    /// The access this process is asking to keep, when it copies a handle it already holds.
+    /// </summary>
+    private const uint DuplicateSameAccess = 0x00000002;
 
-    private static uint FileAccessMask(CapAccess access)
+    /// <summary>
+    /// Opens or creates a file as an entry of an already-open directory, as the request
+    /// describes.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The creating call rather than the opening one, for every disposition including the one
+    /// that cannot create. It is the only call with a disposition at all, and expressing some
+    /// modes through one entry point and some through another would mean two code paths whose
+    /// share mode, options and attributes had to be kept in agreement by hand.
+    /// </para>
+    /// <para>
+    /// The name is a counted string resolved against the directory handle, which is what
+    /// confines it, and the reparse-point flag keeps the object manager from resolving a link
+    /// on this library's behalf. Both are the same here as for an ordinary open.
+    /// </para>
+    /// <para>
+    /// <strong>A mode that empties the file is not expressed as a disposition.</strong> The
+    /// flag that opens a reparse point as itself, combined with a disposition that overwrites,
+    /// overwrites the reparse point — the link is destroyed and replaced with an empty file
+    /// before anything has had the chance to notice there was a link. Since the whole purpose
+    /// of opening the reparse point as itself is to let this library decide what to do about
+    /// it, a disposition that acts first defeats the decision it was supposed to inform. So
+    /// emptying is done through the handle instead, by <see cref="TruncateThrough"/>, once the
+    /// object has been opened and proved not to be a link.
+    /// </para>
+    /// </remarks>
+    private static unsafe CapError OpenFileRelative(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request,
+        out nint handle)
     {
-        uint mask = NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE;
+        handle = 0;
 
-        if ((access & CapAccess.Read) != 0)
+        if (name.Length > short.MaxValue)
+        {
+            return CapError.Create(
+                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
+        }
+
+        if (name.Contains('\\') || name.Contains('/') || name.Contains('\0'))
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+        }
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+        }
+
+        // An emptying mode is taken in two halves, and the first half is the one that can be
+        // atomic: claiming a free name. It either succeeds, and the file is new and therefore
+        // already empty, or it reports the name as taken and the second half opens what is
+        // there without touching it.
+        if (request.Truncates && request.Creates)
+        {
+            CapError claimed = CreateFileRelative(lease.Raw, name, in request, NtConstants.FILE_CREATE, out handle);
+            if (claimed.Category != CapErrorCategory.AlreadyExists)
+            {
+                return claimed;
+            }
+        }
+
+        uint disposition = request.Truncates ? NtConstants.FILE_OPEN : FileRequestDisposition(request.Mode);
+
+        CapError opened = CreateFileRelative(lease.Raw, name, in request, disposition, out handle);
+        if (opened.IsFailure)
+        {
+            return opened;
+        }
+
+        if (!request.Truncates)
+        {
+            return CapError.Success;
+        }
+
+        // Only now, with the object open and known not to be a link, is it emptied. A file
+        // something else substituted for this one between the two halves is emptied instead,
+        // which is the same outcome the single atomic call would have produced.
+        CapError kind = RefuseIfReparsePoint(handle);
+        CapError emptied = kind.IsFailure ? kind : TruncateThrough(handle, request.PreallocationSize);
+        if (emptied.IsFailure)
+        {
+            _ = NtNative.NtClose(handle);
+            handle = 0;
+            return emptied;
+        }
+
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// One native open of a name beneath a directory handle, with the checks every handle
+    /// this backend produces is subject to.
+    /// </summary>
+    private static unsafe CapError CreateFileRelative(
+        nint parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request,
+        uint disposition,
+        out nint handle)
+    {
+        handle = 0;
+
+        uint desiredAccess = FileRequestAccessMask(in request);
+        uint createOptions = NtConstants.FILE_NON_DIRECTORY_FILE | NtConstants.FILE_OPEN_REPARSE_POINT |
+                             FileRequestOptions(in request);
+
+        uint attributes = (request.Options & FileOptions.Encrypted) != 0
+            ? NtConstants.FILE_ATTRIBUTE_ENCRYPTED
+            : NtConstants.FILE_ATTRIBUTE_NORMAL;
+
+        long allocation = request.PreallocationSize > 0 && disposition != NtConstants.FILE_OPEN
+            ? request.PreallocationSize
+            : 0;
+
+        fixed (char* characters = name)
+        {
+            UnicodeString objectName = new()
+            {
+                Length = (ushort)(name.Length * sizeof(char)),
+                MaximumLength = (ushort)(name.Length * sizeof(char)),
+                Buffer = (nint)characters,
+            };
+
+            ObjectAttributes objectAttributes = new()
+            {
+                Length = (uint)ObjectAttributes.StructSize,
+                RootDirectory = parent,
+                ObjectName = (nint)(&objectName),
+                Attributes = (uint)ObjectAttributeFlags.CaseInsensitive,
+                SecurityDescriptor = 0,
+                SecurityQualityOfService = 0,
+            };
+
+            IoStatusBlock status = default;
+            nint opened = 0;
+            int result = NtNative.NtCreateFile(
+                &opened,
+                desiredAccess,
+                &objectAttributes,
+                &status,
+                allocation > 0 ? &allocation : null,
+                attributes,
+                FileRequestShare(request.Share),
+                disposition,
+                createOptions,
+                eaBuffer: null,
+                eaLength: 0);
+
+            if (NtStatusCodes.IsFailure(result))
+            {
+                return NtStatusCodes.ToError(result);
+            }
+
+            CapError kind = RefuseUnlessFilesystemObject(opened);
+            if (kind.IsFailure)
+            {
+                _ = NtNative.NtClose(opened);
+                return kind;
+            }
+
+            // Asked even of an open that created the file. A create takes a free name and so
+            // has nothing to be aliased to, but the same call also opens names that were
+            // already there, and a check that ran only for some dispositions would be a check
+            // whose absence depended on a flag the caller chose.
+            CapError alias = RefuseAliasedName(opened, name);
+            if (alias.IsFailure)
+            {
+                _ = NtNative.NtClose(opened);
+                return alias;
+            }
+
+            handle = opened;
+            return CapError.Success;
+        }
+    }
+
+    /// <summary>
+    /// Empties an open file, and claims the room the request asked for.
+    /// </summary>
+    /// <remarks>
+    /// Acts on the object rather than on the name, which is the whole reason the emptying is
+    /// done here: nothing between the open and this call can redirect it at something else,
+    /// however the name is reassigned in the meantime.
+    /// </remarks>
+    private static unsafe CapError TruncateThrough(nint handle, long preallocationSize)
+    {
+        IoStatusBlock status = default;
+
+        long allocation = preallocationSize > 0 ? preallocationSize : 0;
+        int nt = NtNative.NtSetInformationFile(
+            handle, &status, &allocation, sizeof(long), NtConstants.FileAllocationInformationClass);
+
+        if (NtStatusCodes.IsFailure(nt))
+        {
+            return NtStatusCodes.ToError(nt);
+        }
+
+        long end = 0;
+        nt = NtNative.NtSetInformationFile(
+            handle, &status, &end, sizeof(long), NtConstants.FileEndOfFileInformationClass);
+
+        return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
+    }
+
+    /// <summary>The disposition that expresses a file mode.</summary>
+    /// <summary>
+    /// The disposition that expresses a file mode, for the modes that do not empty the file.
+    /// </summary>
+    /// <remarks>
+    /// The overwriting dispositions are deliberately absent. None of these destroys anything:
+    /// each either takes a free name, opens what is there, or does whichever applies. A mode
+    /// that empties the file is taken apart instead — see <see cref="OpenFileRelative"/> —
+    /// because an overwriting disposition combined with the flag that opens a reparse point
+    /// as itself destroys the reparse point, which is precisely the thing the flag exists to
+    /// let this library look at first.
+    /// </remarks>
+    private static uint FileRequestDisposition(FileMode mode) => mode switch
+    {
+        FileMode.CreateNew => NtConstants.FILE_CREATE,
+        FileMode.OpenOrCreate or FileMode.Append => NtConstants.FILE_OPEN_IF,
+        _ => NtConstants.FILE_OPEN,
+    };
+
+    /// <summary>
+    /// The rights a file open asks for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A handle opened to append is granted the appending right instead of the ordinary write
+    /// right and not alongside it. Holding both would let a write land at an explicit offset,
+    /// and a handle that can write anywhere is not a handle that appends — it is a handle
+    /// that happens to be pointed at the end.
+    /// </para>
+    /// <para>
+    /// The right to wait on the handle goes with the synchronous form and only with it: it is
+    /// what makes a blocking read possible, and a handle opened for overlapped operations
+    /// that also asked for it would be a handle whose kind could not be told from its access.
+    /// </para>
+    /// </remarks>
+    private static uint FileRequestAccessMask(in FileOpenRequest request)
+    {
+        uint mask = NtConstants.FILE_READ_ATTRIBUTES;
+
+        if (!request.IsAsynchronous)
+        {
+            mask |= NtConstants.SYNCHRONIZE;
+        }
+
+        if ((request.Access & FileAccess.Read) != 0)
         {
             mask |= NtConstants.FILE_READ_DATA;
         }
 
-        if ((access & CapAccess.Write) != 0)
+        if ((request.Access & FileAccess.Write) != 0)
         {
-            mask |= NtConstants.FILE_WRITE_DATA | NtConstants.FILE_WRITE_ATTRIBUTES;
+            mask |= NtConstants.FILE_WRITE_ATTRIBUTES;
+            mask |= request.Mode == FileMode.Append
+                ? NtConstants.FILE_APPEND_DATA
+                : NtConstants.FILE_WRITE_DATA;
+        }
+
+        if ((request.Options & FileOptions.DeleteOnClose) != 0)
+        {
+            mask |= NtConstants.DELETE;
         }
 
         return mask;
+    }
+
+    /// <summary>The open options a request's flags and hints translate to.</summary>
+    private static uint FileRequestOptions(in FileOpenRequest request)
+    {
+        uint options = request.IsAsynchronous ? 0 : NtConstants.FILE_SYNCHRONOUS_IO_NONALERT;
+
+        if ((request.Options & FileOptions.WriteThrough) != 0)
+        {
+            options |= NtConstants.FILE_WRITE_THROUGH;
+        }
+
+        if ((request.Options & FileOptions.SequentialScan) != 0)
+        {
+            options |= NtConstants.FILE_SEQUENTIAL_ONLY;
+        }
+
+        if ((request.Options & FileOptions.RandomAccess) != 0)
+        {
+            options |= NtConstants.FILE_RANDOM_ACCESS;
+        }
+
+        if ((request.Options & FileOptions.DeleteOnClose) != 0)
+        {
+            options |= NtConstants.FILE_DELETE_ON_CLOSE;
+        }
+
+        return options;
+    }
+
+    /// <summary>
+    /// The share mode a request asks for.
+    /// </summary>
+    /// <remarks>
+    /// Passed through as the caller wrote it, rather than widened to the permissive mode
+    /// resolution itself uses. A walk holds its handles for an instant and denying anybody
+    /// else access for that instant would break ordinary concurrent use of a sandbox; a
+    /// handle handed to a caller is theirs for as long as they keep it, and how they share it
+    /// is their business.
+    /// </remarks>
+    private static uint FileRequestShare(FileShare share)
+    {
+        uint mode = 0;
+
+        if ((share & FileShare.Read) != 0)
+        {
+            mode |= NtConstants.FILE_SHARE_READ;
+        }
+
+        if ((share & FileShare.Write) != 0)
+        {
+            mode |= NtConstants.FILE_SHARE_WRITE;
+        }
+
+        if ((share & FileShare.Delete) != 0)
+        {
+            mode |= NtConstants.FILE_SHARE_DELETE;
+        }
+
+        return mode;
     }
 
     /// <summary>
@@ -1305,9 +1657,18 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// what it got was a link, and hand it back rather than treat it as the directory or file
     /// the caller asked for.
     /// </remarks>
-    private static CapError RefuseIfReparsePoint(SafeHandle handle)
+    private static CapError RefuseIfReparsePoint(SafeHandle handle) =>
+        Classify(QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo), tagInfo);
+
+    /// <summary>
+    /// The same refusal asked of a raw handle, for the operations that hold one directly
+    /// because they are about to close it themselves.
+    /// </summary>
+    private static CapError RefuseIfReparsePoint(nint handle) =>
+        Classify(QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo), tagInfo);
+
+    private static CapError Classify(CapError error, in FileAttributeTagInformation tagInfo)
     {
-        CapError error = QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo);
         if (error.IsFailure)
         {
             return error;

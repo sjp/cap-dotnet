@@ -69,15 +69,33 @@ internal interface IPlatformOps
 
     /// <summary>
     /// Opens the file named by <paramref name="name"/> directly beneath
-    /// <paramref name="parent"/>. The file must already exist.
+    /// <paramref name="parent"/>, as <paramref name="request"/> describes.
     /// </summary>
     /// <remarks>
-    /// Creation, truncation and append are absent on purpose: they belong to the file API,
-    /// which applies them to a name resolution has already confined. Mixing them in here
-    /// would mean the walk could create things while it was still deciding whether it was
-    /// allowed to look at them.
+    /// <para>
+    /// The one member here that may bring something into existence, and it may only do so
+    /// for the single name it is given. That is the whole of the concession: a walk still
+    /// cannot create the directories it passes through, because every step above this one
+    /// opens what is already there. Creation is a property of the last component, so it is
+    /// expressed on the call that touches the last component and nowhere else.
+    /// </para>
+    /// <para>
+    /// Still refuses to follow a link in the name, like every other member. A request that
+    /// creates and finds a link in the way is reported as
+    /// <see cref="CapErrorCategory.SymbolicLink"/> rather than resolved, so the decision
+    /// about whether to follow it is made by the caller, under the caller's policy, with the
+    /// target re-resolved from the sandbox root.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotSupported"/> for anything in the request this
+    /// platform cannot honour, rather than opening a handle that behaves differently from
+    /// the one that was asked for.
+    /// </para>
     /// </remarks>
-    CapResult<SafeFileHandle> OpenChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, CapAccess access);
+    CapResult<SafeFileHandle> OpenChildFile(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request);
 
     /// <summary>
     /// Resolves a whole relative path beneath <paramref name="root"/> in one operation that
@@ -120,10 +138,17 @@ internal interface IPlatformOps
     /// The file counterpart of <see cref="OpenConfinedDirectory"/>, with the same confinement,
     /// the same reporting and the same internal retry.
     /// </summary>
+    /// <remarks>
+    /// Carries the whole of <paramref name="request"/>, creation included. Doing the creation
+    /// in the same operation as the resolution is the point: dividing the path so that the
+    /// last component could be created separately would resolve the prefix in one backend and
+    /// the name in another, and the instant between them is exactly the window this backend
+    /// exists to close.
+    /// </remarks>
     CapResult<SafeFileHandle> OpenConfinedFile(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
-        CapAccess access,
+        in FileOpenRequest request,
         ConfinedResolveOptions options);
 
     /// <summary>
@@ -188,6 +213,18 @@ internal interface IPlatformOps
     /// made it.
     /// </remarks>
     CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle);
+
+    /// <summary>
+    /// Produces a second, independent handle to the same open file.
+    /// </summary>
+    /// <remarks>
+    /// A copy of the handle rather than a second open of the name: it refers to the object
+    /// this one refers to, with the access this one was granted, and nothing that happens to
+    /// the name in the meantime can change which object that is. Re-opening would ask the
+    /// filesystem to resolve a name again, which is the one thing a capability handle exists
+    /// to avoid having to do.
+    /// </remarks>
+    CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle);
 
     /// <summary>
     /// Creates a directory named <paramref name="name"/> directly beneath

@@ -53,10 +53,12 @@ internal static unsafe partial class NtNative
     /// Creates or opens an object, resolving its name against a directory handle.
     /// </summary>
     /// <remarks>
-    /// The creating counterpart of <see cref="NtOpenFile"/>, and used only where something
-    /// is being made: a directory, or the stub a symbolic link is written into. An open of
-    /// something that already exists goes through the other call, which cannot create by
-    /// accident whatever disposition a caller passes.
+    /// The creating counterpart of <see cref="NtOpenFile"/>. Everything that is being made
+    /// goes through it — a directory, the stub a symbolic link is written into, a file the
+    /// caller asked to create — and so does a file open whose disposition the caller chose,
+    /// because this is the only call that has a disposition at all. An open that cannot
+    /// create anything goes through the other call instead, which has no disposition to pass
+    /// wrongly.
     /// </remarks>
     [LibraryImport("ntdll.dll")]
     internal static partial int NtCreateFile(
@@ -163,6 +165,30 @@ internal static unsafe partial class NtNative
         uint pathLength,
         uint flags);
 
+    /// <summary>A pseudo-handle for the current process, for the handle-duplicating call.</summary>
+    [LibraryImport("kernel32.dll")]
+    internal static partial nint GetCurrentProcess();
+
+    /// <summary>
+    /// Produces a second handle to the object an existing handle refers to.
+    /// </summary>
+    /// <remarks>
+    /// A handle rather than a name, so the copy refers to the object the original refers to
+    /// and nothing a concurrent rename does can change which object that is. Re-opening the
+    /// name would ask the filesystem to resolve it a second time, which is the one thing a
+    /// capability handle exists to avoid having to do.
+    /// </remarks>
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool DuplicateHandle(
+        nint sourceProcess,
+        nint sourceHandle,
+        nint targetProcess,
+        nint* targetHandle,
+        uint desiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
+        uint options);
+
     /// <summary>Issues a filesystem control code against an open handle. Used to read a reparse point.</summary>
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -214,6 +240,22 @@ internal static class NtConstants
     /// <summary>Required to remove an object, and to rename one.</summary>
     public const uint DELETE = 0x00010000;
 
+    /// <summary>
+    /// Write at the end of the file, wherever that is when the write happens.
+    /// </summary>
+    /// <remarks>
+    /// Granted instead of the ordinary write right rather than alongside it. Holding both
+    /// would let a write land at an explicit offset, which is exactly what a handle opened to
+    /// append is not supposed to be able to do.
+    /// </remarks>
+    public const uint FILE_APPEND_DATA = 0x0004;
+
+    // --- Share mode, one bit at a time --------------------------------------------------
+
+    public const uint FILE_SHARE_READ = 0x0001;
+    public const uint FILE_SHARE_WRITE = 0x0002;
+    public const uint FILE_SHARE_DELETE = 0x0004;
+
     // --- Open options --------------------------------------------------------------------
 
     /// <summary>Refuse the open unless the object is a directory.</summary>
@@ -223,7 +265,31 @@ internal static class NtConstants
     public const uint FILE_NON_DIRECTORY_FILE = 0x00000040;
 
     /// <summary>Make the handle usable for ordinary blocking reads and writes.</summary>
+    /// <remarks>
+    /// Its absence is what makes a handle capable of overlapped operations; there is no
+    /// separate flag asking for those. A handle opened without it and then used for blocking
+    /// reads, or opened with it and then handed to something expecting overlapped ones, does
+    /// not fail cleanly — so which of the two a handle is has to be decided when it is opened
+    /// and carried with it afterwards.
+    /// </remarks>
     public const uint FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020;
+
+    /// <summary>Do not return from a write until the data has reached the storage device.</summary>
+    public const uint FILE_WRITE_THROUGH = 0x00000002;
+
+    /// <summary>A hint that the file will be read from beginning to end.</summary>
+    public const uint FILE_SEQUENTIAL_ONLY = 0x00000004;
+
+    /// <summary>A hint that the file will be read out of order.</summary>
+    public const uint FILE_RANDOM_ACCESS = 0x00000800;
+
+    /// <summary>Remove the object once the last handle to it is closed.</summary>
+    /// <remarks>
+    /// Acts on the object rather than on a name, which is why it can be offered here at all.
+    /// The removal happens to the file that was opened, whatever its name has become in the
+    /// meantime, so it cannot be made to remove something a rename put in its place.
+    /// </remarks>
+    public const uint FILE_DELETE_ON_CLOSE = 0x00001000;
 
     /// <summary>
     /// Open a reparse point itself rather than what it points at.
@@ -238,21 +304,38 @@ internal static class NtConstants
 
     // --- Create disposition ---------------------------------------------------------------
 
+    /// <summary>Open the object, and fail if nothing holds the name.</summary>
+    public const uint FILE_OPEN = 1;
+
     /// <summary>
     /// Create the object, and fail if the name is already taken.
     /// </summary>
     /// <remarks>
-    /// The only disposition this library ever passes. Every other one either opens something
-    /// that exists or silently does one or the other, and a create that quietly opened an
-    /// existing object would let a name planted by somebody else be mistaken for one this
-    /// process had just made.
+    /// The only disposition anything but a file open ever passes. Every other one either
+    /// opens something that exists or silently does one or the other, and a create that
+    /// quietly opened an existing object would let a name planted by somebody else be
+    /// mistaken for one this process had just made. A file open passes whichever disposition
+    /// the caller chose, because choosing is the whole of what a file mode is.
     /// </remarks>
     public const uint FILE_CREATE = 2;
+
+    /// <summary>Open the object, or create it if nothing holds the name.</summary>
+    public const uint FILE_OPEN_IF = 3;
+
+    // The overwriting dispositions are deliberately not declared. Combined with the flag
+    // that opens a reparse point as itself, they overwrite the reparse point rather than
+    // what it refers to, destroying a link before anything can notice it was one. Emptying a
+    // file is done through its handle here, after the object has been opened and examined.
+
+
 
     // --- File attributes for a newly created object -----------------------------------------
 
     /// <summary>No attributes of note. Valid only on its own.</summary>
     public const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+
+    /// <summary>Store the file's contents encrypted at rest.</summary>
+    public const uint FILE_ATTRIBUTE_ENCRYPTED = 0x00004000;
 
     // --- CreateFileW ----------------------------------------------------------------------
 
@@ -338,6 +421,19 @@ internal static class NtConstants
     public const uint FSCTL_SET_REPARSE_POINT = 0x000900A4;
 
     // --- Information classes for writing --------------------------------------------------------
+
+    /// <summary>Sets an open file's length, which is how a file is emptied through its handle.</summary>
+    public const uint FileEndOfFileInformationClass = 20;
+
+    /// <summary>
+    /// Sets how much room is claimed for an open file, behind whatever length it reports.
+    /// </summary>
+    /// <remarks>
+    /// Set to zero before the length is, when a file is being emptied: the space a file was
+    /// using is not released by shortening it alone, so a file emptied without this would
+    /// report no contents while still occupying the disk.
+    /// </remarks>
+    public const uint FileAllocationInformationClass = 19;
 
     /// <summary>Renames an open object. The older form, carrying a plain replace flag.</summary>
     public const uint FileRenameInformationClass = 10;

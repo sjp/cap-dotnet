@@ -32,7 +32,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     private const int MaxLinkBufferBytes = 64 * 1024;
 
     /// <inheritdoc/>
-    public PlatformCapabilities Capabilities => new(ResolutionBackend.PortableWalk);
+    public PlatformCapabilities Capabilities =>
+        new(ResolutionBackend.PortableWalk, overlappedFileHandles: false);
 
     /// <inheritdoc/>
     /// <remarks>Always zero: there is no confined open on this platform to attempt.</remarks>
@@ -95,8 +96,16 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeFileHandle> OpenChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, CapAccess access)
+    public CapResult<SafeFileHandle> OpenChildFile(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
     {
+        if (!TryFileFlags(in request, out int flags, out CapError unsupported))
+        {
+            return CapResult<SafeFileHandle>.Fail(unsupported);
+        }
+
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
@@ -111,8 +120,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        int flags = AccessFlags(access) | DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC |
-                    DarwinConstants.O_NONBLOCK;
+        flags |= DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC | DarwinConstants.O_NONBLOCK;
 
         int fd;
         int errno = 0;
@@ -120,7 +128,10 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         {
             fixed (byte* path = encoded.Bytes)
             {
-                fd = DarwinNative.OpenAt(lease.Descriptor, path, flags);
+                fd = request.Creates
+                    ? DarwinNative.OpenAtWithMode(lease.Descriptor, path, flags, DarwinConstants.FileCreateMode)
+                    : DarwinNative.OpenAt(lease.Descriptor, path, flags);
+
                 if (fd < 0)
                 {
                     errno = Marshal.GetLastPInvokeError();
@@ -134,9 +145,58 @@ internal sealed class DarwinPlatformOps : IPlatformOps
                 TranslateOpenFailure(lease.Descriptor, encoded.Bytes, errno, noFollow: true));
         }
 
-        SafeFileHandle handle = new(fd, ownsHandle: true);
         ClearNonBlocking(fd);
-        return CapResult<SafeFileHandle>.Ok(handle);
+
+        CapError kind = RefuseIfDirectory(fd);
+        CapError reserved = kind.IsFailure ? kind : Preallocate(fd, in request);
+        if (reserved.IsFailure)
+        {
+            new SafeFileHandle(fd, ownsHandle: true).Dispose();
+            return CapResult<SafeFileHandle>.Fail(reserved);
+        }
+
+        return CapResult<SafeFileHandle>.Ok(new SafeFileHandle(fd, ownsHandle: true));
+    }
+
+    /// <summary>
+    /// Refuses a descriptor that turned out to refer to a directory.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Necessary because a read-only open of a directory succeeds on this platform. Nothing
+    /// can be read through the descriptor afterwards, but the failure arrives at the first
+    /// read rather than at the open, and in between the caller is holding something that says
+    /// it is a file. A directory handle and a file handle carry different authority and are
+    /// not interchangeable, so a caller who asked for a file and was given a directory has
+    /// been told something untrue.
+    /// </para>
+    /// <para>
+    /// Asked of the descriptor rather than of the name: the name may already refer to
+    /// something else, and the descriptor is what was opened.
+    /// </para>
+    /// </remarks>
+    private static CapError RefuseIfDirectory(int fd)
+    {
+        DarwinStat stat = default;
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            result = DarwinNative.FStat(fd, &stat);
+            if (result < 0)
+            {
+                errno = Marshal.GetLastPInvokeError();
+            }
+        }
+
+        if (result < 0)
+        {
+            return DarwinErrno.ToError(errno);
+        }
+
+        return stat.NodeType == CapNodeType.Directory
+            ? CapError.FromCategory(CapErrorCategory.IsADirectory)
+            : CapError.Success;
     }
 
     /// <inheritdoc/>
@@ -151,7 +211,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     public CapResult<SafeFileHandle> OpenConfinedFile(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
-        CapAccess access,
+        in FileOpenRequest request,
         ConfinedResolveOptions options) =>
         CapResult<SafeFileHandle>.Fail(ConfinedOpenUnavailable);
 
@@ -350,6 +410,32 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         }
 
         return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
+    }
+
+    /// <inheritdoc/>
+    public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.Create(
+                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+        }
+
+        // Close-on-exec is asked for as part of the duplication, for the same reason it is
+        // on a directory: a process started in the gap before the flag could be set would
+        // inherit the file and the authority to read or write it.
+        //
+        // The copy shares the original's open description, so it shares its access mode, its
+        // append behaviour and its position. That is what makes it a copy of this handle
+        // rather than a second opinion about the name it came from.
+        int fd = DarwinNative.Fcntl(lease.Descriptor, DarwinConstants.F_DUPFD_CLOEXEC, 0);
+        if (fd < 0)
+        {
+            return CapResult<SafeFileHandle>.Fail(DarwinErrno.ToError(Marshal.GetLastPInvokeError()));
+        }
+
+        return CapResult<SafeFileHandle>.Ok(new SafeFileHandle(fd, ownsHandle: true));
     }
 
     /// <inheritdoc/>
@@ -621,6 +707,133 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         CapAccess.Write => DarwinConstants.O_WRONLY,
         _ => DarwinConstants.O_RDONLY,
     };
+
+    /// <summary>
+    /// Turns a file open request into the flags that express it, or reports that this
+    /// platform cannot express it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Removing a file when its last handle closes, and encrypting one at rest, are both
+    /// refused rather than dropped. Neither is something a descriptor can carry here: the
+    /// nearest available stand-in for the first is to unlink a name afterwards, which removes
+    /// whatever holds that name at the time and not necessarily the file that was opened, and
+    /// the second belongs to a filesystem this platform does not have. A caller who asked for
+    /// either asked deliberately, and would have no way of discovering it had not happened.
+    /// </para>
+    /// <para>
+    /// The two access hints are dropped instead. They say how the file is expected to be
+    /// read, any kernel is free to ignore them, and a handle that ignores them still behaves
+    /// exactly as asked.
+    /// </para>
+    /// </remarks>
+    private static bool TryFileFlags(in FileOpenRequest request, out int flags, out CapError error)
+    {
+        error = CapError.Success;
+
+        const FileOptions Unsupported = FileOptions.DeleteOnClose | FileOptions.Encrypted;
+        if ((request.Options & Unsupported) != 0)
+        {
+            flags = 0;
+            error = CapError.FromCategory(CapErrorCategory.NotSupported);
+            return false;
+        }
+
+        flags = request.Access switch
+        {
+            FileAccess.ReadWrite => DarwinConstants.O_RDWR,
+            FileAccess.Write => DarwinConstants.O_WRONLY,
+            _ => DarwinConstants.O_RDONLY,
+        };
+
+        switch (request.Mode)
+        {
+            case FileMode.CreateNew:
+                flags |= DarwinConstants.O_CREAT | DarwinConstants.O_EXCL;
+                break;
+            case FileMode.Create:
+                flags |= DarwinConstants.O_CREAT | DarwinConstants.O_TRUNC;
+                break;
+            case FileMode.OpenOrCreate:
+                flags |= DarwinConstants.O_CREAT;
+                break;
+            case FileMode.Truncate:
+                flags |= DarwinConstants.O_TRUNC;
+                break;
+            case FileMode.Append:
+                flags |= DarwinConstants.O_CREAT | DarwinConstants.O_APPEND;
+                break;
+            default:
+                break;
+        }
+
+        if ((request.Options & FileOptions.WriteThrough) != 0)
+        {
+            flags |= DarwinConstants.O_SYNC;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Reserves the space the request asked for, on a file the open brought into existence
+    /// or emptied.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reservation claims space behind the end of the file and leaves its length alone,
+    /// which is what asking for room in advance means: an empty file that a later write
+    /// cannot run out of space in, rather than a file that already reports that many bytes.
+    /// Contiguous space is asked for first and a scattered reservation accepted if the
+    /// filesystem cannot manage it — the caller asked for room, not for a particular
+    /// arrangement of it.
+    /// </para>
+    /// <para>
+    /// Only for an open that starts the file from nothing: reserving on a file opened as it
+    /// stood would extend somebody else's data. A refusal for want of room fails the open,
+    /// because a caller who reserved in advance did so precisely so that a later write would
+    /// not fail for that reason, and every other complaint is ignored because the file is
+    /// perfectly usable without the reservation.
+    /// </para>
+    /// <para>
+    /// <strong>A file the open created is left behind when this fails.</strong> Removing it
+    /// would mean removing a name, and by then the name may hold something else, so the
+    /// alternative to leaving debris is deleting a stranger's file.
+    /// </para>
+    /// </remarks>
+    private static CapError Preallocate(int fd, in FileOpenRequest request)
+    {
+        if (request.PreallocationSize <= 0 || !(request.Creates || request.Truncates))
+        {
+            return CapError.Success;
+        }
+
+        int errno = 0;
+        unsafe
+        {
+            FileStore store = new()
+            {
+                Flags = DarwinConstants.F_ALLOCATECONTIG | DarwinConstants.F_ALLOCATEALL,
+                PositionMode = DarwinConstants.F_PEOFPOSMODE,
+                Offset = 0,
+                Length = request.PreallocationSize,
+                BytesAllocated = 0,
+            };
+
+            if (DarwinNative.FcntlStore(fd, DarwinConstants.F_PREALLOCATE, &store) < 0)
+            {
+                store.Flags = DarwinConstants.F_ALLOCATEALL;
+                if (DarwinNative.FcntlStore(fd, DarwinConstants.F_PREALLOCATE, &store) < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return errno is PosixErrno.ENOSPC or PosixErrno.EFBIG
+            ? DarwinErrno.ToError(errno)
+            : CapError.Success;
+    }
 
     /// <summary>
     /// Removes the non-blocking flag the open was issued with, so that the handle handed

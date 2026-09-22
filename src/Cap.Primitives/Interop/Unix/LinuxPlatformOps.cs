@@ -46,7 +46,9 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities =>
-        new(_probe.Supported ? ResolutionBackend.ConfinedOpen : ResolutionBackend.PortableWalk);
+        new(
+            _probe.Supported ? ResolutionBackend.ConfinedOpen : ResolutionBackend.PortableWalk,
+            overlappedFileHandles: false);
 
     /// <inheritdoc/>
     public long ConfinedOpenAttempts => Interlocked.Read(ref _confinedOpenAttempts);
@@ -154,8 +156,16 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeFileHandle> OpenChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, CapAccess access)
+    public CapResult<SafeFileHandle> OpenChildFile(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
     {
+        if (!TryFileFlags(in request, out int flags, out CapError unsupported))
+        {
+            return CapResult<SafeFileHandle>.Fail(unsupported);
+        }
+
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
@@ -172,8 +182,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         Interlocked.Increment(ref _componentOpens);
 
-        int flags = AccessFlags(access) | LinuxConstants.O_NOFOLLOW | LinuxConstants.O_CLOEXEC |
-                    LinuxConstants.O_NONBLOCK;
+        flags |= LinuxConstants.O_NOFOLLOW | LinuxConstants.O_CLOEXEC | LinuxConstants.O_NONBLOCK;
 
         int fd;
         int errno;
@@ -181,7 +190,9 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         {
             fixed (byte* path = encoded.Bytes)
             {
-                fd = LinuxNative.OpenAt(lease.Descriptor, path, flags);
+                fd = request.Creates
+                    ? LinuxNative.OpenAtWithMode(lease.Descriptor, path, flags, LinuxConstants.FileCreateMode)
+                    : LinuxNative.OpenAt(lease.Descriptor, path, flags);
                 errno = fd < 0 ? Marshal.GetLastPInvokeError() : 0;
             }
         }
@@ -192,9 +203,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 TranslateOpenFailure(lease.Descriptor, encoded.Bytes, errno, noFollow: true));
         }
 
-        SafeFileHandle handle = new(fd, ownsHandle: true);
-        ClearNonBlocking(fd);
-        return CapResult<SafeFileHandle>.Ok(handle);
+        return FinishFileOpen(fd, in request);
     }
 
     /// <inheritdoc/>
@@ -210,7 +219,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         int flags = accessFlag | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC;
-        CapError error = OpenConfinedDescriptor(root, path, flags, options, out int fd);
+        CapError error = OpenConfinedDescriptor(root, path, flags, mode: 0, options, out int fd);
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
             : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
@@ -220,19 +229,27 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     public CapResult<SafeFileHandle> OpenConfinedFile(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
-        CapAccess access,
+        in FileOpenRequest request,
         ConfinedResolveOptions options)
     {
-        int flags = AccessFlags(access) | LinuxConstants.O_CLOEXEC | LinuxConstants.O_NONBLOCK;
-        CapError error = OpenConfinedDescriptor(root, path, flags, options, out int fd);
+        if (!TryFileFlags(in request, out int flags, out CapError unsupported))
+        {
+            return CapResult<SafeFileHandle>.Fail(unsupported);
+        }
+
+        flags |= LinuxConstants.O_CLOEXEC | LinuxConstants.O_NONBLOCK;
+
+        // The creation mode is read by the kernel only when the flags ask for creation, and
+        // passing a non-zero one when they do not is rejected outright rather than ignored.
+        uint mode = request.Creates ? LinuxConstants.FileCreateMode : 0;
+
+        CapError error = OpenConfinedDescriptor(root, path, flags, mode, options, out int fd);
         if (error.IsFailure)
         {
             return CapResult<SafeFileHandle>.Fail(error);
         }
 
-        SafeFileHandle handle = new(fd, ownsHandle: true);
-        ClearNonBlocking(fd);
-        return CapResult<SafeFileHandle>.Ok(handle);
+        return FinishFileOpen(fd, in request);
     }
 
     /// <inheritdoc/>
@@ -421,6 +438,33 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
+    }
+
+    /// <inheritdoc/>
+    public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.Create(
+                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+        }
+
+        // The same reasoning as for a directory copy: the plain duplication call leaves the
+        // copy without the close-on-exec flag, so a process started in the gap before the
+        // flag could be set would inherit the file and the authority to read or write it.
+        // One call that does both leaves no such gap.
+        //
+        // The copy shares the original's open description, so it shares its access mode, its
+        // append behaviour and its position. That is what makes it a copy of this handle
+        // rather than a second opinion about the name it came from.
+        int fd = LinuxNative.Fcntl(lease.Descriptor, LinuxConstants.F_DUPFD_CLOEXEC, 0);
+        if (fd < 0)
+        {
+            return CapResult<SafeFileHandle>.Fail(LinuxErrno.ToError(Marshal.GetLastPInvokeError()));
+        }
+
+        return CapResult<SafeFileHandle>.Ok(new SafeFileHandle(fd, ownsHandle: true));
     }
 
     /// <inheritdoc/>
@@ -678,6 +722,185 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     };
 
     /// <summary>
+    /// Turns a file open request into the flags that express it, or reports that this
+    /// platform cannot express it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two of the framework's options have no counterpart a handle can carry here, and both
+    /// are refused rather than dropped. Removing a file when its last handle closes is done
+    /// elsewhere by the filesystem, against the object; the nearest thing available here is
+    /// to unlink a name afterwards, which removes whatever holds that name at the time and
+    /// not necessarily the file that was opened. Encrypting a file at rest is a property of
+    /// a filesystem that does not exist on this platform. Quietly ignoring either would
+    /// leave a caller who asked carefully believing they had got what they asked for.
+    /// </para>
+    /// <para>
+    /// The two access hints are a different case and are dropped rather than refused. They
+    /// say how the file is expected to be read, the kernel is free to ignore them anywhere,
+    /// and a handle that ignores them behaves exactly as the caller asked — only more
+    /// slowly, perhaps. A hint is the one kind of request it is honest to drop.
+    /// </para>
+    /// </remarks>
+    private static bool TryFileFlags(in FileOpenRequest request, out int flags, out CapError error)
+    {
+        error = CapError.Success;
+
+        const FileOptions Unsupported = FileOptions.DeleteOnClose | FileOptions.Encrypted;
+        if ((request.Options & Unsupported) != 0)
+        {
+            flags = 0;
+            error = CapError.FromCategory(CapErrorCategory.NotSupported);
+            return false;
+        }
+
+        flags = request.Access switch
+        {
+            FileAccess.ReadWrite => LinuxConstants.O_RDWR,
+            FileAccess.Write => LinuxConstants.O_WRONLY,
+            _ => LinuxConstants.O_RDONLY,
+        };
+
+        switch (request.Mode)
+        {
+            case FileMode.CreateNew:
+                flags |= LinuxConstants.O_CREAT | LinuxConstants.O_EXCL;
+                break;
+            case FileMode.Create:
+                flags |= LinuxConstants.O_CREAT | LinuxConstants.O_TRUNC;
+                break;
+            case FileMode.OpenOrCreate:
+                flags |= LinuxConstants.O_CREAT;
+                break;
+            case FileMode.Truncate:
+                flags |= LinuxConstants.O_TRUNC;
+                break;
+            case FileMode.Append:
+                flags |= LinuxConstants.O_CREAT | LinuxConstants.O_APPEND;
+                break;
+            default:
+                break;
+        }
+
+        if ((request.Options & FileOptions.WriteThrough) != 0)
+        {
+            flags |= LinuxConstants.O_SYNC;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Turns a freshly opened descriptor into a handle, once the open's after-effects have
+    /// been applied.
+    /// </summary>
+    /// <remarks>
+    /// Asynchrony is deliberately absent. A descriptor here has no overlapped mode to be put
+    /// into: every file read on this platform completes when the kernel says it does, and
+    /// what the framework calls an asynchronous file handle is a promise about which thread
+    /// waits, not about the descriptor. So the request's asynchrony is carried by the layer
+    /// that hands the handle to a caller and changes nothing about the open itself.
+    /// </remarks>
+    private static CapResult<SafeFileHandle> FinishFileOpen(int fd, in FileOpenRequest request)
+    {
+        ClearNonBlocking(fd);
+
+        CapError kind = RefuseIfDirectory(fd);
+        CapError reserved = kind.IsFailure ? kind : Preallocate(fd, in request);
+        if (reserved.IsFailure)
+        {
+            new SafeFileHandle(fd, ownsHandle: true).Dispose();
+            return CapResult<SafeFileHandle>.Fail(reserved);
+        }
+
+        return CapResult<SafeFileHandle>.Ok(new SafeFileHandle(fd, ownsHandle: true));
+    }
+
+    /// <summary>
+    /// Refuses a descriptor that turned out to refer to a directory.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Necessary because a read-only open of a directory succeeds on this platform. Nothing
+    /// can then be read through the descriptor, but the failure arrives at the first read
+    /// rather than at the open, and in between the caller is holding something that says it
+    /// is a file. That is the one confusion this pair of types must not permit: a directory
+    /// handle and a file handle carry different authority and are not interchangeable, and
+    /// a caller who asked for a file and was given a directory has been told something
+    /// untrue.
+    /// </para>
+    /// <para>
+    /// Asked of the descriptor rather than of the name. The name may already refer to
+    /// something else; the descriptor is what was opened, and it is what the answer has to be
+    /// about.
+    /// </para>
+    /// </remarks>
+    private static CapError RefuseIfDirectory(int fd)
+    {
+        ReadOnlySpan<byte> empty = [0];
+        CapError error = StatInto(fd, empty, LinuxConstants.AT_EMPTY_PATH, out CapNodeInfo info);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        return info.Type == CapNodeType.Directory
+            ? CapError.FromCategory(CapErrorCategory.IsADirectory)
+            : CapError.Success;
+    }
+
+    /// <summary>
+    /// Reserves the space the request asked for, on a file the open brought into existence
+    /// or emptied.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only for an open that starts the file from nothing. Reserving space on a file that
+    /// was opened as it stood would extend somebody else's data, which is not what the
+    /// request means, and there is no honest way to tell from here whether a name that could
+    /// have been created was.
+    /// </para>
+    /// <para>
+    /// The file's length is left alone. The reservation claims room behind the end of the
+    /// file rather than filling it, so a caller who asked for room in advance gets an empty
+    /// file that a later write cannot run out of space in — which is what the same request
+    /// produces on every other platform, and what the framework's own file open produces
+    /// here.
+    /// </para>
+    /// <para>
+    /// A refusal for want of room fails the open, because a caller who asked for the space
+    /// in advance asked precisely so that a later write would not fail for that reason.
+    /// Every other complaint is ignored: filesystems that cannot reserve space report a
+    /// variety of things, and the file is perfectly usable without the reservation.
+    /// </para>
+    /// <para>
+    /// <strong>A file the open created is left behind when this fails.</strong> Removing it
+    /// would mean removing a name, and by then the name may hold something else — so the
+    /// alternative to leaving debris is deleting a stranger's file. The handle is closed and
+    /// the failure reported; clearing up is the caller's, who knows what they asked for.
+    /// </para>
+    /// </remarks>
+    private static CapError Preallocate(int fd, in FileOpenRequest request)
+    {
+        if (request.PreallocationSize <= 0 || !(request.Creates || request.Truncates))
+        {
+            return CapError.Success;
+        }
+
+        if (LinuxNative.Fallocate(
+            fd, LinuxConstants.FALLOC_FL_KEEP_SIZE, 0, request.PreallocationSize) == 0)
+        {
+            return CapError.Success;
+        }
+
+        int errno = Marshal.GetLastPInvokeError();
+        return errno is PosixErrno.ENOSPC or PosixErrno.EFBIG
+            ? LinuxErrno.ToError(errno)
+            : CapError.Success;
+    }
+
+    /// <summary>
     /// Translates the authority asked of a directory into the flag that expresses it.
     /// </summary>
     /// <returns>
@@ -845,6 +1068,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         int flags,
+        uint mode,
         ConfinedResolveOptions options,
         out int descriptor)
     {
@@ -871,7 +1095,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         OpenHow how = new()
         {
             Flags = (ulong)(uint)flags,
-            Mode = 0,
+            Mode = mode,
             Resolve = (ulong)ResolveFor(options),
         };
 

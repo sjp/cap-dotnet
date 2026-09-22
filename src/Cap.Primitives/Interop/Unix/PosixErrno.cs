@@ -36,6 +36,9 @@ internal static class PosixErrno
     public const int EINVAL = 22;
     public const int ENFILE = 23;
     public const int EMFILE = 24;
+    /// <summary>The file would grow past what the filesystem can represent.</summary>
+    public const int EFBIG = 27;
+
     public const int ENOSPC = 28;
     public const int EROFS = 30;
     public const int EMLINK = 31;
@@ -91,6 +94,7 @@ internal static class PosixErrno
             case EIO:
             case EBUSY:
             case ENOMEM:
+            case EFBIG:
             case ENOSPC:
             case EMLINK:
             case ERANGE:

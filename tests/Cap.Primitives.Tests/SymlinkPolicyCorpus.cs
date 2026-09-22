@@ -185,7 +185,7 @@ internal static class SymlinkPolicyCorpus
         {
             SymlinkPolicyBackend.ConfinedOpen => entry.Kind == ResolvedKind.Directory
                 ? Close(PlatformOps.Current.OpenConfinedDirectory(root, entry.Path, CapAccess.Read, options))
-                : Close(PlatformOps.Current.OpenConfinedFile(root, entry.Path, CapAccess.Read, options)),
+                : Close(PlatformOps.Current.OpenConfinedFile(root, entry.Path, FileOpenRequest.Existing(FileAccess.Read), options)),
 
             _ => ResolveByWalk(root, entry, options),
         };
@@ -215,7 +215,7 @@ internal static class SymlinkPolicyCorpus
 
         return entry.Kind == ResolvedKind.Directory
             ? Close(PortableResolver.OpenDirectory(root, in path, CapAccess.Read, options))
-            : Close(PortableResolver.OpenFile(root, in path, CapAccess.Read, options));
+            : Close(PortableResolver.OpenFile(root, in path, FileOpenRequest.Existing(FileAccess.Read), options));
     }
 
     private static CapError Close<T>(CapResult<T> result)

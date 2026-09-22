@@ -41,7 +41,8 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities => new(
-        _fileSystem.SupportsConfinedOpen ? ResolutionBackend.ConfinedOpen : ResolutionBackend.PortableWalk);
+        _fileSystem.SupportsConfinedOpen ? ResolutionBackend.ConfinedOpen : ResolutionBackend.PortableWalk,
+        overlappedFileHandles: false);
 
     /// <inheritdoc/>
     public long ConfinedOpenAttempts => _confinedOpenAttempts;
@@ -127,14 +128,27 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeFileHandle> OpenChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, CapAccess access)
+    public CapResult<SafeFileHandle> OpenChildFile(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
     {
         CapError error = ResolveChild(parent, name, out FakeNode? node);
+
+        if (error.Category == CapErrorCategory.NotFound && request.Creates)
+        {
+            return CreateChildFile(parent, name);
+        }
+
         if (error.IsFailure)
         {
             return CapResult<SafeFileHandle>.Fail(error);
         }
 
+        // A link is reported rather than followed even when the request would have created
+        // the name. The name being taken by a link is the same fact whichever way the open
+        // was asked for, and what to do about it is the caller's decision to make under the
+        // caller's policy.
         if (node!.Type == CapNodeType.SymbolicLink)
         {
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.SymbolicLink));
@@ -145,7 +159,29 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.IsADirectory));
         }
 
-        return CapResult<SafeFileHandle>.Ok(RegisterFile(node));
+        return request.Mode == FileMode.CreateNew
+            ? CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.AlreadyExists))
+            : CapResult<SafeFileHandle>.Ok(RegisterFile(node));
+    }
+
+    /// <summary>Adds a file to the simulation and hands back a handle on it.</summary>
+    private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        if (error.IsFailure)
+        {
+            return CapResult<SafeFileHandle>.Fail(error);
+        }
+
+        FakeNode created = new()
+        {
+            Type = CapNodeType.File,
+            VolumeId = directory!.VolumeId,
+            NodeId = _fileSystem.NextNodeId(),
+        };
+
+        directory.Entries[name.ToString()] = created;
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(created));
     }
 
     /// <inheritdoc/>
@@ -175,7 +211,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapResult<SafeFileHandle> OpenConfinedFile(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
-        CapAccess access,
+        in FileOpenRequest request,
         ConfinedResolveOptions options)
     {
         CapError error = ResolveConfined(root, path, options, out FakeNode? node);
@@ -257,6 +293,17 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         return CapResult<SafeDirHandle>.Ok(Register(node!, handle.Access));
+    }
+
+    /// <inheritdoc/>
+    public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
+    {
+        if (handle.IsInvalid || handle.IsClosed || !_open.TryGetValue(handle.DangerousGetHandle(), out FakeNode? node))
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(node));
     }
 
     /// <inheritdoc/>

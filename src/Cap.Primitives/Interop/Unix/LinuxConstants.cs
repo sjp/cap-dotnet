@@ -72,6 +72,44 @@ internal static class LinuxConstants
     public const int O_WRONLY = 0x0001;
     public const int O_RDWR = 0x0002;
 
+    /// <summary>Create the name if nothing holds it. Requires a mode argument.</summary>
+    public const int O_CREAT = 0x40;
+
+    /// <summary>
+    /// With <see cref="O_CREAT"/>, refuse the open if anything at all holds the name.
+    /// </summary>
+    /// <remarks>
+    /// Including a symbolic link, whose target is not consulted: the kernel reports the name
+    /// as taken. That is the answer an exclusive create wants, because the name is what is
+    /// being claimed and a link is something holding it.
+    /// </remarks>
+    public const int O_EXCL = 0x80;
+
+    /// <summary>Discard the contents of a file that was already there.</summary>
+    public const int O_TRUNC = 0x200;
+
+    /// <summary>
+    /// Move to the end of the file before every write, atomically with the write itself.
+    /// </summary>
+    /// <remarks>
+    /// A property of the open description rather than of a call, which is why a write given
+    /// an explicit offset still lands at the end on a handle opened this way. The kernel
+    /// decides that, not this library, and pretending otherwise would be a promise that
+    /// could not be kept.
+    /// </remarks>
+    public const int O_APPEND = 0x400;
+
+    /// <summary>
+    /// Do not return from a write until the data and the metadata needed to read it back
+    /// have reached the storage device.
+    /// </summary>
+    /// <remarks>
+    /// Two bits, not one: the data-synchronisation bit and the full-synchronisation bit
+    /// together. The generic architecture defines the full form that way, and passing only
+    /// the upper bit asks for something the kernel does not recognise as either.
+    /// </remarks>
+    public const int O_SYNC = 0x101000;
+
     /// <summary>
     /// Do not block waiting for the other end of a FIFO or device. Cleared again once the
     /// handle is open; it is here to stop an open from hanging, not to change how the file
@@ -133,6 +171,34 @@ internal static class LinuxConstants
     /// filesystem's own permissions.
     /// </remarks>
     public const uint DirectoryCreateMode = 0x1FF;
+
+    // --- open with creation ------------------------------------------------------------------
+
+    /// <summary>
+    /// The permissions a newly created file is asked for, before the process umask is
+    /// applied to them.
+    /// </summary>
+    /// <remarks>
+    /// Read and write for everybody, which is what every program that creates a file asks
+    /// for and never what it gets: the umask clears whatever the process has been configured
+    /// to clear, so a file created through a capability ends up with the same permissions as
+    /// one created by any other means in the same process. Asking for less here would make
+    /// these files quietly different from every other file on the system, which is a
+    /// surprise rather than a defence — a capability bounds what can be reached and is not a
+    /// substitute for the filesystem's own access control.
+    /// </remarks>
+    public const uint FileCreateMode = 0x1B6;
+
+    /// <summary>
+    /// Reserve space behind the file without moving the end of it.
+    /// </summary>
+    /// <remarks>
+    /// The difference between claiming room and writing zeroes into it. Without this the
+    /// reservation extends the file, so a caller who asked for room in advance would get a
+    /// file that already reports that many bytes of contents — which is not what was asked
+    /// for and is not what the reservation does anywhere else.
+    /// </remarks>
+    public const int FALLOC_FL_KEEP_SIZE = 0x01;
 
     // --- fcntl ------------------------------------------------------------------------------
 

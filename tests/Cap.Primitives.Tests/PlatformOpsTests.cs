@@ -88,7 +88,7 @@ public sealed class PlatformOpsTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "plain.txt"), "content");
 
         using SafeDirHandle root = OpenRoot();
-        CapResult<SafeFileHandle> result = Ops.OpenChildFile(root, "plain.txt", CapAccess.Read);
+        CapResult<SafeFileHandle> result = Ops.OpenChildFile(root, "plain.txt", FileOpenRequest.Existing(FileAccess.Read));
         Assert.True(result.IsSuccess, result.Error.FailureDescription);
 
         using SafeFileHandle file = result.Value;
