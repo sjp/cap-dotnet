@@ -111,8 +111,10 @@ alone — is in [paths.md](paths.md).
 | S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is` |
 | S6 | Dangling symlink pointing outside | Reported as not-found **without** revealing whether the target exists | symlink policy | |
 | S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | |
-| S8 | Windows junction / mount point (always absolute) | Rejected | Windows backend | |
-| S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend; component walk | walk half only: `PortableWalkTests.A_reparse_point_that_is_not_a_link_is_never_followed` |
+| S8 | Windows junction / mount point (always absolute) | Rejected | Windows backend | `WindowsResolutionOnDiskTests.A_junction_is_refused_rather_than_followed`, `WindowsReparseDataTests.A_junction_is_never_relative` |
+| S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend; component walk | `WindowsReparseDataTests.A_tag_that_is_not_a_filesystem_link_yields_no_target`, `PortableWalkTests.A_reparse_point_that_is_not_a_link_is_never_followed` |
+| S11 | Windows symbolic link whose stored target is spelled as a relative path but flagged as rooted | Rejected — the flag is what the filesystem acts on, so relativity is taken from it and never inferred from the spelling | Windows backend | `WindowsReparseDataTests.A_link_flagged_as_rooted_says_so_whatever_it_spells` |
+| S12 | Windows reparse point whose header claims a length or a name offset outside the reply | Rejected; no read outside the returned bytes | Windows backend | `WindowsReparseDataTests.A_length_longer_than_the_reply_is_refused`, `.A_name_outside_the_data_is_refused`, `.A_truncated_reply_is_refused` |
 | S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress harness | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it` |
 
 ### 4.3 Windows name handling
@@ -129,19 +131,30 @@ bullet.
 | W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | `WindowsReservedNameTests.ReservedStems` |
 | W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Stream_syntax_is_refused` |
 | W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | `CapPathParseTests.Rejects_trailing_dot_or_space` |
-| W6 | 8.3 short names (`PROGRA~1`) aliasing a long name | Policy stated and enforced consistently | Windows backend | |
-| W7 | Wildcards `* ? < > "` reaching `NtCreateFile` | Rejected | Windows name validation | `CapPathParseTests.Rejects_invalid_windows_characters` |
+| W6 | 8.3 short names (`PROGRA~1`) aliasing a long name | Rejected. A component containing a tilde is opened and then asked what it is actually called; the handle is dropped if the two names disagree. A file genuinely named with a tilde answers with itself and is allowed | Windows backend | `WindowsResolutionOnDiskTests.A_short_name_alias_does_not_reach_the_object_it_aliases`, `.A_name_that_merely_contains_a_tilde_is_its_own_name` |
+| W7 | Wildcards `* ? < > "` reaching the native open | Rejected | Windows name validation | `CapPathParseTests.Rejects_invalid_windows_characters` |
+| W8 | A sandbox root named by a user-facing path that reaches a device rather than a directory | Rejected. The one open that resolves a path string interrogates the handle it got, rather than re-examining the path it was given | Windows backend | `WindowsResolutionOnDiskTests.The_first_directory_handle_refuses_what_is_not_a_filesystem_directory` |
 
 A parse-time blocklist is necessary but **not sufficient**: the set of device names is a
 property of the OS and has grown before. Windows name validation therefore also requires a
-*post-open* device check, so that a name we failed to anticipate still cannot be used.
+*post-open* device check, so that a name we failed to anticipate still cannot be used. W8 is
+the first instance of that check, applied where a path string is resolved by the system; the
+per-component check beneath a handle is required for the same reason.
+
+Case is not in this table because on Windows it is not an attack but a fact to build on. Two
+names differing only in case are one file, every open this library issues matches
+case-insensitively so that a name reaches the same file here as it does everywhere else, and
+the consequence is that **containment on Windows never rests on comparing names as strings**.
+Every decision about whether a step is allowed is taken from an open handle. Asserted in
+`WindowsResolutionOnDiskTests.Names_differing_only_in_case_reach_the_same_object` and, for the
+half that matters, `.Changing_the_case_of_a_refused_name_does_not_get_past_the_refusal`.
 
 ### 4.4 macOS and case-insensitive volumes
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
 | M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | parser half only: `CapPathComponentTests.Components_are_returned_verbatim` |
-| M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | |
+| M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | Windows half only: `WindowsResolutionOnDiskTests.Changing_the_case_of_a_refused_name_does_not_get_past_the_refusal` |
 | M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | |
 
 ### 4.5 Filesystem topology

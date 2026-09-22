@@ -131,6 +131,16 @@ internal enum CapErrorCategory
     Reparse,
 
     /// <summary>
+    /// Windows: the name reached its object through an alias rather than by the object's own
+    /// name. A filesystem that generates short names gives many entries a second, mangled
+    /// spelling, and an open by that spelling reaches the same file — so a caller's own rule
+    /// about which names it will allow can be stated about one spelling and defeated with
+    /// the other. Refused, and reported distinctly, because the failure is neither a missing
+    /// file nor a malformed name and telling a caller either of those would be misleading.
+    /// </summary>
+    AliasedName,
+
+    /// <summary>
     /// The platform reported a failure this layer has no portable reading of. The raw code
     /// is still carried; only the classification is missing.
     /// </summary>

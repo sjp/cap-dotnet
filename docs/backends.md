@@ -10,7 +10,7 @@ implementation detail.
 |---|---|---|
 | `openat2(RESOLVE_BENEATH)` | Linux ≥ 5.6, when not blocked by seccomp | none — resolution is kernel-atomic |
 | Component-by-component walk | Linux fallback, macOS | narrowed, not eliminated |
-| `NtCreateFile` with `RootDirectory` | Windows | narrowed, not eliminated |
+| Native relative open with a `RootDirectory` handle | Windows | narrowed, not eliminated |
 
 On the kernel-atomic backend a path costs exactly one syscall however many names it has,
 which is what leaves no window between components. The other two spend one open per name.
@@ -83,7 +83,7 @@ semantics:
 | Chain within budget, all inside | Followed |
 | Chain exceeding the budget, or a cycle | Refused as a link loop |
 | Reparse point whose tag is not a filesystem link | Refused, never read as a link |
-| Mount point inside the root | Crossed, unless the caller asked not to cross one |
+| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one. A Windows junction is not this case: it is a reparse point, and is refused |
 
 An absolute target is refused rather than re-read as though the sandbox root were the
 filesystem root. The re-reading is defensible — it is what `chroot` does — but it silently
@@ -123,6 +123,76 @@ its own right. So:
 
 > **TODO:** name the public accessor for the active backend and the call counter here
 > once they exist.
+
+## What the Windows walk does differently
+
+Windows has no confined open, so it follows the same component-at-a-time model with the same
+guarantee and the same residual race. Five things about it are specific to the platform, and
+each is a decision rather than an implementation detail.
+
+**Names go to the filesystem as counted strings, never as paths.** The familiar Win32 layer
+rewrites what it is handed on the way down: it strips trailing dots and spaces, recognises a
+reserved device name wherever it occurs including after an extension, and re-parses prefixes.
+A name that has been validated is therefore not the name Win32 would open, and that gap is
+how every published escape from a Windows directory sandbox has worked. The native API takes
+a counted string plus a directory handle to resolve it against, and does none of the
+rewriting. Every open also asks for a reparse point itself rather than its target, so that
+whether to follow a link is decided here rather than by the object manager — which does not
+know where the sandbox root is.
+
+**Exactly one call goes through Win32**, the one that opens the very first directory from an
+ordinary path. That step is ambient by definition, and it needs precisely the drive-letter and
+working-directory handling the rest of the backend avoids. It is also the only place a name
+can reach something that is not a file at all — the path syntax reaches serial ports, volumes
+and pipes as readily as directories, and several of the names that do so look like ordinary
+filenames. So the handle it produces is interrogated before it is handed back, and refused
+unless it is a directory on a filesystem. What was opened is a fact; what a path was going to
+open is a guess.
+
+**Names are matched without regard to case.** That is what the rest of the system does, and
+therefore the only choice under which a name reaches the same file here as it does in every
+other program. Asking for case-sensitive matching would not reliably get it — the kernel has
+a setting that overrides the request — and would leave this library disagreeing with
+everything else about which file a name refers to. The consequence is stated rather than
+worked around: **containment on Windows never rests on comparing names as strings**, because
+two names differing only in case are one file. Every decision about whether a step is allowed
+is taken from an open handle instead.
+
+**A name that is an alias for a different name is refused.** A volume that generates short
+names records two names for one entry — the one it was created with, and an eight-plus-three
+alias derived from it — and an open by either reaches the same object. Nothing about that
+leaves the directory, so it is not an escape; what it defeats is any rule a caller states
+about names, because such a rule is stated about one spelling and there are two. A caller
+refusing to serve `secret documents` is not refusing `SECRET~1`, and both are the same file.
+
+Every generated alias contains a tilde, which makes the presence of one a cheap and complete
+trigger: a component without one cannot be a generated alias and costs nothing, and a
+component with one is opened and then asked what it is actually called, the handle being
+dropped if the two names disagree. A file genuinely named `plain~1` answers with its own name
+and is opened — the check is a comparison, not a refusal of the character. The alternative,
+requiring short-name generation to be turned off on the volume and documenting the rest as
+residual risk, was rejected: it makes the guarantee depend on how the host was configured,
+which is not something a library can verify or a caller can usually change.
+
+**Reparse tags are an allowlist of two**, the symbolic link and the junction. Reparse points
+are a general extension mechanism and most tags have nothing to do with paths: an application
+execution alias holds a series of counted strings, a container link is meaningful only to a
+filter driver, and new tags arrive with new Windows features. A blocklist would treat every
+tag invented after it was written as a link and read a structure of unknown shape as a
+destination, so anything unrecognised is refused instead.
+
+Within a symbolic link, whether the target is relative is taken from the structure's own flag
+and never inferred from how the stored name is spelled, because the flag is what the
+filesystem acts on and the two can disagree. Both readings fail closed: a link declaring
+itself rooted is refused whatever it spells, and for one declaring itself relative the path
+parser refuses every rooted spelling. A junction has no such flag and is never relative — its
+target is recorded as a path from a volume root, which is why one can never be followed while
+staying beneath a directory handle.
+
+Every offset and length inside a reparse point is checked against the bytes actually returned
+rather than against the length the structure claims for itself. Inside a sandbox that data is
+attacker-controlled: anything that can create a file there can create a reparse point with
+whatever header it likes.
 
 ## Directories opened only to be traversed
 

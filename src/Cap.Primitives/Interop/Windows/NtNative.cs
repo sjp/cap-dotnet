@@ -37,6 +37,18 @@ internal static unsafe partial class NtNative
         uint shareAccess,
         uint openOptions);
 
+    /// <summary>
+    /// Closes a handle the native open produced.
+    /// </summary>
+    /// <remarks>
+    /// Needed for the handles this layer opens and then decides not to hand back — an open
+    /// that succeeded against a name the caller is not allowed to use still produced a
+    /// handle, and dropping it on the floor would leak it. Handles that do reach a caller are
+    /// closed by their wrapper instead.
+    /// </remarks>
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtClose(nint handle);
+
     /// <summary>Reads one class of information about an open file.</summary>
     [LibraryImport("ntdll.dll")]
     internal static partial int NtQueryInformationFile(
@@ -153,6 +165,17 @@ internal static class NtConstants
     public const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
 
     // --- Information classes ------------------------------------------------------------------
+
+    /// <summary>
+    /// Asks for the name of an open object, as a path from the root of its volume.
+    /// </summary>
+    /// <remarks>
+    /// The filesystem answers with the name it stores, which is the long one. That is what
+    /// makes the reply worth having: a name generated as a short alias for a longer one opens
+    /// the same object, and asking the object what it is called is the only way to notice
+    /// that the name used to reach it was not its own.
+    /// </remarks>
+    public const uint FileNameInformationClass = 9;
 
     /// <summary>Asks for the attribute bits and the reparse tag together.</summary>
     public const uint FileAttributeTagInformationClass = 35;

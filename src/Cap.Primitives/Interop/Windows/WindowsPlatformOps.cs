@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Win32.SafeHandles;
@@ -33,6 +34,34 @@ namespace Cap.Primitives.Interop.Windows;
 /// unrecognised one as a link would mean treating a structure of unknown shape as a
 /// destination.
 /// </para>
+/// <para>
+/// <strong>Names are matched without regard to case</strong>, which is what the rest of the
+/// system does and therefore the only choice under which a name reaches the same file here as
+/// it does everywhere else. Asking for case-sensitive matching would not reliably get it —
+/// the kernel has a setting that overrides the request — and would mean this library
+/// disagreeing with every other program about which file a name refers to. The consequence is
+/// stated rather than worked around: <em>containment on this platform never rests on
+/// comparing names as strings</em>, because two names that differ only in case are one file.
+/// Every decision about whether a step is allowed is made from an open handle instead.
+/// </para>
+/// <para>
+/// <strong>A name that is an alias for a different name is refused.</strong> A filesystem
+/// that generates short names gives entries a second, mangled spelling, and an open by that
+/// spelling reaches the same object — so a rule a caller states about one spelling can be
+/// defeated with the other. Every generated short name contains a tilde, so a component
+/// containing one is opened and then asked what it is actually called; the open is handed
+/// back if the two disagree. The check costs a query only on the rare component that could
+/// be an alias, and it does not refuse a file genuinely named with a tilde, whose own name
+/// is what it answers with.
+/// </para>
+/// <para>
+/// <strong>One call here goes through the Win32 layer,</strong> the one that opens the very
+/// first directory by an ordinary path. That is the ambient step, before any capability
+/// exists, and it needs exactly the drive-letter and working-directory handling the rest of
+/// this type avoids. It is also the one open whose result is interrogated before being
+/// handed back, because a user-facing path can name something that is not a directory on a
+/// filesystem at all.
+/// </para>
 /// </remarks>
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsPlatformOps : IPlatformOps
@@ -58,6 +87,16 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
     /// <summary>Access enough to ask what something is, and nothing more.</summary>
     private const uint QueryAccess = NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE;
+
+    /// <summary>
+    /// The largest reply this layer will accept when it asks an object for its own name.
+    /// </summary>
+    /// <remarks>
+    /// A ceiling on a length the filesystem states, so that a wrong or hostile one cannot
+    /// turn a question about a name into a large allocation. Set above the longest path the
+    /// platform will store, so nothing reachable is refused by it.
+    /// </remarks>
+    private const int NameReplyLimit = 64 * 1024;
 
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities => new(ResolutionBackend.WindowsRelativeOpen);
@@ -94,7 +133,15 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(Win32Errors.ToError(Marshal.GetLastWin32Error()));
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true, access));
+        SafeDirHandle root = new(raw, ownsHandle: true, access);
+        CapError check = RefuseUnlessFilesystemDirectory(root);
+        if (check.IsFailure)
+        {
+            root.Dispose();
+            return CapResult<SafeDirHandle>.Fail(check);
+        }
+
+        return CapResult<SafeDirHandle>.Ok(root);
     }
 
     /// <inheritdoc/>
@@ -222,7 +269,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return CapResult<string>.Fail(Win32Errors.ToError(win32));
             }
 
-            if (!ReparseData.TryReadTarget(buffer.AsSpan(0, (int)returned), out uint tag, out string target))
+            if (!ReparseData.TryReadTarget(
+                    buffer.AsSpan(0, (int)returned), out string target, out bool isRelative))
             {
                 // Either the tag is not one that names a path, or the structure did not
                 // describe itself consistently. Both mean the same thing here: there is no
@@ -233,7 +281,26 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                     NtStatusCodes.STATUS_IO_REPARSE_TAG_NOT_HANDLED));
             }
 
-            _ = tag;
+            if (!isRelative)
+            {
+                // The link says of itself that its target starts from a filesystem root, and
+                // that is the reading the filesystem will act on. A target anchored at a root
+                // cannot be beneath a directory handle whatever it spells, so it is refused
+                // here rather than handed back to be re-resolved.
+                //
+                // Taken from the structure's flag and not from the spelling of the stored
+                // name, because the two can disagree and only one of them decides. A name
+                // stored as an ordinary relative path but flagged as rooted would otherwise
+                // be walked as though it were relative — the one reading the filesystem
+                // itself would never give it. Both readings therefore fail closed: this
+                // refuses what declares itself rooted, and the path parser refuses every
+                // rooted spelling of what declares itself relative.
+                return CapResult<string>.Fail(CapError.Create(
+                    CapErrorCategory.Escaped,
+                    CapErrorSource.NtStatus,
+                    NtStatusCodes.STATUS_REPARSE_POINT_ENCOUNTERED));
+            }
+
             return CapResult<string>.Ok(target);
         }
         finally
@@ -421,9 +488,143 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return NtStatusCodes.ToError(result);
             }
 
+            CapError alias = RefuseAliasedName(opened, name);
+            if (alias.IsFailure)
+            {
+                _ = NtNative.NtClose(opened);
+                return alias;
+            }
+
             handle = opened;
             return CapError.Success;
         }
+    }
+
+    /// <summary>
+    /// Refuses a handle that was reached by a name that is not the object's own.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A filesystem that generates short names records two names for the same entry — the one
+    /// it was created with and an eight-plus-three alias derived from it — and an open by
+    /// either reaches the same object. Nothing about that leaves the directory the name was
+    /// looked up in, so it is not an escape; what it defeats is any rule a caller states about
+    /// names. A caller that refuses to serve <c>secret documents</c> is not refusing
+    /// <c>SECRET~1</c>, and both are the same file.
+    /// </para>
+    /// <para>
+    /// So the object is asked what it is called. Every generated alias contains a tilde, which
+    /// makes the presence of one a cheap and complete trigger: a component without one cannot
+    /// be a generated alias, and the query is skipped. A component genuinely named with a
+    /// tilde answers with itself and is allowed through — which is why the test is a
+    /// comparison and not a refusal of the character.
+    /// </para>
+    /// <para>
+    /// The comparison ignores case because the filesystem does, and a name differing from the
+    /// stored one only in case is the same name by the only definition that matters here.
+    /// </para>
+    /// </remarks>
+    private static unsafe CapError RefuseAliasedName(nint handle, ReadOnlySpan<char> requested)
+    {
+        if (!requested.Contains('~'))
+        {
+            return CapError.Success;
+        }
+
+        // The reply is a path from the volume root, so its length is bounded by the depth of
+        // the object rather than by the component asked about. Rented rather than stacked
+        // for that reason, and affordable because this runs only for a name that could be an
+        // alias.
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(1024);
+        try
+        {
+            for (int attempt = 0; ; attempt++)
+            {
+                IoStatusBlock status = default;
+                int nt;
+                fixed (byte* raw = buffer)
+                {
+                    nt = NtNative.NtQueryInformationFile(
+                        handle, &status, raw, (uint)buffer.Length, NtConstants.FileNameInformationClass);
+                }
+
+                if (nt == NtStatusCodes.STATUS_BUFFER_OVERFLOW && attempt == 0)
+                {
+                    // The length is written even when the characters did not fit, and it is
+                    // the end of the name — the part being compared — that was lost, so the
+                    // reply cannot be used as it stands. One retry at the stated size is
+                    // enough; a second overflow would mean the filesystem is answering
+                    // inconsistently, and guessing at a third size would be worse than
+                    // refusing.
+                    uint needed = BinaryPrimitives.ReadUInt32LittleEndian(buffer);
+                    if (needed > NameReplyLimit)
+                    {
+                        return CapError.Create(
+                            CapErrorCategory.NameTooLong,
+                            CapErrorSource.NtStatus,
+                            NtStatusCodes.STATUS_NAME_TOO_LONG);
+                    }
+
+                    ArrayPool<byte>.Shared.Return(buffer);
+                    buffer = ArrayPool<byte>.Shared.Rent(sizeof(uint) + (int)needed);
+                    continue;
+                }
+
+                if (NtStatusCodes.IsFailure(nt))
+                {
+                    return NtStatusCodes.ToError(nt);
+                }
+
+                // Parsing a reply, so its self-described length is checked against what was
+                // actually written rather than trusted.
+                uint nameBytes = BinaryPrimitives.ReadUInt32LittleEndian(buffer);
+                if (nameBytes > buffer.Length - sizeof(uint) || (nameBytes & 1) != 0)
+                {
+                    return CapError.Create(
+                        CapErrorCategory.Unknown, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_PARAMETER);
+                }
+
+                ReadOnlySpan<char> full = MemoryMarshal.Cast<byte, char>(
+                    buffer.AsSpan(sizeof(uint), (int)nameBytes));
+
+                int separator = full.LastIndexOf('\\');
+                ReadOnlySpan<char> stored = separator < 0 ? full : full[(separator + 1)..];
+
+                return stored.Equals(requested, StringComparison.OrdinalIgnoreCase)
+                    ? CapError.Success
+                    : CapError.FromCategory(CapErrorCategory.AliasedName);
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Confirms that a handle opened by an ordinary path is a directory on a filesystem.
+    /// </summary>
+    /// <remarks>
+    /// The one place a user-facing path string is resolved by the system, and therefore the
+    /// one place a name can reach something that is not a file at all: the path syntax this
+    /// platform accepts reaches serial ports, volumes and pipes as readily as directories, and
+    /// several of the names that do so look like ordinary filenames. Confining names beneath
+    /// this handle afterwards would be beside the point if the handle itself were a device. So
+    /// the handle is interrogated rather than the path re-examined — what was opened is a fact,
+    /// and what a path was going to open is a guess.
+    /// </remarks>
+    private static CapError RefuseUnlessFilesystemDirectory(SafeDirHandle handle)
+    {
+        CapError error = Describe(handle, out CapNodeInfo info);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        return info.Type == CapNodeType.Directory
+            ? CapError.Success
+            : CapError.Create(
+                CapErrorCategory.NotADirectory, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NOT_A_DIRECTORY);
     }
 
     /// <summary>

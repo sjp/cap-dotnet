@@ -53,6 +53,23 @@ jobs:
         with:
           global-json-file: global.json
 
+      # ---------------------------------------------------------------------------------
+      # A short-name alias reaches the same file as the long name it was derived from, so a
+      # rule a caller states about one spelling is defeated by the other. The backend refuses
+      # an alias, and the only way to know it does is to run on a volume that generates them.
+      # Generation is off by default on non-system volumes, so it is turned on here and the
+      # suite is told to expect it: a case that quietly stood aside would leave the defence
+      # untested on every leg.
+      # ---------------------------------------------------------------------------------
+      - name: Enable 8.3 short-name generation on the volume the tests run on
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $volume = (Split-Path -Qualifier ([System.IO.Path]::GetTempPath()))
+          fsutil 8dot3name set $volume 0
+          fsutil 8dot3name query $volume
+          "CAPDOTNET_EXPECT_SHORT_NAMES=1" >> $env:GITHUB_ENV
+
       - name: Build
         run: dotnet build CapDotnet.slnx --configuration Release
 

@@ -21,7 +21,42 @@ internal static class ReparseTags
     /// <summary>A symbolic link, which may be relative or absolute.</summary>
     public const uint SymbolicLink = 0xA000000C;
 
-    /// <summary>True when the tag describes something that can be read as a path.</summary>
+    /// <summary>
+    /// An application execution alias: the zero-length stub the package manager puts on the
+    /// search path so that typing a package's name launches it.
+    /// </summary>
+    /// <remarks>
+    /// Named here although it is refused, because refusing it for the right reason matters.
+    /// Its data is a sequence of counted strings — a package family name, an application
+    /// identifier, a target executable — and the offsets a link's data carries are not where
+    /// this structure keeps anything. A reader that assumed every reparse point held a link
+    /// would take whichever of those strings happened to land at the offset it expected and
+    /// use it as a path.
+    /// </remarks>
+    public const uint AppExecLink = 0x8000001B;
+
+    /// <summary>
+    /// A Windows Container Isolation link, which redirects a file inside a container to a
+    /// copy held on the host.
+    /// </summary>
+    /// <remarks>
+    /// Acted on by a filter driver rather than by the filesystem, and meaningful only to
+    /// that driver. Whatever it points at is outside anything a directory handle in this
+    /// process confers authority over, so there is nothing a sandbox could usefully do with
+    /// it but refuse it.
+    /// </remarks>
+    public const uint WciLink = 0x80000018;
+
+    /// <summary>
+    /// True when the tag describes something that can be read as a path.
+    /// </summary>
+    /// <remarks>
+    /// An allowlist of two, and deliberately not a blocklist. Reparse tags are an extension
+    /// mechanism: new ones appear with new Windows features, and a reader that refused the
+    /// ones it knew to be dangerous would treat every tag invented after it was written as a
+    /// link. The failure mode of getting this wrong is reading a structure of unknown shape
+    /// as a destination, so the only safe default is to refuse what is not recognised.
+    /// </remarks>
     public static bool IsFilesystemLink(uint tag) => tag is MountPoint or SymbolicLink;
 }
 
@@ -61,6 +96,15 @@ internal static class ReparseData
     /// <summary>Where the characters start for a junction: after four offsets, with no flags word.</summary>
     private const int MountPointPathOffset = 16;
 
+    /// <summary>Offset of a symbolic link's flags word, relative to the start of the path buffer.</summary>
+    private const int SymbolicLinkFlagsOffset = 16;
+
+    /// <summary>
+    /// The one flag defined for a symbolic link: its target is to be resolved from the
+    /// directory holding the link rather than from a filesystem root.
+    /// </summary>
+    private const uint SymbolicLinkFlagRelative = 0x00000001;
+
     /// <summary>Reads the tag from a returned buffer.</summary>
     public static bool TryReadTag(ReadOnlySpan<byte> buffer, out uint tag)
     {
@@ -75,19 +119,30 @@ internal static class ReparseData
     }
 
     /// <summary>
-    /// Reads the stored target of a link.
+    /// Reads the stored target of a link, and whether the filesystem will resolve it from the
+    /// directory holding the link.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The substitute name is returned, not the print name. The print name is a display
     /// convenience the filesystem does not use, and the two need not agree — a link whose
     /// print name says one thing and whose substitute name says another resolves to the
     /// substitute name, so that is the only one worth checking.
+    /// </para>
+    /// <para>
+    /// <paramref name="isRelative"/> comes from the structure's own flag and not from how the
+    /// stored name is spelled, because the flag is what the filesystem acts on. A junction
+    /// has no such flag and is never relative: its target is recorded as a path from a volume
+    /// root, which is the reason a junction cannot be followed while staying beneath a
+    /// directory handle.
+    /// </para>
     /// </remarks>
-    public static bool TryReadTarget(ReadOnlySpan<byte> buffer, out uint tag, out string target)
+    public static bool TryReadTarget(ReadOnlySpan<byte> buffer, out string target, out bool isRelative)
     {
         target = string.Empty;
+        isRelative = false;
 
-        if (!TryReadTag(buffer, out tag) || !ReparseTags.IsFilesystemLink(tag))
+        if (!TryReadTag(buffer, out uint tag) || !ReparseTags.IsFilesystemLink(tag))
         {
             return false;
         }
@@ -121,6 +176,12 @@ internal static class ReparseData
         if (start < 0 || start + nameLength > data.Length)
         {
             return false;
+        }
+
+        if (tag == ReparseTags.SymbolicLink)
+        {
+            uint flags = BinaryPrimitives.ReadUInt32LittleEndian(data[(SymbolicLinkFlagsOffset - HeaderSize)..]);
+            isRelative = (flags & SymbolicLinkFlagRelative) != 0;
         }
 
         ReadOnlySpan<byte> nameBytes = data.Slice((int)start, nameLength);
