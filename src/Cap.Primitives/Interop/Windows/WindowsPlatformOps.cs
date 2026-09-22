@@ -236,6 +236,36 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         CapResult<SafeFileHandle>.Fail(ConfinedOpenUnavailable);
 
     /// <inheritdoc/>
+    public CapResult<DirectoryReader> OpenDirectoryReader(SafeDirHandle directory)
+    {
+        if ((directory.Access & CapAccess.Read) == 0)
+        {
+            return CapResult<DirectoryReader>.Fail(CapError.Create(
+                CapErrorCategory.PermissionDenied, CapErrorSource.NtStatus, NtStatusCodes.STATUS_ACCESS_DENIED));
+        }
+
+        // The empty name with the handle as the resolution root re-opens the object the
+        // handle already refers to. Nothing is named a second time, so nothing a concurrent
+        // rename could do changes what comes back -- and the new object carries a scan
+        // position of its own, where a duplicated handle would share the original's.
+        CapError error = OpenRelative(
+            directory,
+            ReadOnlySpan<char>.Empty,
+            DirectoryAccess,
+            NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
+            NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return CapResult<DirectoryReader>.Fail(error);
+        }
+
+        return CapResult<DirectoryReader>.Ok(
+            new WindowsDirectoryReader(new SafeDirHandle(raw, ownsHandle: true, CapAccess.Read)));
+    }
+
+    /// <inheritdoc/>
     public CapResult<string> ReadChildLink(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
         CapError error = OpenRelative(

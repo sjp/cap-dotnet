@@ -92,6 +92,34 @@ internal static unsafe partial class NtNative
         uint length,
         uint fileInformationClass);
 
+    /// <summary>
+    /// Reads a run of directory entries into a buffer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The only enumeration call this library can use: it names the directory by its handle
+    /// and takes no path at all, where the Win32 find calls take a path with a wildcard on
+    /// the end and resolve it with the process's own authority.
+    /// </para>
+    /// <para>
+    /// Called synchronously, which is what the handle allows: every directory here is opened
+    /// for blocking IO, so the call returns when the buffer is filled and the event, the
+    /// completion routine and its context are all unused.
+    /// </para>
+    /// </remarks>
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtQueryDirectoryFileEx(
+        nint fileHandle,
+        nint completionEvent,
+        nint completionRoutine,
+        nint completionContext,
+        IoStatusBlock* ioStatusBlock,
+        void* fileInformation,
+        uint length,
+        uint fileInformationClass,
+        uint queryFlags,
+        UnicodeString* fileName);
+
     /// <summary>Reads one class of information about an open file.</summary>
     [LibraryImport("ntdll.dll")]
     internal static partial int NtQueryInformationFile(
@@ -401,6 +429,30 @@ internal static class NtConstants
 
     /// <summary>Asks for the volume serial and the 128-bit file identifier.</summary>
     public const uint FileIdInformationClass = 59;
+
+    /// <summary>
+    /// Asks a directory read for each entry's name, attributes and reparse tag.
+    /// </summary>
+    /// <remarks>
+    /// The tag is the reason for this class rather than the plainer one. It arrives in the
+    /// field an ordinary entry uses for the size of its extended attributes, which is how
+    /// this platform has always reported it, and without it an entry that redirects could
+    /// only be known to redirect and not by what mechanism.
+    /// </remarks>
+    public const uint FileFullDirectoryInformationClass = 2;
+
+    // --- Directory query flags -----------------------------------------------------------
+
+    /// <summary>
+    /// Begin the scan again from the first entry.
+    /// </summary>
+    /// <remarks>
+    /// Passed on the first read of a handle and never afterwards. The position belongs to
+    /// the open object, so a handle opened for one enumeration starts wherever the
+    /// enumeration left it, and asking for a restart on every read would return the first
+    /// bufferful for ever.
+    /// </remarks>
+    public const uint SL_RESTART_SCAN = 0x00000001;
 
     // --- Control codes ----------------------------------------------------------------------------
 

@@ -226,6 +226,20 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<DirectoryReader> OpenDirectoryReader(SafeDirHandle directory)
+    {
+        if ((directory.Access & CapAccess.Read) == 0)
+        {
+            return CapResult<DirectoryReader>.Fail(CapError.FromCategory(CapErrorCategory.PermissionDenied));
+        }
+
+        CapError error = ResolveDirectory(directory, out FakeNode? node);
+        return error.IsFailure
+            ? CapResult<DirectoryReader>.Fail(error)
+            : CapResult<DirectoryReader>.Ok(new FakeDirectoryReader(node!));
+    }
+
+    /// <inheritdoc/>
     public CapResult<string> ReadChildLink(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
         CapError error = ResolveChild(parent, name, out FakeNode? node);

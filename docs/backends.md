@@ -48,6 +48,29 @@ Two knobs select it, checked in this order:
 A switch, not a `#if`. The binary that is tested with the fallback forced is bit-identical
 to the one users ship, which is the only way the fallback leg in CI means anything.
 
+## Distrusting the kind a directory read reports
+
+Reading a directory normally answers what each entry is as part of the same call, so listing
+a directory costs no lookups at all. A filesystem is entitled not to answer — several do not,
+and those entries are looked up individually, which is why enumerating such a filesystem is
+markedly slower rather than merely different.
+
+A filesystem that answers *wrongly* is also possible, and has happened in filesystems
+implemented outside the kernel. Two knobs make the reader disregard the answer and look every
+entry up instead, on Linux and macOS:
+
+1. **AppContext switch** `Cap.Primitives.AlwaysLookUpEntryKind`
+2. **Environment variable** `CAPDOTNET_ALWAYS_LOOK_UP_ENTRY_KIND=1`
+
+Read once when an enumeration begins, so a directory being read does not change its mind
+part of the way through, and free when unset. Neither does anything on Windows, where the
+kind arrives with the entry and there is no separate lookup to force.
+
+The lookup never follows a link, so an entry holding one is still reported as a link and not
+as whatever it leads to. An entry removed between the read and the lookup is reported as
+being of no known kind, which is the only honest answer left: the alternative is to say what
+it used to be.
+
 ## What the component-by-component walk does
 
 The walk is one loop. Every operation that names something beneath a directory handle goes

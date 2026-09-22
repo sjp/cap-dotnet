@@ -30,6 +30,17 @@ namespace Cap.Primitives.Interop.Unix;
 [SupportedOSPlatform("linux")]
 internal sealed class LinuxPlatformOps : IPlatformOps
 {
+    /// <summary>
+    /// The name every directory has for itself.
+    /// </summary>
+    /// <remarks>
+    /// Written as the byte it is rather than as text, because it is used as a name handed
+    /// straight to the kernel and encoding it would be a round trip through a decoder for a
+    /// single ASCII character. It is the one name that cannot be reassigned: resolved
+    /// against a descriptor it always means the object that descriptor refers to.
+    /// </remarks>
+    private const byte SelfName = (byte)'.';
+
     /// <summary>Scratch space for a single component or a short path, before renting.</summary>
     private const int PathScratchBytes = 512;
 
@@ -250,6 +261,47 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         return FinishFileOpen(fd, in request);
+    }
+
+    /// <inheritdoc/>
+    public unsafe CapResult<DirectoryReader> OpenDirectoryReader(SafeDirHandle directory)
+    {
+        if ((directory.Access & CapAccess.Read) == 0)
+        {
+            return CapResult<DirectoryReader>.Fail(
+                CapError.Create(CapErrorCategory.PermissionDenied, CapErrorSource.Errno, PosixErrno.EACCES));
+        }
+
+        using HandleLease lease = directory.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<DirectoryReader>.Fail(CapError.Create(
+                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+        }
+
+        // Opened by the name a directory has for itself, which is the one name in the
+        // filesystem that cannot be reassigned: it resolves to the object the descriptor
+        // already refers to, whatever a concurrent rename does to the name the caller
+        // reached it by. So this is a re-open of the same object rather than a lookup, and
+        // it is a re-open rather than a duplicate because a duplicate would share the
+        // position a directory read advances.
+        ReadOnlySpan<byte> self = [SelfName, 0];
+        int fd;
+        fixed (byte* name = self)
+        {
+            fd = LinuxNative.OpenAt(
+                lease.Descriptor,
+                name,
+                LinuxConstants.O_RDONLY | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC);
+        }
+
+        if (fd < 0)
+        {
+            return CapResult<DirectoryReader>.Fail(LinuxErrno.ToError(Marshal.GetLastPInvokeError()));
+        }
+
+        return CapResult<DirectoryReader>.Ok(
+            new LinuxDirectoryReader(new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read)));
     }
 
     /// <inheritdoc/>

@@ -152,6 +152,33 @@ internal interface IPlatformOps
         ConfinedResolveOptions options);
 
     /// <summary>
+    /// Begins a read of what <paramref name="directory"/> holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reader gets an object of its own rather than a copy of this handle. The position
+    /// a directory read advances belongs to the open object on every platform here, so a
+    /// copy would share it — two enumerations through one handle would consume each other's
+    /// entries, and a second enumeration would start wherever the first stopped.
+    /// </para>
+    /// <para>
+    /// <strong>It confers no authority the handle did not already carry.</strong> The object
+    /// is reached through the handle rather than by naming the directory again, and the
+    /// access is restated rather than asked for afresh: a handle held only in order to
+    /// resolve names beneath it cannot be turned into one that lists them, whatever the
+    /// directory's own permissions would allow. Such a handle is refused here with
+    /// <see cref="CapErrorCategory.PermissionDenied"/>.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotFound"/> where the directory has been removed
+    /// since the handle was opened, which is an ordinary outcome rather than a failure of
+    /// the handle: what the handle refers to still exists, but a directory with no name left
+    /// cannot be read.
+    /// </para>
+    /// </remarks>
+    CapResult<DirectoryReader> OpenDirectoryReader(SafeDirHandle directory);
+
+    /// <summary>
     /// Reads the target of the symbolic link named by <paramref name="name"/> directly
     /// beneath <paramref name="parent"/>, without following it.
     /// </summary>

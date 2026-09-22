@@ -170,6 +170,43 @@ internal static class FailureTranslation
     };
 
     /// <summary>
+    /// Builds the exception for a failure to read a directory.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the path-taking form because there is no path. The subject is the
+    /// directory the handle already refers to, and a message quoting one would have to
+    /// invent it — from a name the handle does not keep, or from asking the system what the
+    /// object is currently called, which is authority this operation was never granted and
+    /// an answer that may have changed by the time it is read.
+    /// </remarks>
+    public static Exception ToEnumerationException(CapError error) => error.Category switch
+    {
+        // The handle still refers to the directory, so this is not a stale handle: the
+        // directory has been removed, and a directory with no name left cannot be read even
+        // by something holding it open.
+        CapErrorCategory.NotFound =>
+            new DirectoryNotFoundException(
+                $"The directory this handle refers to has been removed, so its contents can " +
+                $"no longer be read. ({error})"),
+
+        CapErrorCategory.PermissionDenied =>
+            new UnauthorizedAccessException(
+                $"The contents of this directory could not be read. A handle opened only in " +
+                $"order to resolve names beneath a directory carries no authority to list " +
+                $"it, and the filesystem's own permissions are checked as well. ({error})"),
+
+        CapErrorCategory.NotADirectory =>
+            new CapIOException($"This handle does not refer to a directory. ({error})"),
+
+        CapErrorCategory.OutOfHandles =>
+            new CapIOException(
+                $"The directory could not be opened for reading: the process or the system " +
+                $"is out of handles. ({error})"),
+
+        _ => new CapIOException($"The contents of this directory could not be read. ({error})"),
+    };
+
+    /// <summary>
     /// Builds the exception for a path the parser refused, before anything was opened.
     /// </summary>
     /// <param name="error">Why the path was refused.</param>

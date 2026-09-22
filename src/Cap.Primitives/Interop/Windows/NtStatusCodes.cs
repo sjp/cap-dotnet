@@ -49,6 +49,21 @@ internal static class NtStatusCodes
     public const int STATUS_BUFFER_TOO_SMALL = unchecked((int)0xC0000023);
     public const int STATUS_BUFFER_OVERFLOW = unchecked((int)0x80000005);
 
+    /// <summary>
+    /// A directory read reached the end of the directory.
+    /// </summary>
+    /// <remarks>
+    /// A warning rather than an error, and the ordinary way an enumeration finishes. It is
+    /// recognised before anything classifies it, so that running out of entries is never
+    /// reported to a caller as a failure to read them.
+    /// </remarks>
+    public const int STATUS_NO_MORE_FILES = unchecked((int)0x80000006);
+
+    /// <summary>
+    /// A directory read found nothing at all: the same end, reached on the first call.
+    /// </summary>
+    public const int STATUS_NO_SUCH_FILE = unchecked((int)0xC000000F);
+
     /// <summary>A rename would have moved the object to a different volume.</summary>
     public const int STATUS_NOT_SAME_DEVICE = unchecked((int)0xC00000D4);
 

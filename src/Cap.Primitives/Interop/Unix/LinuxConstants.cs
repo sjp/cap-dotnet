@@ -238,4 +238,7 @@ internal static class LinuxConstants
 
     /// <summary><c>renameat2</c>: 316 on x86-64, 276 on AArch64.</summary>
     public static long SYS_renameat2 => IsArm64 ? 276 : 316;
+
+    /// <summary><c>getdents64</c>: 217 on x86-64, 61 on AArch64.</summary>
+    public static long SYS_getdents64 => IsArm64 ? 61 : 217;
 }

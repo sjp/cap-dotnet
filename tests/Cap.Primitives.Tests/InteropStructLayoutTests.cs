@@ -72,6 +72,31 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The macOS directory record is the 64-bit-inode layout, with the name starting at the
+    /// twenty-first byte.
+    /// </summary>
+    /// <remarks>
+    /// The record is filled in by the C library into a buffer this declaration sizes, so
+    /// getting it wrong is not a misread field but a write past the end of one. The name's
+    /// stated length sits immediately before the name itself; reading that from the wrong
+    /// offset would take the low half of the record length and report a name of some other
+    /// size entirely.
+    /// </remarks>
+    [Fact]
+    public void Macos_directory_record_matches_the_sixty_four_bit_inode_layout()
+    {
+        Assert.Equal(1048, DarwinDirectoryEntry.StructSize);
+
+        Assert.Equal(0, Marshal.OffsetOf<DarwinDirectoryEntry>(nameof(DarwinDirectoryEntry.Inode)).ToInt32());
+        Assert.Equal(
+            16, Marshal.OffsetOf<DarwinDirectoryEntry>(nameof(DarwinDirectoryEntry.RecordLength)).ToInt32());
+        Assert.Equal(
+            18, Marshal.OffsetOf<DarwinDirectoryEntry>(nameof(DarwinDirectoryEntry.NameLength)).ToInt32());
+        Assert.Equal(20, Marshal.OffsetOf<DarwinDirectoryEntry>(nameof(DarwinDirectoryEntry.Kind)).ToInt32());
+        Assert.Equal(21, Marshal.OffsetOf<DarwinDirectoryEntry>(nameof(DarwinDirectoryEntry.Name)).ToInt32());
+    }
+
+    /// <summary>
     /// The Windows structures are laid out at natural alignment, which on a 64-bit process
     /// puts every pointer on an eight-byte boundary.
     /// </summary>

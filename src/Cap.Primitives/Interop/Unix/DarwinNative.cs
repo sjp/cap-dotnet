@@ -98,6 +98,58 @@ internal static unsafe partial class DarwinNative
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int FcntlBuffer(int fd, int command, byte* buffer);
 
+    /// <summary>
+    /// Closes a directory stream, and the descriptor it was built on.
+    /// </summary>
+    /// <remarks>
+    /// Undecorated on both architectures: it takes the stream and nothing whose shape
+    /// depends on the size of an inode number.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "closedir", SetLastError = true)]
+    internal static partial int CloseDir(nint stream);
+
+    /// <summary>Builds a directory stream on an open descriptor. Apple silicon spelling.</summary>
+    [LibraryImport("libc", EntryPoint = "fdopendir", SetLastError = true)]
+    private static partial nint FdOpenDirPlain(int fd);
+
+    /// <summary>Builds a directory stream on an open descriptor. Intel spelling.</summary>
+    [LibraryImport("libc", EntryPoint = "fdopendir$INODE64", SetLastError = true)]
+    private static partial nint FdOpenDirInode64(int fd);
+
+    /// <summary>Reads one entry into a caller-supplied record. Apple silicon spelling.</summary>
+    [LibraryImport("libc", EntryPoint = "readdir_r", SetLastError = true)]
+    private static partial int ReadDirRPlain(
+        nint stream, DarwinDirectoryEntry* entry, DarwinDirectoryEntry** result);
+
+    /// <summary>Reads one entry into a caller-supplied record. Intel spelling.</summary>
+    [LibraryImport("libc", EntryPoint = "readdir_r$INODE64", SetLastError = true)]
+    private static partial int ReadDirRInode64(
+        nint stream, DarwinDirectoryEntry* entry, DarwinDirectoryEntry** result);
+
+    /// <summary>
+    /// Builds a directory stream on an open descriptor, which the stream then owns.
+    /// </summary>
+    /// <remarks>
+    /// On failure the descriptor is <em>not</em> taken over, so the caller still has to close
+    /// it. That asymmetry is the one thing about this call worth stating twice.
+    /// </remarks>
+    internal static nint FdOpenDir(int fd) =>
+        UsesPlainStatSymbols ? FdOpenDirPlain(fd) : FdOpenDirInode64(fd);
+
+    /// <summary>
+    /// Reads one directory entry into <paramref name="entry"/>.
+    /// </summary>
+    /// <returns>
+    /// Zero on success, where <paramref name="result"/> is set to
+    /// <paramref name="entry"/> or to null at the end of the directory; otherwise the error
+    /// number, which this call returns rather than leaving in <c>errno</c>.
+    /// </returns>
+    internal static int ReadDirR(
+        nint stream, DarwinDirectoryEntry* entry, DarwinDirectoryEntry** result) =>
+        UsesPlainStatSymbols
+            ? ReadDirRPlain(stream, entry, result)
+            : ReadDirRInode64(stream, entry, result);
+
     /// <summary>Reports on a name relative to a directory descriptor. Apple silicon spelling.</summary>
     [LibraryImport("libc", EntryPoint = "fstatat", SetLastError = true)]
     private static partial int FStatAtPlain(int directoryFd, byte* path, DarwinStat* result, int flags);

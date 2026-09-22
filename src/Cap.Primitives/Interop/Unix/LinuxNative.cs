@@ -130,6 +130,21 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
     internal static partial long OpenAt2(long number, int directoryFd, byte* path, OpenHow* how, nuint size);
 
+    /// <summary>
+    /// Reads a run of directory entries into a buffer, by syscall number.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="number"/> must be <see cref="LinuxConstants.SYS_getdents64"/>. By
+    /// number because the C library grew a wrapper for this only recently, and which library
+    /// a process is linked against is not something this layer wants to depend on.
+    /// </remarks>
+    /// <returns>
+    /// The number of bytes written, which is zero at the end of the directory and never a
+    /// partial record.
+    /// </returns>
+    [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    internal static partial long GetDents64(long number, int fd, byte* buffer, nuint count);
+
     /// <summary><c>statx</c>, by syscall number.</summary>
     /// <remarks><paramref name="number"/> must be <see cref="LinuxConstants.SYS_statx"/>.</remarks>
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
