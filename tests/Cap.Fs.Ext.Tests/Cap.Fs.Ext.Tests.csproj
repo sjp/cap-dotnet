@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Fs.Ext.Tests</RootNamespace>
+    <AssemblyName>Cap.Fs.Ext.Tests</AssemblyName>
+    <!-- The throwaway directory in tests/Scenarios. -->
+    <CapUsesScratchTree>true</CapUsesScratchTree>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+  </ItemGroup>
+
+  <!--
+    The Cap.Fs.Ext sources, carried into this assembly so that a test can read them.
+
+    The convenience layer is where a path is most tempting to build: a walk and a copy both
+    have a natural place to accumulate one level by level, and the result would be right
+    nearly every time and wrong against a tree somebody arranged. That property is not
+    observable from the outside, so it is asserted about the source, which needs the source
+    at run time.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../src/Cap.Fs.Ext/**/*.cs"
+                      Exclude="../../src/Cap.Fs.Ext/obj/**/*.cs;../../src/Cap.Fs.Ext/bin/**/*.cs"
+                      LogicalName="CapFsExtSource.%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

@@ -72,3 +72,7 @@ what is deliberately never rewritten on the way through.
 
 [docs/ambient-authority.md](docs/ambient-authority.md) covers the one way authority enters a
 process from outside, and how to make a running process list every place it did.
+
+[docs/convenience-layer.md](docs/convenience-layer.md) covers the ergonomic layer built on
+top of the core — atomic writes, walks, tree removal, handle-to-handle copy and pattern
+matching — including the table of what a copy does with each kind of object it meets.

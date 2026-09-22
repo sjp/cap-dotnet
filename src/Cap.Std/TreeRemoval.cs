@@ -59,6 +59,82 @@ internal static class TreeRemoval
     public static CapError Empty(Dir directory) => EmptyOpen(directory, MaximumDepth);
 
     /// <summary>
+    /// Removes the directory named <paramref name="name"/> beneath <paramref name="parent"/>,
+    /// and everything inside it.
+    /// </summary>
+    /// <param name="parent">The directory holding the name.</param>
+    /// <param name="name">A single component naming the directory to remove.</param>
+    /// <returns>Success when the name is gone, or the failure that stopped it going.</returns>
+    /// <remarks>
+    /// <para>
+    /// The whole operation in the order it has to happen: open the name as a directory, empty
+    /// it through that handle, close the handle, then unlink the name. The close comes before
+    /// the unlink because Windows will not remove a directory anything still has open, and
+    /// the unlink acts on the name rather than on the handle so that a name swapped for
+    /// something else in the meantime is removed as the name it now is rather than followed.
+    /// </para>
+    /// <para>
+    /// <strong>The work is done through a handle that refuses symbolic links,</strong>
+    /// whatever policy the caller's own handle carries. Removing a tree is the one operation
+    /// where following a link is never what was meant: the name at the top would redirect the
+    /// whole removal somewhere else, and a directory further down that turns into a link
+    /// between being listed and being entered would do the same to a subtree. Narrowing the
+    /// policy for the duration makes both refusals come from resolution rather than from a
+    /// check that something could be arranged to pass.
+    /// </para>
+    /// <para>
+    /// A name that is not a directory — a file, a link, or nothing at all — is reported rather
+    /// than unlinked. Removing a tree is a request about a directory, and quietly deleting
+    /// whatever else was found under the name would make it a request about a name.
+    /// </para>
+    /// </remarks>
+    public static CapError Remove(Dir parent, string name)
+    {
+        if (!parent.TryRestrict(SymlinkPolicy.Deny, out Dir? strict))
+        {
+            return CapError.FromCategory(CapErrorCategory.OutOfHandles);
+        }
+
+        using (strict)
+        {
+            if (!strict.TryOpenDir(name, out Dir? directory))
+            {
+                return Diagnose(parent, name);
+            }
+
+            CapError emptied;
+            using (directory)
+            {
+                emptied = EmptyOpen(directory, MaximumDepth);
+            }
+
+            return emptied.IsFailure ? emptied : RemoveEmpty(strict, name);
+        }
+    }
+
+    /// <summary>Says why a name could not be opened as the directory it was meant to be.</summary>
+    /// <remarks>
+    /// Asked as a description of the name rather than as another attempt to open it, so that
+    /// the answer says what is actually there. A link and a file are worth telling apart from
+    /// each other and from a name holding nothing, because each means a different mistake in
+    /// the calling code. Anything else is left unexplained rather than blamed on a guess.
+    /// </remarks>
+    private static CapError Diagnose(Dir parent, string name)
+    {
+        if (!parent.TryGetMetadata(name, out CapMetadata metadata))
+        {
+            return CapError.FromCategory(CapErrorCategory.NotFound);
+        }
+
+        return metadata.Type switch
+        {
+            CapFileType.Symlink => CapError.FromCategory(CapErrorCategory.SymbolicLink),
+            CapFileType.Directory => CapError.FromCategory(CapErrorCategory.Unknown),
+            _ => CapError.FromCategory(CapErrorCategory.NotADirectory),
+        };
+    }
+
+    /// <summary>
     /// Removes an empty directory by name, reporting the platform's answer.
     /// </summary>
     /// <remarks>

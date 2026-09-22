@@ -98,6 +98,15 @@ internal static class UnixFileTypes
     /// <summary>Reads the permission, set-id and sticky bits of a mode.</summary>
     public static UnixFileMode PermissionsFromMode(ushort mode) => (UnixFileMode)(mode & S_IPERM);
 
+    /// <summary>Turns caller-facing permissions back into the bits a mode carries.</summary>
+    /// <remarks>
+    /// The reverse of <see cref="PermissionsFromMode"/>, masked the same way. The type bits
+    /// are dropped rather than carried through: what a node is was decided when it was
+    /// created and is not something a permission change may restate.
+    /// </remarks>
+    public static ushort ModeFromPermissions(UnixFileMode permissions) =>
+        (ushort)((ushort)permissions & S_IPERM);
+
     /// <summary>Reads the type bits of a mode.</summary>
     public static CapFileType FromMode(ushort mode) => (mode & S_IFMT) switch
     {

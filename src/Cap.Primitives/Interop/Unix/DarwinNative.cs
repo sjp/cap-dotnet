@@ -88,6 +88,26 @@ internal static unsafe partial class DarwinNative
         int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, int flags);
 
     /// <summary>
+    /// Commits everything the kernel is holding for an open object to the storage it lives
+    /// on.
+    /// </summary>
+    /// <remarks>
+    /// Accepts a directory descriptor as well as a file one, which is the reason it is here:
+    /// committing a directory is how the name that reaches a file is made to survive a power
+    /// loss, and there is no other call that does it.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    internal static partial int FSync(int fd);
+
+    /// <summary>Sets the permission bits of an open object.</summary>
+    /// <remarks>
+    /// By descriptor rather than by name, so nothing is resolved a second time and there is
+    /// no name for a link to be planted at between deciding what to set and setting it.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fchmod", SetLastError = true)]
+    internal static partial int FChmod(int fd, uint mode);
+
+    /// <summary>
     /// The same call, for the commands whose argument is a buffer rather than a number.
     /// </summary>
     /// <remarks>

@@ -37,6 +37,18 @@
   </ItemGroup>
 
   <!--
+    The throwaway directory in tests/Scenarios, for suites that need a real tree to attack
+    rather than a simulated one. Opt-in, because it is built on Cap.Std and so only compiles
+    where that assembly is referenced. The namespace is imported for every file in such a
+    project, so a test refers to it without saying where it came from.
+  -->
+  <ItemGroup Condition="'$(CapUsesScratchTree)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)Scenarios/*.cs"
+             Link="Scenarios/%(Filename)%(Extension)" />
+    <Using Include="Cap.Testing" />
+  </ItemGroup>
+
+  <!--
     The simulated filesystem in tests/Fakes. Opt-in rather than shared by every assembly,
     because it implements an internal contract of Cap.Primitives and so only compiles where
     that assembly has granted access. A project that needs it sets CapUsesPlatformFake.

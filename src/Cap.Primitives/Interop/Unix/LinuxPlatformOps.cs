@@ -659,6 +659,53 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// One call, and no retry. A commit that reports a failure has left the kernel's record
+    /// of what went wrong in a state the next attempt cannot be trusted to report again, so
+    /// the answer is passed on rather than second-guessed.
+    /// </remarks>
+    public CapError SyncDirectory(SafeDirHandle directory)
+    {
+        using HandleLease lease = directory.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        return LinuxNative.FSync(lease.Descriptor) < 0
+            ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
+            : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A value carrying Windows attributes and no mode describes permissions this system does
+    /// not have, and is refused rather than approximated. The mode is masked to the bits that
+    /// say who may do what, so nothing here can restate what kind of object the handle refers
+    /// to.
+    /// </remarks>
+    public CapError SetHandlePermissions(
+        SafeHandle handle,
+        UnixFileMode? unixMode,
+        FileAttributes? windowsAttributes)
+    {
+        if (unixMode is not { } mode)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        return LinuxNative.FChmod(lease.Descriptor, UnixFileTypes.ModeFromPermissions(mode)) < 0
+            ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
+            : CapError.Success;
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         using HandleLease lease = handle.Lease();

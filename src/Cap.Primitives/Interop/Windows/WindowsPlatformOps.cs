@@ -78,6 +78,20 @@ namespace Cap.Primitives.Interop.Windows;
 [SupportedOSPlatform("windows")]
 internal sealed class WindowsPlatformOps : IPlatformOps
 {
+    /// <summary>
+    /// The attribute bits an object's owner may choose, as opposed to the ones the
+    /// filesystem reports about it.
+    /// </summary>
+    /// <remarks>
+    /// Read-only, hidden, system, archive, temporary, offline and the two indexing hints.
+    /// Everything outside this set — that the entry is a directory, that it redirects, that
+    /// the volume has compressed or encrypted or sparsified it — is the filesystem's own
+    /// account of what it did, and a request to set one of them fails the whole call rather
+    /// than being ignored.
+    /// </remarks>
+    private const uint SettableAttributes = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000020 |
+                                            0x00000100 | 0x00001000 | 0x00002000 | 0x00080000;
+
     /// <summary>Access enough to traverse a directory and to read what it contains.</summary>
     private const uint DirectoryAccess =
         NtConstants.FILE_LIST_DIRECTORY | NtConstants.FILE_TRAVERSE |
@@ -506,6 +520,119 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                     CapErrorCategory.NameTooLong, CapErrorSource.Win32, Win32Errors.ERROR_FILENAME_EXCED_RANGE));
             }
         }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// There is no such request here for a process without volume-level privilege. This
+    /// system commits a directory's own record only as part of flushing the whole volume,
+    /// which needs a right an ordinary account does not hold and would in any case stall
+    /// every other writer on the disk — so what a caller asks for and what could be done are
+    /// different enough that doing the second under the name of the first would be a lie.
+    /// </para>
+    /// <para>
+    /// Saying so rather than succeeding is what lets a caller that needs the guarantee find
+    /// out it does not have it. The weaker promise that is left — that the rename publishing
+    /// a file is atomic against anything else reading the directory — holds here as
+    /// everywhere; it is durability across a power loss, and nothing else, that is missing.
+    /// </para>
+    /// </remarks>
+    public CapError SyncDirectory(SafeDirHandle directory) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// A value carrying a Unix mode and no attributes describes permissions this system does
+    /// not record, and is refused rather than translated into the nearest-looking flag.
+    /// </para>
+    /// <para>
+    /// A directory's attributes are written through a second opening of the object rather
+    /// than through the handle itself. A handle on a directory here is granted the rights to
+    /// look into it and no more, so changing anything about it needs an opening that asked
+    /// for that right — and the opening is aimed at the handle with an empty name, which
+    /// reaches the object the handle already refers to and names nothing that could be
+    /// substituted in the meantime.
+    /// </para>
+    /// </remarks>
+    public unsafe CapError SetHandlePermissions(
+        SafeHandle handle,
+        UnixFileMode? unixMode,
+        FileAttributes? windowsAttributes)
+    {
+        if (windowsAttributes is not { } attributes)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        if (handle is SafeDirHandle directory)
+        {
+            CapError opened = OpenRelative(
+                directory,
+                ReadOnlySpan<char>.Empty,
+                NtConstants.FILE_WRITE_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+                NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
+                NtConstants.FILE_OPEN_REPARSE_POINT,
+                out nint reopened);
+
+            if (opened.IsFailure)
+            {
+                return opened;
+            }
+
+            try
+            {
+                return WriteAttributes(reopened, attributes);
+            }
+            finally
+            {
+                _ = NtNative.NtClose(reopened);
+            }
+        }
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+        }
+
+        return WriteAttributes(lease.Raw, attributes);
+    }
+
+    /// <summary>Writes an attribute set to an open object.</summary>
+    /// <remarks>
+    /// <para>
+    /// The bits that describe the object rather than ask anything of it — that it is a
+    /// directory, that it redirects elsewhere, that the filesystem has compressed or
+    /// encrypted it — are dropped. They are the filesystem's own account of what it did and
+    /// are not settable; leaving them in makes the whole call fail rather than the bit be
+    /// ignored.
+    /// </para>
+    /// <para>
+    /// An empty set is written as the bit meaning "nothing in particular", because zero means
+    /// "change nothing" to this call rather than "clear everything".
+    /// </para>
+    /// </remarks>
+    private static unsafe CapError WriteAttributes(nint handle, FileAttributes attributes)
+    {
+        uint settable = (uint)attributes & SettableAttributes;
+
+        FileBasicInformation basic = new()
+        {
+            FileAttributes = settable == 0 ? NtConstants.FILE_ATTRIBUTE_NORMAL : settable,
+        };
+
+        IoStatusBlock status = default;
+        int nt = NtNative.NtSetInformationFile(
+            handle,
+            &status,
+            &basic,
+            (uint)FileBasicInformation.StructSize,
+            NtConstants.FileBasicInformationClass);
+
+        return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
     }
 
     /// <inheritdoc/>

@@ -104,6 +104,26 @@ public readonly struct CapPermissions
         return _origin == Origin.Windows;
     }
 
+    /// <summary>
+    /// The Unix mode this value carries, or null when it came from the other kind of system.
+    /// </summary>
+    /// <remarks>
+    /// The same answer <see cref="TryGetUnixMode"/> gives, in the shape the layer beneath
+    /// takes. Internal because a nullable pair is the right thing to hand a platform and the
+    /// wrong thing to hand a caller: a caller asking about permissions has to be made to say
+    /// which system's they mean, and a null they could ignore would let them not.
+    /// </remarks>
+    internal UnixFileMode? UnixMode => _origin == Origin.Unix ? _unixMode : null;
+
+    /// <summary>
+    /// The Windows attributes this value carries, or null when it came from the other kind of
+    /// system.
+    /// </summary>
+    internal FileAttributes? WindowsAttributes => _origin == Origin.Windows ? _windowsAttributes : null;
+
+    /// <summary>True when this value describes permissions some filesystem actually records.</summary>
+    internal bool IsPresent => _origin != Origin.None;
+
     /// <summary>The permissions as text, for a log line.</summary>
     public override string ToString() => _origin switch
     {

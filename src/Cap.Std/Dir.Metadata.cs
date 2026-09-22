@@ -29,6 +29,52 @@ public sealed partial class Dir
     }
 
     /// <summary>
+    /// Asks the filesystem to commit this directory's own record of what it holds.
+    /// </summary>
+    /// <returns>
+    /// The platform's answer, so that a caller can tell a refusal from a system that has no
+    /// such request at all.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The step that makes a name durable. Committing a file's contents says nothing about
+    /// the entry that reaches them, so an operation promising that a file will be there after
+    /// the power fails has to commit the directory as well — and only the directory's own
+    /// handle can be asked.
+    /// </para>
+    /// <para>
+    /// Internal because it is a step of the operations that publish a file rather than
+    /// something a caller composes for themselves. Reported rather than thrown for the same
+    /// reason: the one platform that cannot do it at all is a case the caller above decides
+    /// about, not a failure.
+    /// </para>
+    /// </remarks>
+    internal CapError SyncContents()
+    {
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        return PlatformOps.Current.SyncDirectory(_handle);
+    }
+
+    /// <summary>
+    /// Writes permissions onto the directory this handle refers to.
+    /// </summary>
+    /// <param name="permissions">A value read from some other object's snapshot.</param>
+    /// <remarks>
+    /// Applied to the object rather than to a name, so nothing is looked up a second time.
+    /// Internal, and reached only by copying: choosing permissions is a decision about a file
+    /// that a caller makes when they create it, while carrying an existing object's across is
+    /// a mechanical step of reproducing that object.
+    /// </remarks>
+    internal CapError SetPermissions(in CapPermissions permissions)
+    {
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        return PlatformOps.Current.SetHandlePermissions(
+            _handle, permissions.UnixMode, permissions.WindowsAttributes);
+    }
+
+    /// <summary>
     /// Describes what a name beneath this handle holds.
     /// </summary>
     /// <param name="path">A relative path to the name to describe.</param>

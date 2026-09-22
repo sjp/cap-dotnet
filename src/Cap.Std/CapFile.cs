@@ -168,6 +168,24 @@ public sealed class CapFile : IDisposable
     }
 
     /// <summary>
+    /// Writes permissions onto the file this handle refers to.
+    /// </summary>
+    /// <param name="permissions">A value read from some other object's snapshot.</param>
+    /// <remarks>
+    /// Applied through the handle, so the object whose permissions change is the one that was
+    /// opened and not whatever its name has come to mean since. Internal for the reason the
+    /// directory's counterpart is: it exists to reproduce an object, not to let a caller
+    /// revise one.
+    /// </remarks>
+    internal CapError SetPermissions(in CapPermissions permissions)
+    {
+        Demand();
+
+        return PlatformOps.Current.SetHandlePermissions(
+            _handle, permissions.UnixMode, permissions.WindowsAttributes);
+    }
+
+    /// <summary>
     /// Reads from a given position in the file.
     /// </summary>
     /// <param name="buffer">Where the bytes go.</param>

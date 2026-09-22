@@ -12,6 +12,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Cap.Primitives.Tests/Cap.Primitives.Tests.csproj" />
     <Project Path="tests/Cap.Std.Tests/Cap.Std.Tests.csproj" />
+    <Project Path="tests/Cap.Fs.Ext.Tests/Cap.Fs.Ext.Tests.csproj" />
     <Project Path="tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj" />
     <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
   </Folder>

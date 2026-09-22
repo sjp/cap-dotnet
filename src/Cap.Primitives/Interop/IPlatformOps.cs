@@ -316,6 +316,55 @@ internal interface IPlatformOps
     CapResult<string> GetHandlePath(SafeDirHandle handle);
 
     /// <summary>
+    /// Asks the filesystem to make a directory's own record of what it holds durable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The step that finishes a publish. Writing a file's contents durably says nothing
+    /// about the name that reaches them: the entry that binds the name to the object lives
+    /// in the directory, and until the directory itself has been committed a crash can leave
+    /// a fully written object that nothing refers to, or a name that refers to nothing. Every
+    /// operation that promises a file will be there after the power goes out therefore ends
+    /// here rather than at the file.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotSupported"/> where the platform offers no such
+    /// request, rather than succeeding at nothing. Windows is that platform for any process
+    /// without volume-level privilege, so a caller asking for the strongest durability there
+    /// has to be told it did not get it and decide what that means.
+    /// </para>
+    /// </remarks>
+    CapError SyncDirectory(SafeDirHandle directory);
+
+    /// <summary>
+    /// Writes to an already-open object the permissions this platform records.
+    /// </summary>
+    /// <param name="handle">An open directory or file handle, as for
+    /// <see cref="DescribeHandle"/>.</param>
+    /// <param name="unixMode">The mode bits to set, or null when the value came from
+    /// elsewhere.</param>
+    /// <param name="windowsAttributes">The attribute bits to set, or null when the value
+    /// came from elsewhere.</param>
+    /// <remarks>
+    /// <para>
+    /// The mirror of <see cref="DescribeHandle"/>, and nullable in the same way and for the
+    /// same reason: the two platforms record different things, and a value carrying the
+    /// other one's is not a value this can apply. A platform handed nothing it understands
+    /// reports <see cref="CapErrorCategory.NotSupported"/> rather than inventing a mapping —
+    /// a Unix mode guessed from a read-only flag would be a permission nobody chose.
+    /// </para>
+    /// <para>
+    /// Acts on the object rather than on a name, which is what makes it usable during a
+    /// copy: the destination is already open, so there is no second lookup for anything to
+    /// be substituted in.
+    /// </para>
+    /// </remarks>
+    CapError SetHandlePermissions(
+        SafeHandle handle,
+        UnixFileMode? unixMode,
+        FileAttributes? windowsAttributes);
+
+    /// <summary>
     /// Produces a second, independent handle to the same directory.
     /// </summary>
     /// <remarks>

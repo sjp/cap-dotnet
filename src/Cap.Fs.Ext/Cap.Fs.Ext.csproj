@@ -3,6 +3,13 @@
   <PropertyGroup>
     <RootNamespace>Cap.Fs.Ext</RootNamespace>
     <Description>Convenience layer over Cap.Std: atomic writes, recursive walks, handle-to-handle copy, sandbox-scoped globbing.</Description>
+    <!--
+      A walk, a copy and a pattern search all work level by level, which is the shape in
+      which a path gets accumulated by somebody who means well. So this assembly is held to
+      the same ban on System.IO.Path as the layers beneath it, and to the audit that reads
+      its own source looking for a separator in a literal.
+    -->
+    <CapBanSystemIoPath>true</CapBanSystemIoPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Cap.Escape.Tests" />
+    <InternalsVisibleTo Include="Cap.Fs.Ext.Tests" />
   </ItemGroup>
 
 </Project>

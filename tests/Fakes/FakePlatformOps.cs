@@ -326,6 +326,73 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Counted rather than performed. There is no storage behind the simulation for anything
+    /// to be committed to, and what a test needs to know is whether the code under test asked
+    /// — a durability promise is kept or broken by whether the call is made, so the count is
+    /// the observable the assertions are written against.
+    /// </remarks>
+    public CapError SyncDirectory(SafeDirHandle directory)
+    {
+        if (!TryResolveHandle(directory, out _))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        DirectorySyncs++;
+        return CapError.Success;
+    }
+
+    /// <summary>How many times a directory has been asked to commit what it holds.</summary>
+    public int DirectorySyncs { get; private set; }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Applies whichever half of the value this simulated platform records, matching the rule
+    /// the real implementations follow: a node created with a Unix mode takes a mode, and one
+    /// created with attributes takes attributes. A value carrying the other platform's is
+    /// refused here exactly as it would be there.
+    /// </remarks>
+    public CapError SetHandlePermissions(
+        SafeHandle handle,
+        UnixFileMode? unixMode,
+        FileAttributes? windowsAttributes)
+    {
+        FakeNode? node;
+        if (handle is SafeDirHandle directory)
+        {
+            if (!TryResolveHandle(directory, out node))
+            {
+                return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+            }
+        }
+        else if (handle.IsInvalid || handle.IsClosed ||
+                 !_open.TryGetValue(handle.DangerousGetHandle(), out node))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        if (node!.UnixMode is not null)
+        {
+            if (unixMode is not { } mode)
+            {
+                return CapError.FromCategory(CapErrorCategory.NotSupported);
+            }
+
+            node.UnixMode = mode;
+            return CapError.Success;
+        }
+
+        if (windowsAttributes is not { } attributes)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        node.WindowsAttributes = attributes;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         if (!TryResolveHandle(handle, out FakeNode? node))

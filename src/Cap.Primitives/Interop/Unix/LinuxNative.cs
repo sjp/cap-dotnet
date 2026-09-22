@@ -60,6 +60,26 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "readlinkat", SetLastError = true)]
     internal static partial nint ReadLinkAt(int directoryFd, byte* path, byte* buffer, nuint bufferSize);
 
+    /// <summary>
+    /// Commits everything the kernel is holding for an open object to the storage it lives
+    /// on.
+    /// </summary>
+    /// <remarks>
+    /// Accepts a directory descriptor as well as a file one, which is the reason it is here:
+    /// committing a directory is how the name that reaches a file is made to survive a power
+    /// loss, and there is no other call that does it.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    internal static partial int FSync(int fd);
+
+    /// <summary>Sets the permission bits of an open object.</summary>
+    /// <remarks>
+    /// By descriptor rather than by name, so nothing is resolved a second time and there is
+    /// no name for a link to be planted at between deciding what to set and setting it.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fchmod", SetLastError = true)]
+    internal static partial int FChmod(int fd, uint mode);
+
     /// <summary>Manipulates a descriptor. Used to duplicate one and to clear a status flag.</summary>
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int Fcntl(int fd, int command, int argument);

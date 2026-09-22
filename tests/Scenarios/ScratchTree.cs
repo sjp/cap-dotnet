@@ -1,6 +1,7 @@
 using Cap.Primitives;
+using Cap.Std;
 
-namespace Cap.Std.Tests;
+namespace Cap.Testing;
 
 /// <summary>
 /// A throwaway directory for one test class to build its scenarios in.
@@ -18,6 +19,11 @@ namespace Cap.Std.Tests;
 /// The host path is kept alongside the handle, because the scenarios have to be built by
 /// something that is not the code under test. A test that arranged its attack through the
 /// capability API would be arranging an attack that API had already agreed to.
+/// </para>
+/// <para>
+/// Shared by every suite that needs a real tree rather than copied into each of them, so that
+/// there is one answer to where a test's scratch space comes from and one place the cleanup
+/// lives.
 /// </para>
 /// </remarks>
 internal sealed class ScratchTree : IDisposable
