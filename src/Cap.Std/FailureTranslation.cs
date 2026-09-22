@@ -21,6 +21,24 @@ namespace Cap.Std;
 /// own is what the framework has no word for: a refusal on containment grounds.
 /// </para>
 /// </remarks>
+/// <summary>
+/// What an operation was looking for, for the sole purpose of reporting that it was not
+/// there.
+/// </summary>
+/// <remarks>
+/// Not a resolution option and not visible to a caller. It exists because the framework
+/// reports a missing directory and a missing file as different exception types, and code
+/// ported onto these APIs has <c>catch</c> clauses written for whichever one it used to get.
+/// </remarks>
+internal enum ExpectedTarget
+{
+    /// <summary>A directory: a missing one is reported as such.</summary>
+    Directory,
+
+    /// <summary>A name of any kind: a missing one is reported as a missing file.</summary>
+    Name,
+}
+
 internal static class FailureTranslation
 {
     /// <summary>
@@ -28,10 +46,71 @@ internal static class FailureTranslation
     /// </summary>
     /// <param name="error">The failure.</param>
     /// <param name="path">The path the caller supplied, quoted back in the message.</param>
-    public static Exception ToException(CapError error, string path) => error.Category switch
+    /// <param name="expected">
+    /// What the caller was after, which decides only how a missing thing is reported. An
+    /// operation that wanted a directory and did not find one is a different fact from an
+    /// operation that wanted a name and found none, and the framework has a separate type
+    /// for each — so a caller porting a <c>catch</c> clause keeps matching what it matched
+    /// before.
+    /// </param>
+    public static Exception ToException(
+        CapError error,
+        string path,
+        ExpectedTarget expected = ExpectedTarget.Directory) => error.Category switch
     {
-        CapErrorCategory.NotFound =>
-            new DirectoryNotFoundException($"'{path}' does not name a directory that exists. ({error})"),
+        CapErrorCategory.NotFound => expected == ExpectedTarget.Directory
+            ? new DirectoryNotFoundException($"'{path}' does not name a directory that exists. ({error})")
+            : new FileNotFoundException($"'{path}' does not name anything that exists. ({error})"),
+
+        CapErrorCategory.AlreadyExists =>
+            new CapIOException($"'{path}' names something that already exists. ({error})"),
+
+        CapErrorCategory.IsADirectory =>
+            new CapIOException(
+                $"'{path}' names a directory, or is spelled so that it has to be one, and " +
+                $"this operation does not act on a directory. ({error})"),
+
+        CapErrorCategory.NotEmpty =>
+            new CapIOException(
+                $"'{path}' names a directory that still has entries in it. Removing what is " +
+                $"inside is a walk over handles, which the caller performs rather than this " +
+                $"call. ({error})"),
+
+        CapErrorCategory.CrossDevice =>
+            new CapIOException(
+                $"'{path}' and the destination are on different filesystems, so the entry " +
+                $"cannot be moved between them. It is not copied instead: a copy has " +
+                $"different timing, different failure modes and a different result for a " +
+                $"hard link, and doing one under the name of a move would quietly stop the " +
+                $"operation being atomic. ({error})"),
+
+        // Not a containment refusal and not a missing thing: the filesystem understood the
+        // request and it was not one it could carry out as written. Moving a directory to a
+        // name inside itself is the case a caller is most likely to meet.
+        CapErrorCategory.InvalidArgument =>
+            new CapIOException(
+                $"'{path}' was not a request the filesystem could carry out as asked. " +
+                $"Moving a directory to a name beneath itself is the usual cause. ({error})"),
+
+        CapErrorCategory.ReadOnlyFilesystem =>
+            new CapIOException($"'{path}' is on a filesystem mounted read-only. ({error})"),
+
+        // Reported rather than worked around. The platform cannot make the refusal part of
+        // the operation, and the alternative -- looking first and acting if the answer was
+        // favourable -- has a window in which the answer changes, which is the whole class
+        // of bug this library exists to remove.
+        CapErrorCategory.NotSupported =>
+            new CapIOException(
+                $"'{path}' could not be operated on: the filesystem does not implement what " +
+                $"the operation needs in order to be performed as one step. ({error})"),
+
+        // The name turned out to be a symbolic link where the operation needed the thing
+        // itself. Inside the subtree, so not an escape -- only a step the operation will not
+        // take on the caller's behalf.
+        CapErrorCategory.SymbolicLink =>
+            new CapIOException(
+                $"'{path}' is a symbolic link, and this operation acts on what a name holds " +
+                $"rather than on what it points at. ({error})"),
 
         CapErrorCategory.PermissionDenied =>
             new UnauthorizedAccessException($"Access to '{path}' was denied by the filesystem. ({error})"),

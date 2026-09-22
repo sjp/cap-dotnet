@@ -49,6 +49,47 @@ internal static unsafe partial class NtNative
     [LibraryImport("ntdll.dll")]
     internal static partial int NtClose(nint handle);
 
+    /// <summary>
+    /// Creates or opens an object, resolving its name against a directory handle.
+    /// </summary>
+    /// <remarks>
+    /// The creating counterpart of <see cref="NtOpenFile"/>, and used only where something
+    /// is being made: a directory, or the stub a symbolic link is written into. An open of
+    /// something that already exists goes through the other call, which cannot create by
+    /// accident whatever disposition a caller passes.
+    /// </remarks>
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtCreateFile(
+        nint* fileHandle,
+        uint desiredAccess,
+        ObjectAttributes* objectAttributes,
+        IoStatusBlock* ioStatusBlock,
+        long* allocationSize,
+        uint fileAttributes,
+        uint shareAccess,
+        uint createDisposition,
+        uint createOptions,
+        void* eaBuffer,
+        uint eaLength);
+
+    /// <summary>
+    /// Writes one class of information about an open file.
+    /// </summary>
+    /// <remarks>
+    /// How removal, renaming and hard linking are all performed here. Each takes a handle to
+    /// the object and a structure describing what to do with it, which is what makes them
+    /// expressible against an already-confined handle at all — the path-taking Win32
+    /// equivalents would re-resolve a string, with the Win32 rewriting in front of it, and
+    /// throw away everything resolution established.
+    /// </remarks>
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtSetInformationFile(
+        nint fileHandle,
+        IoStatusBlock* ioStatusBlock,
+        void* fileInformation,
+        uint length,
+        uint fileInformationClass);
+
     /// <summary>Reads one class of information about an open file.</summary>
     [LibraryImport("ntdll.dll")]
     internal static partial int NtQueryInformationFile(
@@ -170,6 +211,9 @@ internal static class NtConstants
     /// </remarks>
     public const uint FILE_SHARE_ALL = 0x0001 | 0x0002 | 0x0004;
 
+    /// <summary>Required to remove an object, and to rename one.</summary>
+    public const uint DELETE = 0x00010000;
+
     // --- Open options --------------------------------------------------------------------
 
     /// <summary>Refuse the open unless the object is a directory.</summary>
@@ -191,6 +235,24 @@ internal static class NtConstants
     /// before this library got to see that there was a link at all.
     /// </remarks>
     public const uint FILE_OPEN_REPARSE_POINT = 0x00200000;
+
+    // --- Create disposition ---------------------------------------------------------------
+
+    /// <summary>
+    /// Create the object, and fail if the name is already taken.
+    /// </summary>
+    /// <remarks>
+    /// The only disposition this library ever passes. Every other one either opens something
+    /// that exists or silently does one or the other, and a create that quietly opened an
+    /// existing object would let a name planted by somebody else be mistaken for one this
+    /// process had just made.
+    /// </remarks>
+    public const uint FILE_CREATE = 2;
+
+    // --- File attributes for a newly created object -----------------------------------------
+
+    /// <summary>No attributes of note. Valid only on its own.</summary>
+    public const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
 
     // --- CreateFileW ----------------------------------------------------------------------
 
@@ -261,4 +323,61 @@ internal static class NtConstants
 
     /// <summary>Reads the data stored in a reparse point.</summary>
     public const uint FSCTL_GET_REPARSE_POINT = 0x000900A8;
+
+    /// <summary>
+    /// Writes the data of a reparse point, which is how a symbolic link is created here.
+    /// </summary>
+    /// <remarks>
+    /// The Win32 call that makes a symbolic link takes two paths and resolves both with the
+    /// process's ambient authority, so it cannot be used beneath a directory handle at all.
+    /// A link is therefore made in two steps: an empty object is created as an entry of the
+    /// confined directory, and the link data is written into it through its handle. The
+    /// window between them is visible — the empty stub exists for an instant — and is closed
+    /// by removing the stub if the second step fails.
+    /// </remarks>
+    public const uint FSCTL_SET_REPARSE_POINT = 0x000900A4;
+
+    // --- Information classes for writing --------------------------------------------------------
+
+    /// <summary>Renames an open object. The older form, carrying a plain replace flag.</summary>
+    public const uint FileRenameInformationClass = 10;
+
+    /// <summary>Creates a second name for an open object.</summary>
+    public const uint FileLinkInformationClass = 11;
+
+    /// <summary>Marks an open object for removal. The older form, carrying a plain flag.</summary>
+    public const uint FileDispositionInformationClass = 13;
+
+    /// <summary>
+    /// Marks an open object for removal, with flags — among them the one that makes the name
+    /// disappear at once rather than when the last handle closes.
+    /// </summary>
+    public const uint FileDispositionInformationExClass = 64;
+
+    /// <summary>Renames an open object, with flags.</summary>
+    public const uint FileRenameInformationExClass = 65;
+
+    // --- Flags for those classes ------------------------------------------------------------------
+
+    /// <summary>Remove the object.</summary>
+    public const uint FILE_DISPOSITION_DELETE = 0x00000001;
+
+    /// <summary>
+    /// Unlink the name immediately, rather than keeping it until every handle is closed.
+    /// </summary>
+    /// <remarks>
+    /// This platform's default is the other way round: a removed name stays visible, and
+    /// unusable, until the last handle to the object goes away, which is why deleting a file
+    /// something else has open behaves so differently here from everywhere else. Asking for
+    /// the immediate form makes removal mean the same thing on every platform this library
+    /// runs on, which is worth more than matching the local convention.
+    /// </remarks>
+    public const uint FILE_DISPOSITION_POSIX_SEMANTICS = 0x00000002;
+
+    /// <summary>Replace an entry already holding the destination name.</summary>
+    public const uint FILE_RENAME_REPLACE_IF_EXISTS = 0x00000001;
+
+    /// <summary>Replace it the way the other platforms do: at once, even if it is open.</summary>
+    public const uint FILE_RENAME_POSIX_SEMANTICS = 0x00000002;
+
 }

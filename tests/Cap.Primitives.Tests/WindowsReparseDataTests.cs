@@ -25,6 +25,52 @@ namespace Cap.Primitives.Tests;
 public sealed class WindowsReparseDataTests
 {
     /// <summary>
+    /// A link this library writes reads back as the link it meant to write.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Creating a symbolic link beneath a directory handle means writing this structure by
+    /// hand, because the call that would write it for us takes two paths and resolves both
+    /// with the process's own authority. A wrong offset in it is invisible: the link is
+    /// created, the call reports success, and only something that reads the link back finds
+    /// out — which on the platform concerned might be months later and somewhere else.
+    /// </para>
+    /// <para>
+    /// The reader is already exercised against hand-built structures on every platform, so
+    /// pairing the writer with it costs nothing and turns a Windows-only unknown into an
+    /// assertion that runs on every build agent. The rooted case is the one worth insisting
+    /// on: what the filesystem resolves and what a reader is shown are deliberately not the
+    /// same characters there.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("inside\\target", false)]
+    [InlineData("..\\sibling", false)]
+    [InlineData("C:\\elsewhere\\file", true)]
+    public void A_link_written_here_reads_back_as_what_was_written(string target, bool rooted)
+    {
+        byte[] buffer = new byte[ReparseData.SymbolicLinkSize(target, rooted)];
+
+        Assert.True(ReparseData.TryBuildSymbolicLink(target, rooted, buffer, out int written));
+        Assert.Equal(buffer.Length, written);
+
+        Assert.True(ReparseData.TryReadTarget(buffer, out string stored, out bool isRelative));
+        Assert.Equal(!rooted, isRelative);
+        Assert.Equal(rooted ? ReparseData.ObjectManagerPrefix + target : target, stored);
+    }
+
+    /// <summary>A destination that is too small is refused rather than half filled.</summary>
+    [Fact]
+    public void A_buffer_that_does_not_fit_the_link_is_refused()
+    {
+        const string Target = "inside\\target";
+        byte[] buffer = new byte[ReparseData.SymbolicLinkSize(Target, rooted: false) - 1];
+
+        Assert.False(ReparseData.TryBuildSymbolicLink(Target, rooted: false, buffer, out int written));
+        Assert.Equal(0, written);
+    }
+
+    /// <summary>
     /// A link that says its target is to be resolved from the directory holding it. This is
     /// the only shape a walk can do anything with.
     /// </summary>

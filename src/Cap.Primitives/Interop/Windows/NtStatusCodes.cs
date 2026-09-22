@@ -49,6 +49,28 @@ internal static class NtStatusCodes
     public const int STATUS_BUFFER_TOO_SMALL = unchecked((int)0xC0000023);
     public const int STATUS_BUFFER_OVERFLOW = unchecked((int)0x80000005);
 
+    /// <summary>A rename would have moved the object to a different volume.</summary>
+    public const int STATUS_NOT_SAME_DEVICE = unchecked((int)0xC00000D4);
+
+    /// <summary>
+    /// The process token does not hold a privilege the operation requires. What creating a
+    /// symbolic link reports on a system where that is still privileged.
+    /// </summary>
+    public const int STATUS_PRIVILEGE_NOT_HELD = unchecked((int)0xC0000061);
+
+    /// <summary>The object cannot be removed: read-only, in use, or a directory that is not empty.</summary>
+    public const int STATUS_CANNOT_DELETE = unchecked((int)0xC0000121);
+
+    /// <summary>
+    /// The filesystem does not implement the class of information that was asked for.
+    /// </summary>
+    /// <remarks>
+    /// How an older system, or a filesystem that has not caught up, reports that one of the
+    /// newer forms of removal or renaming is unavailable. It is the signal to use the older
+    /// form of the same operation, not a failure to report.
+    /// </remarks>
+    public const int STATUS_INVALID_INFO_CLASS = unchecked((int)0xC0000003);
+
     /// <summary>The object is not a reparse point, so there is no link to read.</summary>
     public const int STATUS_NOT_A_REPARSE_POINT = unchecked((int)0xC0000275);
 
@@ -86,6 +108,8 @@ internal static class NtStatusCodes
                 return CapErrorCategory.NotFound;
             case STATUS_ACCESS_DENIED:
             case STATUS_SHARING_VIOLATION:
+            case STATUS_PRIVILEGE_NOT_HELD:
+            case STATUS_CANNOT_DELETE:
                 return CapErrorCategory.PermissionDenied;
             case STATUS_OBJECT_NAME_COLLISION:
                 return CapErrorCategory.AlreadyExists;
@@ -106,7 +130,10 @@ internal static class NtStatusCodes
             case STATUS_INVALID_HANDLE:
                 return CapErrorCategory.InvalidArgument;
             case STATUS_NOT_SUPPORTED:
+            case STATUS_INVALID_INFO_CLASS:
                 return CapErrorCategory.NotSupported;
+            case STATUS_NOT_SAME_DEVICE:
+                return CapErrorCategory.CrossDevice;
             case STATUS_DIRECTORY_NOT_EMPTY:
                 return CapErrorCategory.NotEmpty;
             case STATUS_NAME_TOO_LONG:

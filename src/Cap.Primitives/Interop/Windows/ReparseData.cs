@@ -90,6 +90,16 @@ internal static class ReparseData
 
     private const int SubstituteNameLengthOffset = 10;
 
+    /// <summary>Offset of the print name's position, relative to the start of the structure.</summary>
+    private const int PrintNameOffsetOffset = 12;
+
+    private const int PrintNameLengthOffset = 14;
+
+    /// <summary>
+    /// The terminator written after each stored name, which no declared length counts.
+    /// </summary>
+    private const int TerminatorBytes = sizeof(char);
+
     /// <summary>Where the characters start for a symbolic link: after four offsets and a flags word.</summary>
     private const int SymbolicLinkPathOffset = 20;
 
@@ -104,6 +114,105 @@ internal static class ReparseData
     /// directory holding the link rather than from a filesystem root.
     /// </summary>
     private const uint SymbolicLinkFlagRelative = 0x00000001;
+
+    /// <summary>
+    /// The prefix that makes a rooted path a name the object manager resolves.
+    /// </summary>
+    /// <remarks>
+    /// What the system's own link-creating call stores for a target that is not relative.
+    /// The displayed name keeps the caller's spelling; this is what the filesystem acts on.
+    /// </remarks>
+    public const string ObjectManagerPrefix = @"\??\";
+
+    /// <summary>
+    /// How many bytes a symbolic link's data occupies for a given target.
+    /// </summary>
+    public static int SymbolicLinkSize(ReadOnlySpan<char> target, bool rooted) =>
+        SymbolicLinkPathOffset +
+        (SubstituteChars(target, rooted) * sizeof(char)) + TerminatorBytes +
+        (target.Length * sizeof(char)) + TerminatorBytes;
+
+    /// <summary>
+    /// Builds the structure that creates a symbolic link with the given stored target.
+    /// </summary>
+    /// <param name="target">The target as the caller wrote it.</param>
+    /// <param name="rooted">
+    /// Whether the target names a location from a root rather than from the directory
+    /// holding the link. The filesystem acts on this rather than on the spelling, which is
+    /// why it is decided by the same path parser resolution uses and passed in rather than
+    /// guessed from the characters here.
+    /// </param>
+    /// <param name="destination">
+    /// Where to write, at least <see cref="SymbolicLinkSize"/> bytes long.
+    /// </param>
+    /// <param name="written">How much of <paramref name="destination"/> was used.</param>
+    /// <remarks>
+    /// <para>
+    /// Written here, beside the reader, so that the two cannot drift apart about where the
+    /// names live. The offsets in this structure are the part a mistake hides in: everything
+    /// keeps working with a wrong one until something reads the link back, and on the
+    /// platform this runs on there is no way to find out except by trying it.
+    /// </para>
+    /// <para>
+    /// The substitute name is the one the filesystem resolves and the print name the one a
+    /// reader is shown. They are the same characters for a relative target; for a rooted one
+    /// the substitute name is spelled in the object manager's syntax and the print name keeps
+    /// the caller's spelling, which is what the system's own call stores. Each is followed by
+    /// a terminator that its declared length does not count, again to match.
+    /// </para>
+    /// </remarks>
+    public static bool TryBuildSymbolicLink(
+        ReadOnlySpan<char> target,
+        bool rooted,
+        Span<byte> destination,
+        out int written)
+    {
+        written = 0;
+
+        int substituteBytes = SubstituteChars(target, rooted) * sizeof(char);
+        int printBytes = target.Length * sizeof(char);
+        int printOffset = substituteBytes + TerminatorBytes;
+        int total = SymbolicLinkPathOffset + printOffset + printBytes + TerminatorBytes;
+
+        if (total > MaximumBufferSize || total > destination.Length ||
+            substituteBytes > ushort.MaxValue || printOffset > ushort.MaxValue)
+        {
+            return false;
+        }
+
+        Span<byte> structure = destination[..total];
+        structure.Clear();
+
+        BinaryPrimitives.WriteUInt32LittleEndian(structure, ReparseTags.SymbolicLink);
+        BinaryPrimitives.WriteUInt16LittleEndian(structure[DataLengthOffset..], (ushort)(total - HeaderSize));
+        BinaryPrimitives.WriteUInt16LittleEndian(structure[SubstituteNameOffsetOffset..], 0);
+        BinaryPrimitives.WriteUInt16LittleEndian(structure[SubstituteNameLengthOffset..], (ushort)substituteBytes);
+        BinaryPrimitives.WriteUInt16LittleEndian(structure[PrintNameOffsetOffset..], (ushort)printOffset);
+        BinaryPrimitives.WriteUInt16LittleEndian(structure[PrintNameLengthOffset..], (ushort)printBytes);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            structure[SymbolicLinkFlagsOffset..], rooted ? 0 : SymbolicLinkFlagRelative);
+
+        Span<byte> substitute = structure.Slice(SymbolicLinkPathOffset, substituteBytes);
+        if (rooted)
+        {
+            System.Text.Encoding.Unicode.GetBytes(ObjectManagerPrefix, substitute);
+            System.Text.Encoding.Unicode.GetBytes(
+                target, substitute[(ObjectManagerPrefix.Length * sizeof(char))..]);
+        }
+        else
+        {
+            System.Text.Encoding.Unicode.GetBytes(target, substitute);
+        }
+
+        System.Text.Encoding.Unicode.GetBytes(
+            target, structure[(SymbolicLinkPathOffset + printOffset)..]);
+
+        written = total;
+        return true;
+    }
+
+    private static int SubstituteChars(ReadOnlySpan<char> target, bool rooted) =>
+        rooted ? ObjectManagerPrefix.Length + target.Length : target.Length;
 
     /// <summary>Reads the tag from a returned buffer.</summary>
     public static bool TryReadTag(ReadOnlySpan<byte> buffer, out uint tag)

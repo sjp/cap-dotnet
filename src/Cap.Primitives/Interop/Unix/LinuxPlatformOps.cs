@@ -423,6 +423,253 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
     }
 
+    /// <inheritdoc/>
+    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                result = LinuxNative.MkdirAt(
+                    lease.Descriptor, path, LinuxConstants.DirectoryCreateMode);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        Unlink(parent, name, flags: 0);
+
+    /// <inheritdoc/>
+    public CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        Unlink(parent, name, LinuxConstants.AT_REMOVEDIR);
+
+    /// <inheritdoc/>
+    public CapError RenameChild(
+        SafeDirHandle fromParent,
+        ReadOnlySpan<char> fromName,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName,
+        bool replaceExisting)
+    {
+        using HandleLease fromLease = fromParent.Lease();
+        using HandleLease toLease = toParent.Lease();
+        if (!fromLease.IsValid || !toLease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
+        Span<byte> toScratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer from = UnixPathBuffer.Create(fromName, fromScratch);
+        using UnixPathBuffer to = UnixPathBuffer.Create(toName, toScratch);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        long result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* fromPath = from.Bytes)
+            fixed (byte* toPath = to.Bytes)
+            {
+                result = replaceExisting
+                    ? LinuxNative.RenameAt(fromLease.Descriptor, fromPath, toLease.Descriptor, toPath)
+                    : LinuxNative.RenameAt2(
+                        LinuxConstants.SYS_renameat2,
+                        fromLease.Descriptor,
+                        fromPath,
+                        toLease.Descriptor,
+                        toPath,
+                        LinuxConstants.RENAME_NOREPLACE);
+
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (result >= 0)
+        {
+            return CapError.Success;
+        }
+
+        return replaceExisting ? LinuxErrno.ToError(errno) : TranslateNoReplaceFailure(errno);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The kind of the target is not recorded on this platform, so it is not asked for:
+    /// a link is a stored string and what it turns out to name is decided when something
+    /// follows it.
+    /// </remarks>
+    public CapError CreateChildSymbolicLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        ReadOnlySpan<char> target,
+        bool targetIsDirectory)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> nameScratch = stackalloc byte[PathScratchBytes];
+        Span<byte> targetScratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer link = UnixPathBuffer.Create(name, nameScratch);
+        using UnixPathBuffer stored = UnixPathBuffer.Create(target, targetScratch);
+        if (!link.IsValid || !stored.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* linkPath = link.Bytes)
+            fixed (byte* targetPath = stored.Bytes)
+            {
+                result = LinuxNative.SymlinkAt(targetPath, lease.Descriptor, linkPath);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError CreateChildHardLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName)
+    {
+        using HandleLease lease = parent.Lease();
+        using HandleLease toLease = toParent.Lease();
+        if (!lease.IsValid || !toLease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
+        Span<byte> toScratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer from = UnixPathBuffer.Create(name, fromScratch);
+        using UnixPathBuffer to = UnixPathBuffer.Create(toName, toScratch);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* fromPath = from.Bytes)
+            fixed (byte* toPath = to.Bytes)
+            {
+                // No flags, so the existing name is taken as written. The flag that would
+                // follow a symbolic link is deliberately absent: a second name for a link
+                // is a second name for the link.
+                result = LinuxNative.LinkAt(
+                    lease.Descriptor, fromPath, toLease.Descriptor, toPath, flags: 0);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <summary>Removes one name beneath a directory descriptor.</summary>
+    private static CapError Unlink(SafeDirHandle parent, ReadOnlySpan<char> name, int flags)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                result = LinuxNative.UnlinkAt(lease.Descriptor, path, flags);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <summary>
+    /// Reads the failure of a rename that refused to replace its destination.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two codes mean this kernel, or this filesystem, cannot make the refusal part of the
+    /// rename: an older kernel has no such call at all, and a filesystem that has not
+    /// implemented the flag says the operation is unsupported. Neither is answered by
+    /// looking the destination up first and renaming if it was absent — between those two
+    /// the destination can appear, and the rename would then destroy exactly what the caller
+    /// asked not to destroy. So it is reported as unsupported, and a caller content to
+    /// replace can say so and get an ordinary rename.
+    /// </para>
+    /// <para>
+    /// An invalid-argument report is deliberately not among them, although a handful of
+    /// filesystems have historically used it for an unimplemented flag. It is the code for a
+    /// request that is wrong rather than unsupported — moving a directory inside itself,
+    /// most often — and reading every one of those as a platform limitation would tell a
+    /// caller their filesystem is old when what is actually wrong is what they asked for.
+    /// </para>
+    /// </remarks>
+    private static CapError TranslateNoReplaceFailure(int errno) =>
+        errno is LinuxErrno.ENOSYS or LinuxErrno.EOPNOTSUPP
+            ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
+            : LinuxErrno.ToError(errno);
+
     private static int AccessFlags(CapAccess access) => access switch
     {
         CapAccess.ReadWrite => LinuxConstants.O_RDWR,

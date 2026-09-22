@@ -18,6 +18,13 @@ internal static class DarwinErrno
     /// </summary>
     public const int EAGAIN = 35;
 
+    /// <summary>
+    /// Operation not supported. 45 here, and not to be confused with <see cref="EOPNOTSUPP"/>
+    /// at 102, which this platform reserves for sockets — a filesystem declining a rename
+    /// flag reports this one.
+    /// </summary>
+    public const int ENOTSUP = 45;
+
     public const int ELOOP = 62;
     public const int ENAMETOOLONG = 63;
     public const int ENOTEMPTY = 66;
@@ -37,7 +44,7 @@ internal static class DarwinErrno
             EAGAIN => CapErrorCategory.Raced,
             ELOOP => CapErrorCategory.SymbolicLinkLoop,
             ENAMETOOLONG => CapErrorCategory.NameTooLong,
-            ENOSYS or EOPNOTSUPP => CapErrorCategory.NotSupported,
+            ENOSYS or ENOTSUP or EOPNOTSUPP => CapErrorCategory.NotSupported,
             ENOTEMPTY => CapErrorCategory.NotEmpty,
             _ => CapErrorCategory.Unknown,
         };

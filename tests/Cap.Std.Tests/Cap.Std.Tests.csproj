@@ -9,4 +9,19 @@
     <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
   </ItemGroup>
 
+  <!--
+    The Cap.Std sources, carried into this assembly so that a test can read them.
+
+    One of the guarantees this library makes is not expressible as behaviour: that no
+    operation ever rebuilds a path out of pieces. A test can only observe the results of the
+    code, and a rebuilt path produces the right result nearly every time, and goes wrong
+    only against a tree an attacker has arranged. So the property is asserted about the
+    source instead, which needs the source at run time.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../src/Cap.Std/**/*.cs"
+                      Exclude="../../src/Cap.Std/obj/**/*.cs;../../src/Cap.Std/bin/**/*.cs"
+                      LogicalName="CapStdSource.%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

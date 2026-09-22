@@ -352,6 +352,246 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
     }
 
+    /// <inheritdoc/>
+    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                result = DarwinNative.MkdirAt(
+                    lease.Descriptor, path, DarwinConstants.DirectoryCreateMode);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        Unlink(parent, name, flags: 0);
+
+    /// <inheritdoc/>
+    public CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        Unlink(parent, name, DarwinConstants.AT_REMOVEDIR);
+
+    /// <inheritdoc/>
+    public CapError RenameChild(
+        SafeDirHandle fromParent,
+        ReadOnlySpan<char> fromName,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName,
+        bool replaceExisting)
+    {
+        using HandleLease fromLease = fromParent.Lease();
+        using HandleLease toLease = toParent.Lease();
+        if (!fromLease.IsValid || !toLease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
+        Span<byte> toScratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer from = UnixPathBuffer.Create(fromName, fromScratch);
+        using UnixPathBuffer to = UnixPathBuffer.Create(toName, toScratch);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* fromPath = from.Bytes)
+            fixed (byte* toPath = to.Bytes)
+            {
+                result = replaceExisting
+                    ? DarwinNative.RenameAt(fromLease.Descriptor, fromPath, toLease.Descriptor, toPath)
+                    : DarwinNative.RenameAtX(
+                        fromLease.Descriptor,
+                        fromPath,
+                        toLease.Descriptor,
+                        toPath,
+                        DarwinConstants.RENAME_EXCL);
+
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (result >= 0)
+        {
+            return CapError.Success;
+        }
+
+        return replaceExisting ? DarwinErrno.ToError(errno) : TranslateNoReplaceFailure(errno);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The kind of the target is not recorded on this platform, so the request for a
+    /// directory link and the request for a file link produce the same link.
+    /// </remarks>
+    public CapError CreateChildSymbolicLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        ReadOnlySpan<char> target,
+        bool targetIsDirectory)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> nameScratch = stackalloc byte[PathScratchBytes];
+        Span<byte> targetScratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer link = UnixPathBuffer.Create(name, nameScratch);
+        using UnixPathBuffer stored = UnixPathBuffer.Create(target, targetScratch);
+        if (!link.IsValid || !stored.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* linkPath = link.Bytes)
+            fixed (byte* targetPath = stored.Bytes)
+            {
+                result = DarwinNative.SymlinkAt(targetPath, lease.Descriptor, linkPath);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError CreateChildHardLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName)
+    {
+        using HandleLease lease = parent.Lease();
+        using HandleLease toLease = toParent.Lease();
+        if (!lease.IsValid || !toLease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
+        Span<byte> toScratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer from = UnixPathBuffer.Create(name, fromScratch);
+        using UnixPathBuffer to = UnixPathBuffer.Create(toName, toScratch);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* fromPath = from.Bytes)
+            fixed (byte* toPath = to.Bytes)
+            {
+                result = DarwinNative.LinkAt(
+                    lease.Descriptor, fromPath, toLease.Descriptor, toPath, flags: 0);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <summary>Removes one name beneath a directory descriptor.</summary>
+    private static CapError Unlink(SafeDirHandle parent, ReadOnlySpan<char> name, int flags)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                result = DarwinNative.UnlinkAt(lease.Descriptor, path, flags);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <summary>
+    /// Reads the failure of a rename that refused to replace its destination.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A filesystem that has not implemented the flag reports the operation unsupported, and
+    /// a system predating the call reports it missing. Neither is answered by looking the
+    /// destination up first and renaming if it was free: something appearing between those
+    /// two would be destroyed by the call that was told not to destroy anything. So it is
+    /// reported as unsupported, and a caller content to replace can ask for that and get an
+    /// ordinary rename.
+    /// </para>
+    /// <para>
+    /// An invalid-argument report is not among them. It is the code for a request that is
+    /// wrong rather than unsupported — moving a directory inside itself, most often — and
+    /// reading it as a platform limitation would tell a caller their filesystem is old when
+    /// what is actually wrong is what they asked for.
+    /// </para>
+    /// </remarks>
+    private static CapError TranslateNoReplaceFailure(int errno) =>
+        errno is DarwinErrno.ENOSYS or DarwinErrno.ENOTSUP or DarwinErrno.EOPNOTSUPP
+            ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
+            : DarwinErrno.ToError(errno);
+
     private static CapError ConfinedOpenUnavailable =>
         CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, DarwinErrno.ENOSYS);
 

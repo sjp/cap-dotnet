@@ -188,4 +188,132 @@ internal interface IPlatformOps
     /// made it.
     /// </remarks>
     CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle);
+
+    /// <summary>
+    /// Creates a directory named <paramref name="name"/> directly beneath
+    /// <paramref name="parent"/>.
+    /// </summary>
+    /// <remarks>
+    /// Fails with <see cref="CapErrorCategory.AlreadyExists"/> when the name is taken, by
+    /// anything at all — an existing directory, a file, a symbolic link whose target happens
+    /// to be a directory. The name is what is being claimed, so what currently holds it does
+    /// not change the answer, and the refusal comes from the one call that makes the
+    /// directory rather than from a lookup before it.
+    /// </remarks>
+    CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name);
+
+    /// <summary>
+    /// Removes the non-directory entry named by <paramref name="name"/> directly beneath
+    /// <paramref name="parent"/>.
+    /// </summary>
+    /// <remarks>
+    /// Removes the name and never what a name points at: a symbolic link here is unlinked
+    /// itself, and its target is not touched or even looked at. A handle whose policy
+    /// refuses to follow links can therefore still delete one, which is the case that
+    /// matters — a caller that distrusts the links in a subtree needs above all to be able
+    /// to clear them out.
+    /// </remarks>
+    CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name);
+
+    /// <summary>
+    /// Removes the directory named by <paramref name="name"/> directly beneath
+    /// <paramref name="parent"/>, which must be empty.
+    /// </summary>
+    /// <remarks>
+    /// Reports <see cref="CapErrorCategory.NotEmpty"/> rather than removing what is inside.
+    /// Recursive removal is a walk, and a walk is something built on top of this from
+    /// handles, never something a single call is quietly allowed to do.
+    /// </remarks>
+    CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name);
+
+    /// <summary>
+    /// Moves the entry named by <paramref name="fromName"/> beneath
+    /// <paramref name="fromParent"/> to <paramref name="toName"/> beneath
+    /// <paramref name="toParent"/>.
+    /// </summary>
+    /// <param name="fromParent">The directory the entry is in now.</param>
+    /// <param name="fromName">The name it has now.</param>
+    /// <param name="toParent">The directory it is to end up in.</param>
+    /// <param name="toName">The name it is to have there.</param>
+    /// <param name="replaceExisting">
+    /// Whether an entry already holding the destination name is replaced. When false the
+    /// operation fails with <see cref="CapErrorCategory.AlreadyExists"/> instead, and the
+    /// refusal is made by the same call that does the move rather than by a lookup before
+    /// it — a check followed by a rename would have a window in which the destination could
+    /// appear.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Both ends are named relative to a directory handle, so the operation needs both
+    /// handles and is exactly as confined as the two capabilities that were combined to
+    /// perform it. The handles may be the same one.
+    /// </para>
+    /// <para>
+    /// A move between filesystems is reported as <see cref="CapErrorCategory.CrossDevice"/>
+    /// and never emulated by copying. A copy is a different operation with different
+    /// failure modes, different timing and a different result for a hard link, and
+    /// performing one under the name of a rename would make an operation callers rely on to
+    /// be atomic silently stop being so.
+    /// </para>
+    /// <para>
+    /// A platform that cannot refuse an existing destination atomically reports
+    /// <see cref="CapErrorCategory.NotSupported"/> rather than falling back to a check.
+    /// </para>
+    /// </remarks>
+    CapError RenameChild(
+        SafeDirHandle fromParent,
+        ReadOnlySpan<char> fromName,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName,
+        bool replaceExisting);
+
+    /// <summary>
+    /// Creates a symbolic link named <paramref name="name"/> beneath
+    /// <paramref name="parent"/>, storing <paramref name="target"/> as its target.
+    /// </summary>
+    /// <param name="parent">The directory the link is created in.</param>
+    /// <param name="name">The name the link is given.</param>
+    /// <param name="target">The text stored as the link's target.</param>
+    /// <param name="targetIsDirectory">
+    /// Whether the link is to be created as a link to a directory. Ignored where links are
+    /// untyped, which is every platform but Windows; there, a link records which kind it is
+    /// and one created as the wrong kind cannot be traversed at all.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The target is stored exactly as given and is not resolved, validated against the
+    /// subtree, or required to exist. Containment is enforced where the link is followed:
+    /// resolution reads the stored text and refuses it there if it leaves, whoever wrote it
+    /// and whatever wrote it. Refusing a target here would add nothing to that and would
+    /// refuse links that are legitimate — the same relative target escapes or does not
+    /// depending on where the link ends up, which is not knowable when it is created.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotSupported"/> where the filesystem has no
+    /// symbolic links, and <see cref="CapErrorCategory.PermissionDenied"/> where creating
+    /// one needs a privilege the process does not hold.
+    /// </para>
+    /// </remarks>
+    CapError CreateChildSymbolicLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        ReadOnlySpan<char> target,
+        bool targetIsDirectory);
+
+    /// <summary>
+    /// Creates a second name, <paramref name="toName"/> beneath <paramref name="toParent"/>,
+    /// for the object already named by <paramref name="name"/> beneath
+    /// <paramref name="parent"/>.
+    /// </summary>
+    /// <remarks>
+    /// Acts on the name it is given rather than on what that name points at, so a hard link
+    /// made to a symbolic link is a second name for the link and not for its target. Both
+    /// ends are relative to a directory handle for the same reason a rename's are: joining
+    /// two places together requires authority over both.
+    /// </remarks>
+    CapError CreateChildHardLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName);
 }

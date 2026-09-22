@@ -454,6 +454,526 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true, handle.Access));
     }
 
+    /// <inheritdoc/>
+    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = CreateRelative(
+            parent,
+            name,
+            QueryAccess,
+            NtConstants.FILE_ATTRIBUTE_DIRECTORY,
+            NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        // The directory is made by the create itself; the handle was only ever the create's
+        // result and nothing here wants to keep it.
+        _ = NtNative.NtClose(raw);
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The open constrains nothing about what kind of object the name holds, and then the
+    /// answer decides. A plain directory is refused, because removing one is the other
+    /// operation; everything else — a file, a symbolic link of either kind, a junction — is
+    /// a name this removes, which is the same set the Unix call removes and for the same
+    /// reason. A link is unlinked as itself: the open asks for the reparse point rather than
+    /// what it points at, so nothing about the target is reached or even read.
+    /// </remarks>
+    public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = OpenRelative(
+            parent,
+            name,
+            NtConstants.DELETE | NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        try
+        {
+            CapError kind = QueryAttributeTag(raw, out FileAttributeTagInformation info);
+            if (kind.IsFailure)
+            {
+                return kind;
+            }
+
+            bool isReparsePoint = (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+            bool isDirectory = (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0;
+
+            return isDirectory && !isReparsePoint
+                ? CapError.Create(
+                    CapErrorCategory.IsADirectory, CapErrorSource.NtStatus, NtStatusCodes.STATUS_FILE_IS_A_DIRECTORY)
+                : MarkForRemoval(raw);
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A reparse point is refused here even when it is a directory one, which is the same
+    /// answer the Unix call gives: a link that happens to point at a directory is still a
+    /// link, and removing it is removing a name rather than removing a directory. Emptiness
+    /// is left to the filesystem to enforce, because only the filesystem can decide it
+    /// without a window in which something is added.
+    /// </remarks>
+    public CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = OpenRelative(
+            parent,
+            name,
+            NtConstants.DELETE | NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
+            NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        try
+        {
+            CapError kind = QueryAttributeTag(raw, out FileAttributeTagInformation info);
+            if (kind.IsFailure)
+            {
+                return kind;
+            }
+
+            return (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0
+                ? CapError.Create(
+                    CapErrorCategory.NotADirectory, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NOT_A_DIRECTORY)
+                : MarkForRemoval(raw);
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The destination is named by a handle and a single name rather than by a path, which
+    /// is what keeps the far end of the move as confined as the near end. Refusing an
+    /// existing destination is the filesystem's own behaviour when the replace flag is
+    /// absent, so it costs no extra call and leaves no window.
+    /// </remarks>
+    public CapError RenameChild(
+        SafeDirHandle fromParent,
+        ReadOnlySpan<char> fromName,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName,
+        bool replaceExisting)
+    {
+        CapError error = OpenRelative(
+            fromParent,
+            fromName,
+            NtConstants.DELETE | NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        try
+        {
+            uint extended = replaceExisting
+                ? NtConstants.FILE_RENAME_REPLACE_IF_EXISTS | NtConstants.FILE_RENAME_POSIX_SEMANTICS
+                : 0;
+
+            CapError renamed = SetDestinationName(
+                raw, toParent, toName, NtConstants.FileRenameInformationExClass, extended);
+
+            // An unimplemented information class is reported two ways depending on how old
+            // the system is, and an invalid-argument report is one of them. Falling back on
+            // it is safe even when the argument was genuinely wrong: the older form then
+            // fails the same way and its failure is what gets reported.
+            if (renamed.Category is not (CapErrorCategory.NotSupported or CapErrorCategory.InvalidArgument))
+            {
+                return renamed;
+            }
+
+            // The older form carries a plain flag in the first byte rather than a flag word,
+            // so the value is recomputed rather than reused: the newer form's second flag has
+            // the numeric value the older form reads as "replace", and passing it through
+            // would turn a refusal into exactly the replacement it was asked to prevent.
+            return SetDestinationName(
+                raw,
+                toParent,
+                toName,
+                NtConstants.FileRenameInformationClass,
+                replaceExisting ? 1u : 0u);
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// Made in two steps rather than one, because the call this platform offers for making a
+    /// link in one step takes two paths and resolves both with the process's own authority,
+    /// which is precisely what a directory handle exists to avoid. So an empty object is
+    /// created as an entry of the confined directory, and the link is written into it
+    /// through its handle.
+    /// </para>
+    /// <para>
+    /// The stub is removed again if the second step fails, so a failure leaves no empty file
+    /// or directory behind wearing the name the caller asked for. It cannot be made not to
+    /// exist in between: for an instant the name is a zero-length object rather than a link.
+    /// </para>
+    /// <para>
+    /// The link records which kind it is, and the wrong kind cannot be traversed, which is
+    /// why the kind is asked for rather than guessed from what the target happens to be
+    /// today. It also records separately whether its target is rooted, and the filesystem
+    /// acts on that flag rather than on the spelling — so the flag is set from the same
+    /// reading of the text that resolution uses, and a rooted target is additionally stored
+    /// in the syntax the object manager resolves, which is what the system's own call
+    /// stores. The name shown to a reader keeps the caller's spelling either way.
+    /// </para>
+    /// </remarks>
+    public CapError CreateChildSymbolicLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        ReadOnlySpan<char> target,
+        bool targetIsDirectory)
+    {
+        if (target.IsEmpty || target.Contains('\0'))
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+        }
+
+        CapError error = CreateRelative(
+            parent,
+            name,
+            NtConstants.FILE_WRITE_DATA | NtConstants.FILE_WRITE_ATTRIBUTES |
+            NtConstants.FILE_READ_ATTRIBUTES | NtConstants.DELETE | NtConstants.SYNCHRONIZE,
+            targetIsDirectory ? NtConstants.FILE_ATTRIBUTE_DIRECTORY : NtConstants.FILE_ATTRIBUTE_NORMAL,
+            (targetIsDirectory ? NtConstants.FILE_DIRECTORY_FILE : NtConstants.FILE_NON_DIRECTORY_FILE) |
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        using SafeFileHandle stub = new(raw, ownsHandle: true);
+        CapError written = WriteSymbolicLinkData(stub, target);
+        if (written.IsSuccess)
+        {
+            return CapError.Success;
+        }
+
+        // Best effort, and deliberately not allowed to replace the failure that matters: the
+        // caller needs to know why the link could not be made, not why the tidying up of a
+        // stub they never asked for did not work either.
+        _ = MarkForRemoval(raw);
+        return written;
+    }
+
+    /// <inheritdoc/>
+    public CapError CreateChildHardLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName)
+    {
+        CapError error = OpenRelative(
+            parent,
+            name,
+            NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        try
+        {
+            // Never replaces: a second name for an object is always a new name, so the flag
+            // that would overwrite the destination is not offered and not passed.
+            return SetDestinationName(
+                raw, toParent, toName, NtConstants.FileLinkInformationClass, flags: 0);
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
+    }
+
+    /// <summary>
+    /// Creates a name as an entry of an already-open directory.
+    /// </summary>
+    /// <remarks>
+    /// The creating twin of <see cref="OpenRelative"/>, with the same counted name and the
+    /// same directory handle as the resolution root, and the same refusal of anything that
+    /// is not a filesystem object. It does not ask whether the name reached its object
+    /// through an alias, because there was no object: a create either takes a free name or
+    /// fails.
+    /// </remarks>
+    private static unsafe CapError CreateRelative(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        uint desiredAccess,
+        uint fileAttributes,
+        uint createOptions,
+        out nint handle)
+    {
+        handle = 0;
+
+        if (name.Length > short.MaxValue)
+        {
+            return CapError.Create(
+                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
+        }
+
+        if (name.Contains('\\') || name.Contains('/') || name.Contains('\0'))
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+        }
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+        }
+
+        fixed (char* characters = name)
+        {
+            UnicodeString objectName = new()
+            {
+                Length = (ushort)(name.Length * sizeof(char)),
+                MaximumLength = (ushort)(name.Length * sizeof(char)),
+                Buffer = (nint)characters,
+            };
+
+            ObjectAttributes attributes = new()
+            {
+                Length = (uint)ObjectAttributes.StructSize,
+                RootDirectory = lease.Raw,
+                ObjectName = (nint)(&objectName),
+                Attributes = (uint)ObjectAttributeFlags.CaseInsensitive,
+                SecurityDescriptor = 0,
+                SecurityQualityOfService = 0,
+            };
+
+            IoStatusBlock status = default;
+            nint created = 0;
+            int result = NtNative.NtCreateFile(
+                &created,
+                desiredAccess,
+                &attributes,
+                &status,
+                allocationSize: null,
+                fileAttributes,
+                NtConstants.FILE_SHARE_ALL,
+                NtConstants.FILE_CREATE,
+                createOptions,
+                eaBuffer: null,
+                eaLength: 0);
+
+            if (NtStatusCodes.IsFailure(result))
+            {
+                return NtStatusCodes.ToError(result);
+            }
+
+            CapError kind = RefuseUnlessFilesystemObject(created);
+            if (kind.IsFailure)
+            {
+                _ = NtNative.NtClose(created);
+                return kind;
+            }
+
+            handle = created;
+            return CapError.Success;
+        }
+    }
+
+    /// <summary>
+    /// Marks an open object for removal.
+    /// </summary>
+    /// <remarks>
+    /// The newer form is asked for first because it can request that the name disappear at
+    /// once. This platform's own convention is the opposite — a removed name lingers,
+    /// unusable, until the last handle to the object is closed — and a library whose removal
+    /// meant something different here from everywhere else would be a trap rather than a
+    /// portability layer. Where the filesystem has no such form, the older one is used and
+    /// the local convention applies; that is a difference worth having rather than a failure
+    /// to report.
+    /// </remarks>
+    private static unsafe CapError MarkForRemoval(nint handle)
+    {
+        IoStatusBlock status = default;
+        uint flags = NtConstants.FILE_DISPOSITION_DELETE | NtConstants.FILE_DISPOSITION_POSIX_SEMANTICS;
+        int nt = NtNative.NtSetInformationFile(
+            handle, &status, &flags, sizeof(uint), NtConstants.FileDispositionInformationExClass);
+
+        if (!NtStatusCodes.IsFailure(nt))
+        {
+            return CapError.Success;
+        }
+
+        if (NtStatusCodes.Classify(nt) != CapErrorCategory.NotSupported &&
+            nt != NtStatusCodes.STATUS_INVALID_PARAMETER)
+        {
+            return NtStatusCodes.ToError(nt);
+        }
+
+        // The older structure is a single byte that means "delete", padded to the alignment
+        // the call expects.
+        byte remove = 1;
+        status = default;
+        nt = NtNative.NtSetInformationFile(
+            handle, &status, &remove, sizeof(byte), NtConstants.FileDispositionInformationClass);
+
+        return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
+    }
+
+    /// <summary>
+    /// Gives an open object a name beneath another directory handle: a move, or a second
+    /// name for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Renaming and hard linking take the same structure and differ only in which class it
+    /// is written as, so they are built here once. The layout is a flag word, the directory
+    /// handle the name is relative to, the length of the name in bytes, and the characters —
+    /// with the handle at its natural alignment, which is why the offsets are computed from
+    /// the pointer size rather than written down.
+    /// </para>
+    /// <para>
+    /// The destination handle is what confines the far end. Naming it as a path from the
+    /// object being moved would resolve a string all over again, with none of the work
+    /// resolution has already done and with this platform's rewriting in front of it.
+    /// </para>
+    /// </remarks>
+    private static unsafe CapError SetDestinationName(
+        nint handle,
+        SafeDirHandle destinationParent,
+        ReadOnlySpan<char> destinationName,
+        uint informationClass,
+        uint flags)
+    {
+        if (destinationName.Length > short.MaxValue)
+        {
+            return CapError.Create(
+                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
+        }
+
+        if (destinationName.Contains('\\') || destinationName.Contains('/') ||
+            destinationName.Contains('\0'))
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+        }
+
+        using HandleLease lease = destinationParent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+        }
+
+        int rootOffset = sizeof(nint);
+        int lengthOffset = rootOffset + sizeof(nint);
+        int nameOffset = lengthOffset + sizeof(uint);
+        int nameBytes = destinationName.Length * sizeof(char);
+        int total = nameOffset + nameBytes;
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(total);
+        try
+        {
+            Span<byte> structure = buffer.AsSpan(0, total);
+            structure.Clear();
+
+            BinaryPrimitives.WriteUInt32LittleEndian(structure, flags);
+            nint destinationRoot = lease.Raw;
+            MemoryMarshal.Write(structure[rootOffset..], in destinationRoot);
+            BinaryPrimitives.WriteUInt32LittleEndian(structure[lengthOffset..], (uint)nameBytes);
+            MemoryMarshal.AsBytes(destinationName).CopyTo(structure[nameOffset..]);
+
+            IoStatusBlock status = default;
+            int nt;
+            fixed (byte* raw = structure)
+            {
+                nt = NtNative.NtSetInformationFile(handle, &status, raw, (uint)total, informationClass);
+            }
+
+            return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Writes a symbolic link's data into the empty object that will hold it.
+    /// </summary>
+    /// <remarks>
+    /// The structure itself is built beside the code that reads one back, so that the two
+    /// cannot come to disagree about where the names live. Whether the target is rooted is
+    /// decided here, by the same parser resolution uses, because the filesystem acts on that
+    /// flag rather than on how the target is spelled.
+    /// </remarks>
+    private static unsafe CapError WriteSymbolicLinkData(SafeFileHandle handle, ReadOnlySpan<char> target)
+    {
+        bool rooted = CapPath.IsRooted(target, CapPathSyntax.Windows);
+        int size = ReparseData.SymbolicLinkSize(target, rooted);
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(size);
+        try
+        {
+            if (!ReparseData.TryBuildSymbolicLink(target, rooted, buffer, out int written))
+            {
+                return CapError.Create(
+                    CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
+            }
+
+            bool sent;
+            fixed (byte* raw = buffer)
+            {
+                sent = NtNative.DeviceIoControl(
+                    handle,
+                    NtConstants.FSCTL_SET_REPARSE_POINT,
+                    raw,
+                    (uint)written,
+                    outBuffer: null,
+                    outBufferSize: 0,
+                    out _,
+                    overlapped: 0);
+            }
+
+            return sent ? CapError.Success : Win32Errors.ToError(Marshal.GetLastWin32Error());
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     private static CapError ConfinedOpenUnavailable =>
         CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NOT_SUPPORTED);
 
@@ -844,21 +1364,31 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         return CapError.Success;
     }
 
-    private static unsafe CapError QueryAttributeTag(SafeHandle handle, out FileAttributeTagInformation result)
+    private static CapError QueryAttributeTag(SafeHandle handle, out FileAttributeTagInformation result)
     {
-        result = default;
-
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
+            result = default;
             return CapError.Create(
                 CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
         }
 
+        return QueryAttributeTag(lease.Raw, out result);
+    }
+
+    /// <summary>
+    /// The same question asked of a raw handle, for the operations that hold one directly
+    /// rather than through a wrapper because they are about to close it themselves.
+    /// </summary>
+    private static unsafe CapError QueryAttributeTag(nint handle, out FileAttributeTagInformation result)
+    {
+        result = default;
+
         IoStatusBlock status = default;
         FileAttributeTagInformation value = default;
         int nt = NtNative.NtQueryInformationFile(
-            lease.Raw,
+            handle,
             &status,
             &value,
             (uint)sizeof(FileAttributeTagInformation),

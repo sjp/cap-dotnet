@@ -27,6 +27,48 @@ internal static unsafe partial class DarwinNative
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int Fcntl(int fd, int command, int argument);
 
+    /// <summary>Creates a directory relative to a directory descriptor.</summary>
+    [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
+    internal static partial int MkdirAt(int directoryFd, byte* path, uint mode);
+
+    /// <summary>
+    /// Removes a name relative to a directory descriptor, never following a link in it.
+    /// </summary>
+    [LibraryImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
+    internal static partial int UnlinkAt(int directoryFd, byte* path, int flags);
+
+    /// <summary>Moves a name from one directory descriptor to another.</summary>
+    [LibraryImport("libc", EntryPoint = "renameat", SetLastError = true)]
+    internal static partial int RenameAt(
+        int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath);
+
+    /// <summary>
+    /// The same move, with the platform's own flags — among them the one that refuses to
+    /// replace an existing destination.
+    /// </summary>
+    /// <remarks>
+    /// This platform's answer to the problem Linux solves with a newer syscall number. The
+    /// name carries the suffix Apple gives calls that are not part of any standard, which is
+    /// the only spelling that exists: there is no portable call here that can make the
+    /// refusal part of the rename.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "renameatx_np", SetLastError = true)]
+    internal static partial int RenameAtX(
+        int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, uint flags);
+
+    /// <summary>Creates a symbolic link relative to a directory descriptor.</summary>
+    [LibraryImport("libc", EntryPoint = "symlinkat", SetLastError = true)]
+    internal static partial int SymlinkAt(byte* target, int directoryFd, byte* linkPath);
+
+    /// <summary>Creates a second name for an existing object, both relative to descriptors.</summary>
+    /// <remarks>
+    /// Called with no flags, so the existing name is used as written and a symbolic link is
+    /// linked to as itself rather than as its target.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "linkat", SetLastError = true)]
+    internal static partial int LinkAt(
+        int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, int flags);
+
     /// <summary>
     /// The same call, for the commands whose argument is a buffer rather than a number.
     /// </summary>

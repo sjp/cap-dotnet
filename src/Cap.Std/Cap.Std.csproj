@@ -3,6 +3,11 @@
   <PropertyGroup>
     <RootNamespace>Cap.Std</RootNamespace>
     <Description>Capability-based filesystem API for .NET: Dir, CapFile, CapMetadata. A Dir handle is the authority; there is no ambient path lookup.</Description>
+    <!--
+      This assembly turns a caller's string into a resolution against a directory handle, so
+      it is subject to the same ban on System.IO.Path as the layer beneath it.
+    -->
+    <CapBanSystemIoPath>true</CapBanSystemIoPath>
   </PropertyGroup>
 
   <ItemGroup>

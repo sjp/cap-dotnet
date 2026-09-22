@@ -36,6 +36,59 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int Fcntl(int fd, int command, int argument);
 
+    /// <summary>Creates a directory relative to a directory descriptor.</summary>
+    [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
+    internal static partial int MkdirAt(int directoryFd, byte* path, uint mode);
+
+    /// <summary>
+    /// Removes a name relative to a directory descriptor.
+    /// </summary>
+    /// <remarks>
+    /// One entry point for both kinds of removal, selected by
+    /// <see cref="LinuxConstants.AT_REMOVEDIR"/>. It never follows a symbolic link in the
+    /// name it is given: removing a name removes the name.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "unlinkat", SetLastError = true)]
+    internal static partial int UnlinkAt(int directoryFd, byte* path, int flags);
+
+    /// <summary>Moves a name from one directory descriptor to another.</summary>
+    [LibraryImport("libc", EntryPoint = "renameat", SetLastError = true)]
+    internal static partial int RenameAt(
+        int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath);
+
+    /// <summary>
+    /// <c>renameat2</c>, by syscall number, for the flag that refuses to replace an existing
+    /// destination.
+    /// </summary>
+    /// <remarks>
+    /// By number for the same reason <see cref="OpenAt2"/> is: the C library grew a wrapper
+    /// for it only in version 2.28, and which library the process was linked against is not
+    /// something this layer should have to know. <paramref name="number"/> must be
+    /// <see cref="LinuxConstants.SYS_renameat2"/>.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    internal static partial long RenameAt2(
+        long number, int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, uint flags);
+
+    /// <summary>Creates a symbolic link relative to a directory descriptor.</summary>
+    /// <remarks>
+    /// The target is stored as the bytes given and is not resolved, so it may name something
+    /// that does not exist, or never will.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "symlinkat", SetLastError = true)]
+    internal static partial int SymlinkAt(byte* target, int directoryFd, byte* linkPath);
+
+    /// <summary>
+    /// Creates a second name for an existing object, both relative to directory descriptors.
+    /// </summary>
+    /// <remarks>
+    /// Called with no flags, which on this platform means the existing name is used as
+    /// written: a symbolic link is linked to as itself rather than as whatever it points at.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "linkat", SetLastError = true)]
+    internal static partial int LinkAt(
+        int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, int flags);
+
     /// <summary>
     /// <c>openat2</c>, by syscall number.
     /// </summary>

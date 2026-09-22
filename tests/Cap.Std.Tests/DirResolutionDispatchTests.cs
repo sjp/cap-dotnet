@@ -101,4 +101,63 @@ public sealed class DirResolutionDispatchTests : IDisposable
         Assert.Equal(0, ops.ConfinedOpenAttempts - confinedBefore);
         Assert.True(walked >= 4, $"A path of four names was resolved in {walked} opens.");
     }
+
+    /// <summary>
+    /// An operation that acts on a name resolves the rest of the path through the same
+    /// strongest strategy.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Worth asserting separately because these operations cannot be expressed as an open at
+    /// all: they stop one component short, and the kernel-atomic call has no way to be asked
+    /// for that. The path is therefore divided first and only the part ahead of the last
+    /// component is handed to the kernel — which keeps the guarantee where it was, but only
+    /// if the division actually happens. Resolving the prefix by walking it instead would
+    /// work, produce identical results, and quietly hand every caller of these operations the
+    /// weaker property on the one platform that offers the stronger one.
+    /// </para>
+    /// <para>
+    /// A single name costs nothing at all: there is no prefix, so the name is used against
+    /// the handle the caller already holds.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void Acting_on_a_name_resolves_the_rest_of_the_path_the_same_way()
+    {
+        if (PlatformOps.Current is not LinuxPlatformOps ops)
+        {
+            Assert.Skip("This platform has no kernel-atomic confined open to dispatch to.");
+            return;
+        }
+
+        if (!ops.Capabilities.SupportsConfinedOpen)
+        {
+            Assert.Skip(
+                "This kernel does not offer the confined open, so the walk is the correct " +
+                $"strategy here. Reason: {ops.ConfinedOpenUnavailableReason}");
+        }
+
+        Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c"));
+        File.WriteAllText(Path.Combine(_root, "a", "b", "c", "doomed"), "contents");
+        File.WriteAllText(Path.Combine(_root, "alone"), "contents");
+
+        using Dir root = Dir.Open(_root, AmbientAuthority.Acquire());
+
+        long confinedBefore = ops.ConfinedOpenAttempts;
+        long componentsBefore = ops.ComponentOpens;
+
+        root.DeleteFile("a/b/c/doomed");
+
+        Assert.Equal(1, ops.ConfinedOpenAttempts - confinedBefore);
+        Assert.Equal(0, ops.ComponentOpens - componentsBefore);
+
+        confinedBefore = ops.ConfinedOpenAttempts;
+        componentsBefore = ops.ComponentOpens;
+
+        root.DeleteFile("alone");
+
+        Assert.Equal(0, ops.ConfinedOpenAttempts - confinedBefore);
+        Assert.Equal(0, ops.ComponentOpens - componentsBefore);
+    }
 }

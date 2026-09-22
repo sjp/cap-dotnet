@@ -40,6 +40,26 @@ internal static class DarwinConstants
     /// <summary>Report on a symbolic link itself rather than on what it points at.</summary>
     public const int AT_SYMLINK_NOFOLLOW = 0x0020;
 
+    /// <summary>Remove a directory rather than a name of any other kind. Not the Linux value.</summary>
+    public const int AT_REMOVEDIR = 0x0080;
+
+    /// <summary>
+    /// Fail rather than replace an entry already holding the destination name.
+    /// </summary>
+    /// <remarks>
+    /// Makes the refusal part of the rename, so there is no window between checking that the
+    /// destination is free and taking it. A lookup followed by a plain rename would have one,
+    /// and something appearing in that window would be destroyed by the very call that was
+    /// told not to destroy anything.
+    /// </remarks>
+    public const uint RENAME_EXCL = 0x0004;
+
+    /// <summary>
+    /// The permissions a newly created directory is asked for, before the process umask is
+    /// applied. The same request every directory-creating tool on the system makes.
+    /// </summary>
+    public const uint DirectoryCreateMode = 0x1FF;
+
     public const int F_GETFL = 3;
     public const int F_SETFL = 4;
 

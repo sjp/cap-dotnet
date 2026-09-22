@@ -6,7 +6,8 @@
     build/BannedSymbols.Common.txt  applies to every assembly under src/.
     build/BannedSymbols.Primitives.txt  additionally bans System.IO.Path, which silently
     rewrites paths (lexical `..` collapsing, Windows trailing-dot stripping) and is
-    therefore unusable for containment decisions.
+    therefore unusable for containment decisions. It applies to the assemblies that resolve
+    names, which set CapBanSystemIoPath.
   -->
   <ItemGroup Condition="'$(CapIsProductCode)' == 'true'">
     <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">

@@ -259,6 +259,207 @@ internal sealed class FakePlatformOps : IPlatformOps
         return CapResult<SafeDirHandle>.Ok(Register(node!, handle.Access));
     }
 
+    /// <inheritdoc/>
+    public CapError CreateChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        string entry = name.ToString();
+        if (_fileSystem.Lookup(directory!, entry) is not null)
+        {
+            return CapError.FromCategory(CapErrorCategory.AlreadyExists);
+        }
+
+        directory!.Entries[entry] = new FakeNode
+        {
+            Type = CapNodeType.Directory,
+            VolumeId = directory.VolumeId,
+            NodeId = _fileSystem.NextNodeId(),
+        };
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        if (node!.Type == CapNodeType.Directory)
+        {
+            return CapError.FromCategory(CapErrorCategory.IsADirectory);
+        }
+
+        _ = Parent(parent).Entries.Remove(name.ToString());
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        if (node!.Type != CapNodeType.Directory)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotADirectory);
+        }
+
+        if (node.Entries.Count > 0)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotEmpty);
+        }
+
+        _ = Parent(parent).Entries.Remove(name.ToString());
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError RenameChild(
+        SafeDirHandle fromParent,
+        ReadOnlySpan<char> fromName,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName,
+        bool replaceExisting)
+    {
+        CapError error = ResolveChild(fromParent, fromName, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        error = ResolveDirectory(toParent, out FakeNode? destination);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        if (destination!.VolumeId != node!.VolumeId)
+        {
+            return CapError.FromCategory(CapErrorCategory.CrossDevice);
+        }
+
+        string target = toName.ToString();
+        if (!replaceExisting && _fileSystem.Lookup(destination, target) is not null)
+        {
+            return CapError.FromCategory(CapErrorCategory.AlreadyExists);
+        }
+
+        _ = Parent(fromParent).Entries.Remove(fromName.ToString());
+        destination.Entries[target] = node;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The simulation records no kind for a link, as the Unix platforms do not, so the
+    /// request for a directory link and the request for a file link produce the same node.
+    /// </remarks>
+    public CapError CreateChildSymbolicLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        ReadOnlySpan<char> target,
+        bool targetIsDirectory)
+    {
+        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        string entry = name.ToString();
+        if (_fileSystem.Lookup(directory!, entry) is not null)
+        {
+            return CapError.FromCategory(CapErrorCategory.AlreadyExists);
+        }
+
+        directory!.Entries[entry] = new FakeNode
+        {
+            Type = CapNodeType.SymbolicLink,
+            VolumeId = directory.VolumeId,
+            NodeId = _fileSystem.NextNodeId(),
+            LinkTarget = target.ToString(),
+        };
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The destination entry is made to refer to the very same node, which is what a hard
+    /// link is: one object with two names. A test can therefore tell a link from a copy by
+    /// comparing identities, exactly as it would against a real filesystem.
+    /// </remarks>
+    public CapError CreateChildHardLink(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName)
+    {
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        error = ResolveDirectory(toParent, out FakeNode? destination);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        string target = toName.ToString();
+        if (_fileSystem.Lookup(destination!, target) is not null)
+        {
+            return CapError.FromCategory(CapErrorCategory.AlreadyExists);
+        }
+
+        destination!.Entries[target] = node!;
+        return CapError.Success;
+    }
+
+    /// <summary>Resolves a handle to the directory it refers to.</summary>
+    private CapError ResolveDirectory(SafeDirHandle handle, out FakeNode? directory)
+    {
+        directory = null;
+        if (!TryResolveHandle(handle, out FakeNode? node))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        if (node!.Type != CapNodeType.Directory)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotADirectory);
+        }
+
+        if (node.Unreadable)
+        {
+            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+        }
+
+        directory = node;
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// The directory a handle refers to, for a caller that has already established it is one.
+    /// </summary>
+    private FakeNode Parent(SafeDirHandle handle) =>
+        TryResolveHandle(handle, out FakeNode? node)
+            ? node!
+            : throw new InvalidOperationException("The handle was resolved a moment ago and is not now.");
+
     /// <summary>
     /// Whether the authority asked of a directory is one a directory can carry.
     /// </summary>

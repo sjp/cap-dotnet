@@ -1,10 +1,13 @@
-# Additional bans for Cap.Primitives only.
+# Additional bans for the assemblies that resolve names: Cap.Primitives, which parses and
+# walks paths, and Cap.Std, which turns a caller's string into a resolution.
 #
 # System.IO.Path is not merely inconvenient here, it is unsound for containment:
 #   - GetFullPath resolves against the process CWD and collapses `a/../b` to `b`,
 #     which is the wrong answer whenever `a` is a symlink.
 #   - On Windows it strips trailing dots and spaces, so a string that has been
 #     validated is not the string that reaches the filesystem.
-# Cap.Primitives parses paths itself and never re-enters this type.
+# Neither assembly may re-enter this type: paths are parsed here and resolved a component
+# at a time against a directory handle, so there is nothing for it to be used for except
+# rebuilding a path, which is the technique the library exists to replace.
 
-T:System.IO.Path;Cap.Primitives must parse paths itself. See the notes in build/BannedSymbols.Primitives.txt for why.
+T:System.IO.Path;Paths are parsed and resolved here, never rebuilt. See the notes in build/BannedSymbols.Primitives.txt for why.

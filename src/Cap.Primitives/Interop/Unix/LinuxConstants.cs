@@ -100,6 +100,40 @@ internal static class LinuxConstants
     /// <summary>Do not trigger an automount at the final component.</summary>
     public const int AT_NO_AUTOMOUNT = 0x800;
 
+    /// <summary>Remove a directory rather than a name of any other kind.</summary>
+    public const int AT_REMOVEDIR = 0x200;
+
+    // --- rename -----------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fail rather than replace an entry already holding the destination name.
+    /// </summary>
+    /// <remarks>
+    /// The whole reason the newer rename call is used at all. Without it the refusal would
+    /// have to be a lookup followed by a rename, and between those two the destination can
+    /// appear — so the check would pass and the rename would destroy what appeared. A
+    /// filesystem that does not implement the flag reports an invalid argument, which is
+    /// surfaced rather than answered by falling back to that race.
+    /// </remarks>
+    public const uint RENAME_NOREPLACE = 1;
+
+    // --- mkdir ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The permissions a newly created directory is asked for, before the process umask is
+    /// applied to them.
+    /// </summary>
+    /// <remarks>
+    /// The value every directory-creating tool asks for. It is not the mode the directory
+    /// ends up with: the kernel clears whatever the process umask names, so the result is
+    /// the same as <c>mkdir</c> from a shell would produce in the same process. Asking for
+    /// something narrower here would quietly make directories created through a capability
+    /// differ from every other directory on the system, which is a surprise rather than a
+    /// defence — the sandbox is a bound on what can be reached, not a substitute for the
+    /// filesystem's own permissions.
+    /// </remarks>
+    public const uint DirectoryCreateMode = 0x1FF;
+
     // --- fcntl ------------------------------------------------------------------------------
 
     public const int F_GETFL = 3;
@@ -135,4 +169,7 @@ internal static class LinuxConstants
 
     /// <summary><c>statx</c>: 332 on x86-64, 291 on AArch64.</summary>
     public static long SYS_statx => IsArm64 ? 291 : 332;
+
+    /// <summary><c>renameat2</c>: 316 on x86-64, 276 on AArch64.</summary>
+    public static long SYS_renameat2 => IsArm64 ? 276 : 316;
 }

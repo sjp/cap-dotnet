@@ -205,6 +205,71 @@ public readonly struct CapPath
     /// </remarks>
     public ComponentEnumerator EnumerateComponents() => new(_raw, _syntax);
 
+    /// <summary>
+    /// Splits the path into everything ahead of its last component and that component.
+    /// </summary>
+    /// <param name="parent">
+    /// The characters up to and including the separator before the last component, as a
+    /// slice of the caller's own string. Empty when the path is a single component, which
+    /// means the last component is looked up in the directory the path was resolved
+    /// against.
+    /// </param>
+    /// <param name="name">The last component, exactly as it was written.</param>
+    /// <returns><see langword="false"/> when the path names no component at all.</returns>
+    /// <remarks>
+    /// <para>
+    /// For the backends that resolve a whole path in one kernel operation. An operation that
+    /// acts on a name rather than on an object has to stop one component short, and those
+    /// backends have no way to be asked for that — so the text is divided first and only the
+    /// part ahead of the last component is handed to them.
+    /// </para>
+    /// <para>
+    /// The division is over the same scan that produced the component count, so what counts
+    /// as the last component is whatever the enumerator would yield last: trailing
+    /// separators and <c>.</c> components are not it. Nothing is rewritten and nothing is
+    /// copied; both results are slices of the original string.
+    /// </para>
+    /// </remarks>
+    internal bool TrySplitLastComponent(out ReadOnlySpan<char> parent, out ReadOnlySpan<char> name)
+    {
+        ReadOnlySpan<char> raw = _raw;
+        parent = default;
+        name = default;
+
+        int start = 0;
+        int lastStart = -1;
+        int lastEnd = -1;
+
+        for (int i = 0; i <= raw.Length; i++)
+        {
+            if (i < raw.Length && !IsSeparator(raw[i], _syntax))
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> component = raw[start..i];
+            int componentStart = start;
+            start = i + 1;
+
+            if (component.IsEmpty || component.SequenceEqual("."))
+            {
+                continue;
+            }
+
+            lastStart = componentStart;
+            lastEnd = i;
+        }
+
+        if (lastStart < 0)
+        {
+            return false;
+        }
+
+        parent = raw[..lastStart];
+        name = raw[lastStart..lastEnd];
+        return true;
+    }
+
     /// <inheritdoc/>
     public override string ToString() => _raw ?? string.Empty;
 
@@ -355,6 +420,22 @@ public readonly struct CapPath
 
         return CapPathError.None;
     }
+
+    /// <summary>
+    /// Whether <paramref name="raw"/> names a location from a root rather than from a
+    /// directory: absolute, relative to a drive or to the current volume, a network
+    /// location, or the device namespace.
+    /// </summary>
+    /// <remarks>
+    /// The same reading of a prefix that parsing uses, exposed on its own for the one caller
+    /// that has to classify a string it is not going to resolve — a symbolic link's stored
+    /// target, on a platform that records whether a link is rooted as a flag beside the text
+    /// rather than inferring it from the text. Answering that from a second, private notion
+    /// of what "rooted" means is how the flag and the characters come to disagree, and a
+    /// link whose flag says one thing and whose spelling says another resolves by the flag.
+    /// </remarks>
+    internal static bool IsRooted(ReadOnlySpan<char> raw, CapPathSyntax syntax) =>
+        !raw.IsEmpty && ClassifyPrefix(raw, syntax) != CapPathError.None;
 
     private static bool IsDriveLetter(char c) => char.IsAsciiLetter(c);
 
