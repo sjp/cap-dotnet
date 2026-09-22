@@ -74,9 +74,9 @@ replace.
 
 Each row must, by the time the adversarial escape corpus lands, name the test that covers
 it. A blank **Test** column is a visible reminder that the claim is unverified; prose in its
-place would hide the same gap. The rows filled in so far are the ones decided by parsing the
-path alone — everything that needs a resolver working against a real directory handle is
-still open.
+place would hide the same gap. The rows still blank are the ones that need an operation this
+library does not yet expose — creating a link, renaming, hardlinking — or a host feature the
+suite cannot yet arrange.
 
 The **Where** column names the component responsible for the defence. The three resolution
 backends are described in [backends.md](backends.md).
@@ -104,18 +104,74 @@ alone — is in [paths.md](paths.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| S1 | Symlink to an absolute path outside the sandbox | Rejected by default | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk` |
-| S2 | Relative symlink escaping via `..` | Rejected | component walk | `PortableWalkTests.A_link_that_climbs_out_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk` |
-| S3 | Symlink chain that stays inside | Followed | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_links_target_is_resolved_from_where_the_link_lives` |
-| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped` |
-| S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is` |
-| S6 | Dangling symlink pointing outside | Reported as not-found **without** revealing whether the target exists | symlink policy | |
-| S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | |
+| S1 | Symlink to an absolute path outside the sandbox | Rejected, under every policy | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-absolute-link` |
+| S2 | Relative symlink escaping via `..` | Rejected | component walk | `PortableWalkTests.A_link_that_climbs_out_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-parent-link` |
+| S3 | Symlink chain that stays inside | Followed, unless the handle's policy refuses every link | symlink policy; all backends | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_links_target_is_resolved_from_where_the_link_lives`, corpus cases `chain-within-budget`, `denied-chain` |
+| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped`, corpus cases `chain-beyond-budget`, `self-cycle`, `mutual-cycle` |
+| S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is`, corpus cases `link-as-middle-component`, `denied-link-as-middle-component` |
+| S6 | Dangling symlink pointing outside | Decided from the target **as stored**, before anything is looked up. A link that leaves is a containment refusal whether or not the place it names exists, because that is never asked; a link that dangles *inside* is an ordinary not-found | symlink policy; all backends | `SymlinkPolicyTests.An_escaping_link_never_reveals_whether_its_target_exists_to_the_walk`, `.…_to_the_confined_open`, corpus cases `escape-via-parent-link-target-exists` / `-absent`, `dangling-link-inside` |
+| S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | corpus cases `magic-link-to-a-process-root`, `magic-link-to-an-open-descriptor`, run on disk on Linux |
 | S8 | Windows junction / mount point (always absolute) | Rejected | Windows backend | `WindowsResolutionOnDiskTests.A_junction_is_refused_rather_than_followed`, `WindowsReparseDataTests.A_junction_is_never_relative` |
 | S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend; component walk | `WindowsReparseDataTests.A_tag_that_is_not_a_filesystem_link_yields_no_target`, `PortableWalkTests.A_reparse_point_that_is_not_a_link_is_never_followed` |
 | S11 | Windows symbolic link whose stored target is spelled as a relative path but flagged as rooted | Rejected — the flag is what the filesystem acts on, so relativity is taken from it and never inferred from the spelling | Windows backend | `WindowsReparseDataTests.A_link_flagged_as_rooted_says_so_whatever_it_spells` |
 | S12 | Windows reparse point whose header claims a length or a name offset outside the reply | Rejected; no read outside the returned bytes | Windows backend | `WindowsReparseDataTests.A_length_longer_than_the_reply_is_refused`, `.A_name_outside_the_data_is_refused`, `.A_truncated_reply_is_refused` |
 | S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress harness | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it` |
+
+The rows above are also encoded as a single table of cases that every backend is driven
+through, so that a disagreement between them fails a test rather than waiting for a
+deployment to land on the other one. Each backend asserts against the same expected value
+rather than against the other's answer, because comparing the two would pass whenever both
+were wrong in the same direction. The cases named in the **Test** column above belong to that
+table; it is driven by `SymlinkPolicyTests.The_walk_answers_the_policy_table`, `.The_confined_open_answers_the_policy_table`, `SymlinkPolicyOnDiskTests.The_hosts_walk_answers_the_policy_table`, `.The_hosts_confined_open_answers_the_policy_table`.
+
+#### 4.2.1 The caller's knob, and what it does not reach
+
+Following a link whose resolution stays inside is the default, because refusing every link
+breaks ordinary directory layouts — a link inside a tree pointing elsewhere inside the same
+tree is a normal thing for a package manager or a build system to have left behind, and a
+sandbox that cannot read such a tree does not get used. A caller that treats a link as
+suspect wherever it points can say so instead, and gets a handle that refuses every link.
+
+Three properties of that knob are part of the model rather than conveniences:
+
+- **It cannot weaken containment.** Under either value, a link whose target would leave the
+  subtree is refused, and so is anything that is not a filesystem link at all: a junction,
+  which is always stored as an absolute target; a reparse point whose tag means something
+  else; and the kernel's synthetic links. None of those is a policy question, because
+  following one lands somewhere with no relationship to the sandbox root.
+- **It travels with the capability and only ever tightens.** The value is chosen when a root
+  is opened and copied by every handle derived from it. One operation changes it, and it can
+  only make it stricter; there is no setter and no other writer. A restriction that a derived
+  handle could lift would be a suggestion, not a policy — whoever was given a handle in order
+  to work inside a subtree could undo it in a single call.
+- **It says nothing about the last component.** Whether an operation acts on a link or on
+  what the link points at is fixed by the operation: removing a name removes the name,
+  reading a link reads it, and an exclusive create must fail on a name already taken. Those
+  keep working under the stricter policy — a handle that could not remove a symbolic link
+  would be unable to clean up the very entries the policy was chosen to distrust. Conflating
+  the two axes fails in both directions, and it is the classic bug in this area.
+
+**Two decisions recorded here rather than left to the code.**
+
+*A containment refusal stays distinguishable.* A path refused because it tried to leave the
+subtree is reported as that and not folded into not-found, which is what lets an application
+log and alert on the attempts without matching on message text. It reveals nothing a holder
+of the handle could not find out anyway: the link is inside the sandbox, so its target could
+simply be read. What must not be revealed is whether the place it pointed at exists, and that
+is S6 — the refusal is decided from the stored target before any lookup happens, so the
+answer for a link aimed at a real file outside and one aimed at nothing at all is the same
+answer, reached without either lookup. There is deliberately no option to collapse every
+refusal into not-found: a caller that wants that can catch the one exception type and rewrite
+it, and a library-wide switch would be a second policy axis to inherit, test and document.
+
+*An absolute link target is refused, never re-anchored.* Reading it as though the sandbox
+root were the filesystem root is defensible — it is what `chroot` does — but it silently
+changes which file a link means and nothing in the result tells a caller which reading they
+got. It is also not available in isolation: on the one platform that resolves a whole path in
+a single confined operation, asking the kernel to re-anchor absolute targets also makes it
+clamp an upward step at the root instead of refusing it. A link trying to climb out would
+stop being a reported refusal and become a successful open of a different file, and that
+platform would disagree with the others about the same tree. Both are worse than refusing.
 
 ### 4.3 Windows name handling
 

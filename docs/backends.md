@@ -84,11 +84,22 @@ semantics:
 | Chain exceeding the budget, or a cycle | Refused as a link loop |
 | Reparse point whose tag is not a filesystem link | Refused, never read as a link |
 | A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one. A Windows junction is not this case: it is a reparse point, and is refused |
+| Any link at all, where the handle's policy refuses them | Refused as a link, without being read — so which way it pointed is never learned |
+
+The last row is the one caller-visible choice. It is fixed when a sandbox root is opened and
+carried by every handle derived from it; it can be tightened when a handle is handed on and
+never loosened. It does not reach containment — the refusals above hold under both settings —
+and it does not reach the last component of a path, because whether an operation acts on a
+link or on what the link points at is a property of the operation. Removing a name removes
+the name, and reading a link reads it, however links met on the way are treated.
 
 An absolute target is refused rather than re-read as though the sandbox root were the
 filesystem root. The re-reading is defensible — it is what `chroot` does — but it silently
 changes which file a link means, and nothing in the result tells a caller which reading they
-got.
+got. It is also unavailable in isolation on Linux: asking the kernel to re-anchor absolute
+targets also makes it clamp an upward step at the root rather than refuse it, which would
+turn a link trying to climb out from a reported refusal into a successful open of a different
+file, and would leave this backend and the walk disagreeing about the same tree.
 
 Two limits bound the work a single path can cost, and they are separate because they bound
 different things:

@@ -26,6 +26,14 @@ namespace Cap.Std;
 /// handles it was given.
 /// </para>
 /// <para>
+/// <strong>The symbolic-link policy is part of the capability.</strong> A handle carries
+/// what resolution beneath it does with a link met on the way to the thing a path names,
+/// the value is chosen when a root is opened, and every handle derived from it inherits it.
+/// <see cref="Restrict"/> can hand on a stricter one; nothing can hand on a looser one. So
+/// the rule a subtree is read under travels with the authority to read it, and cannot be
+/// changed by the code that was given both.
+/// </para>
+/// <para>
 /// <strong>It does not expose its own path.</strong> There is no property that answers "where
 /// is this?", and that is deliberate rather than an omission. A handle is an unforgeable
 /// reference to an object; a path is a name that something else may hold by the time it is
@@ -63,6 +71,26 @@ public sealed class Dir : IDisposable
     }
 
     /// <summary>
+    /// What resolution beneath this handle does with a symbolic link on the way to the thing
+    /// a path names.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Readable so that a component handed a handle can find out what it was given rather
+    /// than having to discover it from a refusal. There is no setter: the value is fixed
+    /// when the handle is created, and <see cref="Restrict"/> produces a new handle rather
+    /// than changing this one, so a handle that has been passed on cannot have its policy
+    /// altered underneath its holder.
+    /// </para>
+    /// <para>
+    /// This says nothing about the last component of a path. Whether an operation acts on a
+    /// link or on what it points at is decided by the operation — removing a name removes
+    /// the name — whatever this reports.
+    /// </para>
+    /// </remarks>
+    public SymlinkPolicy SymlinkPolicy => _options.ToSymlinkPolicy();
+
+    /// <summary>
     /// Opens a directory by an ordinary path, using the authority the process already has.
     /// </summary>
     /// <param name="path">
@@ -73,6 +101,11 @@ public sealed class Dir : IDisposable
     /// <param name="authority">
     /// Proof that taking authority from outside the capability graph is intended here. Must
     /// come from <see cref="AmbientAuthority.Acquire"/>; a default value is refused.
+    /// </param>
+    /// <param name="policy">
+    /// What resolution beneath the returned handle does with a symbolic link it meets on the
+    /// way to the thing a path names. Travels with that handle and with everything derived
+    /// from it; see <see cref="SymlinkPolicy"/>.
     /// </param>
     /// <returns>A handle on the directory.</returns>
     /// <remarks>
@@ -86,12 +119,18 @@ public sealed class Dir : IDisposable
     /// <exception cref="ArgumentException">
     /// <paramref name="path"/> is empty, or <paramref name="authority"/> was never acquired.
     /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="policy"/> is not a value the enumeration defines.
+    /// </exception>
     /// <exception cref="DirectoryNotFoundException">There is no such directory.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">The open failed for another reason.</exception>
-    public static Dir Open(string path, AmbientAuthority authority)
+    public static Dir Open(
+        string path,
+        AmbientAuthority authority,
+        SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox)
     {
-        CapError error = OpenRootCore(path, authority, ConfinedResolveOptions.None, out Dir? dir);
+        CapError error = OpenRootCore(path, authority, Demand(policy), out Dir? dir);
         return error.IsSuccess ? dir! : throw FailureTranslation.ToException(error, path);
     }
 
@@ -101,15 +140,21 @@ public sealed class Dir : IDisposable
     /// <param name="path">The directory to open. See <see cref="Open"/>.</param>
     /// <param name="authority">An acquired ambient-authority token.</param>
     /// <param name="dir">The handle, when this returns true.</param>
+    /// <param name="policy">The symbolic-link policy the subtree is resolved under.</param>
     /// <returns>True when the directory was opened.</returns>
     /// <remarks>
     /// A missing directory is an expected answer rather than an exceptional one, and building
     /// an exception to say so costs more than the open. Arguments that are wrong rather than
-    /// unlucky — a null path, a token that was never acquired — still throw, because no
-    /// retry or fallback can be the right response to either.
+    /// unlucky — a null path, a token that was never acquired, a policy that is not one of
+    /// the defined values — still throw, because no retry or fallback can be the right
+    /// response to any of them.
     /// </remarks>
-    public static bool TryOpen(string path, AmbientAuthority authority, [NotNullWhen(true)] out Dir? dir) =>
-        OpenRootCore(path, authority, ConfinedResolveOptions.None, out dir).IsSuccess;
+    public static bool TryOpen(
+        string path,
+        AmbientAuthority authority,
+        [NotNullWhen(true)] out Dir? dir,
+        SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox) =>
+        OpenRootCore(path, authority, Demand(policy), out dir).IsSuccess;
 
     /// <summary>
     /// Opens a directory beneath this one.
@@ -203,6 +248,77 @@ public sealed class Dir : IDisposable
     public bool TryClone([NotNullWhen(true)] out Dir? clone) => CloneCore(out clone).IsSuccess;
 
     /// <summary>
+    /// Produces a handle on the same directory that resolves under a stricter symbolic-link
+    /// policy.
+    /// </summary>
+    /// <param name="policy">
+    /// The policy the new handle resolves under. Must be at least as strict as this
+    /// handle's; passing the policy this handle already has is allowed and yields a plain
+    /// copy.
+    /// </param>
+    /// <returns>A handle carrying this handle's authority under the stricter policy.</returns>
+    /// <remarks>
+    /// <para>
+    /// How a subtree is handed to code that should be held to a tighter rule than the code
+    /// handing it over. The usual case is passing a directory to something that will read
+    /// whatever an untrusted party has written into it, where a symbolic link is not part of
+    /// the layout the format was ever supposed to contain.
+    /// </para>
+    /// <para>
+    /// <strong>It can only tighten.</strong> Asking for a looser policy than this handle
+    /// carries is refused rather than honoured or quietly ignored, and that refusal is what
+    /// makes the policy worth stating: if a handle could be widened by deriving from it,
+    /// whoever was given one in order to work inside a subtree could lift the restriction it
+    /// came with in a single call. Every other way of deriving a handle —
+    /// <see cref="OpenDir"/>, <see cref="Clone"/> — copies the policy unchanged, so this is
+    /// the only place the value ever moves, and it moves in one direction.
+    /// </para>
+    /// <para>
+    /// The result owns its own open directory, so it outlives this handle and can be closed
+    /// without affecting it. It is a separate capability, not a view onto this one.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="policy"/> is not a value the enumeration defines.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="policy"/> is looser than the policy this handle carries.
+    /// </exception>
+    /// <exception cref="CapIOException">The handle could not be duplicated.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public Dir Restrict(SymlinkPolicy policy)
+    {
+        CapError error = RestrictCore(policy, out Dir? restricted);
+        return error.IsSuccess
+            ? restricted!
+            : throw new CapIOException(
+                $"The directory handle could not be duplicated under the stricter policy. ({error})");
+    }
+
+    /// <summary>
+    /// Produces a handle under a stricter symbolic-link policy, reporting failure rather
+    /// than throwing.
+    /// </summary>
+    /// <param name="policy">The policy the new handle resolves under. See <see cref="Restrict"/>.</param>
+    /// <param name="restricted">The handle, when this returns true.</param>
+    /// <returns>True when the handle was produced.</returns>
+    /// <remarks>
+    /// False means only that the process or the system is out of handles, which is a
+    /// condition a server may prefer to shed load for rather than unwind a stack over. A
+    /// policy looser than this handle's still throws: that is a mistake in the calling code,
+    /// and a caller that treated it as a transient failure and retried would loop.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="policy"/> is not a value the enumeration defines.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="policy"/> is looser than the policy this handle carries.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TryRestrict(SymlinkPolicy policy, [NotNullWhen(true)] out Dir? restricted) =>
+        RestrictCore(policy, out restricted).IsSuccess;
+
+    /// <summary>
     /// Asks the operating system what path this handle is currently reachable by.
     /// </summary>
     /// <param name="authority">
@@ -285,11 +401,19 @@ public sealed class Dir : IDisposable
     /// Opens a root handle with an explicit resolution policy.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The policy a subtree is resolved under is fixed when its root is opened, and every
     /// handle derived from that root copies it unchanged. Widening it is not expressible:
-    /// derivation copies the field and nothing else writes it, so a component handed a
-    /// handle cannot grant itself a looser policy than the one it was given — which is the
-    /// only arrangement under which the word "policy" means anything.
+    /// derivation copies the field, the only member that writes a different value writes a
+    /// stricter one, and there is no setter — so a component handed a handle cannot grant
+    /// itself a looser policy than the one it was given, which is the only arrangement
+    /// under which the word "policy" means anything.
+    /// </para>
+    /// <para>
+    /// Takes the resolution flags rather than the caller-facing policy because it is the
+    /// seam the whole library opens roots through, and confinement carries more than the
+    /// treatment of links.
+    /// </para>
     /// </remarks>
     internal static CapError OpenRootCore(
         string path,
@@ -345,6 +469,57 @@ public sealed class Dir : IDisposable
 
         dir = new Dir(opened.Value, _options);
         return CapPathError.None;
+    }
+
+    /// <summary>
+    /// Checks a caller-supplied policy and converts it to the flags resolution takes.
+    /// </summary>
+    /// <remarks>
+    /// An undefined value is refused rather than mapped. The mapping reads anything it does
+    /// not recognise as the default, and the default is the loosest policy, so a value that
+    /// arrived by a bad cast or a stale constant would otherwise select the weakest
+    /// behaviour without anybody being told.
+    /// </remarks>
+    private static ConfinedResolveOptions Demand(SymlinkPolicy policy)
+    {
+        if (!policy.IsDefinedValue())
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                policy,
+                "The symbolic-link policy is not one of the defined values. It is refused " +
+                "rather than treated as the default, because the default is the least " +
+                "restrictive of them.");
+        }
+
+        return policy.ToResolveOptions();
+    }
+
+    private CapError RestrictCore(SymlinkPolicy policy, out Dir? restricted)
+    {
+        ConfinedResolveOptions requested = Demand(policy);
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        restricted = null;
+
+        if (policy < SymlinkPolicy)
+        {
+            throw new ArgumentException(
+                $"A handle resolving under {SymlinkPolicy} cannot produce one resolving " +
+                $"under {policy}, which is less restrictive. Authority is only ever narrowed " +
+                "by derivation; a caller that needs the looser policy has to have been given " +
+                "a handle that already carries it.",
+                nameof(policy));
+        }
+
+        CapResult<SafeDirHandle> copy = PlatformOps.Current.DuplicateDirectory(_handle);
+        if (!copy.IsSuccess)
+        {
+            return copy.Error;
+        }
+
+        restricted = new Dir(copy.Value, _options | requested);
+        return CapError.Success;
     }
 
     private CapError CloneCore(out Dir? clone)
