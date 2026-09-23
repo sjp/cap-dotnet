@@ -28,8 +28,16 @@ namespace Cap.Primitives;
 /// </para>
 /// <para>
 /// Instances are cheap and hold a reference to the caller's string rather than a copy, so
-/// parsing allocates nothing. The type is immutable; a <see langword="default"/> instance
+/// parsing allocates nothing. The type is immutable, and so safe to share between threads
+/// and to read from any number of them at once; a <see langword="default"/> instance
 /// behaves as an empty path and resolves to nothing.
+/// </para>
+/// <para>
+/// <strong>Symbolic links.</strong> Parsing never touches the filesystem, so it cannot know
+/// which components are links and treats every one as an ordinary name. Whether a link met
+/// on the way is followed is decided later, at resolution, by the directory handle's
+/// <see cref="SymlinkPolicy"/> — which is exactly why a <c>..</c> is carried through rather
+/// than collapsed: only the walk knows what the component before it really was.
 /// </para>
 /// </remarks>
 public readonly struct CapPath
@@ -148,12 +156,28 @@ public readonly struct CapPath
     /// This is the overload for a boundary where a path first arrives from a caller. It
     /// allocates nothing: the returned path refers to <paramref name="raw"/> itself.
     /// </remarks>
+    /// <param name="raw">The caller's path.</param>
+    /// <param name="path">The parsed path when this returns true; the default otherwise.</param>
+    /// <param name="error">
+    /// Why the path was refused, or <see cref="CapPathError.None"/> when it was not.
+    /// </param>
+    /// <returns>True when the path is acceptable.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="raw"/> is null.</exception>
     public static bool TryParse(string raw, out CapPath path, out CapPathError error) =>
         TryParse(raw, HostSyntax, ParentLinkPolicy.Reject, out path, out error);
 
     /// <summary>
     /// Parses <paramref name="raw"/> under an explicit syntax and <c>..</c> policy.
     /// </summary>
+    /// <param name="raw">The caller's path.</param>
+    /// <param name="syntax">Which platform's rules to apply.</param>
+    /// <param name="parentLinks">Whether a <c>..</c> component is refused or carried through.</param>
+    /// <param name="path">The parsed path when this returns true; the default otherwise.</param>
+    /// <param name="error">
+    /// Why the path was refused, or <see cref="CapPathError.None"/> when it was not.
+    /// </param>
+    /// <returns>True when the path is acceptable.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="raw"/> is null.</exception>
     public static bool TryParse(
         string raw,
         CapPathSyntax syntax,
@@ -185,6 +209,12 @@ public readonly struct CapPath
     /// paying for that — the verdict is all most callers want, and the components can be
     /// walked from the span directly afterwards.
     /// </remarks>
+    /// <param name="raw">The characters to check.</param>
+    /// <param name="syntax">Which platform's rules to apply.</param>
+    /// <param name="parentLinks">Whether a <c>..</c> component is refused or carried through.</param>
+    /// <returns>
+    /// Why the path would be refused, or <see cref="CapPathError.None"/> when it would not.
+    /// </returns>
     public static CapPathError Validate(
         ReadOnlySpan<char> raw,
         CapPathSyntax syntax,
@@ -203,6 +233,7 @@ public readonly struct CapPath
     /// exactly as the caller wrote it, including any <c>..</c>, which is never collapsed and
     /// never silently removed.
     /// </remarks>
+    /// <returns>An enumerator over slices of the caller's own string.</returns>
     public ComponentEnumerator EnumerateComponents() => new(_raw, _syntax);
 
     /// <summary>
@@ -497,9 +528,11 @@ public readonly struct CapPath
         public readonly ReadOnlySpan<char> Current => _current;
 
         /// <summary>Supports <c>foreach</c>; the enumerator is its own source.</summary>
+        /// <returns>A copy of this enumerator, at the same point.</returns>
         public readonly ComponentEnumerator GetEnumerator() => this;
 
         /// <summary>Advances to the next component, skipping <c>.</c> and empty ones.</summary>
+        /// <returns>True when a component was reached; false at the end of the path.</returns>
         public bool MoveNext()
         {
             while (!_remaining.IsEmpty)

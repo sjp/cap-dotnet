@@ -24,6 +24,15 @@ namespace Cap.Std;
 /// <para>
 /// A value that came from no filesystem — the default of the type — answers false to both.
 /// </para>
+/// <para>
+/// <strong>Symbolic links.</strong> A value read from a description of a link holds the
+/// link's own mode or attributes, not its target's; on Windows those attributes include the
+/// bit that marks the entry as redirecting.
+/// </para>
+/// <para>
+/// <strong>Thread safety.</strong> Instances are immutable, so they are safe to share
+/// between threads and to read from any number of them at once.
+/// </para>
 /// </remarks>
 public readonly struct CapPermissions
 {

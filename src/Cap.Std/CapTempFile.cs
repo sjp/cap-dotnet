@@ -63,6 +63,17 @@ public sealed class CapTempFile : IDisposable
     /// The parent handle is duplicated rather than borrowed, so disposing it does not stop
     /// this from removing its file, and disposing this leaves the caller's handle open.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, including several at once against the same
+    /// <paramref name="parent"/>: each call works through its own copy of the handle and
+    /// draws its own name.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The creation is exclusive, and an exclusive creation
+    /// never follows a link: a link already sitting at the drawn name, wherever it points,
+    /// counts as the name being taken, and another name is drawn. That is what stops a
+    /// planted link from redirecting the file somewhere the attacker chose.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="parent"/> is null.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
@@ -106,6 +117,15 @@ public sealed class CapTempFile : IDisposable
     /// glossed over: the file has a name, something with access to the directory can open it,
     /// and it needs disposal to go away.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, including several at once against the same
+    /// <paramref name="parent"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A nameless file is created against the directory
+    /// handle itself, with no name to look up, so there is no link that could be met. The
+    /// named fallback behaves as <see cref="New"/> does.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="parent"/> is null.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
@@ -134,8 +154,14 @@ public sealed class CapTempFile : IDisposable
 
     /// <summary>The open file, for reading and writing.</summary>
     /// <remarks>
+    /// <para>
     /// This is the capability. Disposing this object closes it, so a handle passed to
     /// something that outlives this object is a handle on a file that is about to go.
+    /// </para>
+    /// <para>
+    /// Safe to read from any thread; what the returned file guarantees to concurrent callers
+    /// is described on <see cref="CapFile"/>.
+    /// </para>
     /// </remarks>
     public CapFile File => _file;
 
@@ -144,9 +170,12 @@ public sealed class CapTempFile : IDisposable
     /// when it has none.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A single component and never a path. Null is not a missing answer: it means the file
     /// genuinely has no entry in any directory, which is a stronger position than any name
     /// could give it.
+    /// </para>
+    /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public string? Name => _name;
 
@@ -154,10 +183,13 @@ public sealed class CapTempFile : IDisposable
     /// Whether the file has a name that something else could open it by.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// False is the better answer. A caller who asked for a nameless file and got one can
     /// rely on nothing else in the system being able to reach it; a caller who asked and got
     /// a named one has an ordinary file, protected by the unguessability of its name and by
     /// the permissions on the directory it is in.
+    /// </para>
+    /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public bool HasName => _name is not null;
 
@@ -174,6 +206,11 @@ public sealed class CapTempFile : IDisposable
     /// <para>
     /// The handle is still closed on disposal. What is kept is the file, not the access to
     /// it.
+    /// </para>
+    /// <para>
+    /// Not synchronised with <see cref="Dispose"/>. Called from another thread while disposal
+    /// is under way, it may or may not take effect; call it before disposal begins, from the
+    /// thread that will dispose.
     /// </para>
     /// </remarks>
     public void Keep() => _keep = true;
@@ -195,6 +232,13 @@ public sealed class CapTempFile : IDisposable
     /// </para>
     /// <para>
     /// Disposing twice does nothing the second time.
+    /// </para>
+    /// <para>
+    /// <strong>Not thread-safe.</strong> Two disposals racing each other are not guarded
+    /// against. Other threads still using <see cref="File"/> are not corrupted by it — an
+    /// operation under way finishes, and one that starts afterwards throws
+    /// <see cref="ObjectDisposedException"/> — but they lose the file under them, so dispose
+    /// once, after that work has finished.
     /// </para>
     /// </remarks>
     public void Dispose()

@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Jobs;
+using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
 

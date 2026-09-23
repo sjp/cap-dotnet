@@ -62,6 +62,10 @@ public sealed class CapTempDir : IDisposable
     /// the handles are still closed; only the removal is skipped, and what is skipped stays
     /// on the disk until something else removes it.
     /// </para>
+    /// <para>
+    /// Setting the switch from one thread while another disposes a scratch directory decides
+    /// that one disposal either way; every disposal that starts afterwards sees it.
+    /// </para>
     /// </remarks>
     public const string PersistSwitchName = "Cap.Std.PersistTemporaryDirectories";
 
@@ -120,6 +124,17 @@ public sealed class CapTempDir : IDisposable
     /// gets a scratch directory there, and the only defence against that is the same one
     /// every other program on the system has.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, as often as wanted: each call opens the location for
+    /// itself and draws its own name, and no two calls can be handed the same directory.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The temporary location is an ordinary path opened
+    /// with the process's own authority, so a link anywhere in it is followed wherever it
+    /// leads, as it would be for any other program. The scratch directory beneath it is
+    /// different: its name is claimed by a creation that never follows a link, so a link
+    /// already sitting at that name counts as the name being taken and another is drawn.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="authority"/> was never acquired.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -173,6 +188,17 @@ public sealed class CapTempDir : IDisposable
     /// this from cleaning up after itself, and disposing this leaves the caller's handle
     /// open.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, including several at once against the same
+    /// <paramref name="parent"/>: each call works through its own copy of the handle and
+    /// draws its own name.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The name is claimed by a creation that never follows
+    /// a link, so a link already sitting at that name counts as the name being taken and
+    /// another is drawn. <paramref name="parent"/> is a handle, so no link above it is
+    /// consulted either.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="parent"/> is null.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
@@ -198,19 +224,28 @@ public sealed class CapTempDir : IDisposable
     /// A handle on the scratch directory, carrying authority over it and nothing above it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is the capability, and it is what gets passed on to whatever needs to work in
     /// the directory. Passing it hands over the authority without handing over the cleanup:
     /// the holder cannot remove the directory itself, and disposing this removes it whether
     /// or not they are finished — so a handle handed to something outliving this object is a
     /// handle on a directory that is about to disappear.
+    /// </para>
+    /// <para>
+    /// Safe to read from any thread, and the handle it returns is itself safe for concurrent
+    /// use; see <see cref="Dir"/>.
+    /// </para>
     /// </remarks>
     public Dir Directory => _directory;
 
     /// <summary>The name the directory was given in the directory holding it.</summary>
     /// <remarks>
+    /// <para>
     /// A single component and never a path. It is the one fact about the directory that
     /// cannot be recovered from the handle, and it is here so that a log line, or a test
     /// looking at the tree from outside, can say which directory is being talked about.
+    /// </para>
+    /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public string Name => _name;
 
@@ -229,6 +264,11 @@ public sealed class CapTempDir : IDisposable
     /// <para>
     /// The handles are still closed on disposal. What is kept is the directory, not the
     /// authority over it.
+    /// </para>
+    /// <para>
+    /// Not synchronised with <see cref="Dispose"/>. Called from another thread while disposal
+    /// is under way, it may or may not take effect; call it before disposal begins, from the
+    /// thread that will dispose.
     /// </para>
     /// </remarks>
     public void Keep() => _keep = true;
@@ -252,7 +292,24 @@ public sealed class CapTempDir : IDisposable
     /// told to keep them rather than be left to infer what survived.
     /// </para>
     /// <para>
+    /// <strong>Symbolic links.</strong> A link found in the tree is never descended into: it
+    /// is unlinked as a link, and what it points at, file or directory, is not removed
+    /// through it. Nothing outside the scratch directory is reached under any policy. The one
+    /// case in which a link is followed is a race: a directory that something replaces with a
+    /// link between being listed and being opened is opened under the policy the scratch
+    /// directory carries, so under <see cref="SymlinkPolicy.FollowWithinSandbox"/> a link to
+    /// another directory inside the scratch tree can be emptied through — which removes
+    /// nothing the disposal was not removing anyway.
+    /// </para>
+    /// <para>
     /// Disposing twice does nothing the second time.
+    /// </para>
+    /// <para>
+    /// <strong>Not thread-safe.</strong> Two disposals racing each other are not guarded
+    /// against, and a removal racing work that other threads are still doing inside the
+    /// directory — including through <see cref="Directory"/> — leaves behind whatever those
+    /// threads create after the removal has passed. Dispose once, after that work has
+    /// finished.
     /// </para>
     /// </remarks>
     public void Dispose()

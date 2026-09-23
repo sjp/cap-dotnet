@@ -124,6 +124,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </remarks>
     private const int NameReplyLimit = 64 * 1024;
 
+    private long _componentOpens;
+
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities =>
         new(ResolutionBackend.WindowsRelativeOpen, overlappedFileHandles: true);
@@ -131,6 +133,13 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <inheritdoc/>
     /// <remarks>Always zero: there is no confined open on this platform to attempt.</remarks>
     public long ConfinedOpenAttempts => 0;
+
+    /// <inheritdoc/>
+    /// <remarks>Always zero: there is no confined open on this platform to retry.</remarks>
+    public long ConfinedOpenRaceRetries => 0;
+
+    /// <inheritdoc/>
+    public long ComponentOpens => Interlocked.Read(ref _componentOpens);
 
     /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
@@ -215,6 +224,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
+        Interlocked.Increment(ref _componentOpens);
         CapError error = OpenRelative(
             parent,
             name,
@@ -245,6 +255,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         ReadOnlySpan<char> name,
         in FileOpenRequest request)
     {
+        Interlocked.Increment(ref _componentOpens);
         CapError error = OpenFileRelative(parent, name, in request, out nint raw);
         if (error.IsFailure)
         {

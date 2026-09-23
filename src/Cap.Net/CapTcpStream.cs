@@ -33,17 +33,24 @@ public sealed class CapTcpStream : CapSocketStream
     }
 
     /// <summary>The authority this connection was made under, for what it does next.</summary>
+    /// <remarks>Fixed when the connection is made; safe to read from any thread.</remarks>
     public Pool Pool { get; }
 
     /// <summary>The endpoint at the other end, as it stood when the connection was made.</summary>
+    /// <remarks>Fixed when the connection is made; safe to read from any thread.</remarks>
     public IPEndPoint RemoteEndPoint { get; }
 
     /// <summary>The endpoint at this end, as it stood when the connection was made.</summary>
+    /// <remarks>Fixed when the connection is made; safe to read from any thread.</remarks>
     public IPEndPoint LocalEndPoint { get; }
 
     /// <summary>Connects to <paramref name="endpoint"/>, if <paramref name="pool"/> grants it.</summary>
     /// <param name="pool">The authority the connection is made under.</param>
     /// <param name="endpoint">The address and port to connect to.</param>
+    /// <remarks>
+    /// Safe to call from any thread, and from several at once with the same pool: a pool
+    /// never changes, so each attempt is checked against the same grants.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
     /// <paramref name="pool"/> grants no authority over <paramref name="endpoint"/>.

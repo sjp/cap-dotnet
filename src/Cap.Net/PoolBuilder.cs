@@ -51,9 +51,14 @@ public sealed class PoolBuilder
     /// </param>
     /// <returns>This builder, so that grants can be written one after another.</returns>
     /// <remarks>
+    /// <para>
     /// The only grant that reaches an address an interface configures for itself, which is
     /// the point: reaching one is a thing somebody has to write down rather than a thing that
     /// falls out of a range.
+    /// </para>
+    /// <para>
+    /// Not safe to call at the same time as any other member of the same builder.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="endpoint"/> is null.</exception>
     /// <exception cref="ArgumentException">
@@ -89,9 +94,14 @@ public sealed class PoolBuilder
     /// </param>
     /// <returns>This builder, so that grants can be written one after another.</returns>
     /// <remarks>
+    /// <para>
     /// A range of addresses given to the newer family that lies wholly inside the prefix
     /// which embeds the older one is read as a grant over the older family, so that it covers
     /// those addresses however they are spelled.
+    /// </para>
+    /// <para>
+    /// Not safe to call at the same time as any other member of the same builder.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException">
     /// <paramref name="ports"/> is empty, <paramref name="network"/> lies wholly inside the
@@ -147,6 +157,9 @@ public sealed class PoolBuilder
     /// whatever it is told to; it is worth writing down as a decision rather than reaching by
     /// widening a range until everything fits.
     /// </para>
+    /// <para>
+    /// Not safe to call at the same time as any other member of the same builder.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="authority"/> was never acquired.</exception>
     public PoolBuilder InsertEveryEndpoint(AmbientAuthority authority)
@@ -159,8 +172,14 @@ public sealed class PoolBuilder
 
     /// <summary>Fixes the grants collected so far as a pool.</summary>
     /// <remarks>
+    /// <para>
     /// Takes a copy, so the builder can go on being used and nothing that happens to it
     /// afterwards reaches a pool already handed out.
+    /// </para>
+    /// <para>
+    /// Not safe to call while another thread is adding a grant to the same builder. The pool
+    /// it returns is immutable and may be shared between threads freely.
+    /// </para>
     /// </remarks>
     public Pool Build() => new([.. _endpoints], [.. _networks], _everyEndpoint);
 }

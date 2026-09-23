@@ -92,6 +92,37 @@ public sealed partial class Dir : IDisposable
     public SymlinkPolicy SymlinkPolicy => _options.ToSymlinkPolicy();
 
     /// <summary>
+    /// The implementation this process resolves every path beneath every handle through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The backends keep the same containment promise and differ in how much of it holds
+    /// while the tree is being changed underneath them.
+    /// <see cref="Cap.Primitives.ResolutionBackend.ConfinedOpen"/> resolves a whole path in
+    /// one kernel operation, so nothing can be substituted part-way through.
+    /// <see cref="Cap.Primitives.ResolutionBackend.PortableWalk"/> and
+    /// <see cref="Cap.Primitives.ResolutionBackend.WindowsRelativeOpen"/> open one name at a
+    /// time against the handle the last step produced: resolution still cannot leave the
+    /// tree, but someone able to write inside it can, with the right timing, steer an
+    /// operation to a different object that is also inside it.
+    /// </para>
+    /// <para>
+    /// Settled once, the first time anything is resolved, and fixed for the life of the
+    /// process; reading it before then settles it. It is a property of the process rather
+    /// than of a handle, which is why it is static. On Linux the kernel-atomic backend can be
+    /// unavailable — an old kernel, or a syscall filter such as a container runtime's — and a
+    /// process that depends on it should check this at start-up and refuse to run on
+    /// anything else, rather than discover the difference from a report.
+    /// </para>
+    /// <para>
+    /// The same answer, and counts of the opens each backend performs, are published as
+    /// instruments on the <c>Cap.Primitives</c> meter, for a process watched from outside.
+    /// </para>
+    /// <para>Safe to read from any thread.</para>
+    /// </remarks>
+    public static ResolutionBackend ResolutionBackend => ResolutionMetrics.ActiveBackend;
+
+    /// <summary>
     /// Opens a directory by an ordinary path, using the authority the process already has.
     /// </summary>
     /// <param name="path">
@@ -110,11 +141,20 @@ public sealed partial class Dir : IDisposable
     /// </param>
     /// <returns>A handle on the directory.</returns>
     /// <remarks>
+    /// <para>
     /// The one call in this type that is not confined to anything, and the only one that can
     /// produce a handle from nothing. Everything the containment guarantee promises begins
     /// after it returns: this step is exposed to whatever the host's own path resolution is
     /// exposed to, and a caller that resolves an attacker-controlled string here has handed
     /// over the sandbox before it existed.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> <paramref name="path"/> is resolved by the host,
+    /// which follows a link anywhere in it, the last component included, wherever the link
+    /// points. <paramref name="policy"/> plays no part in this step; it governs only
+    /// resolution beneath the handle that comes back.
+    /// </para>
+    /// <para>Safe to call from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException">
@@ -144,11 +184,17 @@ public sealed partial class Dir : IDisposable
     /// <param name="policy">The symbolic-link policy the subtree is resolved under.</param>
     /// <returns>True when the directory was opened.</returns>
     /// <remarks>
+    /// <para>
     /// A missing directory is an expected answer rather than an exceptional one, and building
     /// an exception to say so costs more than the open. Arguments that are wrong rather than
     /// unlucky — a null path, a token that was never acquired, a policy that is not one of
     /// the defined values — still throw, because no retry or fallback can be the right
     /// response to any of them.
+    /// </para>
+    /// <para>
+    /// Symbolic links in <paramref name="path"/> are followed by the host, as
+    /// <see cref="Open"/> describes. Safe to call from any thread.
+    /// </para>
     /// </remarks>
     public static bool TryOpen(
         string path,
@@ -167,11 +213,25 @@ public sealed partial class Dir : IDisposable
     /// </param>
     /// <returns>A handle on the directory, owning its own open object.</returns>
     /// <remarks>
+    /// <para>
     /// Resolution is confined to the subtree this handle was opened on. Where the kernel can
     /// resolve the whole path in one operation that cannot leave it, it does; elsewhere the
     /// path is walked a component at a time against handles already held, refusing to follow
     /// any link the policy does not allow and refusing any step that would climb out. Both
     /// answer the same way for the same tree.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A link met on the way is followed only under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/>, and only while its
+    /// target stays beneath this handle; one that leaves — an absolute target, or one that
+    /// climbs above this directory — is refused with <see cref="SandboxEscapeException"/>.
+    /// Under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> every link is refused with
+    /// <see cref="CapIOException"/>, wherever it points. The last component is treated the
+    /// same way as the others, because opening a link is opening what it names: a link to a
+    /// directory inside the subtree opens that directory under the default policy and is
+    /// refused under the stricter one.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -180,6 +240,10 @@ public sealed partial class Dir : IDisposable
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">There is no such directory.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
+    /// <exception cref="CapIOException">
+    /// A symbolic link the policy will not follow is in the way, a component is not a
+    /// directory, or the open failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public Dir OpenDir(string path)
     {
@@ -199,10 +263,17 @@ public sealed partial class Dir : IDisposable
     /// <param name="dir">The handle, when this returns true.</param>
     /// <returns>True when the directory was opened.</returns>
     /// <remarks>
+    /// <para>
     /// False covers every reason the path did not open, containment refusals included. An
     /// application that audits escape attempts should call <see cref="OpenDir"/> and catch
     /// <see cref="SandboxEscapeException"/>; this overload deliberately reports no reason,
     /// so that the failure path builds nothing.
+    /// </para>
+    /// <para>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="OpenDir"/> describes; a refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -239,6 +310,17 @@ public sealed partial class Dir : IDisposable
     /// then narrows; a capability bounds what can be reached and is not a substitute for the
     /// filesystem's own access control.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A link met before the last component is followed or
+    /// refused under this handle's <see cref="SymlinkPolicy"/> exactly as
+    /// <see cref="OpenDir"/> describes — refused with <see cref="SandboxEscapeException"/> if
+    /// its target leaves the subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>. The last component is never followed,
+    /// under either policy: a link already holding the name, whatever it points at and
+    /// whether or not its target exists, makes the name taken, and nothing is created where
+    /// it points.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -270,9 +352,17 @@ public sealed partial class Dir : IDisposable
     /// <param name="dir">A handle on the new directory, when this returns true.</param>
     /// <returns>True when the directory was created.</returns>
     /// <remarks>
+    /// <para>
     /// False covers every reason it was not created, a name already taken included. A caller
     /// that needs to tell those apart wants <see cref="CreateDir"/>; this form deliberately
     /// reports no reason, so that the failure path builds no message and no exception.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated exactly as <see cref="CreateDir"/> describes: followed or
+    /// refused on the way by this handle's policy, never followed at the last component, and
+    /// a refusal is reported as false. Safe to call concurrently with any other member of
+    /// this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -302,6 +392,17 @@ public sealed partial class Dir : IDisposable
     /// follow one — which is what stops this from being a way to have a link decide where the
     /// caller's directory really is.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A link met before the last component is followed or
+    /// refused under this handle's <see cref="SymlinkPolicy"/> exactly as
+    /// <see cref="OpenDir"/> describes — refused with <see cref="SandboxEscapeException"/> if
+    /// its target leaves the subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>. A link holding the last component is
+    /// refused with <see cref="CapIOException"/> under either policy, as above. That makes
+    /// this stricter than <see cref="OpenDir"/>, which follows a link to a directory inside
+    /// the subtree under the default policy.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -332,6 +433,12 @@ public sealed partial class Dir : IDisposable
     /// <param name="path">A relative path. See <see cref="OpenOrCreateDir"/>.</param>
     /// <param name="dir">A handle on the directory, when this returns true.</param>
     /// <returns>True when the directory is there and was opened.</returns>
+    /// <remarks>
+    /// Symbolic links are treated exactly as <see cref="OpenOrCreateDir"/> describes: followed
+    /// or refused on the way by this handle's policy, refused at the last component under
+    /// either policy, and a refusal is reported as false. Safe to call concurrently with any
+    /// other member of this handle, from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryOpenOrCreateDir(string path, [NotNullWhen(true)] out Dir? dir) =>
@@ -367,6 +474,14 @@ public sealed partial class Dir : IDisposable
     /// spread it. A caller that genuinely does not care whether it was there calls
     /// <see cref="TryDeleteFile"/>, which costs nothing.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A link met before the last component is a different
+    /// matter: it is followed or refused under this handle's <see cref="SymlinkPolicy"/>
+    /// exactly as <see cref="OpenDir"/> describes — refused with
+    /// <see cref="SandboxEscapeException"/> if its target leaves the subtree, and with
+    /// <see cref="CapIOException"/> under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -392,10 +507,18 @@ public sealed partial class Dir : IDisposable
     /// <param name="path">A relative path to the name to remove. See <see cref="DeleteFile"/>.</param>
     /// <returns>True when the name was removed by this call.</returns>
     /// <remarks>
+    /// <para>
     /// False when there was nothing there as well as when the removal was refused, so this is
     /// not quite "make sure it is gone": a caller that wants that treats false as success
     /// once it has satisfied itself the name is absent. The two are kept apart because some
     /// callers audit deletions and need to know which ones did something.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated exactly as <see cref="DeleteFile"/> describes: a link at the
+    /// last component is removed itself under either policy, one on the way is followed or
+    /// refused by this handle's policy, and a refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -424,6 +547,15 @@ public sealed partial class Dir : IDisposable
     /// rebuild paths — which makes it a walk the caller drives, over an enumeration, and not
     /// something a single call can be quietly allowed to do.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The link at the last component is refused as above,
+    /// under either policy, and is never followed. A link met before the last component is
+    /// followed or refused under this handle's <see cref="SymlinkPolicy"/> exactly as
+    /// <see cref="OpenDir"/> describes — refused with <see cref="SandboxEscapeException"/> if
+    /// its target leaves the subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -450,6 +582,12 @@ public sealed partial class Dir : IDisposable
     /// </summary>
     /// <param name="path">A relative path to the directory. See <see cref="DeleteDir"/>.</param>
     /// <returns>True when the directory was removed by this call.</returns>
+    /// <remarks>
+    /// Symbolic links are treated exactly as <see cref="DeleteDir"/> describes: a link at the
+    /// last component is refused rather than followed, one on the way is followed or refused
+    /// by this handle's policy, and every refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryDeleteDir(string path) =>
@@ -498,6 +636,21 @@ public sealed partial class Dir : IDisposable
     /// refused when the entry is anything else — a symbolic link to a directory included,
     /// since the link is what would be moved.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Neither last component is followed, under either
+    /// policy: a link at <paramref name="from"/> is moved as itself, and a link already
+    /// holding <paramref name="to"/> is a name like any other — it makes the destination
+    /// taken, or is replaced when replacement is asked for, and what it points at is not
+    /// touched. A link met before the last component of either path is followed or refused
+    /// under the policy of the handle that path is resolved against, exactly as
+    /// <see cref="OpenDir"/> describes — refused with <see cref="SandboxEscapeException"/> if
+    /// its target leaves that handle's subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call concurrently with any other member of this handle or of
+    /// <paramref name="toDir"/>, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ArgumentException">A path is not a usable name.</exception>
@@ -533,6 +686,13 @@ public sealed partial class Dir : IDisposable
     /// <param name="to">The name to give it beneath that handle.</param>
     /// <param name="replaceExisting">Whether an existing destination is replaced.</param>
     /// <returns>True when the entry was moved.</returns>
+    /// <remarks>
+    /// Symbolic links are treated exactly as <see cref="Rename"/> describes: neither last
+    /// component is followed, a link on the way is followed or refused by the policy of the
+    /// handle that path is resolved against, and a refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle or of <paramref name="toDir"/>, from
+    /// any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
     public bool TryRename(string from, Dir toDir, string to, bool replaceExisting = false)
@@ -573,6 +733,16 @@ public sealed partial class Dir : IDisposable
     /// historically always did, and still does outside developer mode — which is reported as
     /// the filesystem refusing the operation.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links in <paramref name="linkPath"/>.</strong> The last component is
+    /// never followed: a link already holding the name, wherever it points, makes the name
+    /// taken. A link met before the last component is followed or refused under this
+    /// handle's <see cref="SymlinkPolicy"/> exactly as <see cref="OpenDir"/> describes —
+    /// refused with <see cref="SandboxEscapeException"/> if its target leaves the subtree,
+    /// and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
@@ -602,6 +772,12 @@ public sealed partial class Dir : IDisposable
     /// <param name="linkPath">A relative path naming the link. See <see cref="CreateSymlink"/>.</param>
     /// <param name="target">The text the link stores.</param>
     /// <returns>True when the link was created.</returns>
+    /// <remarks>
+    /// Symbolic links in <paramref name="linkPath"/> are treated exactly as
+    /// <see cref="CreateSymlink"/> describes: the last component is never followed, a link on
+    /// the way is followed or refused by this handle's policy, and a refusal is reported as
+    /// false. Safe to call concurrently with any other member of this handle, from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="target"/> is empty or contains a NUL character.
@@ -616,12 +792,21 @@ public sealed partial class Dir : IDisposable
     /// <param name="linkPath">A relative path naming the link to create.</param>
     /// <param name="target">The text the link stores, kept exactly as given.</param>
     /// <remarks>
+    /// <para>
     /// The directory-kind counterpart of <see cref="CreateSymlink"/>, and everything said
     /// there about the stored target applies unchanged. The two are separate members because
     /// Windows records the kind in the link and will not traverse one made as the wrong kind;
     /// on every other platform a link has no kind and these do the same thing. Choosing
     /// between them in portable code is therefore not pedantry — it is the only way the
     /// choice gets made before the platform that cares is reached.
+    /// </para>
+    /// <para>
+    /// Symbolic links in <paramref name="linkPath"/> are treated exactly as
+    /// <see cref="CreateSymlink"/> describes: the last component is never followed, and a
+    /// link already holding it makes the name taken; a link on the way is followed or
+    /// refused by this handle's policy. Safe to call concurrently with any other member of
+    /// this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
@@ -651,6 +836,11 @@ public sealed partial class Dir : IDisposable
     /// <param name="linkPath">A relative path naming the link. See <see cref="CreateDirSymlink"/>.</param>
     /// <param name="target">The text the link stores.</param>
     /// <returns>True when the link was created.</returns>
+    /// <remarks>
+    /// Symbolic links in <paramref name="linkPath"/> are treated exactly as
+    /// <see cref="CreateSymlink"/> describes, and a refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="target"/> is empty or contains a NUL character.
@@ -682,6 +872,20 @@ public sealed partial class Dir : IDisposable
     /// there is no option to overwrite and a destination already in use is a failure.
     /// Directories cannot be linked on any filesystem this runs on, and filesystems that do
     /// not support hard links at all report so.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Neither last component is followed, under either
+    /// policy: a link at <paramref name="path"/> gets the second name itself, as above, and a
+    /// link already holding <paramref name="to"/> makes the new name taken. A link met before
+    /// the last component of either path is followed or refused under the policy of the
+    /// handle that path is resolved against, exactly as <see cref="OpenDir"/> describes —
+    /// refused with <see cref="SandboxEscapeException"/> if its target leaves that handle's
+    /// subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call concurrently with any other member of this handle or of
+    /// <paramref name="toDir"/>, from any thread.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
@@ -717,6 +921,13 @@ public sealed partial class Dir : IDisposable
     /// <param name="toDir">The handle the new name is beneath.</param>
     /// <param name="to">The new name beneath that handle.</param>
     /// <returns>True when the second name was created.</returns>
+    /// <remarks>
+    /// Symbolic links are treated exactly as <see cref="CreateHardLink"/> describes: neither
+    /// last component is followed, a link on the way is followed or refused by the policy of
+    /// the handle that path is resolved against, and a refusal is reported as false. Safe to
+    /// call concurrently with any other member of this handle or of <paramref name="toDir"/>,
+    /// from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
     public bool TryCreateHardLink(string path, Dir toDir, string to)
@@ -759,6 +970,14 @@ public sealed partial class Dir : IDisposable
     /// alike. Anything that needs those told apart is asking a different question and should
     /// use the operation it actually intends.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links on the way.</strong> A link met before the last component is
+    /// followed or refused under this handle's <see cref="SymlinkPolicy"/> exactly as
+    /// <see cref="OpenDir"/> describes. A refusal — a target that leaves the subtree, or any
+    /// link at all under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> — answers false, so
+    /// under the stricter policy a name reachable only through a link is reported absent.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -801,6 +1020,14 @@ public sealed partial class Dir : IDisposable
     /// different things, and a handle held precisely in order to audit the links in a subtree
     /// would be useless if the stricter policy took this away.
     /// </para>
+    /// <para>
+    /// That applies to the last component only. A link met before it is followed or refused
+    /// under this handle's <see cref="SymlinkPolicy"/> exactly as <see cref="OpenDir"/>
+    /// describes — refused with <see cref="SandboxEscapeException"/> if its target leaves the
+    /// subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -830,9 +1057,17 @@ public sealed partial class Dir : IDisposable
     /// <param name="target">The stored target, when this returns true.</param>
     /// <returns>True when a link was read.</returns>
     /// <remarks>
+    /// <para>
     /// False covers a name that is not a link at all, which is an ordinary answer to "is this
     /// a link, and what does it say?" and not worth an exception on a path that asks it of
     /// every entry in a directory.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated exactly as <see cref="ReadLink"/> describes: the last
+    /// component is read and never followed, under either policy, while a link on the way is
+    /// followed or refused by this handle's policy, a refusal being reported as false. Safe
+    /// to call concurrently with any other member of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -853,8 +1088,10 @@ public sealed partial class Dir : IDisposable
     /// The copy reproduces this handle's authority rather than asking the filesystem what it
     /// would grant. A handle deliberately opened with less than the directory's permissions
     /// would allow keeps that narrowing when it is copied; a copy that re-derived the answer
-    /// would be a promotion dressed as a duplicate.
+    /// would be a promotion dressed as a duplicate. The symbolic-link policy is copied
+    /// unchanged along with it.
     /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="CapIOException">The handle could not be duplicated.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -873,8 +1110,11 @@ public sealed partial class Dir : IDisposable
     /// <param name="clone">The copy, when this returns true.</param>
     /// <returns>True when the handle was duplicated.</returns>
     /// <remarks>
+    /// <para>
     /// Duplication fails only when the process is out of handles, which is a condition a
     /// server may well want to shed load for rather than unwind a stack over.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryClone([NotNullWhen(true)] out Dir? clone) => CloneCore(out clone).IsSuccess;
@@ -909,6 +1149,11 @@ public sealed partial class Dir : IDisposable
     /// The result owns its own open directory, so it outlives this handle and can be closed
     /// without affecting it. It is a separate capability, not a view onto this one.
     /// </para>
+    /// <para>
+    /// Safe to call concurrently with any other member of this handle, from any thread. This
+    /// handle's own policy is not changed, so an operation already running through it, or
+    /// started later, resolves exactly as it would have.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="policy"/> is not a value the enumeration defines.
@@ -936,10 +1181,13 @@ public sealed partial class Dir : IDisposable
     /// <param name="restricted">The handle, when this returns true.</param>
     /// <returns>True when the handle was produced.</returns>
     /// <remarks>
+    /// <para>
     /// False means only that the process or the system is out of handles, which is a
     /// condition a server may prefer to shed load for rather than unwind a stack over. A
     /// policy looser than this handle's still throws: that is a mistake in the calling code,
     /// and a caller that treated it as a transient failure and retried would loop.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="policy"/> is not a value the enumeration defines.
@@ -975,6 +1223,7 @@ public sealed partial class Dir : IDisposable
     /// all — a Linux container without the process filesystem mounted, for one — and a
     /// caller must have something to log in that case too.
     /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="authority"/> was never acquired.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -1006,6 +1255,11 @@ public sealed partial class Dir : IDisposable
     /// Anything that wants a lifetime of its own should be given <see cref="Clone"/>'s result
     /// instead, whose handle it may close freely.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread. What is done with the handle afterwards is outside this
+    /// type's reach: closing it, from any thread, disposes this instance for every other
+    /// caller, which then sees <see cref="ObjectDisposedException"/>.
+    /// </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public SafeHandle UnsafeGetHandle()
@@ -1026,6 +1280,15 @@ public sealed partial class Dir : IDisposable
     /// Not asynchronous, and no <see cref="IAsyncDisposable"/> to go with it: closing a
     /// descriptor does not wait for anything, so an asynchronous form would add a state
     /// machine to a call that completes immediately.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, more than once, and while other threads are using this
+    /// handle. An operation already under way keeps the underlying handle alive until it
+    /// finishes, and one that reaches it after the close throws
+    /// <see cref="ObjectDisposedException"/>; none ever lands on an unrelated object that has
+    /// since been given the same handle number. An enumeration already begun reads through an
+    /// open object of its own and runs on, but the entries it goes on to yield can no longer
+    /// be opened through this handle.
     /// </para>
     /// </remarks>
     public void Dispose() => _handle.Dispose();

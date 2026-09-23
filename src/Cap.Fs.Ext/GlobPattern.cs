@@ -38,6 +38,20 @@ namespace Cap.Fs.Ext;
 /// platform, so a default that guessed would be wrong somewhere; a pattern that must match
 /// regardless of spelling asks for that when it is parsed.
 /// </para>
+/// <para>
+/// <strong>Immutable once parsed.</strong> Matching keeps its progress in the search rather
+/// than in the pattern, so one instance can drive any number of searches at once, on any
+/// number of threads.
+/// </para>
+/// <para>
+/// <strong>Symbolic links.</strong> A pattern is matched against the names a directory read
+/// produced, and the name of a link is matched like any other name: a link whose name the
+/// pattern describes is a match, whatever it points at. Whether a search continues through a
+/// link to a directory is not the pattern's decision but the search's — see
+/// <see cref="WalkOptions.FollowSymlinks"/>. A piece in the middle of a pattern that matches a
+/// link's name therefore leads nowhere unless links are being followed, unlike a shell, where
+/// the path is resolved and the link followed.
+/// </para>
 /// </remarks>
 public sealed class GlobPattern
 {
@@ -66,10 +80,16 @@ public sealed class GlobPattern
     /// </param>
     /// <returns>The parsed pattern, ready to match against a tree.</returns>
     /// <remarks>
+    /// <para>
     /// The pattern is relative, like every other name this library takes. A pattern that
     /// begins at a root, or that asks to climb above one, is refused rather than resolved:
     /// there is nothing above the directory a handle grants, and a pattern that reached there
     /// would be asking for authority nobody handed out.
+    /// </para>
+    /// <para>
+    /// Parsing touches no filesystem, so no link is looked at here. Safe to call from any
+    /// thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is null.</exception>
     /// <exception cref="ArgumentException">
@@ -128,6 +148,8 @@ public sealed class GlobPattern
     }
 
     /// <summary>The pattern as it was written.</summary>
+    /// <returns>The text given to <see cref="Parse"/>, unchanged.</returns>
+    /// <remarks>Safe to call from any thread.</remarks>
     public override string ToString() => _text;
 
     /// <summary>

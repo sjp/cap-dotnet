@@ -32,6 +32,17 @@ public static partial class DirExtensions
     /// <param name="path">A relative path to the name to ask about.</param>
     /// <returns>True when the name holds a directory; false when it holds anything else,
     /// holds nothing, or could not be reached.</returns>
+    /// <remarks>
+    /// <para>
+    /// Safe to call from any thread: it is a single lookup, and changes nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Components ahead of the last are resolved under the
+    /// handle's own policy, so a link among them is followed or refused as it would be for any
+    /// other operation, and a refusal answers false. A link as the last component is looked at
+    /// rather than followed, so a link to a directory answers false.
+    /// </para>
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static bool IsDir(this Dir dir, string path) => Holds(dir, path, CapFileType.Directory);
@@ -41,6 +52,17 @@ public static partial class DirExtensions
     /// <param name="path">A relative path to the name to ask about.</param>
     /// <returns>True when the name holds a file; false when it holds a directory, a link,
     /// something that is neither, or nothing at all.</returns>
+    /// <remarks>
+    /// <para>
+    /// Safe to call from any thread: it is a single lookup, and changes nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Components ahead of the last are resolved under the
+    /// handle's own policy, so a link among them is followed or refused as it would be for any
+    /// other operation, and a refusal answers false. A link as the last component is looked at
+    /// rather than followed, so a link to a file answers false.
+    /// </para>
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static bool IsFile(this Dir dir, string path) => Holds(dir, path, CapFileType.File);
@@ -51,10 +73,15 @@ public static partial class DirExtensions
     /// <returns>True when the name holds a symbolic link, whether or not its target exists
     /// and whether or not the target lies outside this handle's authority.</returns>
     /// <remarks>
-    /// Only components ahead of the last one are resolved, and they are resolved under the
-    /// handle's own policy — so a link in the middle of the path is followed or refused as it
-    /// would be for any other operation, while the last component is looked at rather than
-    /// followed.
+    /// <para>
+    /// <strong>Symbolic links.</strong> Only components ahead of the last one are resolved,
+    /// and they are resolved under the handle's own policy — so a link in the middle of the
+    /// path is followed or refused as it would be for any other operation, while the last
+    /// component is looked at rather than followed.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread: it is a single lookup, and changes nothing.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>

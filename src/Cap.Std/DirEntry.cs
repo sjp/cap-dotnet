@@ -81,14 +81,38 @@ public readonly struct DirEntry
     /// </summary>
     /// <returns>A handle on it, carrying this entry's directory's own resolution policy.</returns>
     /// <remarks>
+    /// <para>
     /// The name is resolved again rather than reused from the enumeration; see the notes on
     /// this type. Whether a symbolic link here is followed is decided by the policy the
     /// handle the entry came from carries, exactly as for a name a caller supplied.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The name is a single component, so the only link that
+    /// can be met is the one holding it, and it is followed as <see cref="Dir.OpenDir"/>
+    /// follows a last component: under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> it opens the directory
+    /// the link leads to while that stays beneath the handle, and is refused with
+    /// <see cref="SandboxEscapeException"/> when it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
+    /// <see cref="CapIOException"/>. An entry whose <see cref="Type"/> says
+    /// <see cref="CapFileType.Symlink"/> may therefore still open as a directory.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ArgumentException">The name is not one this platform will open.</exception>
-    /// <exception cref="DirectoryNotFoundException">The entry is gone, or was never a directory.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// The name holds a symbolic link whose target leaves the handle's subtree.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">The entry is gone.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds something that is not a directory, a symbolic link the policy will not
+    /// follow, or the open failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
     public Dir OpenDir() => Owner.OpenDir(Name);
 
@@ -98,9 +122,20 @@ public readonly struct DirEntry
     /// <param name="dir">The open directory, when this returns true.</param>
     /// <returns>True when it was opened.</returns>
     /// <remarks>
+    /// <para>
     /// The form to prefer here. An entry that has been removed between the read and the open
     /// is an ordinary outcome of listing a directory something else is writing to, and not a
     /// reason to build an exception.
+    /// </para>
+    /// <para>
+    /// A symbolic link holding the name is followed or refused exactly as
+    /// <see cref="OpenDir"/> describes, and a refusal, containment included, is reported as
+    /// false.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
@@ -116,12 +151,31 @@ public readonly struct DirEntry
     /// <param name="preallocationSize">How much room to claim in advance.</param>
     /// <returns>The open file.</returns>
     /// <remarks>
+    /// <para>
     /// The same arguments as opening a file by name through the handle this entry came from,
     /// and with the same defaults: an existing file, opened to read. The creating modes are
     /// accepted because the name is resolved afresh and may by now hold nothing.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The name is a single component, and a link holding it
+    /// is treated as <see cref="Dir.OpenFile"/> treats a last component: under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> it is followed while
+    /// its target stays beneath the handle and refused with
+    /// <see cref="SandboxEscapeException"/> when it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
+    /// <see cref="CapIOException"/>. <see cref="FileMode.CreateNew"/> never follows it and
+    /// reports the name taken.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ArgumentException">The name is not one this platform will open.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// The name holds a symbolic link whose target leaves the handle's subtree.
+    /// </exception>
     /// <exception cref="FileNotFoundException">The entry is gone, and the mode does not create.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">The name holds a directory, or the open failed otherwise.</exception>
@@ -139,6 +193,17 @@ public readonly struct DirEntry
     /// </summary>
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when it was opened.</returns>
+    /// <remarks>
+    /// <para>
+    /// A symbolic link holding the name is followed or refused exactly as
+    /// <see cref="OpenFile"/> describes for an existing file, and a refusal, containment
+    /// included, is reported as false.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
+    /// </para>
+    /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
     public bool TryOpenFile([NotNullWhen(true)] out CapFile? file) => Owner.TryOpenFile(Name, out file);
@@ -155,10 +220,21 @@ public readonly struct DirEntry
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when it was opened.</returns>
     /// <remarks>
+    /// <para>
     /// A request that cannot mean anything still throws. This form is about a filesystem
     /// that said no; a mode combined with an access it contradicts is a mistake in the
     /// calling code, and reporting it as an ordinary failure would hide it behind whichever
     /// branch the caller wrote for a missing file.
+    /// </para>
+    /// <para>
+    /// A symbolic link holding the name is followed or refused exactly as
+    /// <see cref="OpenFile"/> describes for the same <paramref name="mode"/>, and a refusal,
+    /// containment included, is reported as false.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ArgumentException">The request is not one that means anything.</exception>
@@ -192,7 +268,12 @@ public readonly struct DirEntry
     /// </para>
     /// <para>
     /// A link is described as a link, not as what it leads to, exactly as it is when the same
-    /// name is described through the handle this entry came from.
+    /// name is described through the handle this entry came from. That holds under either
+    /// policy, and since the name is a single component no other link is ever met.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
@@ -209,9 +290,19 @@ public readonly struct DirEntry
     /// <param name="metadata">The snapshot, when this returns true.</param>
     /// <returns>True when the entry was described.</returns>
     /// <remarks>
+    /// <para>
     /// The form to prefer here, for the reason the opening members give: an entry that has
     /// gone between the read and the lookup is an ordinary outcome of listing a directory
     /// something else is writing to.
+    /// </para>
+    /// <para>
+    /// A symbolic link holding the name is described as itself and never followed, as
+    /// <see cref="GetMetadata"/> describes.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with anything else done through the handle
+    /// the entry came from; the entry itself is an immutable value.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>

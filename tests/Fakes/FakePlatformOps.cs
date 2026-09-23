@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Microsoft.Win32.SafeHandles;
 
@@ -33,6 +34,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     private readonly List<SafeHandle> _issued = [];
     private nint _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
+    private long _componentOpens;
 
     /// <summary>How many times a link may be followed before resolution gives up.</summary>
     private const int LinkBudget = 8;
@@ -46,6 +48,12 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     public long ConfinedOpenAttempts => _confinedOpenAttempts;
+
+    /// <inheritdoc/>
+    public long ConfinedOpenRaceRetries => 0;
+
+    /// <inheritdoc/>
+    public long ComponentOpens => _componentOpens;
 
     /// <summary>
     /// How many of the handles this instance has produced are still open.
@@ -106,6 +114,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
+        _componentOpens++;
         CapError error = ResolveChild(parent, name, out FakeNode? node);
         if (error.IsFailure)
         {
@@ -133,6 +142,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         ReadOnlySpan<char> name,
         in FileOpenRequest request)
     {
+        _componentOpens++;
         CapError error = ResolveChild(parent, name, out FakeNode? node);
 
         if (error.Category == CapErrorCategory.NotFound && request.Creates)

@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>PluginHost.Plugins.Notes</RootNamespace>
+    <!-- Built to be loaded into a host's AssemblyLoadContext, with its own dependency file. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The contract, and the library behind it, come from the host at run time: a plugin that
+      carried its own copy would have a Dir type the host's Dir is not, and could not be handed
+      one. So they are compiled against and not copied.
+    -->
+    <ProjectReference Include="../../Contracts/PluginHost.Contracts.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+    <!--
+      The analyzer a consumer of the Cap.Std package gets automatically. Referenced by project
+      here because the sample builds against the source rather than the package; with
+      [assembly: CapabilityStrict] it makes any ambient filesystem, network, clock or entropy
+      call in this plugin a build error.
+    -->
+    <ProjectReference Include="../../../../src/Cap.Analyzers/Cap.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

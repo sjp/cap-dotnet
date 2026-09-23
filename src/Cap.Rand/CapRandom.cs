@@ -56,6 +56,7 @@ public sealed class CapRandom : IRandomSource
     /// The same instance every time. It holds no state, so nothing is gained by caching it and
     /// nothing is lost by calling this more than once.
     /// </returns>
+    /// <remarks>Safe to call from any thread.</remarks>
     /// <exception cref="ArgumentException">
     /// <paramref name="authority"/> is <c>default</c> rather than a token that was acquired.
     /// </exception>
@@ -66,6 +67,10 @@ public sealed class CapRandom : IRandomSource
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Safe to call from any number of threads at once. There is no shared position in a
+    /// stream to contend over: every call asks the operating system for fresh bytes.
+    /// </remarks>
     public void Fill(Span<byte> destination)
     {
         // The one place in this library that is allowed to name the ambient generator: this

@@ -42,6 +42,17 @@ public static partial class DirExtensions
     /// for that in <see cref="WalkOptions.SkipHidden"/> — where it also applies to the
     /// directories the search would otherwise descend into.
     /// </para>
+    /// <para>
+    /// Safe to enumerate any number of times from any number of threads at once, as a walk
+    /// is; each enumerator is for one consumer at a time.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A link is matched by its own name and yielded when the
+    /// pattern describes that name, whatever it points at. It is searched through only as
+    /// <see cref="Walk"/> would descend into it — under
+    /// <see cref="WalkOptions.FollowSymlinks"/>, the handle's policy and the subtree's bounds —
+    /// and only when some piece of the pattern is still live beneath it.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">The pattern is not one that can be matched.</exception>
@@ -65,9 +76,20 @@ public static partial class DirExtensions
     /// <param name="options">How the search descends, or null for the defaults.</param>
     /// <returns>The matching entries, parents before their children.</returns>
     /// <remarks>
+    /// <para>
     /// The form to use when the same pattern is applied more than once: the pattern is divided
     /// into its pieces when it is parsed, and a pattern parsed once is matched without that
     /// work being repeated.
+    /// </para>
+    /// <para>
+    /// Safe to enumerate any number of times from any number of threads at once, and one
+    /// pattern may drive several searches concurrently; each enumerator is for one consumer
+    /// at a time.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Treated exactly as the form taking the pattern as text
+    /// treats them.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">

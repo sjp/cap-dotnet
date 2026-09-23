@@ -34,5 +34,11 @@ public interface IRandomSource
     /// Overwrites every byte of <paramref name="destination"/>.
     /// </summary>
     /// <param name="destination">The buffer to fill. An empty buffer is allowed and draws nothing.</param>
+    /// <remarks>
+    /// Whether this may be called from several threads at once is the implementation's to
+    /// say. <see cref="CapRandom"/> allows it; <see cref="InsecureDeterministicRandom"/> does
+    /// not. Code written against the interface that shares one source between threads should
+    /// assume it does not.
+    /// </remarks>
     void Fill(Span<byte> destination);
 }

@@ -127,6 +127,11 @@ public sealed class ProjectDirs : IDisposable
     /// The names become directory names, so a separator or a NUL in any of them is refused
     /// rather than letting the application's directory land somewhere else.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread. It reads the environment as it stands at the moment of
+    /// the call, so a variable changed on another thread while it runs may or may not be
+    /// seen.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A name is null.</exception>
     /// <exception cref="ArgumentException">
@@ -207,10 +212,29 @@ public sealed class ProjectDirs : IDisposable
     /// A new handle on the directory, which the caller owns and must dispose. Every call
     /// returns a separate handle, so disposing one does not affect any other.
     /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Whatever part of the location existed when
+    /// <see cref="From"/> ran was opened then, following links as any program would. The
+    /// part that did not is created one component at a time through the handle above it,
+    /// and each component is then opened without following a link: a name that has come to
+    /// hold a symbolic link by the time it is created is refused, whatever it points at and
+    /// whichever policy was given, so a link planted in the meantime cannot decide where the
+    /// directory is. Once created, the directory is held open, so every later call hands out
+    /// a handle on that same directory, however its name is changed afterwards. The handle
+    /// returned resolves paths beneath itself under the policy passed to <see cref="From"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with every other member. The first
+    /// requests for this kind create it once between them, and a call racing
+    /// <see cref="Dispose"/> either returns a handle or throws
+    /// <see cref="ObjectDisposedException"/>.
+    /// </para>
+    /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation or the open.</exception>
     /// <exception cref="CapIOException">
-    /// Something that is not a directory holds one of the names, or the creation failed
-    /// otherwise.
+    /// Something that is not a directory, a symbolic link included, holds one of the names,
+    /// or the creation failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
     public Dir OpenConfig() => _config.Open(this);
@@ -220,8 +244,17 @@ public sealed class ProjectDirs : IDisposable
     /// </summary>
     /// <returns>A new handle on the directory, which the caller owns. See <see cref="OpenConfig"/>.</returns>
     /// <remarks>
+    /// <para>
     /// On macOS this is the same directory as the configuration directory, because the
     /// platform keeps both in one place.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated as they are by <see cref="OpenConfig"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with every other member; the first
+    /// requests for this kind create it once between them.
+    /// </para>
     /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation or the open.</exception>
     /// <exception cref="CapIOException">The directory could not be created or opened.</exception>
@@ -232,6 +265,15 @@ public sealed class ProjectDirs : IDisposable
     /// The application's cache directory, created if it is not there.
     /// </summary>
     /// <returns>A new handle on the directory, which the caller owns. See <see cref="OpenConfig"/>.</returns>
+    /// <remarks>
+    /// <para>
+    /// Symbolic links are treated as they are by <see cref="OpenConfig"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with every other member; the first
+    /// requests for this kind create it once between them.
+    /// </para>
+    /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation or the open.</exception>
     /// <exception cref="CapIOException">The directory could not be created or opened.</exception>
     /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
@@ -244,6 +286,15 @@ public sealed class ProjectDirs : IDisposable
     /// <returns>
     /// A new handle on the directory, which the caller owns, or null on macOS and Windows.
     /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Symbolic links are treated as they are by <see cref="OpenConfig"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with every other member; the first
+    /// requests for this kind create it once between them.
+    /// </para>
+    /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation or the open.</exception>
     /// <exception cref="CapIOException">The directory could not be created or opened.</exception>
     /// <exception cref="ObjectDisposedException">This instance has been disposed.</exception>
@@ -259,10 +310,22 @@ public sealed class ProjectDirs : IDisposable
     /// is not owned by the current account or is open to anybody else.
     /// </returns>
     /// <remarks>
+    /// <para>
     /// Null is an ordinary answer, and the caller decides what to do without one: put its
     /// socket in the state directory, say, or run without it. There is no fallback chosen
     /// here, because none of the candidates shares the property that makes a runtime
     /// directory worth having — that it is removed when the session ends.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated as they are by <see cref="OpenConfig"/>. The session's
+    /// directory itself was opened by <see cref="From"/> following links, and the ownership
+    /// and permission check was made on what that open reached, so a
+    /// <c>XDG_RUNTIME_DIR</c> that is a link is judged by the directory it leads to.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with every other member; the first
+    /// requests for this kind create it once between them.
+    /// </para>
     /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation or the open.</exception>
     /// <exception cref="CapIOException">The directory could not be created or opened.</exception>
@@ -273,8 +336,15 @@ public sealed class ProjectDirs : IDisposable
     /// Closes the handles this instance holds.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Handles already returned by the <c>Open</c> methods are the caller's and stay open.
     /// Disposing twice does nothing the second time.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, including while an <c>Open</c> method runs on another:
+    /// that call either finishes first and returns its handle, or finds the instance
+    /// disposed and throws <see cref="ObjectDisposedException"/>.
+    /// </para>
     /// </remarks>
     public void Dispose()
     {

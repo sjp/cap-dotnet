@@ -28,12 +28,15 @@ public class CapIOException : IOException
     }
 
     /// <summary>Creates the exception with a message.</summary>
+    /// <param name="message">What went wrong, for a person reading the log.</param>
     public CapIOException(string? message)
         : base(message)
     {
     }
 
     /// <summary>Creates the exception with a message and an underlying cause.</summary>
+    /// <param name="message">What went wrong, for a person reading the log.</param>
+    /// <param name="innerException">The failure that caused this one.</param>
     public CapIOException(string? message, Exception? innerException)
         : base(message, innerException)
     {

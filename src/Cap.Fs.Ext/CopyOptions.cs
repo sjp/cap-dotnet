@@ -3,6 +3,11 @@ namespace Cap.Fs.Ext;
 /// <summary>
 /// What a recursive copy does with what it finds.
 /// </summary>
+/// <remarks>
+/// <strong>Immutable once constructed.</strong> Every property is set only by an object
+/// initializer, so one instance — <see cref="Default"/> included — can be shared by any number
+/// of copies on any number of threads.
+/// </remarks>
 public sealed class CopyOptions
 {
     /// <summary>
@@ -13,10 +18,18 @@ public sealed class CopyOptions
 
     /// <summary>What the copy does with a symbolic link.</summary>
     /// <remarks>
+    /// <para>
     /// Refusing by default is the conservative reading and the one that cannot surprise: a
     /// caller who copies a tree containing links and is told about it can decide whether the
     /// links belong in the copy, whereas a caller whose links silently became copies of their
     /// targets has a destination that is a different shape from the source and no way to know.
+    /// </para>
+    /// <para>
+    /// Applied to every link found anywhere in the source tree, whatever its target is — a
+    /// file, a directory, nothing, or somewhere outside. A link is recognised by describing
+    /// the name without following it, and under none of the three settings is it followed,
+    /// read through or descended into.
+    /// </para>
     /// </remarks>
     public CopyAction Symlinks { get; init; } = CopyAction.Fail;
 
@@ -35,11 +48,26 @@ public sealed class CopyOptions
     /// Whether a name already taken in the destination is written over.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Off, so that the destructive reading is never the one a caller gets without asking for
     /// it. With it off, a name already present in the destination stops the copy; with it on,
     /// a file is replaced, a directory is used as it is and copied into, and a name holding
     /// one kind where the source has the other still stops the copy — replacing a directory
     /// with a file, or the reverse, is not something a copy should decide to do.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links already in the destination.</strong> With this off, a link at a
+    /// name the copy needs stops the copy like any other taken name, whatever it points at.
+    /// With it on, a link where the source has a directory still stops the copy, because the
+    /// directory is opened in a way that refuses to follow one; a link where the source has a
+    /// link is removed as a name and the new link made in its place. A link where the source
+    /// has a file is different: the file is opened for writing through the name, and that
+    /// open follows a link as the destination handle's policy allows, so the contents land in
+    /// whatever the link points at inside the destination's subtree and the link is left in
+    /// place. A link that leaves the subtree is refused. A destination that must not be
+    /// written through links is passed as a handle restricted with
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
     /// </remarks>
     public bool Overwrite { get; init; }
 
@@ -68,7 +96,8 @@ public sealed class CopyOptions
     /// <remarks>
     /// The same limit and the same reason as a walk's: the copy holds one open directory per
     /// level on each side for as long as it is inside that level. A source deeper than this
-    /// stops the copy rather than being quietly cut short.
+    /// stops the copy rather than being quietly cut short. A symbolic link is never descended
+    /// into, so it adds no depth, whatever it points at.
     /// </remarks>
     public int MaxDepth { get; init; } = WalkOptions.DefaultMaxDepth;
 }

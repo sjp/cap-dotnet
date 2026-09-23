@@ -1,5 +1,93 @@
 # Samples
 
+Every sample here is built with the solution, and CI runs each one's demonstration on Linux,
+Windows and macOS. Run with no arguments, each sets up a scene of its own in a scratch
+directory, shows what happens, and exits non-zero if anything reached outside where it should
+have been confined.
+
+## `ContainmentCheck`
+
+The two snippets the [README](../README.md) opens with, run for real.
+
+```bash
+dotnet run --project samples/ContainmentCheck
+```
+
+It makes a sandbox directory holding a symbolic link to a directory beside it, then reads
+`reports/secret.txt` twice: once through the usual `GetFullPath` and `StartsWith` check, which
+passes and reads the file outside, and once through a `Dir`, which refuses.
+
+```
+string check: passed, and read "the contents of a file outside the sandbox"
+Dir:          refused: 'reports/secret.txt' resolved outside the directory the handle grants authority over.
+```
+
+The README's copies of the two snippets are checked against this program's by a test, so the
+page cannot drift from what is run.
+
+## `StaticFileServer`
+
+An ASP.NET Core static file host whose request paths go straight to a `Dir` on the content
+root.
+
+```bash
+dotnet run --project samples/StaticFileServer                 # the demonstration
+dotnet run --project samples/StaticFileServer -- ./wwwroot     # serve a real directory
+```
+
+The demonstration builds a content root containing `assets`, a link to a private directory
+beside it, starts on a loopback port and sends itself requests over a raw socket, so that no
+client library resolves the dot segments first. Then it serves the same content root through
+`UseStaticFiles` and `PhysicalFileProvider` and makes the request that matters:
+
+```
+  200  GET /docs/guide.txt
+  404  GET /assets/secret.txt
+  404  GET /%2e%2e/private/secret.txt
+  404  GET /docs/..%2f..%2fprivate%2fsecret.txt
+  ...
+For comparison, the same content root served by UseStaticFiles over PhysicalFileProvider:
+  200  GET /assets/secret.txt   <-- served "outside the content root"
+```
+
+Every refusal is a 404, whatever the reason, so a client learns nothing about what lies
+outside.
+
+## `PluginHost`
+
+A host that loads plugins from their own assemblies and hands each one a `Dir` on a
+directory of its own.
+
+```bash
+dotnet run --project samples/PluginHost/Host
+```
+
+- `Contracts` is the interface a plugin implements: `Run(Dir data, TextWriter log)`. That
+  signature is the plugin's whole reach.
+- `Plugins/Notes` keeps a file in its directory.
+- `Plugins/Snoop` tries to read the notes plugin's file and the host's, by every spelling
+  that would lead there, and writes whatever it gets to its own directory, where the host
+  looks afterwards.
+
+Both plugins are built with `[assembly: CapabilityStrict]`, so `File.ReadAllText` or
+`AmbientAuthority.Acquire()` in either is a build error, and each is given its directory
+restricted to `SymlinkPolicy.Deny`.
+
+```
+[snoop]
+  refused  ../notes/notes.txt  (outside this plugin's directory)
+  refused  ../../host-secret.txt  (outside this plugin's directory)
+  refused  /etc/passwd  (outside this plugin's directory)
+```
+
+**This is not a sandbox for hostile plugins.** An `AssemblyLoadContext` separates assemblies,
+not authority: plugin code runs in the host's process and can do anything the process can,
+including P/Invoke and ignoring the analyzer by not being built with it. What this shows is
+the arrangement for plugins that cooperate — each one's reach is the handle it was given, and
+the build refuses code that reaches around it. A plugin nobody trusts needs an
+operating-system sandbox around the process as well; see
+[threat model §5.1](../docs/threat-model.md#51-cap-dotnet-is-not-a-process-sandbox).
+
 ## `AmbientAudit`
 
 Where a process reaches outside itself, printed at the end of a run.
@@ -50,9 +138,3 @@ Extracting a hostile archive into /tmp/cap-archive-extractor-AJHBEz/out:
 
 It is also the program whose NativeAOT size is recorded in [docs/aot.md](../docs/aot.md).
 CI publishes it as a native executable on every platform and runs the demonstration.
-
-## Planned
-
-- **Sandboxed file server** — serve a directory tree where a crafted request path is
-  structurally incapable of escaping it.
-- **Plugin host** — hand each plugin a `Dir` on its own data directory and nothing else.

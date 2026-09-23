@@ -36,12 +36,15 @@ public sealed class SandboxEscapeException : CapIOException
     }
 
     /// <summary>Creates the exception with a message.</summary>
+    /// <param name="message">What went wrong, for a person reading the log.</param>
     public SandboxEscapeException(string? message)
         : base(message)
     {
     }
 
     /// <summary>Creates the exception with a message and an underlying cause.</summary>
+    /// <param name="message">What went wrong, for a person reading the log.</param>
+    /// <param name="innerException">The failure that caused this one.</param>
     public SandboxEscapeException(string? message, Exception? innerException)
         : base(message, innerException)
     {

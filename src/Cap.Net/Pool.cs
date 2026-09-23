@@ -53,21 +53,33 @@ public sealed class Pool
 
     /// <summary>A pool that grants nothing.</summary>
     /// <remarks>
+    /// <para>
     /// Useful as the authority handed to a component that is not supposed to reach the
     /// network at all: it is a value that can be passed and logged, where a null reference
     /// would be a missing argument and would eventually be filled in with something else.
+    /// </para>
+    /// <para>
+    /// The same instance every time, and safe to share between threads like any other pool.
+    /// </para>
     /// </remarks>
     public static Pool Empty { get; } = new([], [], everyEndpoint: false);
 
     /// <summary>Whether this pool grants every endpoint there is.</summary>
     /// <remarks>
+    /// <para>
     /// True only of a pool built with <see cref="PoolBuilder.InsertEveryEndpoint"/>. Worth
     /// asking about in a start-up log: it is the one shape of pool that says nothing about
     /// what a component may reach.
+    /// </para>
+    /// <para>Safe to read from any thread; the answer never changes.</para>
     /// </remarks>
     public bool GrantsEveryEndpoint => _everyEndpoint;
 
     /// <summary>Whether this pool grants <paramref name="endpoint"/>.</summary>
+    /// <remarks>
+    /// Safe to call from any number of threads at once: a pool never changes once built, so
+    /// the same endpoint always gets the same answer.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="endpoint"/> is null.</exception>
     public bool Allows(IPEndPoint endpoint)
     {
@@ -82,6 +94,10 @@ public sealed class Pool
     /// The address is reduced to one form before it is compared, so the several spellings of
     /// one host are answered identically. See the discussion on <see cref="PoolBuilder"/> of
     /// what a grant over a range does and does not reach.
+    /// </para>
+    /// <para>
+    /// Safe to call from any number of threads at once: a pool never changes once built, so
+    /// the same endpoint always gets the same answer.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="address"/> is null.</exception>

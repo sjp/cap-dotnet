@@ -67,6 +67,10 @@ public sealed class InsecureDeterministicRandom : IRandomSource
     /// <param name="seed">
     /// Any value, zero included. Two instances made with the same seed produce the same bytes.
     /// </param>
+    /// <remarks>
+    /// Instances share nothing, so constructing them on different threads is safe, and is the
+    /// way to give each thread a stream of its own.
+    /// </remarks>
     public InsecureDeterministicRandom(ulong seed)
     {
         // SplitMix64 cannot produce four zeros in a row, since each output is a bijection of a
@@ -79,6 +83,12 @@ public sealed class InsecureDeterministicRandom : IRandomSource
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Not safe to call from more than one thread at once. Each call advances the instance's
+    /// single position in its stream without any lock, so concurrent calls can hand two
+    /// callers the same bytes, skip bytes, or leave the state a mixture of two steps — after
+    /// which the sequence is no longer the one the seed selects.
+    /// </remarks>
     public void Fill(Span<byte> destination)
     {
         while (_pendingCount > 0 && !destination.IsEmpty)

@@ -50,14 +50,31 @@ public sealed class CapUnixStream : CapSocketStream
     /// exception: the answer is a property of the host and does not change while a process
     /// runs.
     /// </para>
+    /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public static bool IsSupported => UnixSocketReach.IsSupported;
 
     /// <summary>Connects to the socket <paramref name="path"/> names beneath <paramref name="dir"/>.</summary>
     /// <param name="dir">The authority over where the socket lives.</param>
     /// <param name="path">A path beneath it, of one or more components.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Every component ahead of the last is resolved beneath
+    /// <paramref name="dir"/> under that handle's <see cref="Dir.SymlinkPolicy"/>, exactly as
+    /// it would be for an open: a link met on the way is followed only when the policy allows
+    /// it and its resolution stays beneath the handle, and refused otherwise. The last
+    /// component is never followed, whatever the policy. A name that holds a symbolic link is
+    /// refused with <see cref="CapIOException"/>, even when the link points at a socket
+    /// beneath the same handle.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and from several at once through the same
+    /// <paramref name="dir"/>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException"><paramref name="dir"/> has been disposed.</exception>
     /// <exception cref="PlatformNotSupportedException"><see cref="IsSupported"/> is false.</exception>
     /// <exception cref="SandboxEscapeException">
     /// <paramref name="path"/> names something outside what <paramref name="dir"/> covers.

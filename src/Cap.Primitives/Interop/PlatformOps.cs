@@ -25,6 +25,10 @@ internal static class PlatformOps
 {
     private static IPlatformOps s_current = CreateForHostPlatform();
 
+    // Initialised with the platform rather than on first query, so that a listener attached
+    // to the meter sees the instruments as soon as anything has been resolved.
+    private static readonly bool s_metricsPublished = ResolutionMetrics.Publish();
+
     /// <summary>The implementation in use.</summary>
     public static IPlatformOps Current => s_current;
 

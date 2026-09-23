@@ -47,6 +47,24 @@ internal interface IPlatformOps
     long ConfinedOpenAttempts { get; }
 
     /// <summary>
+    /// How many times a confined open has been retried after the kernel reported that
+    /// resolution lost a race with a concurrent rename.
+    /// </summary>
+    /// <remarks>Zero wherever there is no confined open to retry.</remarks>
+    long ConfinedOpenRaceRetries { get; }
+
+    /// <summary>
+    /// How many single-name opens have been issued beneath an existing handle in this
+    /// process.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart of <see cref="ConfinedOpenAttempts"/>: a walk spends one of these per
+    /// name, and a confined resolution spends none, so between them the two show which
+    /// strategy resolution actually took rather than which one was selected.
+    /// </remarks>
+    long ComponentOpens { get; }
+
+    /// <summary>
     /// Opens a directory by an ordinary path, with the process's ambient authority.
     /// </summary>
     /// <remarks>

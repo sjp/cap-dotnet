@@ -27,6 +27,11 @@ namespace Cap.Primitives;
 /// of day to answer that would mean this library consulted an ambient clock in order to
 /// report on ambient authority.
 /// </para>
+/// <para>
+/// <strong>Thread safety.</strong> A site is an immutable snapshot, safe to share between
+/// threads; later acquisitions at the same place do not change a value already handed out,
+/// so its <see cref="Count"/> is the count as it stood when the snapshot was taken.
+/// </para>
 /// </remarks>
 public readonly struct AmbientAuthoritySite
 {
@@ -66,6 +71,7 @@ public readonly struct AmbientAuthoritySite
     /// <summary>
     /// The site as one line of a report.
     /// </summary>
+    /// <returns>The location, the count and the time of first acquisition, on one line.</returns>
     /// <remarks>
     /// For people reading a dump. Nothing parses it and the exact wording is not part of the
     /// contract.

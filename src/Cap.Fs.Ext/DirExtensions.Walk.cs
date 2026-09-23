@@ -51,6 +51,23 @@ public static partial class DirExtensions
     /// it, so a tree being modified while the walk runs is reported partly as it was and
     /// partly as it became, and nothing here can do better.
     /// </para>
+    /// <para>
+    /// The sequence may be enumerated any number of times, from any number of threads at
+    /// once: each enumeration opens its own handles and shares nothing with another but the
+    /// starting handle, which is safe for concurrent use. A single enumerator is not, and is
+    /// for one consumer at a time, as any enumerator is.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A link inside the tree is yielded as an entry of its
+    /// own, reporting <see cref="CapFileType.Symlink"/>, and is not descended into unless
+    /// <see cref="WalkOptions.FollowSymlinks"/> asks for that, the starting handle's policy
+    /// allows it and the link resolves inside the subtree; a link leading out is yielded and
+    /// never entered. Following turns on the cycle check described there. A directory, or an
+    /// entry the filesystem did not classify, is entered by an ordinary open of its name, so
+    /// a link met that way — a directory swapped for one after it was listed, or a link on a
+    /// filesystem that does not report kinds — is entered as the policy would follow it, and
+    /// never outside the subtree.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -78,10 +95,20 @@ public static partial class DirExtensions
     /// <param name="cancellationToken">Stops the walk between batches of entries.</param>
     /// <returns>The entries, as <see cref="Walk"/> produces them.</returns>
     /// <remarks>
+    /// <para>
     /// The reading is not asynchronous and nothing here claims it is: no operating system this
     /// runs on offers a directory read that completes by itself, so what this does is have a
     /// thread-pool thread do the waiting. The opens between levels happen on whichever thread
     /// the enumeration resumes on, for the same reason.
+    /// </para>
+    /// <para>
+    /// As for <see cref="Walk"/>, the sequence may be enumerated any number of times,
+    /// concurrently included, and each enumerator is for one consumer at a time: a second
+    /// <c>MoveNextAsync</c> must not be started before the previous one has completed.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="Walk"/> treats them.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">

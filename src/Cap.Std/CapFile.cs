@@ -29,6 +29,12 @@ namespace Cap.Std;
 /// either order; the exception is a stream asked for with ownership, which takes this one's
 /// handle and leaves it spent.
 /// </para>
+/// <para>
+/// <strong>Symbolic links.</strong> A handle never refers to a link. Any link on the path it
+/// was opened by, the last component included, was followed or refused under the opening
+/// directory's policy at the moment of the open; what is held afterwards is the object that
+/// resolution arrived at, and no member here consults a name again.
+/// </para>
 /// </remarks>
 public sealed class CapFile : IDisposable
 {
@@ -56,10 +62,13 @@ public sealed class CapFile : IDisposable
 
     /// <summary>What this handle may do with the file's contents.</summary>
     /// <remarks>
+    /// <para>
     /// Fixed when the file was opened. There is no way to widen it, for the same reason a
     /// directory handle cannot be widened: a component given a handle to read a file has been
     /// given exactly that, and a method that turned it into a writable one would make the
     /// grant meaningless.
+    /// </para>
+    /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public FileAccess Access => _access;
 
@@ -83,10 +92,22 @@ public sealed class CapFile : IDisposable
     /// caller's thread free — but the waiting has not gone anywhere, and a property that
     /// claimed otherwise would be describing a capability the platform does not have.
     /// </para>
+    /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public bool IsAsync => _isAsync;
 
     /// <summary>The file's current length in bytes.</summary>
+    /// <remarks>
+    /// <para>
+    /// Safe to read from any thread, including while other threads read, write or resize the
+    /// file through this handle; the answer is whatever length the file had when the
+    /// operating system was asked, which a concurrent write may already have changed.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The length of the object this handle refers to, never
+    /// of a link: any link was resolved when the file was opened.
+    /// </para>
+    /// </remarks>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public long Length
     {
@@ -114,6 +135,17 @@ public sealed class CapFile : IDisposable
     /// instant. Where only the length is wanted, <see cref="Length"/> is the cheaper
     /// question.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with any other member. A disposal racing
+    /// the call on another thread ends as <see cref="ObjectDisposedException"/>, never as a
+    /// description of whatever else has since been given the handle's number.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The type reported is never
+    /// <see cref="Cap.Primitives.CapFileType.Symlink"/>: the handle refers to the object a
+    /// link led to, because the link was followed, or refused, when the file was opened. To
+    /// describe a link itself, ask the directory that holds it about the name.
+    /// </para>
     /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the question.</exception>
     /// <exception cref="CapIOException">The question could not be answered.</exception>
@@ -130,6 +162,17 @@ public sealed class CapFile : IDisposable
     /// Sets the file's length, truncating it or extending it with zeroes.
     /// </summary>
     /// <param name="length">The length in bytes.</param>
+    /// <remarks>
+    /// <para>
+    /// Safe to call from any thread. It is not ordered against writes made concurrently on
+    /// other threads: a write that lands beyond the new length after the resize extends the
+    /// file again, and which of the two the operating system applies first is its choice.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Acts on the object this handle refers to; no name is
+    /// consulted, so there is no link to follow.
+    /// </para>
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="length"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot write.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
@@ -151,10 +194,16 @@ public sealed class CapFile : IDisposable
     /// with a disk flush they did not ask for.
     /// </param>
     /// <remarks>
+    /// <para>
     /// A write that has returned is a write the operating system has accepted, which is not
     /// the same as one the hardware has stored. The difference is invisible until the power
     /// fails, so the choice belongs to the caller: durability costs a great deal on some
     /// devices and nothing on others, and there is no default that is right for both.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread. What it waits for is the writes that had returned before
+    /// it was called; a write still in progress on another thread may or may not be included.
+    /// </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public void Flush(bool toDisk)
@@ -195,6 +244,12 @@ public sealed class CapFile : IDisposable
     /// end of the file. A short read is not an error and not a promise that the rest is
     /// absent; a caller that needs the whole buffer filled asks again from further on.
     /// </returns>
+    /// <remarks>
+    /// Safe to call from any thread, concurrently with other reads and writes on the same
+    /// handle: each call carries its own offset and moves no shared position. A read that
+    /// overlaps a concurrent write to the same range may see some, all or none of it — the
+    /// operating system does not promise that a write is observed whole.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot read.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
@@ -211,11 +266,18 @@ public sealed class CapFile : IDisposable
     /// <param name="buffer">The bytes to write.</param>
     /// <param name="fileOffset">Where in the file to write them.</param>
     /// <remarks>
+    /// <para>
     /// Writes all of the buffer, repeating the call underneath if the system accepts only
     /// part of it. A file opened to append is the exception, and the exception is the
     /// platform's rather than this library's: such a handle puts every write at the end of
     /// the file whatever offset it is given, because appending is a property of how the file
     /// was opened and is applied by the operating system.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, concurrently with other reads and writes on the same
+    /// handle. Concurrent writes to overlapping ranges are not ordered against each other, and
+    /// the file may end up holding bytes from either.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot write.</exception>
@@ -235,11 +297,18 @@ public sealed class CapFile : IDisposable
     /// <param name="cancellationToken">Asks for the read to be abandoned.</param>
     /// <returns>How many bytes were read. See <see cref="Read"/> for what a short count means.</returns>
     /// <remarks>
+    /// <para>
     /// <strong>Cancellation is best-effort and is not a guarantee about the file.</strong>
     /// A read already in the hands of the operating system is usually not recallable, so what
     /// cancelling reliably does is release the caller — the read may still complete, and a
     /// write may still reach the file. It is honoured before the operation starts on every
     /// platform, and during it only where the platform provides a way to say so.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, with as many reads and writes outstanding on the same
+    /// handle as the caller likes, for the same reason <see cref="Read"/> is: no position is
+    /// shared between them.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot read.</exception>
@@ -262,9 +331,16 @@ public sealed class CapFile : IDisposable
     /// <param name="fileOffset">Where in the file to write them.</param>
     /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
     /// <remarks>
+    /// <para>
     /// Cancellation carries the same caveat as it does for a read, and carries it more
     /// sharply: a write that was abandoned may still have reached the file, in whole or in
     /// part. Cancelling releases the caller and says nothing about what is now on disk.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, with other reads and writes outstanding on the same
+    /// handle; as with <see cref="Write"/>, writes to overlapping ranges are not ordered
+    /// against each other.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot write.</exception>
@@ -310,6 +386,18 @@ public sealed class CapFile : IDisposable
     /// reach one file rather than a second opinion about what the name meant. That matters:
     /// re-opening by name is exactly what a capability exists to avoid, and a name can hold
     /// something else by the time it is asked again.
+    /// </para>
+    /// <para>
+    /// <strong>Thread safety.</strong> The borrowing form is safe to call from any thread.
+    /// The stream it returns is not: it is an ordinary <see cref="FileStream"/>, with a
+    /// position and a buffer that belong to one caller at a time, so a thread that wants one
+    /// of its own should take one of its own. Handing the handle over with
+    /// <paramref name="leaveOpen"/> false must not race any other call on this object, since
+    /// those calls can no longer tell that the handle has changed owner.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> No name is consulted, so no link is followed: the
+    /// stream reaches the same object this handle does.
     /// </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
@@ -367,6 +455,11 @@ public sealed class CapFile : IDisposable
     /// caller that keeps it past that point holds a closed handle — and a descriptor number
     /// that something else may by then have been given.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread. What the caller does with the handle afterwards is
+    /// outside anything this object can keep safe: a disposal on another thread closes it
+    /// under them.
+    /// </para>
     /// </remarks>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public SafeFileHandle UnsafeGetHandle()
@@ -379,9 +472,18 @@ public sealed class CapFile : IDisposable
     /// Closes the file, unless a stream was given ownership of it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Safe to call more than once, and safe to call after ownership was handed to a stream —
     /// in which case it does nothing, because closing a handle somebody else now owns would
     /// close a file they are still using.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, including while other threads are using this handle: an
+    /// operation already under way keeps the file open until it returns, and one that starts
+    /// afterwards throws <see cref="ObjectDisposedException"/>. A stream taken with
+    /// <see cref="AsStream"/> in its borrowing form holds a handle of its own and is not
+    /// closed by this.
+    /// </para>
     /// </remarks>
     public void Dispose()
     {

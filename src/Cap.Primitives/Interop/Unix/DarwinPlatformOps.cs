@@ -42,6 +42,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// </remarks>
     private const byte SelfName = (byte)'.';
 
+    private long _componentOpens;
+
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities =>
         new(ResolutionBackend.PortableWalk, overlappedFileHandles: false);
@@ -49,6 +51,13 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// <inheritdoc/>
     /// <remarks>Always zero: there is no confined open on this platform to attempt.</remarks>
     public long ConfinedOpenAttempts => 0;
+
+    /// <inheritdoc/>
+    /// <remarks>Always zero: there is no confined open on this platform to retry.</remarks>
+    public long ConfinedOpenRaceRetries => 0;
+
+    /// <inheritdoc/>
+    public long ComponentOpens => Interlocked.Read(ref _componentOpens);
 
     /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
@@ -104,6 +113,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
+        Interlocked.Increment(ref _componentOpens);
+
         int flags = DarwinConstants.O_RDONLY | DarwinConstants.O_DIRECTORY |
                     DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC;
         return OpenDirectoryDescriptor(lease.Descriptor, encoded, flags, noFollow: true, access);
@@ -132,6 +143,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         {
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
+
+        Interlocked.Increment(ref _componentOpens);
 
         flags |= DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC | DarwinConstants.O_NONBLOCK;
 

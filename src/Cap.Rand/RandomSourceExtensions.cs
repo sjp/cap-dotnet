@@ -41,6 +41,12 @@ public static class RandomSourceExtensions
     /// </summary>
     /// <param name="source">Where the bytes come from.</param>
     /// <param name="count">How many bytes. Zero gives an empty array.</param>
+    /// <remarks>
+    /// Exactly as safe to call from several threads at once as <paramref name="source"/>'s
+    /// <see cref="IRandomSource.Fill"/> is: safe with <see cref="CapRandom"/>, not with a
+    /// shared <see cref="InsecureDeterministicRandom"/>.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
     public static byte[] GetBytes(this IRandomSource source, int count)
     {
@@ -57,6 +63,14 @@ public static class RandomSourceExtensions
     /// </summary>
     /// <param name="source">Where the bytes come from.</param>
     /// <param name="toExclusive">One more than the largest value that may be returned.</param>
+    /// <remarks>
+    /// Exactly as safe to call from several threads at once as <paramref name="source"/>'s
+    /// <see cref="IRandomSource.Fill"/> is: safe with <see cref="CapRandom"/>, not with a
+    /// shared <see cref="InsecureDeterministicRandom"/>. A value that needs a redraw makes
+    /// several calls to it, and nothing keeps them together, so on a source shared between
+    /// threads another caller's draws can fall between them.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="toExclusive"/> is zero or negative, so the range is empty.
     /// </exception>
@@ -73,10 +87,18 @@ public static class RandomSourceExtensions
     /// <param name="source">Where the bytes come from.</param>
     /// <param name="fromInclusive">The smallest value that may be returned.</param>
     /// <param name="toExclusive">One more than the largest value that may be returned.</param>
+    /// <remarks>
+    /// Exactly as safe to call from several threads at once as <paramref name="source"/>'s
+    /// <see cref="IRandomSource.Fill"/> is: safe with <see cref="CapRandom"/>, not with a
+    /// shared <see cref="InsecureDeterministicRandom"/>. A value that needs a redraw makes
+    /// several calls to it, and nothing keeps them together, so on a source shared between
+    /// threads another caller's draws can fall between them.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="fromInclusive"/> is not below <paramref name="toExclusive"/>, so the
     /// range is empty.
     /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
     public static int GetInt32(this IRandomSource source, int fromInclusive, int toExclusive)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -110,10 +132,18 @@ public static class RandomSourceExtensions
     /// <param name="source">Where the bytes come from.</param>
     /// <param name="fromInclusive">The smallest value that may be returned.</param>
     /// <param name="toExclusive">One more than the largest value that may be returned.</param>
+    /// <remarks>
+    /// Exactly as safe to call from several threads at once as <paramref name="source"/>'s
+    /// <see cref="IRandomSource.Fill"/> is: safe with <see cref="CapRandom"/>, not with a
+    /// shared <see cref="InsecureDeterministicRandom"/>. A value that needs a redraw makes
+    /// several calls to it, and nothing keeps them together, so on a source shared between
+    /// threads another caller's draws can fall between them.
+    /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="fromInclusive"/> is not below <paramref name="toExclusive"/>, so the
     /// range is empty.
     /// </exception>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
     public static long GetInt64(this IRandomSource source, long fromInclusive, long toExclusive)
     {
         ArgumentNullException.ThrowIfNull(source);

@@ -28,6 +28,16 @@ namespace Cap.Std;
 /// names needs a set rather than a chain of pairwise comparisons, and a type that could only
 /// be compared in pairs would force every caller doing that to invent this one.
 /// </para>
+/// <para>
+/// <strong>Symbolic links.</strong> A link is an object of its own, so an identifier taken
+/// from a description of a link identifies the link and not its target, and the two compare
+/// unequal. Comparing a link with the file it leads to means describing the target — through
+/// a handle opened by following the link — rather than the name that holds the link.
+/// </para>
+/// <para>
+/// <strong>Thread safety.</strong> Instances are immutable, so they are safe to share
+/// between threads and to compare or hash from any number of them at once.
+/// </para>
 /// </remarks>
 public readonly struct CapFileId : IEquatable<CapFileId>
 {
@@ -62,9 +72,15 @@ public readonly struct CapFileId : IEquatable<CapFileId>
     public UInt128 NodeId { get; }
 
     /// <summary>Whether two identifiers name the same object.</summary>
+    /// <param name="left">One identifier.</param>
+    /// <param name="right">The other.</param>
+    /// <returns>True when both the volume and the node match.</returns>
     public static bool operator ==(CapFileId left, CapFileId right) => left.Equals(right);
 
     /// <summary>Whether two identifiers name different objects.</summary>
+    /// <param name="left">One identifier.</param>
+    /// <param name="right">The other.</param>
+    /// <returns>True when the volume or the node differs.</returns>
     public static bool operator !=(CapFileId left, CapFileId right) => !left.Equals(right);
 
     /// <inheritdoc/>

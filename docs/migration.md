@@ -1,0 +1,123 @@
+# Migrating from `System.IO`
+
+The shape of every change is the same: a static call that takes a full path becomes an
+instance call on a `Dir` that takes a path relative to it.
+
+```csharp
+// Before
+string text = File.ReadAllText(Path.Combine(dataRoot, "settings", "app.json"));
+
+// After: `data` was opened once, at start-up, and handed to this code.
+string text = data.ReadAllText("settings/app.json");
+```
+
+Paths use `/` on every platform, and `\` too on Windows. They must be relative: an absolute
+path, `..`, or a Windows device name is refused with `SandboxEscapeException` rather than
+resolved. Where a `System.IO` method would have created or found a path by joining strings,
+the replacement usually opens a `Dir` on the directory and works inside that, which is also
+what the [analyzer's `CAP0005`](analyzers.md#cap0005-paths-built-by-joining-strings) asks for.
+
+`Dir` members are in `Cap.Std`. Members marked **Ext** are extension methods in `Cap.Fs.Ext`.
+
+## `File`
+
+| `System.IO` | Replacement | Notes |
+|---|---|---|
+| `File.Exists(p)` | **Ext** `dir.IsFile(p)` | `dir.Exists(p)` is true for anything at the name, directory included. |
+| `File.ReadAllText(p)` | `dir.ReadAllText(p)` | UTF-8 unless a byte-order mark says otherwise, as `File.ReadAllText` does. |
+| `File.ReadAllTextAsync(p)` | `dir.ReadAllTextAsync(p)` | |
+| `File.ReadAllBytes(p)` | `dir.ReadAllBytes(p)` | |
+| `File.ReadAllBytesAsync(p)` | `dir.ReadAllBytesAsync(p)` | |
+| `File.ReadAllLines(p)`, `File.ReadLines(p)` | `dir.OpenFile(p).AsStream()` in a `StreamReader` | See [Streams](#streams). |
+| `File.WriteAllBytes(p, b)` | `dir.WriteAllBytes(p, b)` | Truncates and writes in place. |
+| `File.WriteAllBytesAsync(p, b)` | `dir.WriteAllBytesAsync(p, b)` | |
+| `File.WriteAllText(p, s)` | **Ext** `dir.WriteAllTextAtomic(p, s)` | Readers see the old file or the new one, never half of either. Or `dir.WriteAllBytes(p, Encoding.UTF8.GetBytes(s))` to write in place. |
+| `File.WriteAllLines(p, lines)` | a `StreamWriter` over `dir.CreateFile(p).AsStream()` | |
+| `File.AppendAllText(p, s)` | a `StreamWriter` over `dir.OpenFile(p, FileMode.Append, FileAccess.Write).AsStream()` | |
+| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. |
+| `File.OpenRead(p)` | `dir.OpenFile(p)` | Read is the default. |
+| `File.OpenWrite(p)` | `dir.OpenFile(p, FileMode.OpenOrCreate, FileAccess.Write)` | |
+| `File.Create(p)` | `dir.CreateFile(p)` | |
+| `new FileStream(p, …)` | `dir.OpenFile(p, …).AsStream()` | |
+| `File.OpenHandle(p, …)` | `dir.OpenFile(p, …)` | `CapFile` has positional `Read`/`Write` and their `Async` forms, like `RandomAccess`. |
+| `File.Delete(p)` | `dir.DeleteFile(p)` | A link is removed, not its target. Throws if nothing is there; `File.Delete` does not. `dir.TryDeleteFile(p)` returns false instead. |
+| `File.Move(a, b)` | `dir.Rename(a, dir, b)` | The destination is named against a `Dir` too, and may be a different one: moving between two trees needs authority over both. |
+| `File.Move(a, b, overwrite: true)` | `dir.Rename(a, dir, b, replaceExisting: true)` | |
+| `File.Replace(a, b, backup)` | two `Rename` calls | There is no single-call equivalent. |
+| `File.Copy(a, b)` | `using` both `dir.OpenFile(a).AsStream()` and `dir.CreateNewFile(b).AsStream()`, then `Stream.CopyTo` | **Ext** `source.CopyTo(destination)` copies a whole tree between two `Dir`s. |
+| `File.CreateSymbolicLink(p, target)` | `dir.CreateSymlink(p, target)` | `dir.CreateDirSymlink` for a link to a directory, which Windows records differently. The target is stored as written; whether it can be followed is decided when it is used. |
+| `File.ResolveLinkTarget(p, false)`, `FileInfo.LinkTarget` | `dir.ReadLink(p)` | |
+| `File.ResolveLinkTarget(p, true)` | open through the link instead | Resolution follows a link only while it stays inside the tree; there is no call that hands back where it leads as a path. |
+| Creating a hard link | `dir.CreateHardLink(p, toDir, to)` | Both ends need a `Dir`. |
+| `File.GetAttributes(p)` | `dir.GetMetadata(p).Permissions.TryGetWindowsAttributes(out var a)` | |
+| `File.GetUnixFileMode(p)` | `dir.GetMetadata(p).Permissions.TryGetUnixMode(out var m)` | |
+| `File.GetLastWriteTimeUtc(p)` | `dir.GetMetadata(p).LastWriteTime` | A `DateTimeOffset`. |
+| `File.GetLastAccessTimeUtc(p)` | `dir.GetMetadata(p).LastAccessTime` | |
+| `File.GetCreationTimeUtc(p)` | `dir.GetMetadata(p).CreationTime` | Null where the filesystem records none, rather than a made-up date. |
+| `new FileInfo(p).Length` | `dir.GetMetadata(p).Length` | |
+| `File.SetAttributes`, `File.SetUnixFileMode`, `File.SetLastWriteTime`, `File.SetCreationTime`, `File.SetLastAccessTime` | none | Not provided. **Ext** `CopyTo` carries permissions across a copy. |
+| `File.Encrypt`, `File.Decrypt` | none | |
+
+## `Directory`
+
+| `System.IO` | Replacement | Notes |
+|---|---|---|
+| `Directory.Exists(p)` | **Ext** `dir.IsDir(p)` | |
+| `Directory.CreateDirectory(p)` | `dir.OpenOrCreateDir(p)` | Returns a `Dir` on it. Creates the last name only; `Directory.CreateDirectory` creates every missing parent too, so call it once per level, holding each result, for a nested path. |
+| `Directory.CreateDirectory(p)`, new name expected | `dir.CreateDir(p)` | Fails if the name is taken. |
+| `new DirectoryInfo(p)` | `dir.OpenDir(p)` | A `Dir` rather than a description of a path. |
+| `Directory.Delete(p)` | `dir.DeleteDir(p)` | Empty directories only. |
+| `Directory.Delete(p, recursive: true)` | **Ext** `dir.DeleteTree(p)` | Never follows a link out of the tree; it removes the link. |
+| `Directory.Move(a, b)` | `dir.Rename(a, dir, b)` | |
+| `Directory.EnumerateFileSystemEntries(p)`, `GetFileSystemEntries` | `dir.OpenDir(p).EnumerateEntries()` | Yields `DirEntry` values, which carry the name and kind and open what they name directly. |
+| `Directory.EnumerateFiles(p)`, `GetFiles` | `EnumerateEntries().Where(e => e.Type == CapFileType.File)` | |
+| `Directory.EnumerateDirectories(p)`, `GetDirectories` | `EnumerateEntries().Where(e => e.Type == CapFileType.Directory)` | |
+| `Directory.EnumerateFiles(p, "*.json")` | **Ext** `dir.Glob("*.json")` | |
+| `Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories)` | **Ext** `dir.Walk()` | `WalkEntry.Depth` and `.Directory` stand in for the relative path. |
+| `Directory.GetLastWriteTimeUtc(p)` etc. | `dir.GetMetadata(p)` | As for files. |
+| `Directory.CreateSymbolicLink(p, target)` | `dir.CreateDirSymlink(p, target)` | |
+| `Directory.GetCurrentDirectory()`, `SetCurrentDirectory` | none, by design | The working directory is process-wide state that any code can change. Pass a `Dir`. |
+| `Directory.GetParent(p)`, `DirectoryInfo.Parent` | none, by design | A handle confers nothing above itself. Keep the parent's `Dir` if you need it. |
+| `Directory.GetDirectoryRoot`, `GetLogicalDrives` | none | |
+
+## `Path`
+
+| `System.IO` | Replacement | Notes |
+|---|---|---|
+| `Path.Combine(root, p)`, `Path.Join` | `dir.OpenDir(a)` and then a name within it | Or a relative path with `/` in it, when every part is yours. |
+| `Path.GetFullPath(p)` | none | It is what the README shows being walked past. See [Why there is no `Dir.FullName`](no-full-name.md). |
+| `Path.GetTempPath()` | `CapTempDir.New(AmbientAuthority.Acquire())` | A private scratch directory beneath it, removed on disposal. |
+| `Path.GetTempFileName()` | `CapTempFile.New(dir)`, or `CapTempFile.NewAnonymous(dir)` for a file with no name at all | |
+| `Path.GetFileName`, `GetExtension`, `GetFileNameWithoutExtension`, `ChangeExtension` | unchanged | String manipulation of a name is harmless. Deciding *containment* from strings is what is not. |
+| `Environment.GetFolderPath(SpecialFolder.ApplicationData)` and friends | `Cap.Directories.ProjectDirs` | Configuration, data, cache, state and runtime directories as `Dir` handles; see [directories.md](directories.md). |
+
+## `FileSystemWatcher`, `DriveInfo`, `FileSystemInfo`
+
+No equivalent. A watcher reports changes by path, and a path cannot be turned back into
+authority without the ambient lookup this library exists to remove.
+
+## Streams
+
+`CapFile.AsStream()` returns an ordinary `FileStream` over the same handle, so everything
+that takes a `Stream` — `StreamReader`, `JsonSerializer`, `ZipArchive`, `HttpContent` —
+works unchanged.
+
+```csharp
+using CapFile file = data.OpenFile("events.log");
+using StreamReader reader = new(file.AsStream());
+
+while (reader.ReadLine() is { } line)
+{
+    // ...
+}
+```
+
+By default the stream leaves the handle open when disposed (`leaveOpen: true`), so dispose
+the `CapFile` as well, as above.
+
+## Exceptions
+
+`FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException` and
+`IOException` mean what they mean in `System.IO`, so existing handlers keep working.
+`SandboxEscapeException`, an `IOException`, is new: the path would have led outside the
+`Dir`. See [getting-started.md](getting-started.md#what-refusals-look-like).

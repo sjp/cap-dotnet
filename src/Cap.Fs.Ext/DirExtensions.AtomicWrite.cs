@@ -50,6 +50,20 @@ public static partial class DirExtensions
     /// <paramref name="path"/> untouched. A crash may leave the scratch name behind; it is
     /// recognisable, it is inside the same directory, and it is never mistaken for the file.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with other writers of the same name:
+    /// each call claims its own scratch name, so two publishing at once cannot write into
+    /// each other's file, the later move wins, and a reader sees one whole version or the
+    /// other.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Components ahead of the last are resolved under this
+    /// handle's own policy, so a link among them is followed while it stays inside the subtree
+    /// or refused as for any other operation. The last component is never followed: the move
+    /// replaces the name, so a link already holding it is replaced by the new file and what it
+    /// pointed at is neither written nor removed. The scratch file is created exclusively, so
+    /// a link planted at its name makes the creation fail rather than redirecting it.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
@@ -94,9 +108,19 @@ public static partial class DirExtensions
     /// <param name="contents">The text to store.</param>
     /// <param name="durability">How far the write is pushed before it is treated as done.</param>
     /// <remarks>
+    /// <para>
     /// Encoded as UTF-8 with no byte-order mark, which is what the framework's own text write
     /// produces and what the matching read here assumes when a file begins with no mark. A
     /// caller who needs some other encoding encodes it themselves and publishes the bytes.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, on the terms <see cref="WriteAllBytesAtomic"/> gives.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic"/>
+    /// treats them: followed ahead of the last component as the policy allows, and replaced,
+    /// never followed, as the last.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
@@ -139,6 +163,20 @@ public static partial class DirExtensions
     /// Abandoning it leaves nothing behind and leaves <paramref name="path"/> as it was. That
     /// is the difference from cancelling an ordinary write, which has already emptied the file
     /// it was writing to by the time it notices.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with other writers of the same name:
+    /// each call claims its own scratch name, so two publishing at once cannot write into
+    /// each other's file, the later move wins, and a reader sees one whole version or the
+    /// other.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Components ahead of the last are resolved under this
+    /// handle's own policy, so a link among them is followed while it stays inside the subtree
+    /// or refused as for any other operation. The last component is never followed: the move
+    /// replaces the name, so a link already holding it is replaced by the new file and what it
+    /// pointed at is neither written nor removed. The scratch file is created exclusively, so
+    /// a link planted at its name makes the creation fail rather than redirecting it.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
@@ -186,7 +224,18 @@ public static partial class DirExtensions
     /// <param name="contents">The text to store.</param>
     /// <param name="durability">How far the write is pushed before it is treated as done.</param>
     /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
-    /// <remarks>Encoded as <see cref="WriteAllTextAtomic"/> describes.</remarks>
+    /// <remarks>
+    /// <para>Encoded as <see cref="WriteAllTextAtomic"/> describes.</para>
+    /// <para>
+    /// Safe to call from any thread, on the terms <see cref="WriteAllBytesAtomicAsync"/>
+    /// gives.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic"/>
+    /// treats them: followed ahead of the last component as the policy allows, and replaced,
+    /// never followed, as the last.
+    /// </para>
+    /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
     /// <exception cref="SandboxEscapeException">

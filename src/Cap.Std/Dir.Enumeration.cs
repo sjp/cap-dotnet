@@ -65,6 +65,22 @@ public sealed partial class Dir
     /// swallowed, so a caller that has already been handed some entries learns that there
     /// were more it did not see.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Nothing is resolved and no link is followed, under
+    /// either policy: a link in the directory is reported as an entry of type
+    /// <see cref="Cap.Primitives.CapFileType.Symlink"/>, wherever it points and whether or not its target
+    /// exists. What happens to it afterwards is decided when the entry is used, by the
+    /// member of <see cref="DirEntry"/> that uses it.
+    /// </para>
+    /// <para>
+    /// <strong>Threads.</strong> Safe to call concurrently with any other member of this
+    /// handle, from any thread, and the sequence returned may be enumerated by several
+    /// threads at once, since each enumeration reads through a position of its own. A single
+    /// enumerator is not safe to share between threads, as with any
+    /// <see cref="IEnumerator{T}"/>. Disposing this handle does not stop an enumeration
+    /// already under way, which reads through an open object of its own; the entries it goes
+    /// on to yield can no longer be opened.
+    /// </para>
     /// </remarks>
     /// <exception cref="UnauthorizedAccessException">
     /// The filesystem refused to let the directory be read, or this handle was opened only
@@ -97,6 +113,18 @@ public sealed partial class Dir
     /// The token is observed between batches rather than during one. A read already in the
     /// hands of the filesystem runs to completion, so cancelling stops the enumeration
     /// promptly rather than instantly.
+    /// </para>
+    /// <para>
+    /// No symbolic link is followed, under either policy: a link is reported as an entry of
+    /// type <see cref="Cap.Primitives.CapFileType.Symlink"/>, as <see cref="EnumerateEntries"/> describes.
+    /// </para>
+    /// <para>
+    /// Safe to call concurrently with any other member of this handle, from any thread, and
+    /// the sequence may be enumerated by several consumers at once, each with a position of
+    /// its own. A single enumerator is for one consumer: its
+    /// <see cref="IAsyncEnumerator{T}.MoveNextAsync"/> must not be called again before the
+    /// previous call has completed. Disposing this handle affects an enumeration already
+    /// under way as it does for <see cref="EnumerateEntries"/>.
     /// </para>
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>

@@ -1,4 +1,4 @@
-namespace Cap.Primitives.Interop;
+namespace Cap.Primitives;
 
 /// <summary>
 /// Which implementation of confined resolution is in use.
@@ -17,10 +17,20 @@ namespace Cap.Primitives.Interop;
 /// which a naive capability probe reads as "not available" and caches forever. Every test
 /// would still pass, and the fast path would never run again on any machine.
 /// </para>
+/// <para>
+/// The choice is made once per process, the first time anything is resolved, and does not
+/// change afterwards. The same process-wide answer is read through the static
+/// <c>Dir.ResolutionBackend</c> property in <c>Cap.Std</c>, and published, together with
+/// counts of the operations each backend performs, as instruments on the
+/// <c>Cap.Primitives</c> meter.
+/// </para>
 /// </remarks>
-internal enum ResolutionBackend
+public enum ResolutionBackend
 {
-    /// <summary>No backend selected; the platform has no implementation here.</summary>
+    /// <summary>
+    /// No backend: the operating system has no implementation here, and opening a directory
+    /// fails rather than degrading to anything weaker.
+    /// </summary>
     None = 0,
 
     /// <summary>

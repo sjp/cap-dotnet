@@ -80,11 +80,27 @@ public sealed partial class Dir
     /// link appears where the link points — and only if the link points inside.
     /// </para>
     /// <para>
+    /// <strong>Symbolic links, precisely.</strong> Under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> a link anywhere in the
+    /// path, the last component included, is followed while its target stays beneath this
+    /// handle, and one whose target leaves — an absolute target, or one that climbs above
+    /// this directory — is refused with <see cref="SandboxEscapeException"/>. Under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> every link is refused with
+    /// <see cref="CapIOException"/>, the last component's included, wherever it points. The
+    /// one exception is <see cref="FileMode.CreateNew"/>, which never follows the last
+    /// component under either policy: a link holding the name, dangling or not, makes the
+    /// name taken, so the exclusive create cannot be steered into making a file somewhere
+    /// else. Every other mode that creates follows a dangling link that stays inside, and
+    /// creates the file it names; <see cref="FileMode.Create"/> and
+    /// <see cref="FileMode.Truncate"/> empty whatever file an existing link leads to.
+    /// </para>
+    /// <para>
     /// Nothing about the file's permissions is decided here. A created file is asked for with
     /// the permissions every other program asks for, which the system then narrows as it is
     /// configured to; a capability bounds what can be reached and is not a substitute for the
     /// filesystem's own access control.
     /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException">
@@ -102,8 +118,9 @@ public sealed partial class Dir
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">
-    /// The name is taken and the mode refuses to take it, the name holds a directory, or the
-    /// platform cannot honour part of the request.
+    /// The name is taken and the mode refuses to take it, the name holds a directory, a
+    /// symbolic link the policy will not follow is in the way, or the platform cannot honour
+    /// part of the request.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public CapFile OpenFile(
@@ -143,10 +160,18 @@ public sealed partial class Dir
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when the file was opened.</returns>
     /// <remarks>
+    /// <para>
     /// False covers every reason it was not opened, a missing file and a containment refusal
     /// alike. An application that audits escape attempts calls <see cref="OpenFile"/> and
     /// catches <see cref="SandboxEscapeException"/>; this form deliberately reports no
     /// reason, so that the failure path builds no message and no exception.
+    /// </para>
+    /// <para>
+    /// Opens an existing file to read, so symbolic links, the last component included, are
+    /// followed or refused under this handle's policy exactly as <see cref="OpenFile"/>
+    /// describes; a refusal is reported as false. Safe to call concurrently with any other
+    /// member of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -166,11 +191,18 @@ public sealed partial class Dir
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when the file was opened.</returns>
     /// <remarks>
+    /// <para>
     /// A request that cannot mean anything still throws, as it does from <see cref="OpenFile"/>.
     /// This form is about a filesystem that said no, which is an outcome; a mode combined with
     /// an access it contradicts is a mistake in the calling code, and reporting it as an
     /// ordinary failure would hide it behind whichever branch the caller wrote for a missing
     /// file.
+    /// </para>
+    /// <para>
+    /// Symbolic links are followed or refused exactly as <see cref="OpenFile"/> describes for
+    /// the same <paramref name="mode"/>; a refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException">The request is not one that means anything.</exception>
@@ -195,9 +227,22 @@ public sealed partial class Dir
     /// <param name="path">A relative path. Every component but the last must already exist.</param>
     /// <returns>An open file, ready to be written from the beginning.</returns>
     /// <remarks>
+    /// <para>
     /// The shorthand for the most common write: the caller has something to store and does
     /// not care whether a file of that name was there before. A caller who does care, and
     /// wants the attempt to fail rather than overwrite, wants <see cref="CreateNewFile"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The same as <see cref="OpenFile"/> with
+    /// <see cref="FileMode.Create"/>: under the default policy a link at the last component
+    /// is followed, so the file it leads to is emptied — or, if the link dangles, created
+    /// where it points — provided the target stays beneath this handle; one that leaves is
+    /// refused with <see cref="SandboxEscapeException"/>. Under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> a link anywhere in the path is refused
+    /// with <see cref="CapIOException"/>. A link before the last component is followed or
+    /// refused on the same terms.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -227,6 +272,14 @@ public sealed partial class Dir
     /// directory, or a symbolic link, whatever the link points at and whether or not its
     /// target exists.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> The last component is therefore never followed, under
+    /// either policy. A link met before it is followed or refused under this handle's policy
+    /// as <see cref="OpenFile"/> describes — refused with <see cref="SandboxEscapeException"/>
+    /// if its target leaves the subtree, and with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -235,7 +288,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
-    /// <exception cref="CapIOException">The name is already taken.</exception>
+    /// <exception cref="CapIOException">
+    /// The name is already taken, a symbolic link the policy will not follow is in the way,
+    /// or the open failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public CapFile CreateNewFile(string path) => OpenFile(path, FileMode.CreateNew, FileAccess.Write);
 
@@ -245,6 +301,11 @@ public sealed partial class Dir
     /// <param name="path">A relative path. See <see cref="CreateFile"/>.</param>
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when the file was created or emptied and opened.</returns>
+    /// <remarks>
+    /// Symbolic links are followed or refused exactly as <see cref="CreateFile"/> describes,
+    /// the last component included; a refusal is reported as false. Safe to call concurrently
+    /// with any other member of this handle, from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateFile(string path, [NotNullWhen(true)] out CapFile? file) =>
@@ -258,9 +319,17 @@ public sealed partial class Dir
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when the name was free and is now this caller's.</returns>
     /// <remarks>
+    /// <para>
     /// The form to use when the claim is expected to fail sometimes, which is most of the
     /// times it is worth making: losing a race for a name is an ordinary outcome and building
     /// an exception to describe it is waste on the path that runs most often.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated exactly as <see cref="CreateNewFile"/> describes: a link
+    /// holding the last component makes the name taken and is never followed, one on the way
+    /// is followed or refused by this handle's policy, and a refusal is reported as false.
+    /// Safe to call concurrently with any other member of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
@@ -271,9 +340,20 @@ public sealed partial class Dir
     /// <param name="path">A relative path to the file.</param>
     /// <returns>Its contents.</returns>
     /// <remarks>
+    /// <para>
     /// For files small enough to want in one piece. The length is asked for once and the read
     /// carries on to the end regardless, because a file can grow between the two and a length
     /// is a fact about an instant rather than a promise.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Opened as <see cref="OpenFile"/> opens an existing
+    /// file, so a link anywhere in the path, the last component included, is followed under
+    /// the default policy while its target stays beneath this handle and refused with
+    /// <see cref="SandboxEscapeException"/> when it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> any link is refused with
+    /// <see cref="CapIOException"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -282,6 +362,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the read failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public byte[] ReadAllBytes(string path)
     {
@@ -293,10 +377,17 @@ public sealed partial class Dir
     /// <param name="path">A relative path to the file.</param>
     /// <returns>Its contents, decoded.</returns>
     /// <remarks>
+    /// <para>
     /// Decoded as UTF-8 unless the file opens with a byte-order mark naming something else,
     /// which is the framework's own rule for the same operation and is therefore what a
     /// caller moving code onto this API already expects. A caller who knows the encoding, or
     /// who does not want it guessed, reads the bytes and decodes them.
+    /// </para>
+    /// <para>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member
+    /// of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -305,6 +396,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the read failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public string ReadAllText(string path)
     {
@@ -316,6 +411,19 @@ public sealed partial class Dir
     /// <summary>Writes a whole file beneath this handle, replacing whatever was there.</summary>
     /// <param name="path">A relative path to the file.</param>
     /// <param name="bytes">The contents to store.</param>
+    /// <remarks>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Opened as <see cref="CreateFile"/> opens, so a link at
+    /// the last component is followed under the default policy and the file it leads to is
+    /// the one replaced — or created, if the link dangles — provided the target stays beneath
+    /// this handle; one that leaves is refused with <see cref="SandboxEscapeException"/>.
+    /// Under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> any link in the path is refused
+    /// with <see cref="CapIOException"/>. A link before the last component is followed or
+    /// refused on the same terms. A caller that must not write through a link it did not
+    /// make claims the name with <see cref="CreateNewFile"/> instead.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
     /// <exception cref="SandboxEscapeException">
@@ -323,6 +431,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the write failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public void WriteAllBytes(string path, ReadOnlySpan<byte> bytes)
     {
@@ -335,9 +447,16 @@ public sealed partial class Dir
     /// <param name="cancellationToken">Asks for the read to be abandoned.</param>
     /// <returns>Its contents.</returns>
     /// <remarks>
+    /// <para>
     /// Opening still happens on the calling thread. Resolution is a short sequence of calls
     /// that no platform offers asynchronously, so an implementation that promised otherwise
     /// would only be moving them to a pool thread and waiting on that.
+    /// </para>
+    /// <para>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member
+    /// of this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -346,6 +465,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the read failed otherwise.
+    /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public async Task<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken = default)
@@ -362,6 +485,12 @@ public sealed partial class Dir
     /// <param name="path">A relative path to the file.</param>
     /// <param name="cancellationToken">Asks for the read to be abandoned.</param>
     /// <returns>Its contents, decoded as <see cref="ReadAllText"/> describes.</returns>
+    /// <remarks>
+    /// Opening happens on the calling thread, as it does for <see cref="ReadAllBytesAsync"/>.
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member
+    /// of this handle, from any thread.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
     /// <exception cref="SandboxEscapeException">
@@ -369,6 +498,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the read failed otherwise.
+    /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public async Task<string> ReadAllTextAsync(string path, CancellationToken cancellationToken = default)
@@ -388,9 +521,17 @@ public sealed partial class Dir
     /// <param name="bytes">The contents to store.</param>
     /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
     /// <remarks>
+    /// <para>
     /// Abandoning it does not undo it. The file has already been emptied by the time any of
     /// the contents are written, so a cancelled call leaves a file that is shorter than it
     /// was — cancellation releases the caller and says nothing about what is on disk.
+    /// </para>
+    /// <para>
+    /// Symbolic links are followed or refused exactly as <see cref="WriteAllBytes"/>
+    /// describes, so under the default policy a link at the last component that stays inside
+    /// has the file it leads to replaced. Safe to call concurrently with any other member of
+    /// this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -399,6 +540,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the write failed otherwise.
+    /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public async Task WriteAllBytesAsync(

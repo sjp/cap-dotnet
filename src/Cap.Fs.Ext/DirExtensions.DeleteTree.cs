@@ -51,6 +51,20 @@ public static partial class DirExtensions
     /// the one reported and the walk carries on past it, so a single entry that cannot be
     /// removed does not leave behind the rest of a tree that had nothing to do with it.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with anything else on the same tree,
+    /// another removal included: every step stays inside the subtree whatever else is
+    /// happening. Two removals racing over one tree do not coordinate, though, and either may
+    /// report a failure for an entry the other removed first.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Components ahead of the last are resolved under this
+    /// handle's own policy, so a link among them is followed while it stays inside the subtree
+    /// or refused as for any other operation. A link as the last component is refused and left
+    /// in place, not followed and not removed. A link anywhere inside the tree is removed as
+    /// the link, and what it points at is not reached; a directory swapped for a link while
+    /// the removal runs is not entered, and its name is removed as the link it now is.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -82,10 +96,21 @@ public static partial class DirExtensions
     /// <param name="path">A relative path to the directory. See <see cref="DeleteTree"/>.</param>
     /// <returns>True when the directory and everything in it are gone.</returns>
     /// <remarks>
+    /// <para>
     /// The form to prefer when clearing up. A tree that has already been removed — by a
     /// previous attempt, by whatever created it, by another process tidying the same place —
     /// is an ordinary outcome, and building an exception to describe it is work done on the
     /// path that runs most often.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, on the same terms as <see cref="DeleteTree"/>: racing
+    /// removals stay contained, and either may answer false for an entry the other removed.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> As for <see cref="DeleteTree"/>: a link ahead of the
+    /// last component is resolved under the handle's policy, a link as the last component
+    /// answers false and is left in place, and a link inside the tree is removed as the link.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -117,6 +142,18 @@ public static partial class DirExtensions
     /// the handle passed in carries, for the reason the named form gives: a directory that
     /// turns into a link between being listed and being entered would otherwise send part of
     /// the removal somewhere else.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with anything else on the same
+    /// directory, another emptying included: every step stays inside it. Two emptyings racing
+    /// do not coordinate, and either may report a failure for an entry the other removed first.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> There is no path, so nothing is resolved on the way in:
+    /// the handle is the directory emptied, however it was reached. Every link inside is
+    /// removed as the link, whatever it points at and whether or not its target is inside, and
+    /// what it points at is never reached; a directory swapped for a link while the emptying
+    /// runs is not entered, and its name is removed as the link.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>

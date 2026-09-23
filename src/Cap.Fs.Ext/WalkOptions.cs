@@ -4,10 +4,17 @@ namespace Cap.Fs.Ext;
 /// What a recursive walk does with what it finds.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Deliberately small. Everything here changes which entries the walk reaches, which is the
 /// only thing a caller cannot do for themselves afterwards — filtering by name, by kind or by
 /// anything else is a condition over the entries the walk already produced, and adding
 /// options for those would put a second way of doing the same thing in front of everyone.
+/// </para>
+/// <para>
+/// <strong>Immutable once constructed.</strong> Every property is set only by an object
+/// initializer, so one instance — <see cref="Default"/> included — can be shared by any number
+/// of walks on any number of threads without one of them changing what another is doing.
+/// </para>
 /// </remarks>
 public sealed class WalkOptions
 {
@@ -59,6 +66,16 @@ public sealed class WalkOptions
     /// on the way down. A directory already on that path is not entered a second time; it is
     /// still reported as an entry.
     /// </para>
+    /// <para>
+    /// <strong>Off is decided by the kind the directory read reported.</strong> An entry the
+    /// read called a directory, or one the filesystem declined to classify, is entered by an
+    /// ordinary open of its name, and that open follows a link as the handle's own policy
+    /// allows. So a directory swapped for a link between being listed and being entered, or a
+    /// link on a filesystem that does not report what its entries are, can be entered with
+    /// this off — though only when the link resolves inside the subtree, since one that leaves
+    /// is refused under every policy. A caller that must never pass through a link walks a
+    /// handle restricted with <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// </para>
     /// </remarks>
     public bool FollowSymlinks { get; init; }
 
@@ -74,6 +91,11 @@ public sealed class WalkOptions
     /// <para>
     /// On Windows this costs a lookup per entry, because the attribute is not part of what a
     /// directory read reports. A walk that leaves this off pays nothing for it.
+    /// </para>
+    /// <para>
+    /// A symbolic link is judged as itself — by its own name and, on Windows, by the
+    /// attributes of the link rather than of its target — so a visible link to a hidden
+    /// directory is kept, and a hidden link to a visible one is skipped.
     /// </para>
     /// </remarks>
     public bool SkipHidden { get; init; }

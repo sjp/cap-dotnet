@@ -96,6 +96,23 @@ jobs:
           dotnet test CapDotnet.slnx --configuration Release --no-build
           -- --coverage --coverage-output-format cobertura
 
+      # ---------------------------------------------------------------------------------
+      # Each sample, run with no arguments, sets up a scene of its own and exits non-zero if
+      # anything reached outside where it was confined. The README opens with the first one's
+      # code, so a failure here means the README is showing something that is not true on this
+      # platform.
+      # ---------------------------------------------------------------------------------
+      - name: Run the samples
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in samples/ContainmentCheck samples/StaticFileServer samples/PluginHost/Host \
+                         samples/ArchiveExtractor samples/AmbientAudit; do
+            echo "::group::$project"
+            dotnet run --project "$project" --configuration Release --no-build
+            echo "::endgroup::"
+          done
+
       - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4

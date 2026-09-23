@@ -43,6 +43,11 @@ namespace Cap.Primitives;
 /// where it is presented, as an argument error rather than a security failure, because it is
 /// a mistake in the calling code rather than an attack on the containment guarantee.
 /// </para>
+/// <para>
+/// <strong>Thread safety.</strong> A token is immutable and may be passed between and used
+/// from any number of threads. The static members, recording included, are safe to call
+/// from any thread at once.
+/// </para>
 /// </remarks>
 public readonly struct AmbientAuthority
 {
@@ -92,6 +97,10 @@ public readonly struct AmbientAuthority
     /// <summary>
     /// Whether an acquisition happening now would be added to the recorded sites.
     /// </summary>
+    /// <remarks>
+    /// Safe to read from any thread. The answer can change as soon as it is given, since the
+    /// switch is read afresh each time and can be set from anywhere in the process.
+    /// </remarks>
     public static bool IsRecording => AmbientAuthorityLog.IsRecording;
 
     /// <summary>
@@ -99,9 +108,16 @@ public readonly struct AmbientAuthority
     /// did so, or an empty list when nothing was recorded.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Empty is not the same answer as "nothing took any": with the recording off, which is
     /// the default, nothing is recorded however much authority is taken. Check
     /// <see cref="IsRecording"/> before reading anything into an empty list.
+    /// </para>
+    /// <para>
+    /// Safe to read from any thread, while other threads are still acquiring. Each read
+    /// returns a new list that nothing changes afterwards: a snapshot of what had been
+    /// recorded by then, which a concurrent acquisition may already have added to.
+    /// </para>
     /// </remarks>
     public static IReadOnlyList<AmbientAuthoritySite> RecordedSites => AmbientAuthorityLog.Sites;
 
@@ -109,9 +125,16 @@ public readonly struct AmbientAuthority
     /// The recorded sites as a report to print — typically once, after start-up, so that a
     /// deployment states in its own log what it reached for.
     /// </summary>
+    /// <returns>The report, several lines long when anything was recorded.</returns>
     /// <remarks>
+    /// <para>
     /// Says so plainly when the recording is off, rather than producing an empty report that
     /// reads like a clean bill of health.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread; it reports from the same kind of snapshot
+    /// <see cref="RecordedSites"/> takes.
+    /// </para>
     /// </remarks>
     public static string DescribeRecordedSites() => AmbientAuthorityLog.Describe();
 
@@ -127,11 +150,18 @@ public readonly struct AmbientAuthority
     /// Filled in by the compiler with the member the call was written in. Kept alongside the
     /// line because it is the half of the location that survives the file being edited.
     /// </param>
+    /// <returns>A token naming this call site.</returns>
     /// <remarks>
+    /// <para>
     /// Checks nothing, and costs nothing beyond a switch lookup. The call is the
     /// declaration: this line is where the process reaches past what it was given, and it is
     /// meant to be findable both by searching for this method by name and, at run time,
     /// through <see cref="RecordedSites"/>.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, any number of times at once. Concurrent acquisitions at
+    /// one site are all counted.
+    /// </para>
     /// </remarks>
     public static AmbientAuthority Acquire(
         [CallerFilePath] string? file = null,
@@ -149,6 +179,7 @@ public readonly struct AmbientAuthority
     /// <summary>
     /// Where this token was acquired, or a note that it was never acquired at all.
     /// </summary>
+    /// <returns>A description of the acquisition site, for a person to read.</returns>
     /// <remarks>
     /// For logs and assertion messages. Nothing parses it, and the exact wording is not part
     /// of the contract.

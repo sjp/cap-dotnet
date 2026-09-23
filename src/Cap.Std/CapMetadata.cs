@@ -32,6 +32,16 @@ namespace Cap.Std;
 /// handle and another through a strict one. A caller that wants the target described opens
 /// the target and asks the handle.
 /// </para>
+/// <para>
+/// A snapshot taken from an open handle, rather than of a name, describes the object the
+/// handle refers to. A handle never refers to a link — any link was followed or refused when
+/// it was opened — so such a snapshot never reports <see cref="CapFileType.Symlink"/>.
+/// </para>
+/// <para>
+/// <strong>Thread safety.</strong> Instances are immutable, so they are safe to share
+/// between threads and to read from any number of them at once. Nothing here goes back to
+/// the filesystem.
+/// </para>
 /// </remarks>
 public readonly struct CapMetadata
 {
@@ -43,10 +53,16 @@ public readonly struct CapMetadata
     /// What the object is.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Told apart further than resolution tells things apart. A walk has one question about
     /// a socket, a pipe and a device node — can a path continue through it, and it cannot —
     /// so it groups them; a caller looking at what is in a directory is deciding what to do
     /// with each one, and the difference is the answer.
+    /// </para>
+    /// <para>
+    /// <see cref="CapFileType.Symlink"/> when the name described holds a link, whatever the
+    /// link points at and whether or not its target exists.
+    /// </para>
     /// </remarks>
     public CapFileType Type => _stat.Type;
 

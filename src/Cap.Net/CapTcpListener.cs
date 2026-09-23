@@ -44,9 +44,11 @@ public sealed class CapTcpListener : IDisposable
     }
 
     /// <summary>The authority this listener was bound under.</summary>
+    /// <remarks>Fixed when the listener is bound; safe to read from any thread.</remarks>
     public Pool Pool { get; }
 
     /// <summary>The endpoint this listener is bound to, with the port the system settled on.</summary>
+    /// <remarks>Fixed when the listener is bound; safe to read from any thread.</remarks>
     public IPEndPoint LocalEndPoint { get; }
 
     /// <summary>Binds and listens at <paramref name="endpoint"/>, if <paramref name="pool"/> grants it.</summary>
@@ -56,6 +58,10 @@ public sealed class CapTcpListener : IDisposable
     /// then checked against the pool like any other.
     /// </param>
     /// <param name="backlog">How many pending connections the system holds before refusing.</param>
+    /// <remarks>
+    /// Safe to call from any thread, and from several at once with the same pool: a pool
+    /// never changes, so each bind is checked against the same grants.
+    /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
     /// <paramref name="pool"/> grants no authority over the endpoint that would be claimed.
@@ -99,7 +105,13 @@ public sealed class CapTcpListener : IDisposable
     }
 
     /// <summary>Waits for a connection and takes it.</summary>
-    /// <remarks>The connection carries this listener's pool for whatever it does next.</remarks>
+    /// <remarks>
+    /// <para>The connection carries this listener's pool for whatever it does next.</para>
+    /// <para>
+    /// Safe to call from several threads at once; each pending connection is handed to
+    /// exactly one of them.
+    /// </para>
+    /// </remarks>
     /// <exception cref="SocketException">The accept failed.</exception>
     public CapTcpStream Accept() => Adopt(_socket.Accept());
 
@@ -113,8 +125,14 @@ public sealed class CapTcpListener : IDisposable
 
     /// <summary>Stops listening and gives up the endpoint.</summary>
     /// <remarks>
+    /// <para>
     /// Connections already accepted are unaffected and stay usable: each owns a socket of its
     /// own rather than a reference into this one.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread; an accept waiting on another thread is abandoned and
+    /// fails rather than completing.
+    /// </para>
     /// </remarks>
     public void Dispose() => _socket.Dispose();
 

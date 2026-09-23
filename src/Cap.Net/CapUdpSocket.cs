@@ -35,14 +35,22 @@ public sealed class CapUdpSocket : IDisposable
     }
 
     /// <summary>The authority every destination is checked against.</summary>
+    /// <remarks>Fixed when the socket is made; safe to read from any thread.</remarks>
     public Pool Pool { get; }
 
     /// <summary>
     /// The endpoint this socket sends from, or null before the system has assigned one.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Null only for a socket from <see cref="Open"/> that has not yet sent anything: it
     /// claims no name until it needs one, and the system assigns it at the first send.
+    /// </para>
+    /// <para>
+    /// Safe to read from any thread. It is asked of the socket each time rather than
+    /// remembered, so a send on another thread can change the answer from null to an
+    /// endpoint between one read and the next.
+    /// </para>
     /// </remarks>
     public IPEndPoint? LocalEndPoint => _socket.LocalEndPoint as IPEndPoint;
 
@@ -63,6 +71,7 @@ public sealed class CapUdpSocket : IDisposable
     /// A service that peers are told how to reach wants <see cref="Bind"/>, so that the
     /// endpoint it claims is one the pool granted.
     /// </para>
+    /// <para>Safe to call from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="pool"/> is null.</exception>
     public static CapUdpSocket Open(Pool pool, AddressFamily family)
@@ -78,6 +87,7 @@ public sealed class CapUdpSocket : IDisposable
     /// The address and port to claim. A port of zero asks the system to choose one, which is
     /// then checked against the pool like any other.
     /// </param>
+    /// <remarks>Safe to call from any thread.</remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
     /// <paramref name="pool"/> grants no authority over the endpoint that would be claimed.
@@ -113,8 +123,15 @@ public sealed class CapUdpSocket : IDisposable
 
     /// <summary>Points this socket at one peer, if the pool grants it.</summary>
     /// <remarks>
+    /// <para>
     /// After this the system refuses to send anywhere else and discards what arrives from
     /// anywhere else, which is why the check happens here and not on each subsequent send.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread. A send racing it on another thread may reach the peer
+    /// this socket was pointed at before or the one it is pointed at after, but either way
+    /// one the pool granted, since nothing is pointed at an endpoint before it is checked.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="endpoint"/> is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
@@ -133,6 +150,10 @@ public sealed class CapUdpSocket : IDisposable
 
     /// <summary>Sends one datagram to <paramref name="destination"/>, if the pool grants it.</summary>
     /// <returns>How many bytes were sent.</returns>
+    /// <remarks>
+    /// Safe to call from several threads at once; each datagram is sent whole, and each is
+    /// checked against the pool on its own.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="destination"/> is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
     /// The pool grants no authority over <paramref name="destination"/>.
@@ -167,8 +188,11 @@ public sealed class CapUdpSocket : IDisposable
     /// <summary>Sends one datagram to the peer this socket was pointed at.</summary>
     /// <returns>How many bytes were sent.</returns>
     /// <remarks>
+    /// <para>
     /// The destination was checked by <see cref="Connect"/> and cannot have changed since:
     /// the system will not send a datagram from a pointed socket anywhere else.
+    /// </para>
+    /// <para>Safe to call from several threads at once; each datagram is sent whole.</para>
     /// </remarks>
     public int Send(ReadOnlySpan<byte> buffer) => _socket.Send(buffer, SocketFlags.None);
 
@@ -181,8 +205,14 @@ public sealed class CapUdpSocket : IDisposable
 
     /// <summary>Waits for a datagram, and reports who it claims to be from.</summary>
     /// <remarks>
+    /// <para>
     /// The sender is not checked against the pool and is not authenticated. It is what the
     /// datagram says.
+    /// </para>
+    /// <para>
+    /// Safe to call from several threads at once; each datagram arrives whole at exactly one
+    /// of them.
+    /// </para>
     /// </remarks>
     public SocketReceiveFromResult ReceiveFrom(Span<byte> buffer)
     {
@@ -201,6 +231,17 @@ public sealed class CapUdpSocket : IDisposable
 
     /// <summary>Waits for a datagram from the peer this socket was pointed at.</summary>
     /// <returns>How many bytes arrived.</returns>
+    /// <remarks>
+    /// <para>
+    /// On a socket that has not been pointed at a peer with <see cref="Connect"/>, this takes
+    /// a datagram from anybody and does not say who sent it; <see cref="ReceiveFrom"/> is the
+    /// form that reports the sender.
+    /// </para>
+    /// <para>
+    /// Safe to call from several threads at once; each datagram arrives whole at exactly one
+    /// of them.
+    /// </para>
+    /// </remarks>
     public int Receive(Span<byte> buffer) => _socket.Receive(buffer, SocketFlags.None);
 
     /// <inheritdoc cref="Receive"/>
@@ -211,6 +252,10 @@ public sealed class CapUdpSocket : IDisposable
         _socket.ReceiveAsync(buffer, SocketFlags.None, cancellationToken);
 
     /// <summary>Closes the socket.</summary>
+    /// <remarks>
+    /// Safe to call from any thread; a send or receive waiting on another thread is abandoned
+    /// and fails rather than completing.
+    /// </remarks>
     public void Dispose() => _socket.Dispose();
 
     /// <summary>

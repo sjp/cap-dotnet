@@ -24,6 +24,9 @@ namespace Cap.Net;
 /// nobody built should grant nothing rather than grant whatever sits at the bottom of the
 /// numbering.
 /// </para>
+/// <para>
+/// <strong>Thread safety.</strong> An immutable value, safe to share between threads.
+/// </para>
 /// </remarks>
 public readonly struct PortRange : IEquatable<PortRange>
 {

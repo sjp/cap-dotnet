@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PluginHost</RootNamespace>
+    <!--
+      A host that loads assemblies it has never seen, and finds their types by reflection,
+      cannot be trimmed or compiled ahead of time: nothing at build time says what the plugins
+      will need. So the analyses that would report exactly that are off for this project.
+    -->
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Contracts/PluginHost.Contracts.csproj" />
+    <!--
+      Built first so their output can be laid out beside the host, but not referenced: the host
+      knows plugins only through the contract, and finds them at run time.
+    -->
+    <PluginProject Include="../Plugins/Notes/Notes.csproj" />
+    <PluginProject Include="../Plugins/Snoop/Snoop.csproj" />
+    <ProjectReference Include="@(PluginProject)" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- Each plugin's build output goes to plugins/<name>/ under the host's own. -->
+  <Target Name="CopyPlugins" AfterTargets="Build">
+    <MSBuild Projects="@(PluginProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_PluginAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <_PluginFile Include="%(_PluginAssembly.RootDir)%(_PluginAssembly.Directory)%(_PluginAssembly.Filename).*">
+        <PluginName>%(_PluginAssembly.Filename)</PluginName>
+      </_PluginFile>
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginFile)"
+          DestinationFolder="$(OutDir)plugins/%(_PluginFile.PluginName)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

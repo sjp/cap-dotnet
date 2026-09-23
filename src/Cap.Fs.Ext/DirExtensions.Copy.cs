@@ -72,6 +72,25 @@ public static partial class DirExtensions
     /// failure part of the way through leaves the destination holding what had been copied
     /// until then.
     /// </para>
+    /// <para>
+    /// Safe to call from any thread, and concurrently with other work on either handle; the
+    /// copy's own state belongs to the call. Two copies writing into the same destination at
+    /// once do not coordinate: without <see cref="CopyOptions.Overwrite"/> each stops at a name
+    /// the other took first, and with it a file both write may end up holding a mixture of the
+    /// two. Whatever the interleaving, every read stays inside the source's subtree and every
+    /// write inside the destination's.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> There is no path, so nothing is resolved on the way in:
+    /// each handle is the directory used, however it was reached. A link inside the source is
+    /// recognised by describing its name without following it, and is then refused, skipped or
+    /// made again with the same target text, as <see cref="CopyOptions.Symlinks"/> says — never
+    /// followed, read through or descended into. A directory or file in the source that is
+    /// swapped for a link between being described and being opened is opened as the source
+    /// handle's policy would follow that link, which never leaves the source's subtree. What a
+    /// link already sitting at a name in the destination does is set out under
+    /// <see cref="CopyOptions.Overwrite"/>.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">

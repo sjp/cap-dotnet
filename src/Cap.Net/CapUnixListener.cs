@@ -49,8 +49,23 @@ public sealed class CapUnixListener : IDisposable
     /// <param name="dir">The authority over where the socket is created.</param>
     /// <param name="path">A path beneath it, of one or more components, that nothing holds yet.</param>
     /// <param name="backlog">How many pending connections the system holds before refusing.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Every component ahead of the last is resolved beneath
+    /// <paramref name="dir"/> under that handle's <see cref="Dir.SymlinkPolicy"/>, exactly as
+    /// it would be for an open. The last component must hold nothing at all: a name that
+    /// holds a symbolic link, dangling or not, fails the bind with
+    /// <see cref="SocketException"/> like any other name already taken, and the link is
+    /// neither followed nor replaced, so the socket is never created where it points.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread. Two binds racing for the same name are settled by the
+    /// filesystem: one creates it and the other finds it taken.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    /// <exception cref="ObjectDisposedException"><paramref name="dir"/> has been disposed.</exception>
     /// <exception cref="PlatformNotSupportedException"><see cref="IsSupported"/> is false.</exception>
     /// <exception cref="SandboxEscapeException">
     /// <paramref name="path"/> names something outside what <paramref name="dir"/> covers.
@@ -79,6 +94,10 @@ public sealed class CapUnixListener : IDisposable
     }
 
     /// <summary>Waits for a connection and takes it.</summary>
+    /// <remarks>
+    /// Safe to call from several threads at once; each pending connection is handed to
+    /// exactly one of them.
+    /// </remarks>
     /// <exception cref="SocketException">The accept failed.</exception>
     public CapUnixStream Accept() => Adopt(_socket.Accept());
 
@@ -91,6 +110,10 @@ public sealed class CapUnixListener : IDisposable
     }
 
     /// <summary>Stops listening, leaving the name in the directory.</summary>
+    /// <remarks>
+    /// Safe to call from any thread; an accept waiting on another thread is abandoned and
+    /// fails rather than completing. Connections already accepted stay usable.
+    /// </remarks>
     public void Dispose() => _socket.Dispose();
 
     private static CapUnixStream Adopt(Socket accepted)

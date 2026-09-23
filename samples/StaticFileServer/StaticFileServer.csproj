@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>StaticFileServer</RootNamespace>
+    <!--
+      Generates the route handler at build time rather than by reflection when the app starts,
+      which keeps the server trimmable and able to be compiled ahead of time like the library.
+    -->
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+  </ItemGroup>
+
+</Project>

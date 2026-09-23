@@ -55,6 +55,10 @@ public static class CapClock
     /// <c>TimeProvider.System</c>. The same instance every time, so nothing is gained by
     /// caching it and nothing is lost by calling this more than once.
     /// </returns>
+    /// <remarks>
+    /// Safe to call from any thread, and the provider it returns is safe for concurrent use
+    /// by any number of threads.
+    /// </remarks>
     /// <exception cref="ArgumentException">
     /// <paramref name="authority"/> is <c>default</c> rather than a token that was acquired.
     /// </exception>

@@ -165,16 +165,63 @@ its own right. So:
 - The capability probe runs once at startup and caches its result, including **both**
   `ENOSYS` (kernel too old) and `EPERM` (seccomp). Retrying per call would be a syscall
   storm in exactly the deployments that can least afford it.
-- The selected backend is reportable at runtime, and the CI fallback leg asserts the
-  `openat2` call count is zero. A forced-fallback job that quietly keeps using `openat2`
+- The selected backend is reportable at runtime (see [below](#which-backend-is-running)),
+  and the CI fallback leg asserts the `openat2` call count is zero. A forced-fallback job that quietly keeps using `openat2`
   tests nothing at all.
 - CI also runs the suite on a host where the kernel itself refuses the syscall — once
   answering `EPERM`, once `ENOSYS` — because the two switches above are answered before the
   kernel is ever asked. They exercise the decision to stand down; only a refusal exercises
   the probe that reads one.
 
-> **TODO:** name the public accessor for the active backend and the call counter here
-> once they exist.
+## Which backend is running
+
+Inside the process, read the static property:
+
+```csharp
+using Cap.Primitives;
+using Cap.Std;
+
+if (Dir.ResolutionBackend != ResolutionBackend.ConfinedOpen)
+{
+    throw new InvalidOperationException(
+        $"This service requires kernel-atomic path resolution, and this host offers {Dir.ResolutionBackend}.");
+}
+```
+
+The answer is settled the first time anything is resolved, or the first time it is read, and
+does not change for the life of the process. A service whose threat model needs the stronger
+guarantee should check it at start-up, as above, and refuse to run without it; one that can
+live with either should at least log it.
+
+| `ResolutionBackend` | Where | What holds |
+|---|---|---|
+| `ConfinedOpen` | Linux 5.6 and later, unless a syscall filter denies `openat2` or it is turned off as above | The guarantee in [threat model §2](threat-model.md#2-the-guarantee) in full: each path is resolved in one kernel operation that cannot leave the root, so there is no instant at which anything can be substituted. |
+| `PortableWalk` | macOS; Linux when `openat2` is unavailable or turned off | Containment holds: nothing outside the root is reached. Within one operation, someone who can write inside the tree can, with the right timing, steer it to a different object that is also inside ([§6.1](threat-model.md#61-the-fallback-resolver-narrows-toctou-it-does-not-close-it)). |
+| `WindowsRelativeOpen` | Windows | As for `PortableWalk`. |
+| `None` | Any other operating system | Nothing: opening a directory fails, and there is no weaker backend for it to fall back to. |
+
+From outside the process, the same answer and the work behind it are published on the
+`Cap.Primitives` [meter](https://learn.microsoft.com/dotnet/core/diagnostics/metrics), so they
+reach `dotnet-counters`, OpenTelemetry, or any `MeterListener` without code in the
+application:
+
+| Instrument | Kind | Meaning |
+|---|---|---|
+| `cap.resolution.backend` | gauge | Always 1; the tag `cap.resolution.backend.name` names the backend. |
+| `cap.resolution.confined_open.attempts` | counter | Confined, kernel-atomic opens attempted. |
+| `cap.resolution.confined_open.race_retries` | counter | Confined opens the kernel reported as having lost a race with a rename, and that were retried. |
+| `cap.resolution.component_opens` | counter | Single-name opens beneath an existing handle: one per name on a walk, none on a confined open. |
+
+```bash
+dotnet-counters monitor --process-id <pid> --counters Cap.Primitives
+```
+
+The counts are what make a demotion visible after the fact rather than only at start-up. A
+process expected to be on the kernel-atomic backend whose confined-open attempts stay at zero
+while its component opens climb is walking, whatever it was configured to do. The
+instruments appear once the process has resolved its first path or read
+`Dir.ResolutionBackend`, and are read only when a listener asks, so a process that nobody is
+watching pays nothing for them.
 
 ## What the Windows walk does differently
 

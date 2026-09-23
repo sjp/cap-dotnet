@@ -29,9 +29,17 @@
   <Folder Name="/samples/">
     <Project Path="samples/AmbientAudit/AmbientAudit.csproj" />
     <Project Path="samples/ArchiveExtractor/ArchiveExtractor.csproj" />
+    <Project Path="samples/ContainmentCheck/ContainmentCheck.csproj" />
+    <Project Path="samples/StaticFileServer/StaticFileServer.csproj" />
   </Folder>
   <Folder Name="/bench/">
     <Project Path="bench/Cap.Benchmarks/Cap.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/PluginHost/">
+    <Project Path="samples/PluginHost/Contracts/PluginHost.Contracts.csproj" />
+    <Project Path="samples/PluginHost/Host/PluginHost.csproj" />
+    <Project Path="samples/PluginHost/Plugins/Snoop/Snoop.csproj" />
+    <Project Path="samples/PluginHost/Plugins/Notes/Notes.csproj" />
   </Folder>
   <Folder Name="/solution items/">
     <File Path="Directory.Build.props" />

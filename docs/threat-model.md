@@ -397,7 +397,7 @@ existence are observable through any handle derived from it.
 
 ### 5.5 No promise of atomicity across operations
 
-`Dir.RemoveDirRecursive` is many syscalls. Directory enumeration is not a snapshot. Where
+`DeleteTree` is many syscalls. Directory enumeration is not a snapshot. Where
 atomicity *is* provided — the exclusive create behind the temporary-file helpers, the rename
 behind the atomic-write helper — it is documented per-operation and is not a general
 property.
@@ -532,7 +532,8 @@ that goes unreported, leaves callers believing they have §2's guarantee when th
 §6.1's. No escape need be demonstrated for that to be a security bug; it is in scope for
 private disclosure either way. This is why the active backend and its call counts are
 required to be observable at runtime rather than being an implementation detail — see
-[backends.md](backends.md).
+[backends.md](backends.md#which-backend-is-running) for `Dir.ResolutionBackend` and the
+instruments on the `Cap.Primitives` meter.
 
 ## 7. Reporting
 

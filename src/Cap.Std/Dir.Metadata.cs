@@ -10,12 +10,19 @@ public sealed partial class Dir
     /// </summary>
     /// <returns>A snapshot of the directory, taken at the moment of the call.</returns>
     /// <remarks>
+    /// <para>
     /// Asked of the handle and not of a name, so nothing is resolved and there is nothing
     /// for a concurrent rename to interfere with: the answer describes the object this
     /// handle was opened on, whatever that object is currently called and whether it is
     /// called anything at all. A directory that has been removed while this handle was held
     /// still answers, which is the honest result — the object exists as long as something
     /// holds it open, even once no directory names it.
+    /// </para>
+    /// <para>
+    /// No symbolic link is involved: the handle already refers to a directory, never to a
+    /// link, whatever route opened it. Safe to call concurrently with any other member of
+    /// this handle, from any thread.
+    /// </para>
     /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the question.</exception>
     /// <exception cref="CapIOException">The question could not be answered.</exception>
@@ -99,6 +106,14 @@ public sealed partial class Dir
     /// A path spelled so that it must name a directory — one ending in a separator — is
     /// described only if a directory is what holds the name.
     /// </para>
+    /// <para>
+    /// <strong>Symbolic links, in short.</strong> The last component is never followed,
+    /// under either policy. A link before it is followed while its target stays beneath this
+    /// handle and refused with <see cref="SandboxEscapeException"/> when it leaves, and under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> is refused with
+    /// <see cref="CapIOException"/> wherever it points.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
@@ -131,11 +146,22 @@ public sealed partial class Dir
     /// <param name="metadata">The snapshot, when this returns true.</param>
     /// <returns>True when the name was described.</returns>
     /// <remarks>
+    /// <para>
     /// A name that is not there is the expected answer for this question rather than an
     /// exceptional one — describing an entry read a moment ago is the ordinary case, and the
     /// entry being gone by now is the ordinary way that fails. Arguments that are wrong
     /// rather than unlucky still throw.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated exactly as <see cref="GetMetadata(string)"/> describes: a
+    /// link at the last component is described as itself under either policy, one on the way
+    /// is followed or refused by this handle's policy, and a refusal — containment included —
+    /// is reported as false. Safe to call concurrently with any other member of this handle,
+    /// from any thread.
+    /// </para>
     /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryGetMetadata(string path, out CapMetadata metadata)
     {
         CapPathError pathError = MetadataCore(path, out metadata, out CapError error);
