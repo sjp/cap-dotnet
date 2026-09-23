@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>ArchiveExtractor</RootNamespace>
+    <!--
+      Published as a NativeAOT executable, which is how a small command-line tool like this one
+      is most often shipped, and which is how CI publishes and runs it. `dotnet run` still runs
+      it on the JIT.
+    -->
+    <PublishAot>true</PublishAot>
+    <!--
+      A trim or AOT warning means the compiler could not prove some code is still reachable,
+      and code it cannot prove reachable may be missing from the binary. Such a warning fails
+      the publish.
+    -->
+    <IlcTreatWarningsAsErrors>true</IlcTreatWarningsAsErrors>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+  </ItemGroup>
+
+</Project>

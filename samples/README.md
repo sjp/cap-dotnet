@@ -23,13 +23,36 @@ Ambient authority was taken at 2 sites:
 The recording is off unless asked for; this sample asks for it in its project file. See
 [docs/ambient-authority.md](../docs/ambient-authority.md).
 
+## `ArchiveExtractor`
+
+A zip extractor that can't be made to write outside its destination. There's no check that
+could be got wrong: each entry's name goes as-is to a `Dir` on the destination, and a name
+that resolves to somewhere else is refused by the resolution itself.
+
+```bash
+dotnet run --project samples/ArchiveExtractor                            # the demonstration
+dotnet run --project samples/ArchiveExtractor -- archive.zip destination  # a real archive
+```
+
+Run with no arguments, it builds a hostile archive of its own, extracts it into a scratch
+directory, and exits non-zero if anything was written outside it:
+
+```
+Extracting a hostile archive into /tmp/cap-archive-extractor-AJHBEz/out:
+  wrote    readme.txt
+  wrote    docs/guide/intro.txt
+  wrote    docs/guide/usage.txt
+  refused  ../escaped.txt  (outside the destination)
+  refused  docs/../../escaped.txt  (outside the destination)
+  refused  docs/guide/../../../escaped.txt  (outside the destination)
+  refused  /escaped-absolute.txt  (outside the destination)
+```
+
+It is also the program whose NativeAOT size is recorded in [docs/aot.md](../docs/aot.md).
+CI publishes it as a native executable on every platform and runs the demonstration.
+
 ## Planned
 
 - **Sandboxed file server** — serve a directory tree where a crafted request path is
   structurally incapable of escaping it.
 - **Plugin host** — hand each plugin a `Dir` on its own data directory and nothing else.
-- **Archive extractor** — zip-slip made impossible by construction rather than by a check.
-
-The archive extractor is the one worth writing first: it is the canonical vulnerability
-this library exists to remove, it is three lines with `Dir`, and it makes the pitch without
-a paragraph of explanation.

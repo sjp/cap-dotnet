@@ -11,3 +11,11 @@
 # rebuilding a path, which is the technique the library exists to replace.
 
 T:System.IO.Path;Paths are parsed and resolved here, never rebuilt. See the notes in build/CapBannedSymbols.Primitives.txt for why.
+
+# A trim or AOT warning says the compiler cannot prove the code it points at will still be in
+# the published binary. Silencing one does not put the code back; it only stops anyone being
+# told. The resolution code is the last place that may happen, since a step of it missing
+# from a trimmed or native build is a hole in containment, so the attribute that silences
+# those warnings is banned here and each warning is fixed in the code instead. (A #pragma
+# cannot silence them: they are raised again when the application is published.)
+T:System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessageAttribute;Fix the trim or AOT warning instead. See the notes in build/CapBannedSymbols.Primitives.txt for why.

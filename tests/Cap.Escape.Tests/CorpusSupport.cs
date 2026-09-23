@@ -3,7 +3,11 @@ using Cap.Primitives;
 using Cap.Std;
 using Cap.Tests;
 
+#if CAP_XUNIT_AOT
+[assembly: UnprivilegedRunRegistration]
+#else
 [assembly: AssemblyFixture(typeof(UnprivilegedRun))]
+#endif
 
 namespace Cap.Escape.Tests;
 
@@ -39,6 +43,31 @@ public sealed class UnprivilegedRun
         }
     }
 }
+
+#if CAP_XUNIT_AOT
+/// <summary>
+/// Registers <see cref="UnprivilegedRun"/> as an assembly fixture where the test framework is
+/// the ahead-of-time build, which cannot discover fixtures by reflection.
+/// </summary>
+/// <remarks>
+/// That build's source generator turns an <c>AssemblyFixture</c> attribute into this same
+/// registration, but in the version pinned here it emits a factory that takes no argument
+/// where the engine requires one, and the project does not compile. Writing the registration
+/// out by hand keeps the guard in place — every case in the binary still depends on it — with
+/// nothing else changed. Once the generator is fixed, both builds can go back to the
+/// attribute.
+/// </remarks>
+[AttributeUsage(AttributeTargets.Assembly)]
+internal sealed class UnprivilegedRunRegistrationAttribute : Xunit.v3.EngineInitializationAttribute
+{
+    public override ValueTask InitializeAsync()
+    {
+        Xunit.v3.RegisteredEngineConfig.RegisterAssemblyFixtureFactory(
+            typeof(UnprivilegedRun), _ => new ValueTask<object?>(new UnprivilegedRun()));
+        return default;
+    }
+}
+#endif
 
 /// <summary>
 /// Groups every test in the corpus so that they run one at a time.

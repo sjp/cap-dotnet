@@ -110,3 +110,7 @@ makes ambient `System.IO` a build error, and how to extend its lists.
 application's configuration, data, cache, state and runtime directories, found once by the
 platform's conventions and handed out as `Dir` handles that are created only when first
 asked for.
+
+[docs/aot.md](docs/aot.md) covers NativeAOT, trimming and single-file publishing: what the
+library guarantees, how CI runs the escape corpus against the published binary, and the size
+of a native executable built on it.

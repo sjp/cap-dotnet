@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Cap.Escape.Tests" />
+    <InternalsVisibleTo Include="Cap.Escape.Aot.Tests" />
     <InternalsVisibleTo Include="Cap.Fs.Ext.Tests" />
   </ItemGroup>
 

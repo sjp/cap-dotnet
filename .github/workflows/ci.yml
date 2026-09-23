@@ -207,25 +207,94 @@ jobs:
           dotnet test CapDotnet.slnx --configuration Release --no-build
 
   # ---------------------------------------------------------------------------------
-  # Passing the escape corpus under NativeAOT is the real test; merely linking is not.
+  # Passing the escape corpus under NativeAOT is the real test; merely linking is not. A
+  # clean publish shows the compiler found nothing it could not analyse. It cannot show that
+  # every resolution step it kept still behaves the same once compiled to native code, or once
+  # the trimmer has taken away what it judged unused. So the corpus is published the ways an
+  # application ships, and the published binary is what runs it: once as a NativeAOT
+  # executable, once self-contained, trimmed and bundled into a single file. A trim or AOT
+  # warning fails the publish. See docs/aot.md.
+  #
+  # The sample is published the same way, run, and its size written to the job summary: it
+  # is the figure docs/aot.md records.
   # ---------------------------------------------------------------------------------
   nativeaot:
-    name: NativeAOT (${{ matrix.os }})
+    name: NativeAOT and trimming (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+    defaults:
+      run:
+        shell: pwsh
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - name: Publish AOT and run the corpus against the AOT binary
+
+      # The same preparation the corpus gets in build-test, so that the cases that depend on
+      # it run here too rather than standing aside.
+      - name: Enable 8.3 short-name generation on the volume the tests run on
+        if: runner.os == 'Windows'
         run: |
-          echo "TODO: publish tests/Cap.Escape.Tests with PublishAot=true and run it."
-          exit 1
+          $volume = (Split-Path -Qualifier ([System.IO.Path]::GetTempPath()))
+          fsutil 8dot3name set $volume 0
+          fsutil 8dot3name query $volume
+          "CAPDOTNET_EXPECT_SHORT_NAMES=1" >> $env:GITHUB_ENV
+
+      - name: Prepare a bind mount for the escape corpus
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+
+      - name: Publish the escape corpus as a NativeAOT executable
+        run: >
+          dotnet publish tests/Cap.Escape.Aot.Tests/Cap.Escape.Aot.Tests.csproj
+          --configuration Release --use-current-runtime -p:CapPublishAs=native
+          --output "${{ runner.temp }}/corpus-native"
+
+      - name: Run the escape corpus as a NativeAOT executable
+        run: '& "${{ runner.temp }}/corpus-native/Cap.Escape.Aot.Tests"'
+
+      - name: Publish the escape corpus trimmed, as a single file
+        run: >
+          dotnet publish tests/Cap.Escape.Aot.Tests/Cap.Escape.Aot.Tests.csproj
+          --configuration Release --use-current-runtime -p:CapPublishAs=single-file
+          --output "${{ runner.temp }}/corpus-single-file"
+
+      - name: Run the escape corpus trimmed, as a single file
+        run: '& "${{ runner.temp }}/corpus-single-file/Cap.Escape.Aot.Tests"'
+
+      - name: Publish the archive extractor sample as a NativeAOT executable
+        run: >
+          dotnet publish samples/ArchiveExtractor/ArchiveExtractor.csproj
+          --configuration Release --use-current-runtime
+          --output "${{ runner.temp }}/sample"
+
+      # With no arguments the sample extracts a hostile archive of its own and fails if
+      # anything was written outside the destination.
+      - name: Run the archive extractor sample
+        run: '& "${{ runner.temp }}/sample/ArchiveExtractor"'
+
+      - name: Record the sample's size
+        run: |
+          $binary = Get-ChildItem "${{ runner.temp }}/sample" |
+            Where-Object { $_.BaseName -eq 'ArchiveExtractor' -and $_.Extension -in '', '.exe' }
+          $line = "ArchiveExtractor, NativeAOT, ${{ matrix.name }}: $($binary.Length) bytes " +
+            "($([math]::Round($binary.Length / 1MB, 2)) MiB)"
+          $line
+          $line >> $env:GITHUB_STEP_SUMMARY
 
   # ---------------------------------------------------------------------------------
   # Cap.Primitives is the containment core: every line of it is either a resolution step
@@ -325,7 +394,6 @@ jobs:
 # are deliberately *not* commented out: a job that does not exist is a job nobody
 # remembers to write. Each one drops its `continue-on-error` line once the code it exercises exists:
 #
-#   nativeaot     -> AOT + trimming validation
 #   coverage-gate -> a committed threshold to gate on
 #
 # The stress races run here at a size that finishes in seconds, and at full size on the

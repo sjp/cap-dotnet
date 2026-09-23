@@ -1,0 +1,145 @@
+{
+  "measuredOn": "Debian GNU/Linux 13 (trixie) Arm64, 8 logical CPUs, .NET 10.0.11",
+  "benchmarks": {
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Unix]/openat2": {
+      "ratio": 6.5545,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Unix]/walk": {
+      "ratio": 6.5548,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Windows]/openat2": {
+      "ratio": 3.3104,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Windows]/walk": {
+      "ratio": 3.3582,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Unix]/openat2": {
+      "ratio": 2.9487,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Unix]/walk": {
+      "ratio": 2.9212,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Windows]/openat2": {
+      "ratio": 2.2899,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Windows]/walk": {
+      "ratio": 2.2603,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Unix]/openat2": {
+      "ratio": 3.1172,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Unix]/walk": {
+      "ratio": 3.1682,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Windows]/openat2": {
+      "ratio": 3.013,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Windows]/walk": {
+      "ratio": 2.9868,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Unix]/openat2": {
+      "ratio": 0.1653,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Unix]/walk": {
+      "ratio": 0.166,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Windows]/openat2": {
+      "ratio": 0.0432,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Windows]/walk": {
+      "ratio": 0.0451,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Unix]/openat2": {
+      "ratio": 1.2283,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Unix]/walk": {
+      "ratio": 1.2253,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Windows]/openat2": {
+      "ratio": 1.303,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Windows]/walk": {
+      "ratio": 1.395,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Unix]/openat2": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Unix]/walk": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Windows]/openat2": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Windows]/walk": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Unix]/openat2": {
+      "ratio": 2.9482,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Unix]/walk": {
+      "ratio": 2.9613,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Windows]/openat2": {
+      "ratio": 2.2457,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Windows]/walk": {
+      "ratio": 2.2087,
+      "allocatedBytes": 0
+    },
+    "OpenReadFiveComponents.CapDotnet/openat2": {
+      "ratio": 1.2822,
+      "allocatedBytes": 4216
+    },
+    "OpenReadFiveComponents.CapDotnet/walk": {
+      "ratio": 1.749,
+      "allocatedBytes": 4376
+    },
+    "OpenReadSingleComponent.CapDotnet/openat2": {
+      "ratio": 0.9257,
+      "allocatedBytes": 4216
+    },
+    "OpenReadSingleComponent.CapDotnet/walk": {
+      "ratio": 0.9632,
+      "allocatedBytes": 4216
+    },
+    "PositionalRead.CapDotnet/openat2": {
+      "ratio": 1.0016,
+      "allocatedBytes": 0
+    },
+    "PositionalRead.CapDotnet/walk": {
+      "ratio": 1.1853,
+      "allocatedBytes": 0
+    },
+    "StatFile.CapDotnet/openat2": {
+      "ratio": 0.8501,
+      "allocatedBytes": 0
+    },
+    "StatFile.CapDotnet/walk": {
+      "ratio": 1.0004,
+      "allocatedBytes": 0
+    }
+  }
+}
