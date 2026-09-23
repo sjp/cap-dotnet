@@ -274,8 +274,11 @@ jobs:
 #   nativeaot     -> AOT + trimming validation
 #   coverage-gate -> a committed threshold to gate on
 #
+# The stress races run here at a size that finishes in seconds, and at full size on the
+# schedule in nightly.yml.
+#
 # Still to add:
-#   - a nightly schedule for TOCTOU stress (>=1e6 iterations) and fuzzing, which are far
-#     too slow for per-PR. Both are recorded as acceptance criteria on their own work,
-#     so this note is a convenience rather than the only record.
+#   - a nightly schedule for fuzzing, which is far too slow for per-PR. It is recorded as an
+#     acceptance criterion on its own work, so this note is a convenience rather than the
+#     only record.
 # ---------------------------------------------------------------------------------------

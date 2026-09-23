@@ -1,7 +1,7 @@
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
 
-namespace Cap.Escape.Tests;
+namespace Cap.Testing;
 
 /// <summary>
 /// The resolution backends this host has, and a way to run a case on each in turn.
@@ -12,13 +12,13 @@ namespace Cap.Escape.Tests;
 /// that choice is between two genuinely different implementations: the kernel's confined open,
 /// and a walk taken one name at a time. Each is what some real deployment runs — the walk is
 /// what a host whose kernel is too old, or whose seccomp profile refuses the syscall, gets —
-/// so a corpus run that exercised only the one this machine happened to pick would leave the
-/// other untested on every developer's machine.
+/// so a run that exercised only the one this machine happened to pick would leave the other
+/// untested on every developer's machine.
 /// </para>
 /// <para>
-/// So the corpus substitutes each in turn for the process-wide implementation, for the length
-/// of one case. The cases themselves still go through the public API; only which backend
-/// that API dispatches to is chosen here. The walk is obtained the way a user would obtain it,
+/// So a suite substitutes each in turn for the process-wide implementation, for the length of
+/// one test. The tests themselves still go through the public API; only which backend that
+/// API dispatches to is chosen here. The walk is obtained the way a user would obtain it,
 /// by turning the confined open off with the documented switch, so the instance under test is
 /// the shipped implementation in its shipped fallback configuration rather than a test double.
 /// </para>
@@ -66,7 +66,7 @@ internal static class Backends
                 : "not Linux";
             Assert.Skip(
                 $"The confined open is not available on this host ({reason}). The walk leg covers " +
-                "the corpus here; the confined open is covered where the kernel offers it.");
+                "this test here; the confined open is covered where the kernel offers it.");
         }
 
         return new BackendScope(backend, ops, PlatformOps.Substitute(ops));

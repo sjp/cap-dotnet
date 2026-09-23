@@ -97,6 +97,17 @@ because the parent of an open directory is whatever a concurrent rename last mad
 it has been handed a path that tries to escape, and quietly resolving it to something else
 would hide that while leaving the path working for whoever supplied it.
 
+**A name that changes under the walk is looked at again.** Finding that a name is a link
+and reading what it says are two calls, and whatever can write in the directory can put
+something else under the name between them. The read then has nothing to read, which says
+something about the tree at that instant and nothing about the caller's path, so the walk
+goes back and opens the name afresh rather than reporting it. The kernel-atomic backend does
+the same with a lost race of its own: it abandons the attempt and asks to be called again.
+Each second look is charged to the link budget below, so a name swapped in a loop ends the
+resolution with the refusal a chain of links too long to follow gets, rather than holding
+the caller forever. The second look decides nothing about containment — it goes through the
+same open that refuses links as the first.
+
 **Nothing is collapsed as text.** `link/..` resolves to the parent of the link's *target*,
 which is where the kernel would land and is not where string arithmetic would.
 

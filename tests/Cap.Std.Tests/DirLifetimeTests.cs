@@ -114,6 +114,45 @@ public sealed class DirLifetimeTests : IDisposable
     }
 
     /// <summary>
+    /// A handle closed on another thread after an operation checked it, and before the
+    /// operation reached the platform, is reported as disposed as well.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The operation's own check that the handle is open and the moment the platform call pins
+    /// it are not the same instant, and a disposal can land between them. The call is then
+    /// refused without being made — its number may already belong to something else — and
+    /// what the caller hears has to be the same thing a call on an already-closed handle
+    /// hears. Reporting it as a filesystem failure instead would describe a filesystem that
+    /// had nothing to do with it.
+    /// </para>
+    /// <para>
+    /// The instant cannot be scheduled from a test, so the two halves are checked where they
+    /// meet: the platform layer's refusal for a closed handle, and what the caller-facing
+    /// layer makes of it. The stress suite provokes the real race.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_handle_closed_part_way_through_a_call_is_reported_as_disposed()
+    {
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
+
+        CapResult<SafeDirHandle> opened = PlatformOps.Current.OpenAmbientDirectory(_tree.HostPath, CapAccess.Read);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        SafeDirHandle handle = opened.Value;
+        handle.Dispose();
+
+        CapResult<SafeDirHandle> child = PlatformOps.Current.OpenChildDirectory(handle, "child", CapAccess.Read);
+        Assert.False(child.IsSuccess);
+        Assert.Equal(CapErrorCategory.Closed, child.Error.Category);
+
+        Assert.IsType<ObjectDisposedException>(FailureTranslation.ToException(child.Error, "child"));
+        Assert.IsType<ObjectDisposedException>(FailureTranslation.ToEnumerationException(child.Error));
+        Assert.IsType<ObjectDisposedException>(FailureTranslation.ToHandleException(child.Error));
+        Assert.Throws<ObjectDisposedException>(() => FailureTranslation.ThrowIfClosed(child.Error));
+    }
+
+    /// <summary>
     /// A copy carries the authority of its original rather than whatever the directory
     /// would have granted.
     /// </summary>

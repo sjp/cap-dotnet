@@ -49,6 +49,18 @@
   </ItemGroup>
 
   <!--
+    The switch in tests/Backends that makes each resolution backend this host has the one every
+    handle dispatches to, in turn, so that a suite runs against the kernel's confined open and
+    the name-at-a-time walk from one process. Opt-in, because it reaches into Cap.Primitives
+    internals and so only compiles where that assembly has granted access.
+  -->
+  <ItemGroup Condition="'$(CapRunsEachBackend)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)Backends/*.cs"
+             Link="Backends/%(Filename)%(Extension)" />
+    <Using Include="Cap.Testing" Condition="'$(CapUsesScratchTree)' != 'true'" />
+  </ItemGroup>
+
+  <!--
     The simulated filesystem in tests/Fakes. Opt-in rather than shared by every assembly,
     because it implements an internal contract of Cap.Primitives and so only compiles where
     that assembly has granted access. A project that needs it sets CapUsesPlatformFake.

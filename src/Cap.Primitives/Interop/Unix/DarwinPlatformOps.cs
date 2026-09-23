@@ -94,8 +94,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeDirHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -124,8 +123,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeFileHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -242,8 +240,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = directory.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<DirectoryReader>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<DirectoryReader>.Fail(HandleLease.ClosedError);
         }
 
         // Opened by the name a directory has for itself, which is the one name in the
@@ -287,8 +284,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<string>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<string>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -324,7 +320,11 @@ internal sealed class DarwinPlatformOps : IPlatformOps
 
                 if (written < 0)
                 {
-                    return CapResult<string>.Fail(DarwinErrno.ToError(errno));
+                    // The call's only reason to refuse its arguments, given a positive length,
+                    // is that the name holds something other than a link.
+                    return CapResult<string>.Fail(errno == PosixErrno.EINVAL
+                        ? CapError.Create(CapErrorCategory.NotALink, CapErrorSource.Errno, errno)
+                        : DarwinErrno.ToError(errno));
                 }
 
                 if (written < capacity)
@@ -355,7 +355,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -376,7 +376,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         // This platform has no way to ask about a descriptor through the name-relative call,
@@ -411,7 +411,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -454,7 +454,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         DarwinStat raw = default;
@@ -515,8 +515,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<string>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<string>.Fail(HandleLease.ClosedError);
         }
 
         // Exactly the size the platform demands. The call is not told how much room it has,
@@ -567,7 +566,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = directory.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         return DarwinNative.FSync(lease.Descriptor) < 0
@@ -595,7 +594,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         return DarwinNative.FChmod(lease.Descriptor, UnixFileTypes.ModeFromPermissions(mode)) < 0
@@ -609,8 +608,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeDirHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
         }
 
         // The duplicate is asked for with close-on-exec already set, rather than set
@@ -631,8 +629,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapResult<SafeFileHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
         // Close-on-exec is asked for as part of the duplication, for the same reason it is
@@ -660,7 +657,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -738,7 +735,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease toLease = toParent.Lease();
         if (!fromLease.IsValid || !toLease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
@@ -795,7 +792,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> nameScratch = stackalloc byte[PathScratchBytes];
@@ -836,7 +833,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease toLease = toParent.Lease();
         if (!lease.IsValid || !toLease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
@@ -873,7 +870,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -1133,11 +1130,10 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// walk rather than an error.
     /// </param>
     /// <remarks>
-    /// Two codes are ambiguous and the walk reacts to them in opposite ways. A directory open
-    /// that refuses links reports "not a directory" for a symbolic link exactly as it does
-    /// for a plain file, and the link-loop code covers both a link the open declined to
-    /// follow and a chain too long to follow. So the name is asked about again, without
-    /// following it, on the failure path only. The answer is a hint about what to try next,
+    /// One code is ambiguous and the walk reacts to its two meanings in opposite ways: a
+    /// directory open that refuses links reports "not a directory" for a symbolic link exactly
+    /// as it does for a plain file. So the name is asked about again, without following it, on
+    /// the failure path only. The answer is a hint about what to try next,
     /// never a decision about what may be reached: a walk told "this is a link" goes on to
     /// read the link, and finds out there if it is no longer one.
     /// </remarks>
@@ -1147,9 +1143,22 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         int errno,
         bool noFollow)
     {
-        if (noFollow && errno is DarwinErrno.ELOOP or PosixErrno.ENOTDIR &&
+        // An open of one name that refuses to follow links fails with the loop code for one
+        // reason only: the name was a link. Asking again whether it still is could only find
+        // that it has since changed, and the walk learns that for itself when it reads the
+        // link -- reporting a loop here instead would call a lost race a chain too long.
+        if (noFollow && errno == DarwinErrno.ELOOP)
+        {
+            return CapError.Create(CapErrorCategory.SymbolicLink, CapErrorSource.Errno, errno);
+        }
+
+        // A directory now, though the open found something that was not one: the name
+        // was swapped between the two calls, most often from a link. Reported as the link it
+        // most likely was, so that the walk goes on to read it, finds it is not one, and
+        // looks at the name again -- a lost race, not an answer about the caller's path.
+        if (noFollow && errno == PosixErrno.ENOTDIR &&
             StatChildInto(directoryFd, name, out CapNodeInfo info).IsSuccess &&
-            info.Type == CapNodeType.SymbolicLink)
+            info.Type is CapNodeType.SymbolicLink or CapNodeType.Directory)
         {
             return CapError.Create(CapErrorCategory.SymbolicLink, CapErrorSource.Errno, errno);
         }

@@ -91,7 +91,7 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
 
         if (_buffer is null)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         if (_offset >= _filled)
@@ -192,7 +192,7 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
         using HandleLease lease = _handle.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         fixed (byte* buffer = _buffer)

@@ -233,6 +233,10 @@ internal interface IPlatformOps
     /// that can write inside the sandbox can plant one — so it is parsed by the same path
     /// parser as a caller-supplied string, and is not assumed to be relative, to be short,
     /// or to be well-formed text.
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotALink"/>, on every platform, when the name
+    /// holds something other than a symbolic link.
+    /// </para>
     /// </remarks>
     CapResult<string> ReadChildLink(SafeDirHandle parent, ReadOnlySpan<char> name);
 

@@ -156,6 +156,25 @@ internal enum CapErrorCategory
     DeviceObject,
 
     /// <summary>
+    /// A link was to be read and the name does not hold one. Reported by the member that reads
+    /// links, in place of the platform's own code for it, which differs by platform and on
+    /// Unix is the generic "invalid argument". Distinct because the walk acts on it: a name
+    /// that held a link when it was opened and holds something else when it is read has been
+    /// swapped in between, and is looked at again rather than reported.
+    /// </summary>
+    NotALink,
+
+    /// <summary>
+    /// The handle the operation was to be made against had already been closed, so it was
+    /// never made. Reported by this layer rather than by the platform: a handle is pinned open
+    /// for the length of every call made through it, and one found closed at that moment is
+    /// refused before its number is passed to the kernel — a number that, once released, may
+    /// already belong to an unrelated object. Distinct from every platform failure because it
+    /// is not one: it means another thread disposed the handle while this one was using it.
+    /// </summary>
+    Closed,
+
+    /// <summary>
     /// The platform reported a failure this layer has no portable reading of. The raw code
     /// is still carried; only the classification is missing.
     /// </summary>

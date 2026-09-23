@@ -342,6 +342,76 @@ public sealed class PortableWalkTests
     }
 
     /// <summary>
+    /// A name that was a link when the walk opened it and is a directory again by the time the
+    /// walk reads the link is looked at afresh, and resolution carries on through it.
+    /// </summary>
+    /// <remarks>
+    /// Opening the name and reading the link are two calls, and whatever can write in the
+    /// directory can swap the name between them. The read then fails because there is no link
+    /// to read, which describes the tree at that instant rather than anything wrong with the
+    /// caller's path. Reporting it would hand the caller an error for a lost race.
+    /// </remarks>
+    [Fact]
+    public void A_link_swapped_back_for_a_directory_before_it_is_read_is_looked_at_again()
+    {
+        FakeFileSystem fs = Sandbox();
+        _ = fs.AddDirectory("sandbox/elsewhere");
+        FakeNode a = fs.AddDirectory("sandbox/a");
+        FakeNode directory = fs.AddDirectory("sandbox/a/b");
+        FakeNode c = fs.AddDirectory("sandbox/a/b/c");
+        fs.Replace("sandbox/a/b", LinkNode(fs, "../elsewhere"));
+
+        int lookups = 0;
+        fs.BeforeLookup = (parent, name) =>
+        {
+            // The first look finds the link; the second, which is the read, finds the
+            // directory put back.
+            if (ReferenceEquals(parent, a) && name == "b" && ++lookups == 2)
+            {
+                fs.Replace("sandbox/a/b", directory);
+            }
+        };
+
+        Run(fs, (ops, root) =>
+        {
+            using SafeDirHandle opened = OpenDirectory(ops, root, "a/b/c");
+            AssertIs(ops, c, opened);
+        });
+    }
+
+    /// <summary>
+    /// A name that changes kind every time it is looked at is given up on once the link budget
+    /// is spent, rather than looked at forever.
+    /// </summary>
+    /// <remarks>
+    /// Anything that can swap the name once can swap it in a loop, so looking again has to be
+    /// bounded. The bound is the one that already applies to following links, and the refusal
+    /// is the same one a chain of links too long to follow gets.
+    /// </remarks>
+    [Fact]
+    public void A_name_that_keeps_changing_is_given_up_on_after_the_link_budget()
+    {
+        FakeFileSystem fs = Sandbox();
+        FakeNode a = fs.AddDirectory("sandbox/a");
+        FakeNode directory = fs.AddDirectory("sandbox/a/b");
+        FakeNode link = LinkNode(fs, "../a");
+
+        int lookups = 0;
+        fs.BeforeLookup = (parent, name) =>
+        {
+            if (ReferenceEquals(parent, a) && name == "b")
+            {
+                // Always a link when opened, never one when read.
+                fs.Replace("sandbox/a/b", lookups++ % 2 == 0 ? link : directory);
+            }
+        };
+
+        Run(fs, (ops, root) => AssertFails(CapErrorCategory.SymbolicLinkLoop, ops, root, "a/b"));
+
+        Assert.InRange(lookups, 2, 2 * (PortableResolver.MaxSymbolicLinks + 1));
+    }
+
+    /// <summary>
     /// A directory moved out of the sandbox while the walk is standing in it keeps serving
     /// the walk, because the walk holds it open rather than naming it again.
     /// </summary>

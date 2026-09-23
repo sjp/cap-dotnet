@@ -250,7 +250,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         return node!.LinkTarget is { } target
             ? CapResult<string>.Ok(target)
-            : CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
+            : CapResult<string>.Fail(CapError.FromCategory(CapErrorCategory.NotALink));
     }
 
     /// <inheritdoc/>

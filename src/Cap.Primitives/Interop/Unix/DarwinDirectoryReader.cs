@@ -83,7 +83,7 @@ internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
 
         if (_closed)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         DarwinDirectoryEntry* result;

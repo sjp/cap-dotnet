@@ -510,7 +510,12 @@ internal static class PortableResolver
         CapResult<string> target = ops.ReadChildLink(stack.Top, name);
         if (!target.IsSuccess)
         {
-            return target.Error;
+            // The name was a link when it was opened and is something else now: swapped in
+            // between the two calls by whatever can write in the directory. A lost race rather
+            // than an answer, so the name is looked at again.
+            return target.Error.Category == CapErrorCategory.NotALink
+                ? Revisit(ref pending, name, syntax)
+                : target.Error;
         }
 
         if (!CapPath.TryParse(
@@ -520,6 +525,45 @@ internal static class PortableResolver
         }
 
         return pending.TryFollow(parsed)
+            ? CapError.Success
+            : CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
+    }
+
+    /// <summary>
+    /// Puts a name back in front of what is still to be resolved, so that the next step looks
+    /// at it afresh.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The open that found the link and the read of its target are two calls, and whatever
+    /// can write in the directory can put a directory or a file back under the name between
+    /// them. Passing on the read's failure would hand the caller an error about their request
+    /// for what was a lost race; the second look goes through the same no-follow open as the
+    /// first, so it decides nothing about what may be reached.
+    /// </para>
+    /// <para>
+    /// The kernel's confined open does the same thing with a lost race: it abandons the
+    /// attempt and asks to be called again, and the call is made again. Here the unit retried
+    /// is one component rather than the whole path, since the handles above it are already
+    /// held and were never in question.
+    /// </para>
+    /// <para>
+    /// Bounded, because anything able to swap the name can swap it forever. Each look spends
+    /// one unit of the link budget — the read that failed was charged before it was made — so
+    /// a name that keeps changing ends the resolution with the same refusal as a chain of
+    /// links too long to follow, after at most as many attempts.
+    /// </para>
+    /// </remarks>
+    private static CapError Revisit(
+        scoped ref PendingComponents pending,
+        scoped ReadOnlySpan<char> name,
+        CapPathSyntax syntax)
+    {
+        // A name that was a single component when the caller's path was split is still one.
+        // Parsing it again rather than pushing the characters is what lets the frame carry
+        // the syntax the rest of the walk reads it under.
+        return CapPath.TryParse(name.ToString(), syntax, ParentLinkPolicy.Preserve, out CapPath again, out _) &&
+               pending.TryFollow(again)
             ? CapError.Success
             : CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
     }

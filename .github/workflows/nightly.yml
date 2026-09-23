@@ -1,0 +1,70 @@
+name: Nightly stress
+
+# ---------------------------------------------------------------------------------------
+# The races in tests/Cap.Stress.Tests at full size. The same tests run on every change at a
+# size that finishes in seconds, which shows the harness still stages its races and still
+# tells their outcomes apart; a race lost once in a million attempts is only found here.
+#
+# What fails the run is the same at both sizes: an attempt that reached outside the sandbox,
+# an attempt that reached something the race cannot vouch for, anything outside changed, or a
+# descriptor left open. The rest of what the races count -- above all how often a resolution
+# was steered to a different object inside -- is the measurement, and is written to the job
+# summary, where the figures quoted in docs/threat-model.md come from.
+# ---------------------------------------------------------------------------------------
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Attempts per race and backend
+        default: "1000000"
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CI: true
+
+jobs:
+  stress:
+    name: stress (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both Linux backends run on each Linux leg, one after the other in one process: the
+          # suite substitutes the walk for the confined open itself, the same way the escape
+          # corpus does, so no separate forced-fallback leg is needed.
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj --configuration Release
+
+      - name: Run the races at full size
+        shell: bash
+        env:
+          CAPDOTNET_STRESS_ITERATIONS: ${{ inputs.iterations || '1000000' }}
+        run: |
+          export CAPDOTNET_STRESS_REPORT="$GITHUB_STEP_SUMMARY"
+          dotnet test tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj --configuration Release --no-build

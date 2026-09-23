@@ -57,117 +57,152 @@ internal static class FailureTranslation
         CapError error,
         string path,
         ExpectedTarget expected = ExpectedTarget.Directory) => error.Category switch
+        {
+            // Another thread disposed the handle while this call was using it. The same answer a
+            // call on an already-disposed handle gets, since that is what it was by the time the
+            // call reached it.
+            CapErrorCategory.Closed => DisposedDuringCall(),
+
+            CapErrorCategory.NotFound => expected == ExpectedTarget.Directory
+                ? new DirectoryNotFoundException($"'{path}' does not name a directory that exists. ({error})")
+                : new FileNotFoundException($"'{path}' does not name anything that exists. ({error})"),
+
+            CapErrorCategory.AlreadyExists =>
+                new CapIOException($"'{path}' names something that already exists. ({error})"),
+
+            CapErrorCategory.IsADirectory =>
+                new CapIOException(
+                    $"'{path}' names a directory, or is spelled so that it has to be one, and " +
+                    $"this operation does not act on a directory. ({error})"),
+
+            CapErrorCategory.NotEmpty =>
+                new CapIOException(
+                    $"'{path}' names a directory that still has entries in it. Removing what is " +
+                    $"inside is a walk over handles, which the caller performs rather than this " +
+                    $"call. ({error})"),
+
+            CapErrorCategory.CrossDevice =>
+                new CapIOException(
+                    $"'{path}' and the destination are on different filesystems, so the entry " +
+                    $"cannot be moved between them. It is not copied instead: a copy has " +
+                    $"different timing, different failure modes and a different result for a " +
+                    $"hard link, and doing one under the name of a move would quietly stop the " +
+                    $"operation being atomic. ({error})"),
+
+            // Not a containment refusal and not a missing thing: the filesystem understood the
+            // request and it was not one it could carry out as written. Moving a directory to a
+            // name inside itself is the case a caller is most likely to meet.
+            CapErrorCategory.InvalidArgument =>
+                new CapIOException(
+                    $"'{path}' was not a request the filesystem could carry out as asked. " +
+                    $"Moving a directory to a name beneath itself is the usual cause. ({error})"),
+
+            CapErrorCategory.ReadOnlyFilesystem =>
+                new CapIOException($"'{path}' is on a filesystem mounted read-only. ({error})"),
+
+            // Reported rather than worked around. The platform cannot make the refusal part of
+            // the operation, and the alternative -- looking first and acting if the answer was
+            // favourable -- has a window in which the answer changes, which is the whole class
+            // of bug this library exists to remove.
+            CapErrorCategory.NotSupported =>
+                new CapIOException(
+                    $"'{path}' could not be operated on: the filesystem does not implement what " +
+                    $"the operation needs in order to be performed as one step. ({error})"),
+
+            // The name turned out to be a symbolic link where the operation needed the thing
+            // itself. Inside the subtree, so not an escape -- only a step the operation will not
+            // take on the caller's behalf.
+            CapErrorCategory.SymbolicLink =>
+                new CapIOException(
+                    $"'{path}' is a symbolic link, and this operation acts on what a name holds " +
+                    $"rather than on what it points at. ({error})"),
+
+            CapErrorCategory.PermissionDenied =>
+                new UnauthorizedAccessException($"Access to '{path}' was denied by the filesystem. ({error})"),
+
+            // Every one of these means the same thing to a caller: what was asked for lies
+            // outside what the handle covers. They differ only in which layer noticed.
+            CapErrorCategory.Escaped =>
+                new SandboxEscapeException(
+                    $"'{path}' resolved outside the directory the handle grants authority over. ({error})"),
+
+            CapErrorCategory.DeviceObject =>
+                new SandboxEscapeException(
+                    $"'{path}' reached a device rather than a file beneath the handle. ({error})"),
+
+            CapErrorCategory.Reparse =>
+                new SandboxEscapeException(
+                    $"'{path}' passes through a reparse point that is not a filesystem link, so " +
+                    $"following it would leave the subtree entirely. ({error})"),
+
+            // Not an escape. The chain may be a genuine loop, an honestly long one, or a link
+            // the policy in force declines to follow -- and in every case it named something
+            // inside. Reporting these alongside the refusals that were attempts to leave would
+            // put noise into the one log that is worth reading closely.
+            CapErrorCategory.SymbolicLinkLoop =>
+                new CapIOException(
+                    $"'{path}' passes through a symbolic link that resolution would not follow. ({error})"),
+
+            // Nor is this one: the alias reaches the same object beneath the same handle. It is
+            // refused because a rule stated about one spelling of a name can be walked past
+            // using the other, which is a problem about names and not about containment.
+            CapErrorCategory.AliasedName =>
+                new CapIOException(
+                    $"'{path}' reached its target through an alias rather than by the name the " +
+                    $"filesystem stores. ({error})"),
+
+            CapErrorCategory.NotADirectory =>
+                new CapIOException($"A component of '{path}' is not a directory. ({error})"),
+
+            CapErrorCategory.NotALink =>
+                new CapIOException($"'{path}' is not a symbolic link. ({error})"),
+
+            CapErrorCategory.NameTooLong =>
+                new PathTooLongException($"'{path}' is longer than the filesystem accepts. ({error})"),
+
+            CapErrorCategory.PathTooDeep =>
+                new CapIOException(
+                    $"'{path}' descends further than resolution will follow. Each level costs a " +
+                    $"handle that is held until the walk finishes, so the depth is bounded. ({error})"),
+
+            CapErrorCategory.OutOfHandles =>
+                new CapIOException(
+                    $"'{path}' could not be opened: the process or the system is out of handles. ({error})"),
+
+            CapErrorCategory.Raced =>
+                new CapIOException(
+                    $"'{path}' could not be resolved atomically because the tree kept changing " +
+                    $"underneath it. ({error})"),
+
+            _ => new CapIOException($"'{path}' could not be opened. ({error})"),
+        };
+
+    /// <summary>
+    /// Throws the disposal a failure stands for, when it stands for one.
+    /// </summary>
+    /// <remarks>
+    /// For the few members that build their own exception rather than going through one of the
+    /// translations here, so that a handle disposed on another thread part-way through their
+    /// call is reported the same way it is everywhere else.
+    /// </remarks>
+    public static void ThrowIfClosed(CapError error)
     {
-        CapErrorCategory.NotFound => expected == ExpectedTarget.Directory
-            ? new DirectoryNotFoundException($"'{path}' does not name a directory that exists. ({error})")
-            : new FileNotFoundException($"'{path}' does not name anything that exists. ({error})"),
+        if (error.Category == CapErrorCategory.Closed)
+        {
+            throw DisposedDuringCall();
+        }
+    }
 
-        CapErrorCategory.AlreadyExists =>
-            new CapIOException($"'{path}' names something that already exists. ({error})"),
-
-        CapErrorCategory.IsADirectory =>
-            new CapIOException(
-                $"'{path}' names a directory, or is spelled so that it has to be one, and " +
-                $"this operation does not act on a directory. ({error})"),
-
-        CapErrorCategory.NotEmpty =>
-            new CapIOException(
-                $"'{path}' names a directory that still has entries in it. Removing what is " +
-                $"inside is a walk over handles, which the caller performs rather than this " +
-                $"call. ({error})"),
-
-        CapErrorCategory.CrossDevice =>
-            new CapIOException(
-                $"'{path}' and the destination are on different filesystems, so the entry " +
-                $"cannot be moved between them. It is not copied instead: a copy has " +
-                $"different timing, different failure modes and a different result for a " +
-                $"hard link, and doing one under the name of a move would quietly stop the " +
-                $"operation being atomic. ({error})"),
-
-        // Not a containment refusal and not a missing thing: the filesystem understood the
-        // request and it was not one it could carry out as written. Moving a directory to a
-        // name inside itself is the case a caller is most likely to meet.
-        CapErrorCategory.InvalidArgument =>
-            new CapIOException(
-                $"'{path}' was not a request the filesystem could carry out as asked. " +
-                $"Moving a directory to a name beneath itself is the usual cause. ({error})"),
-
-        CapErrorCategory.ReadOnlyFilesystem =>
-            new CapIOException($"'{path}' is on a filesystem mounted read-only. ({error})"),
-
-        // Reported rather than worked around. The platform cannot make the refusal part of
-        // the operation, and the alternative -- looking first and acting if the answer was
-        // favourable -- has a window in which the answer changes, which is the whole class
-        // of bug this library exists to remove.
-        CapErrorCategory.NotSupported =>
-            new CapIOException(
-                $"'{path}' could not be operated on: the filesystem does not implement what " +
-                $"the operation needs in order to be performed as one step. ({error})"),
-
-        // The name turned out to be a symbolic link where the operation needed the thing
-        // itself. Inside the subtree, so not an escape -- only a step the operation will not
-        // take on the caller's behalf.
-        CapErrorCategory.SymbolicLink =>
-            new CapIOException(
-                $"'{path}' is a symbolic link, and this operation acts on what a name holds " +
-                $"rather than on what it points at. ({error})"),
-
-        CapErrorCategory.PermissionDenied =>
-            new UnauthorizedAccessException($"Access to '{path}' was denied by the filesystem. ({error})"),
-
-        // Every one of these means the same thing to a caller: what was asked for lies
-        // outside what the handle covers. They differ only in which layer noticed.
-        CapErrorCategory.Escaped =>
-            new SandboxEscapeException(
-                $"'{path}' resolved outside the directory the handle grants authority over. ({error})"),
-
-        CapErrorCategory.DeviceObject =>
-            new SandboxEscapeException(
-                $"'{path}' reached a device rather than a file beneath the handle. ({error})"),
-
-        CapErrorCategory.Reparse =>
-            new SandboxEscapeException(
-                $"'{path}' passes through a reparse point that is not a filesystem link, so " +
-                $"following it would leave the subtree entirely. ({error})"),
-
-        // Not an escape. The chain may be a genuine loop, an honestly long one, or a link
-        // the policy in force declines to follow -- and in every case it named something
-        // inside. Reporting these alongside the refusals that were attempts to leave would
-        // put noise into the one log that is worth reading closely.
-        CapErrorCategory.SymbolicLinkLoop =>
-            new CapIOException(
-                $"'{path}' passes through a symbolic link that resolution would not follow. ({error})"),
-
-        // Nor is this one: the alias reaches the same object beneath the same handle. It is
-        // refused because a rule stated about one spelling of a name can be walked past
-        // using the other, which is a problem about names and not about containment.
-        CapErrorCategory.AliasedName =>
-            new CapIOException(
-                $"'{path}' reached its target through an alias rather than by the name the " +
-                $"filesystem stores. ({error})"),
-
-        CapErrorCategory.NotADirectory =>
-            new CapIOException($"A component of '{path}' is not a directory. ({error})"),
-
-        CapErrorCategory.NameTooLong =>
-            new PathTooLongException($"'{path}' is longer than the filesystem accepts. ({error})"),
-
-        CapErrorCategory.PathTooDeep =>
-            new CapIOException(
-                $"'{path}' descends further than resolution will follow. Each level costs a " +
-                $"handle that is held until the walk finishes, so the depth is bounded. ({error})"),
-
-        CapErrorCategory.OutOfHandles =>
-            new CapIOException(
-                $"'{path}' could not be opened: the process or the system is out of handles. ({error})"),
-
-        CapErrorCategory.Raced =>
-            new CapIOException(
-                $"'{path}' could not be resolved atomically because the tree kept changing " +
-                $"underneath it. ({error})"),
-
-        _ => new CapIOException($"'{path}' could not be opened. ({error})"),
-    };
+    /// <summary>
+    /// The exception for a handle another thread disposed while a call was using it.
+    /// </summary>
+    /// <remarks>
+    /// The same type a call on an already-disposed handle gets, since that is what the handle
+    /// was by the time the call reached it. Which of the two a caller sees depends only on
+    /// where the disposal landed, and a caller should not have to catch both to find out.
+    /// </remarks>
+    private static ObjectDisposedException DisposedDuringCall() =>
+        new(null, "The handle was disposed on another thread while this operation was using it.");
 
     /// <summary>
     /// Builds the exception for a failure to read a directory.
@@ -181,6 +216,8 @@ internal static class FailureTranslation
     /// </remarks>
     public static Exception ToEnumerationException(CapError error) => error.Category switch
     {
+        CapErrorCategory.Closed => DisposedDuringCall(),
+
         // The handle still refers to the directory, so this is not a stale handle: the
         // directory has been removed, and a directory with no name left cannot be read even
         // by something holding it open.
@@ -217,6 +254,8 @@ internal static class FailureTranslation
     /// </remarks>
     public static Exception ToHandleException(CapError error) => error.Category switch
     {
+        CapErrorCategory.Closed => DisposedDuringCall(),
+
         CapErrorCategory.PermissionDenied =>
             new UnauthorizedAccessException(
                 $"The filesystem would not describe what this handle refers to. ({error})"),

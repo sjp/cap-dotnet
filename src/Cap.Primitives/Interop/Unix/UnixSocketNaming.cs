@@ -112,8 +112,7 @@ internal static class UnixSocketNaming
         using HandleLease lease = holder.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<UnixSocketName>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<UnixSocketName>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[512];
@@ -194,8 +193,7 @@ internal static class UnixSocketNaming
         if (!lease.IsValid)
         {
             anchor.Dispose();
-            return CapResult<UnixSocketName>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<UnixSocketName>.Fail(HandleLease.ClosedError);
         }
 
         string address = Describe(lease.Descriptor, name);

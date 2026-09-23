@@ -333,6 +333,7 @@ public sealed class CapFile : IDisposable
         CapResult<SafeFileHandle> copy = PlatformOps.Current.DuplicateFile(_handle);
         if (!copy.IsSuccess)
         {
+            FailureTranslation.ThrowIfClosed(copy.Error);
             throw new CapIOException(
                 $"The open file could not be copied, so no stream could be given one of its " +
                 $"own. ({copy.Error})");

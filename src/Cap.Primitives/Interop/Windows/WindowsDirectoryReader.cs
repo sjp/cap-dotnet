@@ -94,8 +94,7 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
 
         if (_buffer is null)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         if (!_buffered)
@@ -183,8 +182,7 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
         using HandleLease lease = _handle.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         IoStatusBlock status = default;

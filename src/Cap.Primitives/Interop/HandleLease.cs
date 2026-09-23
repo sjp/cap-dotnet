@@ -40,6 +40,18 @@ internal readonly ref struct HandleLease
         _acquired = acquired;
     }
 
+    /// <summary>
+    /// The failure to report for a handle found closed, in place of the call that was not made.
+    /// </summary>
+    /// <remarks>
+    /// Carries the code the platform itself uses for a handle that is not open, so that a log
+    /// line reads naturally, under a category of its own so that the caller-facing layer can
+    /// tell a disposal on another thread from anything the platform said.
+    /// </remarks>
+    public static CapError ClosedError => OperatingSystem.IsWindows()
+        ? CapError.Create(CapErrorCategory.Closed, CapErrorSource.NtStatus, Windows.NtStatusCodes.STATUS_INVALID_HANDLE)
+        : CapError.Create(CapErrorCategory.Closed, CapErrorSource.Errno, Unix.PosixErrno.EBADF);
+
     /// <summary>True when the handle was open and is now pinned.</summary>
     public bool IsValid => _acquired;
 

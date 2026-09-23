@@ -118,7 +118,7 @@ alone — is in [paths.md](paths.md).
 | S12 | Windows reparse point whose header claims a length or a name offset outside the reply | Rejected; no read outside the returned bytes | Windows backend | `WindowsReparseDataTests.A_length_longer_than_the_reply_is_refused`, `.A_name_outside_the_data_is_refused`, `.A_truncated_reply_is_refused` |
 | S13 | Symlink at the *final* component of an operation that changes something | Acted on as a name, never followed — the link is removed, moved or linked to as itself, and its target is neither reached nor looked up. Keeps working under the policy that refuses every link, since a handle held in order to distrust a subtree's links must be able to clear them out | all backends | `DirMutationTests.Removing_a_symbolic_link_removes_the_link_and_not_its_target`, `.A_handle_that_refuses_to_follow_links_can_still_remove_one`, `.Removing_a_directory_refuses_a_link_that_points_at_one`; escape corpus: every case whose last component is a link, through every operation that changes something |
 | S14 | Symlink in a non-final component of an operation that changes something | Resolved exactly as it is for an open: the prefix goes through the same confined resolution, so a link that leaves the subtree cannot aim a removal or a rename outside it | all backends | `DirMutationTests.A_link_used_as_a_directory_component_cannot_carry_a_removal_outside`, `ResolveParentTests.A_link_that_leaves_the_subtree_is_refused`, `.A_link_used_as_a_directory_component_is_followed`; escape corpus: every case with a link before the last component, through every operation that changes something |
-| S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress harness | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it` |
+| S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress races | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it`, `.A_link_swapped_back_for_a_directory_before_it_is_read_is_looked_at_again`; stress races: `ResolverRaceTests`, `TreeRaceTests`, `DerivationRaceTests` — see §6.1 |
 
 The rows above are also encoded as a single table of cases that every backend is driven
 through, so that a disagreement between them fails a test rather than waiting for a
@@ -359,7 +359,9 @@ rule would forbid exactly the tests this section exists to protect.
 Disk quota, inode exhaustion, file-descriptor exhaustion, file count, and file size are out
 of scope. A caller holding a `Dir` can fill the volume. (Handle exhaustion *behaviour* is in
 scope to the extent that running out of descriptors must not cause a containment failure —
-the stress harness covers it — but preventing exhaustion is not.)
+`ExhaustionTests.Running_out_of_descriptors_fails_closed_and_leaves_nothing_open` covers it on
+Linux and macOS, and every stress race checks on every platform that it left nothing open —
+but preventing exhaustion is not.)
 
 One narrow exception, which is about the library's own appetite rather than the caller's.
 The component-by-component resolver holds a handle open for every directory level it has
@@ -437,8 +439,39 @@ exact instant between two steps, in
 `.A_rename_under_the_walk_does_not_redirect_it`. Both show resolution continuing into
 whatever was substituted and both show it staying beneath the root.
 
-The stress harness must additionally **quantify** the window rather than describe it, and
-the result belongs in this document.
+The stress races in `tests/Cap.Stress.Tests` measure it against a real kernel. An attacker
+with write access inside the sandbox changes the tree in a tight loop — on another thread, and
+for one race in another process — while an operation is repeated through it, and every object
+an operation reaches is identified afterwards by its volume and file number. A race fails if
+any attempt reaches an object outside the sandbox or one it cannot vouch for, changes anything
+outside, or leaves a descriptor open. The races run on every change at ten thousand attempts
+and nightly at a million per race and backend, and the nightly run writes its counts to the
+job summary.
+
+The window is measured by one race built for the purpose. Two directories take turns at `p`,
+and whichever is not in place has its `q` swapped for a stale one and back, so that at every
+instant the path `p/q/f` names a fresh file. Reaching a stale file means resolution saw `p`
+at one moment and `q` at another. On Linux, over a million resolutions (8 processors, one
+attacker thread):
+
+| Backend | Reached the file the path named | Steered to a different file inside | Reached outside |
+|---|--:|--:|--:|
+| `openat2` | 1,000,000 | 0 | 0 |
+| component walk | 999,995 | 5 | 0 |
+
+The rate depends on how fast the attacker can make its changes relative to the resolution,
+so the number to carry away is its order — a handful per million against an attacker doing
+nothing else — and not its exact value. The same run's other races, where the attacker swaps a
+directory for a link pointing outside, recreates a component as another kind of object, or
+replaces the last component of a write, came to between a third and two thirds of attempts
+refused as escapes on both backends, and none reaching outside.
+
+Two defects the races found were fixed rather than recorded. A handle disposed on another
+thread part-way through a call was reported as an unexplained I/O failure rather than as
+disposed; it now throws `ObjectDisposedException`, and the call was never made against the
+handle's number in either case. And the walk reported a name swapped between two of its
+steps as an invalid argument or a link loop; it now looks at the name again, within the link
+budget, as the kernel-atomic backend does with its own lost races.
 
 ### 6.2 `..` on the fallback path
 

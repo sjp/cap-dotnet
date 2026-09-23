@@ -356,7 +356,11 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
             if (!ok)
             {
-                return CapResult<string>.Fail(Win32Errors.ToError(win32));
+                // Not a reparse point at all, as opposed to one whose tag is not a link: the
+                // second is refused as a reparse point, the first is simply not a link.
+                return CapResult<string>.Fail(win32 == Win32Errors.ERROR_NOT_A_REPARSE_POINT
+                    ? CapError.Create(CapErrorCategory.NotALink, CapErrorSource.Win32, win32)
+                    : Win32Errors.ToError(win32));
             }
 
             if (!ReparseData.TryReadTarget(
@@ -465,8 +469,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<string>.Fail(CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE));
+            return CapResult<string>.Fail(HandleLease.ClosedError);
         }
 
         // The call reports the room it needs when the buffer is too small, so the loop runs
@@ -594,8 +597,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         return WriteAttributes(lease.Raw, attributes);
@@ -641,8 +643,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeDirHandle>.Fail(CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE));
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
         }
 
         // The empty name with the handle as the resolution root re-opens the object the
@@ -679,8 +680,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapResult<SafeFileHandle>.Fail(CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE));
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
         // Duplicated rather than re-opened by the empty name, which is how a directory copy
@@ -1091,8 +1091,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         fixed (char* characters = name)
@@ -1227,8 +1226,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = destinationParent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         int rootOffset = sizeof(nint);
@@ -1391,8 +1389,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         // An emptying mode is taken in two halves, and the first half is the one that can be
@@ -1710,8 +1707,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         fixed (char* characters = name)
@@ -1916,8 +1912,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         return lease.IsValid
             ? RefuseUnlessFilesystemObject(lease.Raw)
-            : CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            : HandleLease.ClosedError;
     }
 
     /// <summary>
@@ -2036,8 +2031,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         if (!lease.IsValid)
         {
             result = default;
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         return QueryAttributeTag(lease.Raw, out result);
@@ -2149,8 +2143,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         IoStatusBlock status = default;
@@ -2178,8 +2171,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_HANDLE);
+            return HandleLease.ClosedError;
         }
 
         IoStatusBlock status = default;

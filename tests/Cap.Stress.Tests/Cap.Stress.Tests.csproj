@@ -3,10 +3,15 @@
   <PropertyGroup>
     <RootNamespace>Cap.Stress.Tests</RootNamespace>
     <AssemblyName>Cap.Stress.Tests</AssemblyName>
+    <!-- The throwaway directory in tests/Scenarios, which each race is fought inside. -->
+    <CapUsesScratchTree>true</CapUsesScratchTree>
+    <!-- Every backend this host has, substituted in turn for the length of one test. -->
+    <CapRunsEachBackend>true</CapRunsEachBackend>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
   </ItemGroup>
 
 </Project>

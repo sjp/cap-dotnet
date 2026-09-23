@@ -148,8 +148,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeDirHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -184,8 +183,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeFileHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -256,8 +254,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeFileHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
         int flags = accessFlag | LinuxConstants.O_TMPFILE | LinuxConstants.O_CLOEXEC;
@@ -358,8 +355,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = directory.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<DirectoryReader>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<DirectoryReader>.Fail(HandleLease.ClosedError);
         }
 
         // Opened by the name a directory has for itself, which is the one name in the
@@ -393,8 +389,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<string>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<string>.Fail(HandleLease.ClosedError);
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -443,7 +438,11 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
                 if (written < 0)
                 {
-                    return CapResult<string>.Fail(LinuxErrno.ToError(errno));
+                    // The call's only reason to refuse its arguments, given a positive length,
+                    // is that the name holds something other than a link.
+                    return CapResult<string>.Fail(errno == PosixErrno.EINVAL
+                        ? CapError.Create(CapErrorCategory.NotALink, CapErrorSource.Errno, errno)
+                        : LinuxErrno.ToError(errno));
                 }
 
                 if (written < capacity)
@@ -474,7 +473,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -499,7 +498,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         // An empty name with AT_EMPTY_PATH asks about the descriptor itself, which is the
@@ -517,7 +516,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -539,7 +538,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         ReadOnlySpan<byte> empty = [0];
@@ -634,8 +633,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<string>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<string>.Fail(HandleLease.ClosedError);
         }
 
         // Built on the stack rather than interpolated, so that asking a handle where it is
@@ -670,7 +668,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = directory.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         return LinuxNative.FSync(lease.Descriptor) < 0
@@ -698,7 +696,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         return LinuxNative.FChmod(lease.Descriptor, UnixFileTypes.ModeFromPermissions(mode)) < 0
@@ -712,8 +710,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {
-            return CapResult<SafeDirHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
         }
 
         // Not dup(2): the copy it makes does not have the close-on-exec flag, so a process
@@ -739,8 +736,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
-            return CapResult<SafeFileHandle>.Fail(CapError.Create(
-                CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF));
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
         // The same reasoning as for a directory copy: the plain duplication call leaves the
@@ -769,7 +765,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -839,7 +835,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease toLease = toParent.Lease();
         if (!fromLease.IsValid || !toLease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
@@ -898,7 +894,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> nameScratch = stackalloc byte[PathScratchBytes];
@@ -939,7 +935,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease toLease = toParent.Lease();
         if (!lease.IsValid || !toLease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> fromScratch = stackalloc byte[PathScratchBytes];
@@ -979,7 +975,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];
@@ -1304,12 +1300,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// </param>
     /// <remarks>
     /// <para>
-    /// Two codes are ambiguous here and both have to be resolved, because the walk reacts to
-    /// them in opposite ways. A directory open that refuses links reports "not a directory"
-    /// for a symbolic link and for a plain file alike — the link is not a directory, which is
-    /// true and useless. And the link-loop code covers both a link the open declined to
-    /// follow and a chain of links too long to follow, which are "read it and carry on" and
-    /// "stop" respectively.
+    /// One code is ambiguous here and has to be resolved, because the walk reacts to its two
+    /// meanings in opposite ways: a directory open that refuses links reports "not a
+    /// directory" for a symbolic link and for a plain file alike — the link is not a
+    /// directory, which is true and useless.
     /// </para>
     /// <para>
     /// So the name is asked about again, without following it. That is a second call, on the
@@ -1325,11 +1319,24 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         int errno,
         bool noFollow)
     {
-        if (noFollow && errno is LinuxErrno.ELOOP or PosixErrno.ENOTDIR)
+        // An open of one name that refuses to follow links fails with the loop code for one
+        // reason only: the name was a link. Asking again whether it still is could only find
+        // that it has since changed, and the walk learns that for itself when it reads the
+        // link -- reporting a loop here instead would call a lost race a chain too long.
+        if (noFollow && errno == LinuxErrno.ELOOP)
+        {
+            return CapError.Create(CapErrorCategory.SymbolicLink, CapErrorSource.Errno, errno);
+        }
+
+        if (noFollow && errno == PosixErrno.ENOTDIR)
         {
             int flags = LinuxConstants.AT_SYMLINK_NOFOLLOW | LinuxConstants.AT_NO_AUTOMOUNT;
+            // A directory now, though the open found something that was not one: the name
+            // was swapped between the two calls, most often from a link. Reported as the link it
+            // most likely was, so that the walk goes on to read it, finds it is not one, and
+            // looks at the name again -- a lost race, not an answer about the caller's path.
             if (StatInto(directoryFd, name, flags, out CapNodeInfo info).IsSuccess &&
-                info.Type == CapNodeType.SymbolicLink)
+                info.Type is CapNodeType.SymbolicLink or CapNodeType.Directory)
             {
                 return CapError.Create(CapErrorCategory.SymbolicLink, CapErrorSource.Errno, errno);
             }
@@ -1400,7 +1407,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         using HandleLease lease = root.Lease();
         if (!lease.IsValid)
         {
-            return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, PosixErrno.EBADF);
+            return HandleLease.ClosedError;
         }
 
         Span<byte> scratch = stackalloc byte[PathScratchBytes];

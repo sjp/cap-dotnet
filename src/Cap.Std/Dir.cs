@@ -46,9 +46,10 @@ namespace Cap.Std;
 /// <strong>Thread safety.</strong> Instances are safe for concurrent use by any number of
 /// threads. The underlying descriptor or kernel handle is, and the wrapper keeps it alive
 /// across every call it is used in, so a disposal racing an operation on another thread ends
-/// as a failed operation and never as a call landing on an unrelated object that has taken
-/// the handle's number. This is worth stating because the opposite assumption is the usual
-/// one for a disposable type holding a native resource.
+/// as that operation throwing <see cref="ObjectDisposedException"/> — the same answer it
+/// would have had if the disposal had come first — and never as a call landing on an
+/// unrelated object that has taken the handle's number. This is worth stating because the
+/// opposite assumption is the usual one for a disposable type holding a native resource.
 /// </para>
 /// <para>
 /// <strong>Disposal is not a tree.</strong> Disposing a handle closes that handle and nothing
@@ -860,6 +861,7 @@ public sealed partial class Dir : IDisposable
     public Dir Clone()
     {
         CapError error = CloneCore(out Dir? clone);
+        FailureTranslation.ThrowIfClosed(error);
         return error.IsSuccess
             ? clone!
             : throw new CapIOException($"The directory handle could not be duplicated. ({error})");
@@ -919,6 +921,7 @@ public sealed partial class Dir : IDisposable
     public Dir Restrict(SymlinkPolicy policy)
     {
         CapError error = RestrictCore(policy, out Dir? restricted);
+        FailureTranslation.ThrowIfClosed(error);
         return error.IsSuccess
             ? restricted!
             : throw new CapIOException(
