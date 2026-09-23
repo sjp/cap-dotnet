@@ -13,7 +13,8 @@ implementation detail.
 | Native relative open with a `RootDirectory` handle | Windows | narrowed, not eliminated |
 
 On the kernel-atomic backend a path costs exactly one syscall however many names it has,
-which is what leaves no window between components. The other two spend one open per name.
+which is what leaves no window between components. The other two spend one open per name;
+[benchmarks.md](benchmarks.md) has what that costs, measured against `System.IO` on each.
 
 ## Forcing the fallback
 

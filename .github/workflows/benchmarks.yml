@@ -1,0 +1,81 @@
+name: Benchmarks
+
+# ---------------------------------------------------------------------------------------
+# The full suite, every operation against its System.IO baseline, on each platform and with
+# each resolution backend the platform has. Run by hand: the enumeration and tree benchmarks
+# build a hundred and fifty thousand files per backend and take long enough that they are not
+# worth running on every change. The per-change gate on the hot paths is in ci.yml.
+#
+# Each leg writes its tables to the job summary and uploads BenchmarkDotNet's reports. The
+# GitHub-flavoured Markdown report is the one the tables in docs/benchmarks.md are taken from.
+# ---------------------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: BenchmarkDotNet filter
+        default: "*"
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CI: true
+
+jobs:
+  benchmarks:
+    name: benchmarks (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: linux-arm64
+            os: ubuntu-24.04-arm
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Run the suite
+        shell: bash
+        env:
+          FILTER: ${{ inputs.filter || '*' }}
+        run: >
+          dotnet run --configuration Release --project bench/Cap.Benchmarks --
+          --filter "$FILTER" --exporters github json
+
+      - name: Write the tables to the job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## ${{ matrix.name }}"
+            for report in BenchmarkDotNet.Artifacts/results/*-report-github.md; do
+              [ -e "$report" ] || continue
+              echo
+              cat "$report"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ matrix.name }}
+          path: BenchmarkDotNet.Artifacts/results/
+          if-no-files-found: ignore

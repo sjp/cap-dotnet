@@ -62,6 +62,14 @@ process outranks the permission system. On Unix that means not running as root. 
 an administrator token is fine, and in fact necessary to create the symlinks the suite
 attacks; what must not be enabled is a backup, restore or take-ownership privilege.
 
+```bash
+dotnet run -c Release --project bench/Cap.Benchmarks -- --filter '*'
+```
+
+runs the benchmarks: each operation against its `System.IO` equivalent, once per resolution
+backend the machine has. [docs/benchmarks.md](docs/benchmarks.md) has the results and the
+regression gate CI holds the hot paths to.
+
 ## Security
 
 Escapes are vulnerabilities; please report them privately. See

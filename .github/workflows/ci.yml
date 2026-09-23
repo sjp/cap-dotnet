@@ -271,6 +271,43 @@ jobs:
         run: build/ci/verify-analyzer-package.sh "$RUNNER_TEMP/analyzer-package"
 
   # ---------------------------------------------------------------------------------
+  # The hot-path benchmarks against the committed figures in bench/baselines. Time is
+  # compared as the ratio to the System.IO baseline measured in the same run, so a runner
+  # that is slower today does not fail the gate and a library that is slower does; see
+  # docs/benchmarks.md. A platform with no committed baseline runs and reports but gates
+  # nothing: its figures are in the uploaded artifact, ready to be committed.
+  # ---------------------------------------------------------------------------------
+  benchmark-gate:
+    name: benchmark gate (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both Linux backends, as separate jobs inside the one run.
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Run the hot-path benchmarks and compare
+        run: dotnet run --configuration Release --project bench/Cap.Benchmarks -- gate
+      - name: Upload the figures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-gate-${{ matrix.name }}
+          path: BenchmarkDotNet.Artifacts/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------------
   lint:
     name: format + analyzers
     runs-on: ubuntu-latest

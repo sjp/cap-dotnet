@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using Cap.Primitives;
@@ -592,22 +593,38 @@ public sealed partial class Dir
     /// Reads a file from the beginning until it stops giving anything back.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The length is a starting estimate and never a stopping condition. A file can grow
     /// while it is being read, and several kinds of file report no length at all while still
     /// having contents, so the loop ends when a read returns nothing rather than when a
     /// counter reaches a number decided beforehand.
+    /// </para>
+    /// <para>
+    /// Finding that end is the one extra read, and it is made into a single spare byte rather
+    /// than into a larger array. The usual file is exactly as long as it said, fills the buffer
+    /// on the first read, and has nothing more to give; growing the buffer to ask would
+    /// allocate twice the file and then a third copy to trim it back, for an answer that is
+    /// almost always "nothing". The buffer grows only once that byte has actually arrived.
+    /// </para>
     /// </remarks>
     private static byte[] ReadToEnd(CapFile file)
     {
         long length = file.Length;
         byte[] buffer = new byte[Capacity(length)];
         int filled = 0;
+        Span<byte> probe = stackalloc byte[1];
 
         while (true)
         {
             if (filled == buffer.Length)
             {
-                Array.Resize(ref buffer, buffer.Length == 0 ? GrowthStep : buffer.Length * 2);
+                if (file.Read(probe, filled) == 0)
+                {
+                    break;
+                }
+
+                Grow(ref buffer);
+                buffer[filled++] = probe[0];
             }
 
             int read = file.Read(buffer.AsSpan(filled), filled);
@@ -633,24 +650,42 @@ public sealed partial class Dir
         long length = file.Length;
         byte[] buffer = new byte[Capacity(length)];
         int filled = 0;
+        byte[] probe = ArrayPool<byte>.Shared.Rent(1);
 
-        while (true)
+        try
         {
-            if (filled == buffer.Length)
+            while (true)
             {
-                Array.Resize(ref buffer, buffer.Length == 0 ? GrowthStep : buffer.Length * 2);
+                if (filled == buffer.Length)
+                {
+                    int extra = await file
+                        .ReadAsync(probe.AsMemory(0, 1), filled, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    if (extra == 0)
+                    {
+                        break;
+                    }
+
+                    Grow(ref buffer);
+                    buffer[filled++] = probe[0];
+                }
+
+                int read = await file
+                    .ReadAsync(buffer.AsMemory(filled), filled, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (read == 0)
+                {
+                    break;
+                }
+
+                filled += read;
             }
-
-            int read = await file
-                .ReadAsync(buffer.AsMemory(filled), filled, cancellationToken)
-                .ConfigureAwait(false);
-
-            if (read == 0)
-            {
-                break;
-            }
-
-            filled += read;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(probe);
         }
 
         if (filled != buffer.Length)
@@ -660,6 +695,10 @@ public sealed partial class Dir
 
         return buffer;
     }
+
+    /// <summary>Makes room in a whole-file read's buffer once the file has proved longer than it.</summary>
+    private static void Grow(ref byte[] buffer) =>
+        Array.Resize(ref buffer, buffer.Length == 0 ? GrowthStep : buffer.Length * 2);
 
     /// <summary>
     /// The first allocation for a whole-file read, from the length the file reports.

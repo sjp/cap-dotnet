@@ -21,8 +21,14 @@ namespace Cap.Benchmarks;
 /// and putting the two side by side would invite reading the gap as a cost of safety rather
 /// than as two functions doing different things.
 /// </para>
+/// <para>
+/// Without a <c>System.IO</c> row there is no ratio to hold time to, so the regression gate
+/// watches this class for allocation and for each row's time relative to the single-component
+/// parse. The allocation is the part that matters: any byte at all fails it.
+/// </para>
 /// </remarks>
 [MemoryDiagnoser]
+[BenchmarkCategory(Categories.HotPath)]
 public class CapPathBenchmarks
 {
     private const string SingleComponent = "config.json";
