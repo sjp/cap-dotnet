@@ -42,7 +42,7 @@ src/Cap.Net/           capability sockets: a Pool of permitted endpoints
 src/Cap.Time/          the system clock as a TimeProvider, behind a token
 src/Cap.Rand/          OS entropy behind a token, and a seeded stream for tests
 src/Cap.Directories/   well-known project directories as Dir handles
-src/Cap.Analyzers/     Roslyn analyzers banning ambient System.IO in consuming code
+src/Cap.Analyzers/     Roslyn analyzer shipped in Cap.Std: ambient IO, clock and entropy
 tests/                 unit, adversarial escape corpus, TOCTOU stress, property tests
 fuzz/                  libFuzzer harness and the inputs it has saved
 bench/                 BenchmarkDotNet, each operation against its System.IO baseline
@@ -93,6 +93,10 @@ library's own.
 [docs/randomness.md](docs/randomness.md) covers the randomness capability: the operating
 system's generator, handed out only against a token, the seeded stream for tests that cannot
 be passed where the secure one is required, and the exact algorithm that stream is fixed to.
+
+[docs/analyzers.md](docs/analyzers.md) covers the analyzer that ships in the `Cap.Std`
+package: the rules, which are on by default and which a project turns on, the one line that
+makes ambient `System.IO` a build error, and how to extend its lists.
 
 [docs/directories.md](docs/directories.md) covers the project-directories capability: an
 application's configuration, data, cache, state and runtime directories, found once by the

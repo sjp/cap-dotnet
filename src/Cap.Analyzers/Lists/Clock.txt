@@ -1,0 +1,17 @@
+# CAP0006: the system clock, read or waited on from anywhere in the process.
+#
+# Same format as the BannedSymbols.txt files read by Microsoft.CodeAnalysis.BannedApiAnalyzers:
+# one documentation-comment ID per line, then optionally `;` and the message to show. A method
+# written without a parameter list stands for every overload of it.
+
+P:System.DateTime.Now;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTime.UtcNow;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTime.Today;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTimeOffset.Now;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.DateTimeOffset.UtcNow;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
+P:System.TimeProvider.System;Is the system clock itself. Take it from Cap.Time.CapClock, behind a token, and pass it down.
+M:System.Threading.Thread.Sleep;Waits on the system clock. Use Task.Delay with a TimeProvider that was passed in.
+M:System.Threading.Tasks.Task.Delay(System.Int32);Waits on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken);Waits on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan);Waits on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken);Waits on the system clock. Use the overload that takes a TimeProvider.

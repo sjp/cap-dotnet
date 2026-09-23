@@ -21,4 +21,19 @@
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" PrivateAssets="all" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      The built-in lists, one per rule, in the BannedSymbols.txt format. Embedded rather than
+      shipped as files so that the analyzer cannot be separated from what it bans; a project
+      adds to them with a CapBannedSymbols.txt of its own.
+    -->
+    <EmbeddedResource Include="Lists/*.txt" LogicalName="Cap.Analyzers.Lists.%(Filename)%(Extension)" />
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cap.Analyzers.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -352,9 +352,10 @@ read `/proc/self/mem`. Containment is a property of *this API*, not of the proce
 cap-dotnet is the right tool when the untrusted thing is **data** — a path, a filename, an
 archive entry, a config value. It is the wrong tool, by itself, when the untrusted thing is
 **code**. For that, pair it with an OS-level sandbox (seccomp, AppContainer, a container, a
-Wasm runtime). The shipped Roslyn analyzer narrows this gap for *cooperating* code by making
-ambient `System.IO` a build error, but a compiler diagnostic is not a security boundary and
-must never be described as one.
+Wasm runtime). The shipped Roslyn analyzer narrows this gap for *cooperating* code: an
+assembly that opts in with `[assembly: CapabilityStrict]` gets a build error for ambient
+`System.IO`, sockets, clock and entropy (see [analyzers.md](analyzers.md)). But a compiler
+diagnostic is not a security boundary and must never be described as one.
 
 ### 5.2 Not a defense against a privileged attacker
 

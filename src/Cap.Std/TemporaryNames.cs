@@ -81,9 +81,9 @@ internal static class TemporaryNames
         // the directory the object goes in, and the bytes only decide what it is called there,
         // never where it can reach. Asking for ambient authority to name a file inside a
         // directory the caller was given would record, as an escape, something that is not one.
-#pragma warning disable RS0030
+#pragma warning disable CAP0007
         RandomNumberGenerator.Fill(entropy);
-#pragma warning restore RS0030
+#pragma warning restore CAP0007
 
         Span<char> name = stackalloc char[Prefix.Length + (EntropyBytes * 8 / 5)];
         Prefix.CopyTo(name);

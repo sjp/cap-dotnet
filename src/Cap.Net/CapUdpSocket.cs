@@ -96,7 +96,10 @@ public sealed class CapUdpSocket : IDisposable
         var socket = new Socket(endpoint.AddressFamily, SocketType.Dgram, ProtocolType.Udp);
         try
         {
+            // Checked against the pool above where the port was named, and below where it was not.
+#pragma warning disable CAP0002
             socket.Bind(endpoint);
+#pragma warning restore CAP0002
             pool.Demand(SocketEndpoints.Local(socket), "receive at");
 
             return new CapUdpSocket(socket, pool);
@@ -122,7 +125,9 @@ public sealed class CapUdpSocket : IDisposable
         ArgumentNullException.ThrowIfNull(endpoint);
 
         Pool.Demand(endpoint, "send to");
+#pragma warning disable CAP0002 // Checked against the pool on the line above.
         _socket.Connect(endpoint);
+#pragma warning restore CAP0002
         Pool.Demand(SocketEndpoints.Remote(_socket), "send to");
     }
 
@@ -137,7 +142,9 @@ public sealed class CapUdpSocket : IDisposable
         ArgumentNullException.ThrowIfNull(destination);
 
         Pool.Demand(destination, "send to");
+#pragma warning disable CAP0002 // Checked against the pool on the line above.
         return _socket.SendTo(buffer, SocketFlags.None, destination);
+#pragma warning restore CAP0002
     }
 
     /// <inheritdoc cref="SendTo"/>
@@ -152,7 +159,9 @@ public sealed class CapUdpSocket : IDisposable
         ArgumentNullException.ThrowIfNull(destination);
 
         Pool.Demand(destination, "send to");
+#pragma warning disable CAP0002 // Checked against the pool on the line above.
         return _socket.SendToAsync(buffer, SocketFlags.None, destination, cancellationToken);
+#pragma warning restore CAP0002
     }
 
     /// <summary>Sends one datagram to the peer this socket was pointed at.</summary>

@@ -1,21 +1,22 @@
 <Project>
 
   <!--
-    Ambient-authority ban, an early stand-in for the Cap.Analyzers package.
+    The ambient-authority ban on this library's own assemblies, enforced by the analyzer that
+    ships to consumers in the Cap.Std package. The rules it leaves off for consumers are made
+    errors for src/ in .editorconfig: nothing here may reach the filesystem, the network, the
+    clock or entropy except through the capability that stands for it.
 
-    build/BannedSymbols.Common.txt  applies to every assembly under src/.
-    build/BannedSymbols.Primitives.txt  additionally bans System.IO.Path, which silently
-    rewrites paths (lexical `..` collapsing, Windows trailing-dot stripping) and is
-    therefore unusable for containment decisions. It applies to the assemblies that resolve
-    names, which set CapBanSystemIoPath.
+    build/CapBannedSymbols.Primitives.txt  additionally bans System.IO.Path, which silently
+    rewrites paths (lexical `..` collapsing, Windows trailing-dot stripping) and is therefore
+    unusable for containment decisions. It applies to the assemblies that resolve names,
+    which set CapBanSystemIoPath.
   -->
-  <ItemGroup Condition="'$(CapIsProductCode)' == 'true'">
-    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <AdditionalFiles Include="$(MSBuildThisFileDirectory)build/BannedSymbols.Common.txt" />
-    <AdditionalFiles Include="$(MSBuildThisFileDirectory)build/BannedSymbols.Primitives.txt"
+  <ItemGroup Condition="'$(CapIsProductCode)' == 'true' and '$(MSBuildProjectName)' != 'Cap.Analyzers'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)src/Cap.Analyzers/Cap.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)build/CapBannedSymbols.Primitives.txt"
                      Condition="'$(CapBanSystemIoPath)' == 'true'" />
   </ItemGroup>
 

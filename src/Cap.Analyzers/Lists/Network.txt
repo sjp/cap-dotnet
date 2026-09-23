@@ -1,0 +1,19 @@
+# CAP0002: the network reached by address, with no pool of granted endpoints standing behind it.
+#
+# Same format as the BannedSymbols.txt files read by Microsoft.CodeAnalysis.BannedApiAnalyzers:
+# one documentation-comment ID per line, then optionally `;` and the message to show. A method
+# written without a parameter list stands for every overload of it.
+
+M:System.Net.Sockets.Socket.Bind;Binds whatever address it is given. Bind through a Cap.Net.Pool, which checks the address against what was granted.
+M:System.Net.Sockets.Socket.Connect;Connects to whatever address it is given. Connect through a Cap.Net.Pool, which checks the address against what was granted.
+M:System.Net.Sockets.Socket.ConnectAsync;Connects to whatever address it is given. Connect through a Cap.Net.Pool, which checks the address against what was granted.
+M:System.Net.Sockets.Socket.BeginConnect;Connects to whatever address it is given. Connect through a Cap.Net.Pool, which checks the address against what was granted.
+M:System.Net.Sockets.Socket.SendTo;Sends to whatever address it is given. Use Cap.Net.CapUdpSocket, which checks each destination against a pool.
+M:System.Net.Sockets.Socket.SendToAsync;Sends to whatever address it is given. Use Cap.Net.CapUdpSocket, which checks each destination against a pool.
+M:System.Net.Sockets.Socket.BeginSendTo;Sends to whatever address it is given. Use Cap.Net.CapUdpSocket, which checks each destination against a pool.
+M:System.Net.Sockets.SocketTaskExtensions.ConnectAsync;Connects to whatever address it is given. Connect through a Cap.Net.Pool, which checks the address against what was granted.
+M:System.Net.Sockets.SocketTaskExtensions.SendToAsync;Sends to whatever address it is given. Use Cap.Net.CapUdpSocket, which checks each destination against a pool.
+T:System.Net.Sockets.TcpListener;Listens on whatever address it is given. Use Cap.Net.CapTcpListener, which binds through a pool.
+T:System.Net.Sockets.TcpClient;Connects to whatever host it is given. Use Cap.Net.CapTcpStream, which connects through a pool.
+T:System.Net.Sockets.UdpClient;Binds and sends to whatever address it is given. Use Cap.Net.CapUdpSocket, which checks against a pool.
+T:System.Net.Dns;Name resolution is itself an authority, and an answer somebody else controls. Resolve where the step is visible, and grant the addresses, not the name.

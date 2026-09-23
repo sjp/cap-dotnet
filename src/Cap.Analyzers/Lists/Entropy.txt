@@ -1,0 +1,12 @@
+# CAP0007: the operating system's entropy, or a generator standing in for it, taken from
+# anywhere in the process.
+#
+# Same format as the BannedSymbols.txt files read by Microsoft.CodeAnalysis.BannedApiAnalyzers:
+# one documentation-comment ID per line, then optionally `;` and the message to show. A method
+# written without a parameter list stands for every overload of it.
+
+T:System.Security.Cryptography.RandomNumberGenerator;Draws on the operating system's entropy. Take a Cap.Rand.CapRandom and pass it down.
+T:System.Random;Is neither a capability nor a cryptographic generator. Take a Cap.Rand.CapRandom and pass it down.
+M:System.Guid.NewGuid;Draws on the operating system's entropy. Take a Cap.Rand.CapRandom and pass it down.
+M:System.Guid.CreateVersion7;Draws on the operating system's entropy, and the overload without a timestamp on the system clock too. Take a Cap.Rand.CapRandom and pass it down.
+M:System.IO.Path.GetRandomFileName;Draws on the operating system's entropy. Take a Cap.Rand.CapRandom and pass it down, or let Cap.Std.CapTempFile choose the name.

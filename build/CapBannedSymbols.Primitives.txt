@@ -10,4 +10,4 @@
 # at a time against a directory handle, so there is nothing for it to be used for except
 # rebuilding a path, which is the technique the library exists to replace.
 
-T:System.IO.Path;Paths are parsed and resolved here, never rebuilt. See the notes in build/BannedSymbols.Primitives.txt for why.
+T:System.IO.Path;Paths are parsed and resolved here, never rebuilt. See the notes in build/CapBannedSymbols.Primitives.txt for why.

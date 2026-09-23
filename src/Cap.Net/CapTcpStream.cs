@@ -54,7 +54,10 @@ public sealed class CapTcpStream : CapSocketStream
         Socket socket = Prepare(pool, endpoint);
         try
         {
+            // Checked against the pool in Prepare, and the peer actually reached in Complete.
+#pragma warning disable CAP0002
             socket.Connect(endpoint);
+#pragma warning restore CAP0002
             return Complete(socket, pool);
         }
         catch
@@ -74,7 +77,10 @@ public sealed class CapTcpStream : CapSocketStream
         Socket socket = Prepare(pool, endpoint);
         try
         {
+            // Checked against the pool in Prepare, and the peer actually reached in Complete.
+#pragma warning disable CAP0002
             await socket.ConnectAsync(endpoint, cancellationToken).ConfigureAwait(false);
+#pragma warning restore CAP0002
             return Complete(socket, pool);
         }
         catch

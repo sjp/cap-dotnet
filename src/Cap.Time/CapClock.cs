@@ -64,8 +64,8 @@ public static class CapClock
 
         // The one place in the library that is allowed to name the ambient provider: this is
         // where the clock enters, behind the token.
-#pragma warning disable RS0030
+#pragma warning disable CAP0006
         return TimeProvider.System;
-#pragma warning restore RS0030
+#pragma warning restore CAP0006
     }
 }

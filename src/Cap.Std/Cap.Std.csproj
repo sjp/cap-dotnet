@@ -14,6 +14,25 @@
     <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" />
   </ItemGroup>
 
+  <!--
+    The analyzer travels in this package rather than in one of its own, so that a project
+    that takes a Dir also gets the rules about reaching around one. It is already built as
+    part of this project, because every assembly under src/ is analysed by it; packing only
+    has to pick the assembly up and place it where NuGet looks for analyzers.
+  -->
+  <PropertyGroup>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);IncludeCapAnalyzerInPackage</TargetsForTfmSpecificContentInPackage>
+  </PropertyGroup>
+
+  <Target Name="IncludeCapAnalyzerInPackage">
+    <MSBuild Projects="../Cap.Analyzers/Cap.Analyzers.csproj" Targets="GetTargetPath" RemoveProperties="TargetFramework">
+      <Output TaskParameter="TargetOutputs" ItemName="CapAnalyzerAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <TfmSpecificPackageFile Include="@(CapAnalyzerAssembly)" PackagePath="analyzers/dotnet/cs" />
+    </ItemGroup>
+  </Target>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Cap.Fs.Ext" />
     <InternalsVisibleTo Include="Cap.Net" />

@@ -70,8 +70,8 @@ public sealed class CapRandom : IRandomSource
     {
         // The one place in this library that is allowed to name the ambient generator: this
         // is where entropy enters, and the only way to reach it is through the token above.
-#pragma warning disable RS0030
+#pragma warning disable CAP0007
         RandomNumberGenerator.Fill(destination);
-#pragma warning restore RS0030
+#pragma warning restore CAP0007
     }
 }

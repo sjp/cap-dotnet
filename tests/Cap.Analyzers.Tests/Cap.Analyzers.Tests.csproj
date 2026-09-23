@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Analyzers.Tests</RootNamespace>
+    <AssemblyName>Cap.Analyzers.Tests</AssemblyName>
+    <!--
+      The compiler is handed the framework and this library as files, found through
+      Assembly.Location. This project is never published as a single file.
+    -->
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Analyzers/Cap.Analyzers.csproj" />
+    <!-- Compiled against by the test sources, so that they use the library as a consumer does. -->
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+</Project>

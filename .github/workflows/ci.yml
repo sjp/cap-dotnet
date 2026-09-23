@@ -254,6 +254,23 @@ jobs:
           exit 1
 
   # ---------------------------------------------------------------------------------
+  # The analyzer reaches consumers inside the Cap.Std package, not through a project
+  # reference, so the only proof that it arrives is to pack the package, install it into a
+  # project that has never seen this repository, and watch the rules fire there with the
+  # defaults the documentation promises.
+  # ---------------------------------------------------------------------------------
+  analyzer-package:
+    name: analyzer ships in Cap.Std
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Pack, install into a fresh consumer, and check the diagnostics
+        run: build/ci/verify-analyzer-package.sh "$RUNNER_TEMP/analyzer-package"
+
+  # ---------------------------------------------------------------------------------
   lint:
     name: format + analyzers
     runs-on: ubuntu-latest

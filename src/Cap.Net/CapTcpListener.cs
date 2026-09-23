@@ -77,7 +77,10 @@ public sealed class CapTcpListener : IDisposable
         var socket = new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
         try
         {
+            // Checked against the pool above where the port was named, and below where it was not.
+#pragma warning disable CAP0002
             socket.Bind(endpoint);
+#pragma warning restore CAP0002
 
             // Between the bind and the listen on purpose. The socket has a name by now but
             // nothing can connect to it yet, so a name the pool does not grant is given up

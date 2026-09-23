@@ -63,7 +63,10 @@ public sealed class CapUnixListener : IDisposable
         Socket socket = CapUnixStream.Create();
         try
         {
+            // The name was reached through the directory handle, not looked up by path.
+#pragma warning disable CAP0002
             socket.Bind(new UnixDomainSocketEndPoint(named.Address));
+#pragma warning restore CAP0002
             socket.Listen(backlog);
 
             return new CapUnixListener(socket);

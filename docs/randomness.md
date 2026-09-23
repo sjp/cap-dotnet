@@ -120,10 +120,12 @@ it takes a build rule like the one below.
 
 ## The rule inside this repository
 
-Every assembly under `src/` is built with ambient entropy banned
-(`build/BannedSymbols.Common.txt`): the `RandomNumberGenerator` type, `Guid.NewGuid`,
-`Guid.CreateVersion7` and `Path.GetRandomFileName`, alongside the existing ban on
-`System.Random`. Two places are exempt.
+Every assembly under `src/` is built with ambient entropy banned, by rule `CAP0007` of the
+analyzer that ships in the `Cap.Std` package (see [analyzers.md](analyzers.md)): the
+`RandomNumberGenerator` type, `Guid.NewGuid`, `Guid.CreateVersion7`,
+`Path.GetRandomFileName` and `System.Random`. A consuming project gets the same rule by
+turning `CAP0007` on, or by marking its assembly `[assembly: CapabilityStrict]`. Two places
+in this library are exempt.
 
 - **`CapRandom`** is where entropy enters, behind the token.
 - **The scratch-name generator in `Cap.Std`**, which picks names for `CapTempDir` and

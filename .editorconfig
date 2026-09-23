@@ -34,12 +34,6 @@ csharp_style_var_elsewhere = false:silent
 csharp_style_prefer_pattern_matching = true:warning
 csharp_prefer_braces = true:warning
 
-# --- Banned APIs ---------------------------------------------------------------------
-# RS0030 is the reason build/BannedSymbols.*.txt exists. It must be an error, not a
-# warning: a warning here would be routinely ignored and the ban would rot.
-dotnet_diagnostic.RS0030.severity = error
-dotnet_diagnostic.RS0031.severity = error
-dotnet_diagnostic.RS0035.severity = error
 
 # --- Trimming / AOT ------------------------------------------------------------------
 # These are errors in product code because a suppression is a design decision,
@@ -75,3 +69,16 @@ dotnet_diagnostic.CA1707.severity = none
 [tests/**/*.cs]
 # Shared guard files are linked into every test project, so folder and namespace differ.
 dotnet_diagnostic.IDE0130.severity = none
+
+[src/**.cs]
+# --- Ambient authority ---------------------------------------------------------------
+# The library's own assemblies reach nothing except through the capability that stands for
+# it. These rules are off for consumers until they opt in; here they are errors, not
+# warnings, because a warning would be routinely ignored and the ban would rot. The few
+# places that are allowed to reach the real thing -- where the clock, entropy and sockets
+# enter, behind a token or a pool check -- suppress the rule at that line and say why.
+dotnet_diagnostic.CAP0001.severity = error
+dotnet_diagnostic.CAP0002.severity = error
+dotnet_diagnostic.CAP0006.severity = error
+dotnet_diagnostic.CAP0007.severity = error
+dotnet_diagnostic.CAP0008.severity = error

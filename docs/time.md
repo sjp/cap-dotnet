@@ -84,10 +84,12 @@ else from reaching around it takes a build rule, like the one below.
 
 ## The rule inside this repository
 
-Every assembly under `src/` is built with the ambient clock banned (`build/BannedSymbols.Common.txt`):
+Every assembly under `src/` is built with the ambient clock banned, by rule `CAP0006` of the
+analyzer that ships in the `Cap.Std` package (see [analyzers.md](analyzers.md)):
 `DateTime.Now`, `UtcNow` and `Today`, `DateTimeOffset.Now` and `UtcNow`, `TimeProvider.System`,
 `Thread.Sleep`, and the `Task.Delay` overloads that take no provider. `CapClock` is the one
-place allowed to name `TimeProvider.System`.
+place allowed to name `TimeProvider.System`. A consuming project gets the same rule by
+turning `CAP0006` on, or by marking its assembly `[assembly: CapabilityStrict]`.
 
 `Stopwatch` is deliberately left alone. It measures an interval from a starting point of the
 caller's choosing and cannot say what time it is, which is why the record of ambient-authority

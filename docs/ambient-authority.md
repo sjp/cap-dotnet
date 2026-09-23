@@ -123,5 +123,10 @@ can be reasoned about from its signature: it can reach what is beneath that hand
 nothing else, whatever string it is given. A component that takes its own authority cannot,
 and the recording is how an application finds out that it has one.
 
+The analyzer that ships in the `Cap.Std` package checks the same thing at build time. Rule
+`CAP0003` warns on every `AmbientAuthority.Acquire()` outside the entry point, unless the
+code is marked `[CompositionRoot]` or its file is designated in `.editorconfig`. See
+[analyzers.md](analyzers.md#cap0003-where-authority-is-taken).
+
 `samples/AmbientAudit` is a working program shaped this way, with one deliberate offender in
 it.

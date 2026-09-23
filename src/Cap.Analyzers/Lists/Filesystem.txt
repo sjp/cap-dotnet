@@ -1,0 +1,38 @@
+# CAP0001: the filesystem reached by path, with no directory handle standing behind the path.
+#
+# Same format as the BannedSymbols.txt files read by Microsoft.CodeAnalysis.BannedApiAnalyzers:
+# one documentation-comment ID per line, then optionally `;` and the message to show. A method
+# written without a parameter list stands for every overload of it.
+
+T:System.IO.File;Opens by path, against the whole filesystem. Open it through a Cap.Std.Dir instead.
+T:System.IO.Directory;Reaches directories by path, against the whole filesystem. Use a Cap.Std.Dir instead.
+T:System.IO.FileInfo;Names a file by path, against the whole filesystem. Use Dir.GetMetadata, which returns a Cap.Std.CapMetadata.
+T:System.IO.DirectoryInfo;Names a directory by path, against the whole filesystem. Use a Cap.Std.Dir instead.
+T:System.IO.FileSystemInfo;Names an entry by path, against the whole filesystem. Use Dir.GetMetadata, which returns a Cap.Std.CapMetadata.
+T:System.IO.DriveInfo;Enumerates the machine's volumes, which is not something a capability grants.
+T:System.IO.FileSystemWatcher;Watches by path rather than through a handle.
+T:System.IO.Compression.ZipFile;Opens and extracts by path, against the whole filesystem. Open the archive and its destination through a Cap.Std.Dir.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileMode);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileMode,System.IO.FileAccess);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileMode,System.IO.FileAccess,System.IO.FileShare);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileMode,System.IO.FileAccess,System.IO.FileShare,System.Int32);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileMode,System.IO.FileAccess,System.IO.FileShare,System.Int32,System.Boolean);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileMode,System.IO.FileAccess,System.IO.FileShare,System.Int32,System.IO.FileOptions);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.FileStream.#ctor(System.String,System.IO.FileStreamOptions);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and take its stream.
+M:System.IO.StreamReader.#ctor(System.String);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamReader.#ctor(System.String,System.Boolean);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamReader.#ctor(System.String,System.Text.Encoding);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamReader.#ctor(System.String,System.Text.Encoding,System.Boolean);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamReader.#ctor(System.String,System.Text.Encoding,System.Boolean,System.Int32);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamReader.#ctor(System.String,System.IO.FileStreamOptions);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamReader.#ctor(System.String,System.Text.Encoding,System.Boolean,System.IO.FileStreamOptions);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and read its stream.
+M:System.IO.StreamWriter.#ctor(System.String);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and write its stream.
+M:System.IO.StreamWriter.#ctor(System.String,System.Boolean);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and write its stream.
+M:System.IO.StreamWriter.#ctor(System.String,System.Boolean,System.Text.Encoding);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and write its stream.
+M:System.IO.StreamWriter.#ctor(System.String,System.Boolean,System.Text.Encoding,System.Int32);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and write its stream.
+M:System.IO.StreamWriter.#ctor(System.String,System.IO.FileStreamOptions);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and write its stream.
+M:System.IO.StreamWriter.#ctor(System.String,System.Text.Encoding,System.IO.FileStreamOptions);Opens by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and write its stream.
+P:System.Environment.CurrentDirectory;The process's working directory is reachable from anywhere in the process. Pass a Cap.Std.Dir down instead.
+M:System.IO.Path.GetFullPath(System.String);Resolves against the process's working directory and collapses `..` without looking at the filesystem, which is the wrong answer whenever the component before it is a symbolic link.
+M:System.IO.Path.GetTempPath;Names the system's scratch directory, reachable from anywhere in the process. Use Cap.Std.CapTempDir.
+M:System.IO.Path.GetTempFileName;Creates a file in the system's scratch directory by path, and hands back a name another process can race. Use Cap.Std.CapTempFile.

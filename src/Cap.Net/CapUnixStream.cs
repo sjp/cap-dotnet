@@ -71,7 +71,10 @@ public sealed class CapUnixStream : CapSocketStream
         Socket socket = Create();
         try
         {
+            // The name was reached through the directory handle, not looked up by path.
+#pragma warning disable CAP0002
             socket.Connect(new UnixDomainSocketEndPoint(named.Address));
+#pragma warning restore CAP0002
             return new CapUnixStream(socket);
         }
         catch
@@ -93,9 +96,12 @@ public sealed class CapUnixStream : CapSocketStream
         Socket socket = Create();
         try
         {
+            // The name was reached through the directory handle, not looked up by path.
+#pragma warning disable CAP0002
             await socket.ConnectAsync(
                     new UnixDomainSocketEndPoint(named.Address), cancellationToken)
                 .ConfigureAwait(false);
+#pragma warning restore CAP0002
 
             return new CapUnixStream(socket);
         }
