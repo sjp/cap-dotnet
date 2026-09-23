@@ -19,6 +19,10 @@
     <Project Path="tests/Cap.Directories.Tests/Cap.Directories.Tests.csproj" />
     <Project Path="tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj" />
     <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
+    <Project Path="tests/Cap.Fuzz.Tests/Cap.Fuzz.Tests.csproj" />
+  </Folder>
+  <Folder Name="/fuzz/">
+    <Project Path="fuzz/Cap.Fuzz/Cap.Fuzz.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/AmbientAudit/AmbientAudit.csproj" />
@@ -36,5 +40,7 @@
     <File Path="build/BannedSymbols.Primitives.txt" />
     <File Path="SECURITY.md" />
     <File Path="docs/threat-model.md" />
+    <File Path="docs/fuzzing.md" />
+    <File Path=".config/dotnet-tools.json" />
   </Folder>
 </Solution>

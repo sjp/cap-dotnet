@@ -24,6 +24,8 @@
     <InternalsVisibleTo Include="Cap.Escape.Tests" />
     <InternalsVisibleTo Include="Cap.Stress.Tests" />
     <InternalsVisibleTo Include="Cap.Benchmarks" />
+    <InternalsVisibleTo Include="Cap.Fuzz" />
+    <InternalsVisibleTo Include="Cap.Fuzz.Tests" />
   </ItemGroup>
 
 </Project>

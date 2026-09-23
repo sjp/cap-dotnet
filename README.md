@@ -43,7 +43,8 @@ src/Cap.Time/          the system clock as a TimeProvider, behind a token
 src/Cap.Rand/          OS entropy behind a token, and a seeded stream for tests
 src/Cap.Directories/   well-known project directories as Dir handles
 src/Cap.Analyzers/     Roslyn analyzers banning ambient System.IO in consuming code
-tests/                 unit, adversarial escape corpus, TOCTOU stress
+tests/                 unit, adversarial escape corpus, TOCTOU stress, property tests
+fuzz/                  libFuzzer harness and the inputs it has saved
 bench/                 BenchmarkDotNet, each operation against its System.IO baseline
 ```
 
@@ -69,6 +70,10 @@ Escapes are vulnerabilities; please report them privately. See
 
 [docs/paths.md](docs/paths.md) is the parsing contract — what a path is allowed to be, and
 what is deliberately never rewritten on the way through.
+
+[docs/fuzzing.md](docs/fuzzing.md) covers the fuzz targets and property tests: what each one
+checks, how to run the fuzzer and reproduce what it finds, and what to do when a finding
+reaches outside the sandbox.
 
 [docs/ambient-authority.md](docs/ambient-authority.md) covers the one way authority enters a
 process from outside, and how to make a running process list every place it did.

@@ -298,7 +298,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat)
     {
         stat = default;
-        if (handle is not SafeDirHandle directory || !TryResolveHandle(directory, out FakeNode? node))
+        if (!TryResolveHandle(handle, out FakeNode? node))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -743,7 +743,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         return value;
     }
 
-    private bool TryResolveHandle(SafeDirHandle handle, out FakeNode? node)
+    private bool TryResolveHandle(SafeHandle handle, out FakeNode? node)
     {
         node = null;
         if (handle.IsInvalid || handle.IsClosed)

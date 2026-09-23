@@ -300,6 +300,23 @@ or normalisation expects the entry to be reached where the volume folds names an
 it does not. The CI workflow runs the corpus on several filesystems, and against a bind mount
 prepared inside the sandbox root, which the corpus itself cannot create.
 
+### 4.9 Fuzzing and properties
+
+The corpus can only hold the attacks someone thought of. The code that decides containment is
+also run on inputs a machine chose, and checked for what must hold whatever the input. Three
+parts are targeted:
+
+- **the path parser**, compared with an independent restatement of its rules;
+- **the reader for reparse-point data**, which parses bytes an attacker inside the sandbox can
+  write, and is fed buffers that lie about their own lengths and offsets;
+- **the component walk**, over simulated trees whose links, mount points and depth the input
+  chooses. In every case the walk must look nowhere outside the sandbox, reach nothing
+  outside, change nothing outside and leave no handle open.
+
+Property tests apply these checks on every change. libFuzzer applies them nightly with
+coverage guidance. Every input the fuzzer has saved is replayed on every change, so a fault
+it once found cannot return unnoticed. [fuzzing.md](fuzzing.md) lists each check in full.
+
 #### Known differences between backends
 
 Where backends legitimately disagree, the corpus records the difference as the expectation for

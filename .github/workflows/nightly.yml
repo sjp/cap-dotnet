@@ -1,6 +1,9 @@
-name: Nightly stress
+name: Nightly stress and fuzzing
 
 # ---------------------------------------------------------------------------------------
+# Work too slow for every change: the stress races at full size, the fuzz targets for an hour
+# each, and the property tests at a million cases.
+#
 # The races in tests/Cap.Stress.Tests at full size. The same tests run on every change at a
 # size that finishes in seconds, which shows the harness still stages its races and still
 # tells their outcomes apart; a race lost once in a million attempts is only found here.
@@ -20,6 +23,9 @@ on:
       iterations:
         description: Attempts per race and backend
         default: "1000000"
+      fuzz_seconds:
+        description: Seconds per fuzz target
+        default: "3600"
 
 permissions:
   contents: read
@@ -68,3 +74,103 @@ jobs:
         run: |
           export CAPDOTNET_STRESS_REPORT="$GITHUB_STEP_SUMMARY"
           dotnet test tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj --configuration Release --no-build
+
+  # -------------------------------------------------------------------------------------
+  # The fuzz targets in fuzz/Cap.Fuzz, each under libFuzzer for an hour: path parsing, the
+  # reparse-point reader, and the walk over a simulated tree whose links the fuzzer chooses.
+  # Linux only, since the driver talks to the harness over System V shared memory. None of
+  # the targets touches the host filesystem, so what they find does not depend on the OS they
+  # run on.
+  #
+  # Each target starts from the escape corpus plus whatever inputs earlier runs kept because
+  # they reached something new, carried between runs in the Actions cache. A lost cache costs
+  # only the time to find those inputs again.
+  #
+  # An input that crashes or hangs a target fails the job and is uploaded as an artifact laid
+  # out as fuzz/regressions/<target>/<file>. Unzipped at the root of a checkout it lands where
+  # the replay tests look, and committing it makes it a regression test. Nothing is committed
+  # from here: this job holds a read-only token, and the artifact is kept for a week.
+  # -------------------------------------------------------------------------------------
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [cap-path, reparse-data, resolution]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore the inputs earlier runs kept
+        uses: actions/cache/restore@v4
+        with:
+          path: artifacts/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Seed from the escape corpus
+        env:
+          CAPDOTNET_FUZZ_SEEDS: ${{ github.workspace }}/artifacts/fuzz/corpus
+        run: >
+          dotnet test tests/Cap.Fuzz.Tests/Cap.Fuzz.Tests.csproj --configuration Release
+          --filter-method "*.Seeds_are_written_out_when_asked"
+
+      - name: Fuzz ${{ matrix.target }}
+        run: build/fuzz/run.sh ${{ matrix.target }} ${{ inputs.fuzz_seconds || '3600' }}
+
+      - name: Keep the inputs this run found
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: artifacts/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Collect the inputs that failed
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p findings
+          git ls-files --others --exclude-standard -z fuzz/regressions | xargs -0 --no-run-if-empty cp --parents -t findings
+          {
+            echo "### ${{ matrix.target }}: failing inputs"
+            echo
+            echo "Unzip the fuzz-findings-${{ matrix.target }} artifact at the root of a checkout, then run"
+            echo '`dotnet run --project fuzz/Cap.Fuzz -- replay ${{ matrix.target }} fuzz/regressions/${{ matrix.target }}`'
+            echo "to reproduce. See docs/fuzzing.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the inputs that failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-findings-${{ matrix.target }}
+          path: findings/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------------------
+  # The same property tests that run on every change at two thousand cases each, run here at
+  # a million. A property that fails once in a million cases is only found at this size.
+  # -------------------------------------------------------------------------------------
+  properties:
+    name: properties at full size
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Run the property tests at a million cases
+        env:
+          CAPDOTNET_PROPERTY_ITERATIONS: "1000000"
+        run: dotnet test tests/Cap.Fuzz.Tests/Cap.Fuzz.Tests.csproj --configuration Release

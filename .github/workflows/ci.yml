@@ -275,10 +275,7 @@ jobs:
 #   coverage-gate -> a committed threshold to gate on
 #
 # The stress races run here at a size that finishes in seconds, and at full size on the
-# schedule in nightly.yml.
-#
-# Still to add:
-#   - a nightly schedule for fuzzing, which is far too slow for per-PR. It is recorded as an
-#     acceptance criterion on its own work, so this note is a convenience rather than the
-#     only record.
+# schedule in nightly.yml. Fuzzing runs only on that schedule; what runs here is every input
+# it has saved, replayed through its target, and the property tests at a size that finishes
+# in seconds.
 # ---------------------------------------------------------------------------------------

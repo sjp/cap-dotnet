@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The libFuzzer harness. Built on its own and run on a schedule, never on a pull request:
+    see docs/fuzzing.md. The targets it runs live in Targets/ so that the replay tests in
+    tests/Cap.Fuzz.Tests can compile the same checks and hold every saved input to them.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cap.Fuzz</RootNamespace>
+    <AssemblyName>Cap.Fuzz</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <PackageReference Include="SharpFuzz" />
+  </ItemGroup>
+
+  <!-- The simulated filesystem the resolution target builds its trees in. -->
+  <ItemGroup>
+    <Compile Include="../../tests/Fakes/*.cs" Link="Fakes/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

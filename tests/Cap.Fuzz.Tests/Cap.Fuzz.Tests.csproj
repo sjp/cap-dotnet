@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Fuzz.Tests</RootNamespace>
+    <AssemblyName>Cap.Fuzz.Tests</AssemblyName>
+    <!-- Brings in tests/Fakes: the simulated filesystem the resolution target builds on. -->
+    <CapUsesPlatformFake>true</CapUsesPlatformFake>
+    <!-- The escape corpus names backends, so it needs their names to compile. -->
+    <CapRunsEachBackend>true</CapRunsEachBackend>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <PackageReference Include="CsCheck" />
+  </ItemGroup>
+
+  <!--
+    The fuzz targets themselves, compiled here as well as into the harness, so that every
+    saved input is held to exactly the checks the fuzzer applied when it saved it. And the
+    escape corpus, whose cases are the inputs the fuzzer starts from.
+  -->
+  <ItemGroup>
+    <Compile Include="../../fuzz/Cap.Fuzz/Targets/*.cs" Link="Targets/%(Filename)%(Extension)" />
+    <Compile Include="../Cap.Escape.Tests/EscapeCorpus.cs;../Cap.Escape.Tests/CorpusModel.cs"
+             Link="EscapeCorpus/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!--
+    The saved inputs, copied beside the binaries rather than read from the source tree, so the
+    tests run wherever the binaries were copied to.
+  -->
+  <ItemGroup>
+    <None Include="../../fuzz/regressions/**/*" LinkBase="regressions" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
