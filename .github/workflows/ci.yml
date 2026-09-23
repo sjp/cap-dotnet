@@ -73,6 +73,16 @@ jobs:
       - name: Build
         run: dotnet build CapDotnet.slnx --configuration Release
 
+      # ---------------------------------------------------------------------------------
+      # The escape corpus attacks a bind mount inside a sandbox root, and mounting needs a
+      # privilege the corpus must not hold. So the mount is made here, with sudo, and handed
+      # to the unprivileged test run by path.
+      # ---------------------------------------------------------------------------------
+      - name: Prepare a bind mount for the escape corpus
+        if: runner.os == 'Linux'
+        run: |
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+
       - name: Test
         env:
           # See docs/backends.md. Read by the capability probe in Cap.Primitives.
@@ -102,8 +112,6 @@ jobs:
   filesystems:
     name: escape corpus on ${{ matrix.fs }}
     runs-on: ubuntu-latest
-    # Non-blocking until the escape corpus has cases to run. See the note at the end of this file.
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -145,9 +153,17 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /mnt/captest
           mount | grep /mnt/captest
 
+      # Placed on the runner's own volume rather than the one under test: the fixture needs
+      # symbolic links, and vfat has none.
+      - name: Prepare a bind mount for the escape corpus
+        run: |
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+
       - name: Run the escape corpus against ${{ matrix.fs }}
         env:
-          # The escape corpus reads this to place its fixtures.
+          # The escape corpus reads this to place its fixtures. It probes the volume for what
+          # it can hold -- links, hard links, the characters Windows reserves, case and
+          # normalisation folding -- and adapts each case rather than assuming ext4.
           CAPDOTNET_TEST_ROOT: /mnt/captest
         run: >
           dotnet test tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj
@@ -255,7 +271,6 @@ jobs:
 # are deliberately *not* commented out: a job that does not exist is a job nobody
 # remembers to write. Each one drops its `continue-on-error` line once the code it exercises exists:
 #
-#   filesystems   -> the escape corpus
 #   nativeaot     -> AOT + trimming validation
 #   coverage-gate -> a committed threshold to gate on
 #

@@ -492,6 +492,11 @@ public sealed partial class Dir : IDisposable
     /// itself, with its stored target untouched — which, for a relative target, means it may
     /// name something different once it has arrived.
     /// </para>
+    /// <para>
+    /// A path ending in a separator, on either end, asks for a directory, and the move is
+    /// refused when the entry is anything else — a symbolic link to a directory included,
+    /// since the link is what would be moved.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ArgumentException">A path is not a usable name.</exception>
@@ -570,7 +575,8 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="linkPath"/> is not a usable name, or <paramref name="target"/> is empty.
+    /// <paramref name="linkPath"/> is not a usable name, or <paramref name="target"/> is empty or
+    /// contains a NUL character.
     /// </exception>
     /// <exception cref="SandboxEscapeException">
     /// <paramref name="linkPath"/> named something outside this handle's authority.
@@ -596,7 +602,9 @@ public sealed partial class Dir : IDisposable
     /// <param name="target">The text the link stores.</param>
     /// <returns>True when the link was created.</returns>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="target"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="target"/> is empty or contains a NUL character.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateSymlink(string linkPath, string target) =>
         Succeeded(SymlinkCore(linkPath, target, targetIsDirectory: false, out CapError error, out _), error);
@@ -616,7 +624,8 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="linkPath"/> is not a usable name, or <paramref name="target"/> is empty.
+    /// <paramref name="linkPath"/> is not a usable name, or <paramref name="target"/> is empty or
+    /// contains a NUL character.
     /// </exception>
     /// <exception cref="SandboxEscapeException">
     /// <paramref name="linkPath"/> named something outside this handle's authority.
@@ -642,7 +651,9 @@ public sealed partial class Dir : IDisposable
     /// <param name="target">The text the link stores.</param>
     /// <returns>True when the link was created.</returns>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
-    /// <exception cref="ArgumentException"><paramref name="target"/> is empty.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="target"/> is empty or contains a NUL character.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateDirSymlink(string linkPath, string target) =>
         Succeeded(SymlinkCore(linkPath, target, targetIsDirectory: true, out CapError error, out _), error);
@@ -1522,6 +1533,17 @@ public sealed partial class Dir : IDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(target);
 
+        // Refused here, as it is in a path, rather than left to the platform: the kernel reads
+        // a target up to its first NUL, so the link would store less than it was given, and
+        // whether the platform layer notices first is not something a caller should depend on.
+        if (target.Contains((char)0))
+        {
+            throw new ArgumentException(
+                "A symbolic link's target cannot contain a NUL character: it would be stored " +
+                "cut short at that point, as a different target from the one given.",
+                nameof(target));
+        }
+
         expected = ExpectedTarget.Name;
 
         CapPathError pathError = Locate(linkPath, out NameLookup lookup, out error);
@@ -1588,11 +1610,51 @@ public sealed partial class Dir : IDisposable
                     return error;
                 }
 
-                return rename
-                    ? PlatformOps.Current.RenameChild(
-                        source.Directory, source.Name, destination.Directory, destination.Name, replaceExisting)
-                    : PlatformOps.Current.CreateChildHardLink(
-                        source.Directory, source.Name, destination.Directory, destination.Name);
+                // A trailing separator on either end asks for the entry to be a directory, and
+                // the platform call never sees it: the split into components drops it, so it is
+                // applied here or not at all. The entry is looked at before it is moved, which
+                // leaves a window in which a directory can be swapped for something else under
+                // the same name. What slips through that window is a move of an entry beneath
+                // the same handle the caller named, which is the move a caller without the
+                // separator would have got, so nothing is reached that was not already in reach.
+                if (source.RequiresDirectory || destination.RequiresDirectory)
+                {
+                    CapError described = PlatformOps.Current.StatChild(source.Directory, source.Name, out CapNodeInfo info);
+                    if (described.IsFailure)
+                    {
+                        return described;
+                    }
+
+                    // A directory cannot be given a second name on any filesystem this runs on,
+                    // so for a link the only question left is which refusal to report.
+                    if (info.Type != CapNodeType.Directory || !rename)
+                    {
+                        return CapError.FromCategory(
+                            info.Type == CapNodeType.Directory ? CapErrorCategory.IsADirectory : CapErrorCategory.NotADirectory);
+                    }
+                }
+
+                if (rename)
+                {
+                    return PlatformOps.Current.RenameChild(
+                        source.Directory, source.Name, destination.Directory, destination.Name, replaceExisting);
+                }
+
+                CapError linked = PlatformOps.Current.CreateChildHardLink(
+                    source.Directory, source.Name, destination.Directory, destination.Name);
+
+                // Linux and macOS refuse a second name for a directory as a permission failure,
+                // which would reach the caller as the filesystem refusing access to something it
+                // can read perfectly well. The refusal is reclassified after the fact rather than
+                // anticipated, so that the link itself is still one call.
+                if (linked.Category == CapErrorCategory.PermissionDenied &&
+                    PlatformOps.Current.StatChild(source.Directory, source.Name, out CapNodeInfo refused).IsSuccess &&
+                    refused.Type == CapNodeType.Directory)
+                {
+                    return CapError.FromCategory(CapErrorCategory.IsADirectory);
+                }
+
+                return linked;
             }
         }
     }

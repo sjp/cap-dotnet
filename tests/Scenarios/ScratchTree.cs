@@ -32,12 +32,22 @@ internal sealed class ScratchTree : IDisposable
 
     /// <summary>Creates the directory under the system's temporary location.</summary>
     public ScratchTree()
+        : this(Path.GetTempPath())
+    {
+    }
+
+    /// <summary>Creates the directory inside a chosen location.</summary>
+    /// <param name="location">
+    /// An existing directory. A suite that has to be run against a particular filesystem is
+    /// pointed at a directory on it, since the system's temporary location is usually on
+    /// whichever one the host happened to be installed on.
+    /// </param>
+    public ScratchTree(string location)
     {
         // Opened by path and the scratch directory made inside it, rather than asking for one
         // in the temporary location directly, because the path of what comes back is then
         // known without having to ask the handle where it is -- and asking is a thing some
         // hosts cannot answer.
-        string location = Path.GetTempPath();
         using Dir parent = Dir.Open(location, AmbientAuthority.Acquire());
 
         _temp = CapTempDir.NewIn(parent);

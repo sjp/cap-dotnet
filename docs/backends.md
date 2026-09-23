@@ -48,6 +48,12 @@ Two knobs select it, checked in this order:
 A switch, not a `#if`. The binary that is tested with the fallback forced is bit-identical
 to the one users ship, which is the only way the fallback leg in CI means anything.
 
+The escape corpus does not depend on either knob to reach the walk. It sets the switch only
+while it builds one instance of the Linux backend, installs that instance for the length of
+each case, and runs every case on it as well as on the instance the kernel would have chosen.
+So a single run on a Linux machine covers both backends, and the walk it covers is the shipped
+code in its shipped fallback configuration rather than a test double.
+
 ## Distrusting the kind a directory read reports
 
 Reading a directory normally answers what each entry is as part of the same call, so listing

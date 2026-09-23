@@ -330,6 +330,35 @@ public sealed class DirMutationTests : IDisposable
         Assert.True(File.Exists(Host("source")));
     }
 
+    /// <summary>
+    /// A trailing separator insists on a directory at either end of a move, so it cannot move
+    /// a file.
+    /// </summary>
+    /// <remarks>
+    /// The separator is dropped when the path is split into names, and the platform's move is
+    /// handed only the name. So the requirement has to be applied before the move or it is not
+    /// applied at all — which would make <c>file/</c> and <c>file</c> the same request here and
+    /// different ones everywhere else.
+    /// </remarks>
+    [Fact]
+    public void A_name_spelled_as_a_directory_does_not_move_a_file()
+    {
+        File.WriteAllText(Host("file"), "contents");
+        Directory.CreateDirectory(Host("dir"));
+
+        using Dir root = OpenRoot();
+
+        Exception fromFile = Assert.ThrowsAny<IOException>(() => root.Rename("file/", root, "moved"));
+        Exception toFile = Assert.ThrowsAny<IOException>(() => root.Rename("file", root, "moved/"));
+        Assert.IsType<CapIOException>(fromFile, exactMatch: true);
+        Assert.IsType<CapIOException>(toFile, exactMatch: true);
+        Assert.True(File.Exists(Host("file")));
+        Assert.False(Path.Exists(Host("moved")));
+
+        root.Rename("dir/", root, "moved/");
+        Assert.True(Directory.Exists(Host("moved")));
+    }
+
     /// <summary>Asking for replacement replaces, which is how a file is published atomically.</summary>
     [Fact]
     public void A_move_replaces_the_destination_when_asked_to()
@@ -478,6 +507,27 @@ public sealed class DirMutationTests : IDisposable
         Assert.Equal("other", File.ReadAllText(Host("taken")));
     }
 
+    /// <summary>
+    /// A directory cannot be given a second name, and saying so is not a permission failure.
+    /// </summary>
+    /// <remarks>
+    /// Linux and macOS refuse it with the code they use for a permission problem, which would
+    /// otherwise reach a caller as the filesystem refusing access to a directory they can read.
+    /// </remarks>
+    [Fact]
+    public void A_hard_link_to_a_directory_is_refused_as_what_it_is()
+    {
+        Directory.CreateDirectory(Host("dir"));
+
+        using Dir root = OpenRoot();
+
+        Assert.IsType<CapIOException>(
+            Assert.ThrowsAny<Exception>(() => root.CreateHardLink("dir", root, "second")), exactMatch: true);
+        Assert.IsType<CapIOException>(
+            Assert.ThrowsAny<Exception>(() => root.CreateHardLink("dir/", root, "second")), exactMatch: true);
+        Assert.False(Path.Exists(Host("second")));
+    }
+
     // --- asking what is there -------------------------------------------------------------------
 
     /// <summary>A name that is taken is reported as taken.</summary>
@@ -590,6 +640,27 @@ public sealed class DirMutationTests : IDisposable
         Assert.Equal(
             "from",
             Assert.Throws<ArgumentException>(() => root.Rename("bad\0name", root, "landing")).ParamName);
+    }
+
+    /// <summary>
+    /// A link target with a NUL in it is refused as a bad argument, as a path with one is.
+    /// </summary>
+    /// <remarks>
+    /// The kernel reads a target only as far as the first NUL, so storing one would store a
+    /// shorter target than the caller wrote. It is refused before anything is created.
+    /// </remarks>
+    [Fact]
+    public void A_link_target_holding_a_nul_is_refused_as_an_argument()
+    {
+        using Dir root = OpenRoot();
+
+        Assert.Equal(
+            "target",
+            Assert.Throws<ArgumentException>(() => root.CreateSymlink("link", "plain\0/../../etc")).ParamName);
+        Assert.Equal(
+            "target",
+            Assert.Throws<ArgumentException>(() => root.CreateDirSymlink("link", "plain\0")).ParamName);
+        Assert.False(Path.Exists(Host("link")));
     }
 
     /// <summary>The reporting forms refuse the same paths, without building an exception.</summary>

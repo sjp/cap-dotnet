@@ -72,11 +72,12 @@ replace.
 
 ## 4. In scope: attacks that must be defended
 
-Each row must, by the time the adversarial escape corpus lands, name the test that covers
-it. A blank **Test** column is a visible reminder that the claim is unverified; prose in its
-place would hide the same gap. The rows still blank are the ones that need an operation this
-library does not yet expose — creating a link, renaming, hardlinking — or a host feature the
-suite cannot yet arrange.
+Each row names the test that covers it. Most name a case of the escape corpus, described in
+§4.8, which runs every attack it can arrange against every backend and through every operation
+that takes a path. A row the corpus cannot arrange — a crafted reparse point, a device name
+that only a parser bug could let through, an attacker racing the resolver — names the test
+that covers it elsewhere. The corpus checks this table: a row with nothing in its **Test**
+column, or one the corpus defends without saying so here, fails the build.
 
 The **Where** column names the component responsible for the defence. The three resolution
 backends are described in [backends.md](backends.md).
@@ -85,12 +86,12 @@ backends are described in [backends.md](backends.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| L1 | `..` component in caller input | Rejected at parse time; never collapsed lexically | path parsing | `CapPathParseTests.Rejects_parent_links_by_default` |
-| L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute` |
-| L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state` |
-| L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace`, `WindowsReservedNameTests.A_device_namespace_prefix_on_a_device_name_is_refused` |
-| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components` |
-| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused` |
+| L1 | `..` component in caller input | Rejected at parse time; never collapsed lexically | path parsing | `CapPathParseTests.Rejects_parent_links_by_default`; escape corpus: `parent`, `parent-twice`, `parent-after-descent`, `dot-parent-dot`, `parent-trailing`, `parent-that-would-collapse-to-inside`, `parent-far-past-the-root` |
+| L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute`; escape corpus: `absolute-*`, `windows-absolute`, `windows-absolute-forward-slashes` |
+| L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state`; escape corpus: `windows-root-relative`, `windows-drive-relative` |
+| L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace`, `WindowsReservedNameTests.A_device_namespace_prefix_on_a_device_name_is_refused`; escape corpus: `windows-unc`, `unc-forward-slashes`, `windows-device-namespace-*`, `device-namespace-forward-slashes`, `windows-object-manager-namespace` |
+| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components`; escape corpus: `empty`, `dot`, `dot-slash-dot`, `doubled-separator`, `dot-components`, `trailing-separator-*`, `nul-*` |
+| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused`; escape corpus: `component-too-long`, `path-too-long`, `longer-than-the-kernel-takes-at-once`, `deeper-than-the-walk-descends`, `longer-than-the-win32-path-limit` |
 
 `..` deserves a note. The obvious implementation — collapse `a/../b` to `b` before touching
 the disk — is **wrong**, because if `a` is a symlink to `/etc` then the kernel resolves
@@ -104,19 +105,19 @@ alone — is in [paths.md](paths.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| S1 | Symlink to an absolute path outside the sandbox | Rejected, under every policy | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-absolute-link` |
-| S2 | Relative symlink escaping via `..` | Rejected | component walk | `PortableWalkTests.A_link_that_climbs_out_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-parent-link` |
-| S3 | Symlink chain that stays inside | Followed, unless the handle's policy refuses every link | symlink policy; all backends | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_links_target_is_resolved_from_where_the_link_lives`, corpus cases `chain-within-budget`, `denied-chain` |
-| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped`, corpus cases `chain-beyond-budget`, `self-cycle`, `mutual-cycle` |
-| S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is`, corpus cases `link-as-middle-component`, `denied-link-as-middle-component` |
-| S6 | Dangling symlink pointing outside | Decided from the target **as stored**, before anything is looked up. A link that leaves is a containment refusal whether or not the place it names exists, because that is never asked; a link that dangles *inside* is an ordinary not-found | symlink policy; all backends | `SymlinkPolicyTests.An_escaping_link_never_reveals_whether_its_target_exists_to_the_walk`, `.…_to_the_confined_open`, corpus cases `escape-via-parent-link-target-exists` / `-absent`, `dangling-link-inside` |
-| S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | corpus cases `magic-link-to-a-process-root`, `magic-link-to-an-open-descriptor`, run on disk on Linux |
-| S8 | Windows junction / mount point (always absolute) | Rejected | Windows backend | `WindowsResolutionOnDiskTests.A_junction_is_refused_rather_than_followed`, `WindowsReparseDataTests.A_junction_is_never_relative` |
-| S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend; component walk | `WindowsReparseDataTests.A_tag_that_is_not_a_filesystem_link_yields_no_target`, `PortableWalkTests.A_reparse_point_that_is_not_a_link_is_never_followed` |
+| S1 | Symlink to an absolute path outside the sandbox | Rejected, under every policy | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-absolute-link`; escape corpus: `absolute-link-*` |
+| S2 | Relative symlink escaping via `..` | Rejected | component walk | `PortableWalkTests.A_link_that_climbs_out_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-parent-link`; escape corpus: `link-climbing-to-a-file-outside`, `link-to-the-parent*`, `link-to-a-sibling-outside`, `nested-link-climbing-out` |
+| S3 | Symlink chain that stays inside | Followed, unless the handle's policy refuses every link | symlink policy; all backends | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_links_target_is_resolved_from_where_the_link_lives`, corpus cases `chain-within-budget`, `denied-chain`; escape corpus: `link-to-a-file-inside`, `link-to-a-directory-inside`, `link-climbing-to-the-root-and-back`, `chain-inside` |
+| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped`, corpus cases `chain-beyond-budget`, `self-cycle`, `mutual-cycle`; escape corpus: `chain-of-five-ending-outside*`, `link-to-a-link-to-outside`, `self-cycle*`, `mutual-cycle`, `chain-beyond-the-budget` |
+| S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is`, corpus cases `link-as-middle-component`, `denied-link-as-middle-component`; escape corpus: every `*-as-a-component` case |
+| S6 | Dangling symlink pointing outside | Decided from the target **as stored**, before anything is looked up. A link that leaves is a containment refusal whether or not the place it names exists, because that is never asked; a link that dangles *inside* is an ordinary not-found | symlink policy; all backends | `SymlinkPolicyTests.An_escaping_link_never_reveals_whether_its_target_exists_to_the_walk`, `.…_to_the_confined_open`, corpus cases `escape-via-parent-link-target-exists` / `-absent`, `dangling-link-inside`; escape corpus: `dangling-link-*`, `TopologyTests.A_link_outside_is_refused_the_same_way_whether_or_not_its_target_exists` |
+| S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | corpus cases `magic-link-to-a-process-root`, `magic-link-to-an-open-descriptor`, run on disk on Linux; escape corpus: `magic-link-*` |
+| S8 | Windows junction / mount point (always absolute) | Rejected | Windows backend | `WindowsResolutionOnDiskTests.A_junction_is_refused_rather_than_followed`, `WindowsReparseDataTests.A_junction_is_never_relative`; escape corpus: `junction-*` |
+| S9 | Windows `IO_REPARSE_TAG_APPEXECLINK`, `IO_REPARSE_TAG_WCI_LINK`, unknown tags | Rejected — these are not filesystem links and must not be interpreted as such | Windows backend; component walk | `WindowsReparseDataTests.A_tag_that_is_not_a_filesystem_link_yields_no_target`, `PortableWalkTests.A_reparse_point_that_is_not_a_link_is_never_followed`; escape corpus: `WindowsTopologyTests.An_application_execution_alias_is_refused_rather_than_followed` |
 | S11 | Windows symbolic link whose stored target is spelled as a relative path but flagged as rooted | Rejected — the flag is what the filesystem acts on, so relativity is taken from it and never inferred from the spelling | Windows backend | `WindowsReparseDataTests.A_link_flagged_as_rooted_says_so_whatever_it_spells` |
 | S12 | Windows reparse point whose header claims a length or a name offset outside the reply | Rejected; no read outside the returned bytes | Windows backend | `WindowsReparseDataTests.A_length_longer_than_the_reply_is_refused`, `.A_name_outside_the_data_is_refused`, `.A_truncated_reply_is_refused` |
-| S13 | Symlink at the *final* component of an operation that changes something | Acted on as a name, never followed — the link is removed, moved or linked to as itself, and its target is neither reached nor looked up. Keeps working under the policy that refuses every link, since a handle held in order to distrust a subtree's links must be able to clear them out | all backends | `DirMutationTests.Removing_a_symbolic_link_removes_the_link_and_not_its_target`, `.A_handle_that_refuses_to_follow_links_can_still_remove_one`, `.Removing_a_directory_refuses_a_link_that_points_at_one` |
-| S14 | Symlink in a non-final component of an operation that changes something | Resolved exactly as it is for an open: the prefix goes through the same confined resolution, so a link that leaves the subtree cannot aim a removal or a rename outside it | all backends | `DirMutationTests.A_link_used_as_a_directory_component_cannot_carry_a_removal_outside`, `ResolveParentTests.A_link_that_leaves_the_subtree_is_refused`, `.A_link_used_as_a_directory_component_is_followed` |
+| S13 | Symlink at the *final* component of an operation that changes something | Acted on as a name, never followed — the link is removed, moved or linked to as itself, and its target is neither reached nor looked up. Keeps working under the policy that refuses every link, since a handle held in order to distrust a subtree's links must be able to clear them out | all backends | `DirMutationTests.Removing_a_symbolic_link_removes_the_link_and_not_its_target`, `.A_handle_that_refuses_to_follow_links_can_still_remove_one`, `.Removing_a_directory_refuses_a_link_that_points_at_one`; escape corpus: every case whose last component is a link, through every operation that changes something |
+| S14 | Symlink in a non-final component of an operation that changes something | Resolved exactly as it is for an open: the prefix goes through the same confined resolution, so a link that leaves the subtree cannot aim a removal or a rename outside it | all backends | `DirMutationTests.A_link_used_as_a_directory_component_cannot_carry_a_removal_outside`, `ResolveParentTests.A_link_that_leaves_the_subtree_is_refused`, `.A_link_used_as_a_directory_component_is_followed`; escape corpus: every case with a link before the last component, through every operation that changes something |
 | S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress harness | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it` |
 
 The rows above are also encoded as a single table of cases that every backend is driven
@@ -184,14 +185,14 @@ bullet.
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| W1 | Reserved device names: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused` |
-| W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`, `.Trailing_dots_and_spaces_do_not_hide_a_device` |
-| W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | `WindowsReservedNameTests.ReservedStems` |
-| W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Every_stream_spelling_of_a_reserved_name_is_refused` |
-| W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | `CapPathParseTests.Rejects_trailing_dot_or_space` |
-| W6 | 8.3 short names (`PROGRA~1`) aliasing a long name | Rejected. A component containing a tilde is opened and then asked what it is actually called; the handle is dropped if the two names disagree. A file genuinely named with a tilde answers with itself and is allowed | Windows backend | `WindowsResolutionOnDiskTests.A_short_name_alias_does_not_reach_the_object_it_aliases`, `.A_name_that_merely_contains_a_tilde_is_its_own_name` |
-| W7 | Wildcards `* ? < > "` reaching the native open | Rejected | Windows name validation | `CapPathParseTests.Rejects_invalid_windows_characters` |
-| W8 | A sandbox root named by a user-facing path that reaches a device rather than a directory | Rejected. The one open that resolves a path string interrogates the handle it got, rather than re-examining the path it was given | Windows backend | `WindowsResolutionOnDiskTests.The_first_directory_handle_refuses_what_is_not_a_filesystem_directory` |
+| W1 | Reserved device names: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`; escape corpus: `reserved-name *` |
+| W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`, `.Trailing_dots_and_spaces_do_not_hide_a_device`; escape corpus: `reserved-name *`, `trailing-dot-or-space *` |
+| W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | `WindowsReservedNameTests.ReservedStems`; escape corpus: `reserved-name *` |
+| W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Every_stream_spelling_of_a_reserved_name_is_refused`; escape corpus: `alternate-data-stream`, `default-data-stream`, `device-through-a-stream` |
+| W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | `CapPathParseTests.Rejects_trailing_dot_or_space`; escape corpus: `trailing-dot-or-space *` |
+| W6 | 8.3 short names (`PROGRA~1`) aliasing a long name | Rejected. A component containing a tilde is opened and then asked what it is actually called; the handle is dropped if the two names disagree. A file genuinely named with a tilde answers with itself and is allowed | Windows backend | `WindowsResolutionOnDiskTests.A_short_name_alias_does_not_reach_the_object_it_aliases`, `.A_name_that_merely_contains_a_tilde_is_its_own_name`; escape corpus: `WindowsTopologyTests.A_short_name_alias_does_not_reach_the_entry_it_aliases` |
+| W7 | Wildcards `* ? < > "` reaching the native open | Rejected | Windows name validation | `CapPathParseTests.Rejects_invalid_windows_characters`; escape corpus: `wildcard *` |
+| W8 | A sandbox root named by a user-facing path that reaches a device rather than a directory | Rejected. The one open that resolves a path string interrogates the handle it got, rather than re-examining the path it was given | Windows backend | `WindowsResolutionOnDiskTests.The_first_directory_handle_refuses_what_is_not_a_filesystem_directory`; escape corpus: `WindowsTopologyTests.A_root_named_by_a_path_to_a_device_is_not_opened` |
 | W9 | A device name that gets past the rules in W1–W5 — a name added to the reserved set after this was written, or one a future parser bug lets through | Rejected. Every handle the Windows backend produces is asked what kind of object it is, and anything but a file or directory on a filesystem is dropped before it reaches a caller | Windows backend | `WindowsDeviceHandleTests.A_handle_to_a_device_is_refused`, `.A_device_name_as_a_component_does_not_reach_a_device` |
 
 A parse-time blocklist is necessary but **not sufficient**: the set of device names is a
@@ -223,18 +224,18 @@ half that matters, `.Changing_the_case_of_a_refused_name_does_not_get_past_the_r
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | parser half only: `CapPathComponentTests.Components_are_returned_verbatim` |
-| M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | Windows half only: `WindowsResolutionOnDiskTests.Changing_the_case_of_a_refused_name_does_not_get_past_the_refusal` |
-| M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | `CapTempDirTests.The_directory_sits_beneath_the_system_temporary_location_under_its_own_name` |
+| M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | `CapPathComponentTests.Components_are_returned_verbatim`; escape corpus: `normalisation-variant-*`, run on every volume and folded where the volume folds |
+| M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | `WindowsResolutionOnDiskTests.Changing_the_case_of_a_refused_name_does_not_get_past_the_refusal`; escape corpus: `case-variant-*`, run on every volume and folded where the volume folds |
+| M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | `CapTempDirTests.The_directory_sits_beneath_the_system_temporary_location_under_its_own_name`; escape corpus: `TopologyTests.A_root_opened_through_a_link_is_confined_to_where_the_link_led`, `.A_temporary_location_that_is_a_link_can_be_a_root` |
 
 ### 4.5 Filesystem topology
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| T1 | Mount point or bind mount appearing under the sandbox | Documented; refusing to cross one available as a policy on every backend | `openat2` backend; component walk | `PortableWalkTests.A_mount_point_can_be_refused` |
-| T2 | Hardlink creation crossing the sandbox boundary | Requires a capability on *both* sides | `Dir` API | |
-| T3 | Rename crossing the boundary | Same: both `Dir`s required | `Dir` API | |
-| T4 | Pre-existing hardlink to an outside file, planted inside | **Not defendable** — see §6.3 | — | |
+| T1 | Mount point or bind mount appearing under the sandbox | Crossed, as descending into anything else is: the mount table is trusted. A step up from inside the mount lands in the sandbox, and a link inside it is held to the same root. Every backend's resolver can refuse to cross a mount, but no public member asks it to yet | `openat2` backend; component walk | `PortableWalkTests.A_mount_point_can_be_refused`; escape corpus: `TopologyTests.A_mount_inside_the_root_is_crossed_but_cannot_be_climbed_out_of` |
+| T2 | Hardlink creation crossing the sandbox boundary | Requires a capability on *both* sides | `Dir` API | escape corpus: every case through both ends of `CreateHardLink` |
+| T3 | Rename crossing the boundary | Same: both `Dir`s required | `Dir` API | escape corpus: every case through both ends of `Rename` |
+| T4 | Pre-existing hardlink to an outside file, planted inside | **Not defendable** — see §6.3 | — | escape corpus, as a documented non-defence: `TopologyTests.A_hard_link_planted_before_the_root_was_opened_reaches_the_file_it_names` |
 
 ### 4.6 Shared scratch space
 
@@ -263,6 +264,63 @@ trusted, as it is for every other program the account runs; what follows from it
 | PD2 | A runtime directory owned by another account, or open to one, so that sockets and locks placed there can be reached or pre-empted | The directory is checked on the open handle — a directory, owned by the effective user, no group or other permission bits — and is not used at all otherwise | project directories | `ProjectDirsTests.A_runtime_directory_open_to_other_accounts_is_not_used`, `.A_runtime_directory_must_be_owned_by_the_user_and_closed_to_everybody_else` |
 | PD3 | Renaming or replacing a location after it was found, to redirect where the application's directories get created | Whatever is missing is created through the handle opened at start-up, never by path | project directories | `ProjectDirsTests.Nothing_is_resolved_by_path_after_the_directories_are_found` |
 | PD4 | A project name carrying a separator, NUL or `..`, to place the directory somewhere else | Refused before anything is opened | project directories | `ProjectLayoutTests.A_name_that_is_not_a_single_component_is_refused`, `.An_application_name_that_names_no_new_directory_is_refused` |
+
+### 4.8 The escape corpus
+
+The rows above are the claims; the escape corpus is what holds them to account. It is a single
+table of attacks, each a small tree, a path into it, and the outcome every operation on that
+path must come to — refused as an escape, not found, refused for another reason, or done. The
+table is data, so an attack is written once and runs everywhere:
+
+- **through every operation that takes a path**, and through each end of the ones that take
+  two: opening, creating, describing, reading a link, removing a file, a directory or a whole
+  tree, moving, and linking. A removal or a move that resolves its path differently from an
+  open is the classic escape, and a corpus run only against opens would not see it;
+- **on every backend the host has**, installed in turn for the length of one case, so a Linux
+  run covers the kernel-atomic open and the walk and does not depend on which one the machine
+  would have picked;
+- **under both symbolic-link policies**, the stricter one's answers derived from the other's
+  by the rule in §4.2.1 rather than written out twice.
+
+After every operation, whatever it was expected to come to, the corpus checks that nothing
+outside the sandbox changed and that nothing the operation let the caller see — a name listed,
+bytes read, the identity of an object reached — came from there. A case whose expectation was
+written down wrong still cannot pass by leaking. A refusal must also leave the sandbox as it
+was, since a caller reading a refusal will not look for what it half-did.
+
+Every absolute target in the corpus points at a directory the test created beside the sandbox.
+An attack aimed at a system file would fail for the wrong reason if a bug let it through,
+since an ordinary account cannot write there. For the same reason the corpus refuses to run at
+all in a process that could bypass file permissions.
+
+Filesystem-dependent cases adapt to the volume they run on rather than assuming one: a case
+needing symbolic links or hard links is skipped where the volume has none, and a filesystem
+without them must refuse to create one cleanly; a case that names an entry by a different case
+or normalisation expects the entry to be reached where the volume folds names and missed where
+it does not. The CI workflow runs the corpus on several filesystems, and against a bind mount
+prepared inside the sandbox root, which the corpus itself cannot create.
+
+#### Known differences between backends
+
+Where backends legitimately disagree, the corpus records the difference as the expectation for
+those backends, with the reason, rather than skipping the case. A recorded difference that
+stops being true fails its test like any other wrong expectation.
+
+| Case | Backends | Behaviour | Why |
+|---|---|---|---|
+| `deeper-than-the-walk-descends` | `openat2` | Resolves the path | The depth bound belongs to the walk, which holds a handle per level; the kernel's confined open holds none |
+| `longer-than-the-kernel-takes-at-once` | `openat2` | Refused for length, where the walk reports the first missing name | The kernel is handed the whole path at once and refuses one longer than its own limit |
+| `dot`, `dot-slash-dot` (followed as a link's target) | the walk, on every platform | Reported as not found, where the kernel reports a directory | A defect: a link whose target resolves to the directory holding it is taken to name nothing. Both refuse, and nothing is reached |
+| `trailing-separator-on-a-file` (followed as a link's target) | the walk, on every platform | Opens the file, where the kernel refuses it | A defect: a trailing separator in a stored target is dropped when the link is followed. The file is inside; the walk is only more permissive about its spelling |
+
+One more is recorded against the volume rather than a backend. On Linux, creating a symbolic
+link or a hard link on a filesystem that cannot hold one — vfat, in the CI matrix — is reported
+as a permission failure, because that is how the kernel reports it and the library passes it on;
+the documented refusal is the one for a filesystem that cannot do what was asked. Nothing is
+created either way.
+
+The last two rows and this one are defects rather than design, and are recorded so that they
+cannot be mistaken for either. None reaches anything outside the sandbox.
 
 ## 5. Explicit non-goals
 

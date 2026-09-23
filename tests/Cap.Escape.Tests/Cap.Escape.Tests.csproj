@@ -3,11 +3,22 @@
   <PropertyGroup>
     <RootNamespace>Cap.Escape.Tests</RootNamespace>
     <AssemblyName>Cap.Escape.Tests</AssemblyName>
+    <!-- The throwaway directory in tests/Scenarios, placed wherever the run was told to. -->
+    <CapUsesScratchTree>true</CapUsesScratchTree>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
     <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+  </ItemGroup>
+
+  <!--
+    The threat model, carried alongside the tests so that the suite can check it defends
+    every row the document says is defended. A copy rather than a path back into the source
+    tree, because the tests must run wherever the binaries were copied to.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../docs/threat-model.md" LogicalName="threat-model.md" />
   </ItemGroup>
 
 </Project>
