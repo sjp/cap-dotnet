@@ -217,7 +217,8 @@ rather than from a command line, and `WalkOptions.SkipHidden` is where hidden en
 out, including the directories a search would otherwise descend into.
 
 A pattern is relative, like every other name this library takes. One that begins at a root, or
-that contains `..`, is refused when it is parsed.
+that contains `..`, is refused when it is parsed: a pattern describes names beneath a
+directory, and a piece that climbed would describe names beside it.
 
 ## Asking what a name holds
 

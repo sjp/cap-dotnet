@@ -91,11 +91,15 @@ internal static class FailureTranslation
 
             // Not a containment refusal and not a missing thing: the filesystem understood the
             // request and it was not one it could carry out as written. Moving a directory to a
-            // name inside itself is the case a caller is most likely to meet.
+            // name inside itself is the case a caller is most likely to meet; a path ending in
+            // `..`, which names a directory by where it sits and leaves no name in its parent to
+            // create, remove or rename, is the other.
             CapErrorCategory.InvalidArgument =>
                 new CapIOException(KindOf(error.Category), 
                     $"'{path}' was not a request the filesystem could carry out as asked. " +
-                    $"Moving a directory to a name beneath itself is the usual cause. ({error})"),
+                    $"Moving a directory to a name beneath itself is the usual cause, and a " +
+                    $"path ending in '..' is another: it leaves no name for the operation to act " +
+                    $"on. ({error})"),
 
             CapErrorCategory.ReadOnlyFilesystem =>
                 new CapIOException(KindOf(error.Category), $"'{path}' is on a filesystem mounted read-only. ({error})"),
@@ -317,8 +321,9 @@ internal static class FailureTranslation
     /// Two outcomes, and the line between them is what the path was asking for rather than
     /// how badly it was written. A path that names a location a directory handle confers no
     /// authority over — an absolute path, one relative to a drive or to the current volume, a
-    /// network location, the device namespace, a <c>..</c> component, or a name the system
-    /// routes to a character device — is refused as an escape, because that is what it is,
+    /// network location, the device namespace, a <c>..</c> component refused by a parse that
+    /// does not walk upward, or a name the system routes to a character device — is refused
+    /// as an escape, because that is what it is,
     /// and the refusal deserves to be logged alongside the ones the filesystem produces.
     /// Anything else is a malformed name, which is a mistake in the calling code and is
     /// reported as one.
@@ -376,9 +381,9 @@ internal static class FailureTranslation
             "be opened.",
 
         CapPathError.ParentLink =>
-            $"'{path}' contains a '..' component. It is not collapsed as text, because that " +
-            "is only correct when nothing in the path is a symbolic link, and paths arriving " +
-            "from a caller are refused rather than walked upwards.",
+            $"'{path}' contains a '..' component, and was parsed by rules that refuse one " +
+            "rather than walking it upward. It is not collapsed as text, because that is only " +
+            "correct when nothing in the path is a symbolic link.",
 
         CapPathError.TooLong =>
             $"The supplied path, or one of its components, is longer than the parser will " +

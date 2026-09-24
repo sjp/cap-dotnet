@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Primitives.Interop;
 using Cap.Std;
 
 namespace Cap.Fs.Ext;
@@ -26,11 +27,12 @@ internal readonly struct ParentLocation : IDisposable
 {
     private readonly Dir? _owned;
 
-    private ParentLocation(Dir? owned, Dir directory, string name)
+    private ParentLocation(Dir? owned, Dir directory, string name, CapError refusal = default)
     {
         _owned = owned;
         Directory = directory;
         Name = name;
+        Refusal = refusal;
     }
 
     /// <summary>The directory the name is used against.</summary>
@@ -38,6 +40,13 @@ internal readonly struct ParentLocation : IDisposable
 
     /// <summary>The single component the operation acts on.</summary>
     public string Name { get; }
+
+    /// <summary>
+    /// Why there is no name to act on, when the path ended in <c>..</c> and so named a
+    /// directory by where it sits. Success otherwise. An operation must not go on to use
+    /// <see cref="Name"/> when this is a failure.
+    /// </summary>
+    public CapError Refusal { get; }
 
     /// <summary>
     /// Resolves everything ahead of a path's last component and hands back that component
@@ -61,7 +70,9 @@ internal readonly struct ParentLocation : IDisposable
         ArgumentNullException.ThrowIfNull(dir);
         ArgumentNullException.ThrowIfNull(path);
 
-        if (!CapPath.TryParse(path, out CapPath parsed, out CapPathError parseError))
+        // Parsed as the handle parses it, with `..` carried through, so that a path means the
+        // same thing to these operations as it does to the handle's own members.
+        if (!CapPath.TryParse(path, CapPath.HostSyntax, ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError parseError))
         {
             throw FailureTranslation.ToException(parseError, path, parameterName);
         }
@@ -69,6 +80,24 @@ internal readonly struct ParentLocation : IDisposable
         if (!parsed.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
         {
             throw FailureTranslation.ToException(CapPathError.Empty, path, parameterName);
+        }
+
+        if (name.SequenceEqual(".."))
+        {
+            // A path ending in `..` names a directory by where it sits, not by a name in its
+            // parent, and every operation here needs that name. Removing what it names could
+            // mean removing a directory the caller never spelled out, up to and including this
+            // handle's own. It is resolved through the ordinary open first, so that a climb
+            // above the handle is reported as the escape it is and a missing directory as
+            // missing, and only then refused for what it is.
+            using (dir.OpenDir(path))
+            {
+            }
+
+            if (mayNameDirectory)
+            {
+                return new ParentLocation(null, dir, string.Empty, CapError.FromCategory(CapErrorCategory.InvalidArgument));
+            }
         }
 
         if (!mayNameDirectory && parsed.RequiresDirectory)

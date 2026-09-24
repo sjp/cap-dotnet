@@ -149,6 +149,17 @@ public sealed class WasiEscapeCorpusTests
             return ([itself], "a WASI path of only '.' names the preopened directory itself");
         }
 
+        // A path ending in `..` names a directory by where it sits and leaves no name in its
+        // parent, so the library refuses to create, remove, rename or link one as a request it
+        // cannot carry out, and the adapter answers EINVAL. POSIX answers the same requests
+        // with a different code per call -- EEXIST, EISDIR, ENOTEMPTY, EBUSY -- so no single
+        // code would be more faithful, and each is a refusal.
+        if (EndsInParentStep(entry.Path) && direct == Outcome.Refused && operation is not
+                (Operation.OpenFile or Operation.CreateFile or Operation.CreateSymlinkTo))
+        {
+            return ([Outcome.Refused, Outcome.Malformed], "a path ending in '..' leaves no name to act on, which the adapter reports as EINVAL");
+        }
+
         // rename(2) replaces what holds the destination name, and a guest's rename is that call.
         // The library's rename, as the corpus makes it, refuses a taken name instead. So where
         // the corpus expects that refusal, a guest's rename may instead succeed by replacing
@@ -175,6 +186,9 @@ public sealed class WasiEscapeCorpusTests
 
         return ([direct], why);
     }
+
+    private static bool EndsInParentStep(string path) =>
+        path.Split('/').LastOrDefault(component => component is not ("" or ".")) == "..";
 
     private static bool NamesItself(string path) =>
         path.Length > 0 && path[0] != '/' && path.Split('/').All(component => component is "" or ".");

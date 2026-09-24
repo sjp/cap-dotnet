@@ -207,9 +207,10 @@ public sealed partial class Dir : IDisposable
     /// Opens a directory beneath this one.
     /// </summary>
     /// <param name="path">
-    /// A relative path of one or more components. Absolute paths, paths naming a drive or a
-    /// network location, and paths containing <c>..</c> are refused: none of them names
-    /// something this handle covers.
+    /// A relative path of one or more components. Absolute paths and paths naming a drive or
+    /// a network location are refused: none of them names something this handle covers. A
+    /// <c>..</c> component is resolved beneath this handle, as a step back to the directory
+    /// the walk came from, and refused if it would climb above this directory.
     /// </param>
     /// <returns>A handle on the directory, owning its own open object.</returns>
     /// <remarks>
@@ -219,6 +220,15 @@ public sealed partial class Dir : IDisposable
     /// path is walked a component at a time against handles already held, refusing to follow
     /// any link the policy does not allow and refusing any step that would climb out. Both
     /// answer the same way for the same tree.
+    /// </para>
+    /// <para>
+    /// <strong><c>..</c> is walked, never collapsed.</strong> <c>a/../b</c> enters <c>a</c>,
+    /// steps back out of it and enters <c>b</c>; if <c>a</c> is a link, the step back lands
+    /// beside wherever the link led, as it would for the operating system's own resolution.
+    /// A <c>..</c> taken at this directory is refused with <see cref="SandboxEscapeException"/>
+    /// whatever follows it, even when the rest of the path would lead back inside: the step
+    /// itself is the one this handle grants no authority for. A path that ends in <c>..</c>
+    /// names the directory the walk climbed back to, and opens it.
     /// </para>
     /// <para>
     /// <strong>Symbolic links.</strong> A link met on the way is followed only under
@@ -983,12 +993,17 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool Exists(string path)
     {
-        CapPathError pathError = Locate(path, out NameLookup lookup, out CapError error);
+        CapPathError pathError = Locate(path, out NameLookup lookup, out CapError error, describing: true);
         using (lookup)
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
                 return false;
+            }
+
+            if (lookup.NamesDirectoryItself)
+            {
+                return true;
             }
 
             CapError stat = PlatformOps.Current.StatChild(lookup.Directory, lookup.Name, out CapNodeInfo info);
@@ -1571,6 +1586,7 @@ public sealed partial class Dir : IDisposable
     private ref struct NameLookup
     {
         private ResolvedParent? _owned;
+        private SafeDirHandle? _ownedDirectory;
 
         public NameLookup(
             ResolvedParent? owned,
@@ -1579,10 +1595,34 @@ public sealed partial class Dir : IDisposable
             bool requiresDirectory)
         {
             _owned = owned;
+            _ownedDirectory = null;
             Directory = directory;
             Name = name;
             RequiresDirectory = requiresDirectory;
+            NamesDirectoryItself = false;
         }
+
+        private NameLookup(SafeDirHandle directory)
+        {
+            _owned = null;
+            _ownedDirectory = directory;
+            Directory = directory;
+            Name = default;
+            RequiresDirectory = true;
+            NamesDirectoryItself = true;
+        }
+
+        /// <summary>
+        /// A path that ended in <c>..</c>, resolved to the directory it climbed back to. There
+        /// is no name in it to act on; <see cref="Directory"/> is the thing the path named.
+        /// </summary>
+        public static NameLookup ForDirectoryItself(SafeDirHandle directory) => new(directory);
+
+        /// <summary>
+        /// Whether the path ended in <c>..</c>, so that <see cref="Directory"/> is what it named
+        /// and <see cref="Name"/> is empty.
+        /// </summary>
+        public bool NamesDirectoryItself { get; }
 
         /// <summary>The directory the name is used against.</summary>
         public SafeDirHandle Directory { get; }
@@ -1605,6 +1645,8 @@ public sealed partial class Dir : IDisposable
         {
             _owned?.Dispose();
             _owned = null;
+            _ownedDirectory?.Dispose();
+            _ownedDirectory = null;
         }
     }
 
@@ -1624,7 +1666,11 @@ public sealed partial class Dir : IDisposable
     /// which is what the failure-reporting overloads are for.
     /// </para>
     /// </remarks>
-    private CapPathError Locate(string path, out NameLookup lookup, out CapError error)
+    private CapPathError Locate(
+        string path,
+        out NameLookup lookup,
+        out CapError error,
+        bool describing = false)
     {
         ArgumentNullException.ThrowIfNull(path);
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
@@ -1632,11 +1678,7 @@ public sealed partial class Dir : IDisposable
         lookup = default;
         error = CapError.Success;
 
-        // Refusing `..` here rather than walking it is the rule for every path arriving from
-        // a caller, and it is the same rule an open is held to. A resolver beneath can take
-        // an upward step safely by moving back through a handle it already holds; a path that
-        // asks to climb above the root is one this handle has no answer for.
-        if (!CapPath.TryParse(path, out CapPath parsed, out CapPathError pathError))
+        if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
             return pathError;
         }
@@ -1644,6 +1686,31 @@ public sealed partial class Dir : IDisposable
         if (!parsed.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
         {
             return CapPathError.Empty;
+        }
+
+        // A path ending in `..` names a directory by where it sits rather than by a name in
+        // its parent, so there is no name for a create, a removal or a rename to act on. It is
+        // still resolved in full first, so that one climbing above the handle is reported as
+        // the escape it is and one through something missing as missing. Only describing the
+        // directory, and asking whether it is there, can go on from it.
+        if (name.SequenceEqual(".."))
+        {
+            CapResult<SafeDirHandle> reached = Resolver.OpenDirectory(_handle, in parsed, CapAccess.None, _options);
+            if (!reached.IsSuccess)
+            {
+                error = reached.Error;
+                return CapPathError.None;
+            }
+
+            if (!describing)
+            {
+                reached.Value.Dispose();
+                error = CapError.FromCategory(CapErrorCategory.InvalidArgument);
+                return CapPathError.None;
+            }
+
+            lookup = NameLookup.ForDirectoryItself(reached.Value);
+            return CapPathError.None;
         }
 
         if (prefix.IsEmpty)
@@ -1664,6 +1731,28 @@ public sealed partial class Dir : IDisposable
 
         return CapPathError.None;
     }
+
+    /// <summary>
+    /// Parses a path arriving from a caller, carrying each <c>..</c> through to resolution.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>..</c> is walked for real, beneath this handle: the resolvers step back through a
+    /// directory handle they already hold, or let the kernel do so under a flag that confines
+    /// it, and refuse a step that would climb above the handle as an escape. So
+    /// <c>dir/nested/../file</c> names <c>dir/file</c>, and <c>dir/../../file</c> is refused.
+    /// Nothing is collapsed as text: <c>link/../file</c> climbs from wherever the link led,
+    /// which only the walk can know.
+    /// </para>
+    /// <para>
+    /// Refusing <c>..</c> outright would buy nothing a caller could rely on. A symbolic link
+    /// inside the subtree may already hold <c>..</c> in its target, and following one is the
+    /// same walk under the same root test, so the confinement a written-out <c>..</c> is held
+    /// to is the one every link is already held to.
+    /// </para>
+    /// </remarks>
+    private static bool TryParseCallerPath(string path, out CapPath parsed, out CapPathError error) =>
+        CapPath.TryParse(path, CapPath.HostSyntax, ParentLinkPolicy.Preserve, out parsed, out error);
 
     /// <summary>Turns a core's outcome into a handle or the exception explaining its absence.</summary>
     private static Dir Produce(CapPathError pathError, string path, Dir? dir, CapError error, ExpectedTarget expected)
@@ -2041,12 +2130,7 @@ public sealed partial class Dir : IDisposable
         dir = null;
         error = CapError.Success;
 
-        // Refusing `..` here rather than walking it is the rule for every path arriving from
-        // a caller. The resolvers beneath can take an upward step safely, by moving back
-        // through a handle they already hold, but a path that asks to climb above the root
-        // is one this handle has no answer for, and the refusal is more useful than a
-        // resolution that happens to stay inside.
-        if (!CapPath.TryParse(path, out CapPath parsed, out CapPathError pathError))
+        if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
             return pathError;
         }

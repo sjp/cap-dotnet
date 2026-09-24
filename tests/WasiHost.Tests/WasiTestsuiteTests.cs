@@ -39,9 +39,6 @@ public sealed class WasiTestsuiteTests
     /// </summary>
     internal static readonly Dictionary<string, string> KnownGaps = new()
     {
-        ["rust/interesting_paths"] =
-            "Dir refuses every path containing '..', even one whose resolution stays inside the " +
-            "directory, and WASI resolves those.",
         ["rust/symlink_create"] =
             "Dir.CreateSymlink stores an absolute target, which no resolution beneath a handle " +
             "will ever follow; WASI refuses to create such a link.",

@@ -182,7 +182,7 @@ public sealed partial class Dir
     {
         metadata = default;
 
-        CapPathError pathError = Locate(path, out NameLookup lookup, out error);
+        CapPathError pathError = Locate(path, out NameLookup lookup, out error, describing: true);
         using (lookup)
         {
             if (pathError != CapPathError.None || error.IsFailure)
@@ -190,7 +190,13 @@ public sealed partial class Dir
                 return pathError;
             }
 
-            error = PlatformOps.Current.DescribeChild(lookup.Directory, lookup.Name, out CapNodeStat stat);
+            // A path ending in `..` has no name to describe: it named the directory the walk
+            // climbed back to, which is never a link, so describing that directory is what a
+            // description without following means for it.
+            CapNodeStat stat;
+            error = lookup.NamesDirectoryItself
+                ? PlatformOps.Current.DescribeHandle(lookup.Directory, out stat)
+                : PlatformOps.Current.DescribeChild(lookup.Directory, lookup.Name, out stat);
             if (error.IsFailure)
             {
                 return CapPathError.None;

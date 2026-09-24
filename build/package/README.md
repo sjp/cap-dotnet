@@ -5,8 +5,8 @@ A capability-based filesystem API for .NET, ported from
 
 A `Dir` is an open directory and the authority to reach what is beneath it, and nothing
 else. A path handed to it is resolved against the directory handle, never as a string. A
-name that would lead outside, such as a symbolic link, a `..`, an absolute path or a Windows
-device name, is refused by the resolution itself.
+name that would lead outside, such as a symbolic link, a `..` that climbs above the directory,
+an absolute path or a Windows device name, is refused by the resolution itself.
 
 ```csharp
 using Cap.Primitives;

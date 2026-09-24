@@ -81,7 +81,9 @@ public static partial class DirExtensions
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: true);
 
-        CapError error = TreeRemoval.Remove(location.Directory, location.Name);
+        CapError error = location.Refusal.IsFailure
+            ? location.Refusal
+            : TreeRemoval.Remove(location.Directory, location.Name);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToException(error, path, ExpectedTarget.Directory);
@@ -122,7 +124,7 @@ public static partial class DirExtensions
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: true);
 
-        return TreeRemoval.Remove(location.Directory, location.Name).IsSuccess;
+        return location.Refusal.IsSuccess && TreeRemoval.Remove(location.Directory, location.Name).IsSuccess;
     }
 
     /// <summary>

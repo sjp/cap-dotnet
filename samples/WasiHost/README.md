@@ -75,9 +75,11 @@ nothing outside the sandbox may change or be seen. The call is made by a small g
 re-exports each import, so it crosses the engine exactly as a real guest's would. Two
 differences in outcome are expected and asserted: a path of only `.` opens the directory
 itself, and WASI's rename replaces a name that is taken where the library call the corpus
-makes refuses. Two more are differences only in the code: `link` reports a directory given a
-second name as `EPERM`, and `readlink` reports a name that holds no link as `EINVAL`, the code
-a malformed path also gets.
+makes refuses. Three more are differences only in the code: `link` reports a directory given
+a second name as `EPERM`, `readlink` reports a name that holds no link as `EINVAL`, the code a
+malformed path also gets, and creating, removing, renaming or linking at a path ending in `..`
+is answered `EINVAL`, since such a path leaves no name to act on. POSIX answers those last
+requests with a different code per call.
 
 **The WebAssembly WASI test suite.** Its preview 1 programs that are given a directory — 49
 of them, written in Rust and C — are run against the adapter. Fetch the suite
@@ -88,7 +90,7 @@ export CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh /tmp)
 dotnet test --project tests/WasiHost.Tests
 ```
 
-42 pass. The other 7 fail because the library does not yet offer something WASI needs, and
+43 pass. The other 6 fail because the library does not yet offer something WASI needs, and
 the test asserts that each of those still fails, so a gap that closes is noticed.
 
 ## What the library does not yet offer
@@ -100,9 +102,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Programs that fail:**
 
-- **`..` inside the directory is refused.** `Dir` refuses every path containing `..`, even
-  `dir/nested/../file`, which stays inside. WASI resolves those, confined, as cap-std does.
-  (`interesting_paths`)
 - **A symbolic link can be made with a target no resolution will follow.**
   `Dir.CreateSymlink` stores an absolute target. WASI refuses to create one.
   (`symlink_create`)

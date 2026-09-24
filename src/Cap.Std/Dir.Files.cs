@@ -44,10 +44,14 @@ public sealed partial class Dir
     /// Opens a file beneath this handle.
     /// </summary>
     /// <param name="path">
-    /// A relative path of one or more components. Absolute paths, paths naming a drive or a
-    /// network location, and paths containing <c>..</c> are refused: none of them names
-    /// something this handle covers. A path spelled so that its target must be a directory —
-    /// one ending in a separator — is refused too, because no file can satisfy it.
+    /// A relative path of one or more components. Absolute paths and paths naming a drive or
+    /// a network location are refused: none of them names something this handle covers. A
+    /// <c>..</c> component is resolved beneath this handle and refused if it would climb above
+    /// it, as <see cref="OpenDir"/> describes. A path spelled so that its target must be a
+    /// directory — one ending in a separator or in <c>..</c> — is refused too, because no file
+    /// can satisfy it: by what the name holds when the mode only opens (missing, not a
+    /// directory, or a directory), and as naming a directory when the mode may create, as
+    /// <c>open(2)</c> refuses them.
     /// </param>
     /// <param name="mode">Whether the name may be created, and what happens to what is there.</param>
     /// <param name="access">What the handle may do with the contents.</param>
@@ -122,7 +126,8 @@ public sealed partial class Dir
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">
-    /// The name is taken and the mode refuses to take it, the name holds a directory, the
+    /// The name is taken and the mode refuses to take it, the name holds a directory or is
+    /// spelled as one, the path passes through something that is not a directory, the
     /// name holds a symbolic link and the mode may create or empty the file, a symbolic link
     /// the policy will not follow is in the way, or the platform cannot honour part of the
     /// request.
@@ -704,17 +709,18 @@ public sealed partial class Dir
         file = null;
         error = CapError.Success;
 
-        if (!CapPath.TryParse(path, out CapPath parsed, out CapPathError pathError))
+        if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
             return pathError;
         }
 
-        // A trailing separator asks for a directory, and no file open can satisfy that. The
-        // parser is the only thing that still knows: splitting a path into components is what
-        // loses the distinction, so it has to be applied before resolution or not at all.
+        // A trailing separator, or a final `..`, asks for a directory, and no file open can
+        // satisfy that. The parser is the only thing that still knows: splitting a path into
+        // components is what loses the distinction, so it has to be applied before resolution
+        // or not at all.
         if (parsed.RequiresDirectory)
         {
-            error = CapError.FromCategory(CapErrorCategory.IsADirectory);
+            error = RefuseDirectorySpelling(in parsed, in request);
             return CapPathError.None;
         }
 
@@ -731,6 +737,44 @@ public sealed partial class Dir
             request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles);
 
         return CapPathError.None;
+    }
+
+    /// <summary>
+    /// The refusal for a file open whose path is spelled so that it names a directory.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The path is resolved as a directory, without opening it for reading, and the refusal
+    /// says what was found there, as <c>open(2)</c> does: nothing, something that is not a
+    /// directory, or a directory, which a file open cannot use. A caller told only "is a
+    /// directory" about a name holding a regular file would go looking for the wrong mistake.
+    /// </para>
+    /// <para>
+    /// An open that may create the file is refused as naming a directory whatever is there,
+    /// again as <c>open(2)</c> refuses one, since a file cannot be created under a name
+    /// spelled as a directory. The lookup is still made, so that a path climbing above the
+    /// handle is reported as the escape it is on every open, rather than disguised as the
+    /// wrong kind of object; the attempt deserves to reach whatever records escapes.
+    /// </para>
+    /// <para>
+    /// Nothing is opened for use either way. What the name holds may change before the answer
+    /// is read, which can alter which refusal is given but never lets the open go ahead.
+    /// </para>
+    /// </remarks>
+    private CapError RefuseDirectorySpelling(scoped in CapPath parsed, scoped in FileOpenRequest request)
+    {
+        CapError isADirectory = CapError.FromCategory(CapErrorCategory.IsADirectory);
+
+        CapResult<SafeDirHandle> reached = Resolver.OpenDirectory(_handle, in parsed, CapAccess.None, _options);
+        if (reached.IsSuccess)
+        {
+            reached.Value.Dispose();
+            return isADirectory;
+        }
+
+        return request.Creates && reached.Error.Category != CapErrorCategory.Escaped
+            ? isADirectory
+            : reached.Error;
     }
 
     /// <summary>

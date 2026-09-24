@@ -111,7 +111,8 @@ in which case the Windows remarks apply.
 
 ## Everywhere
 
-- Paths must be relative. `..` is refused rather than collapsed.
+- Paths must be relative. `..` is walked beneath the handle, never collapsed as text, and
+  refused where it would climb above it.
 - A path is limited to 32767 characters and a component to 255, as a bound on work, not a
   promise the filesystem will accept that much.
 - The first directory handle is opened with the process's own authority and follows links;

@@ -20,11 +20,12 @@ namespace Cap.Std;
 /// distinction that makes a log of these worth reading.
 /// </para>
 /// <para>
-/// Reported for a path that is rejected on inspection as well as for one refused mid-walk —
-/// an absolute path, a drive- or root-relative one, a network location, a device-namespace
-/// prefix, a <c>..</c> component, or a name reserved for a character device. None of those
-/// name anything beneath a directory handle, and refusing them before touching the filesystem
-/// rather than after changes nothing about what was asked for.
+/// Reported for a path that is rejected on inspection as well as for one refused mid-walk.
+/// On inspection: an absolute path, a drive- or root-relative one, a network location, a
+/// device-namespace prefix, or a name reserved for a character device. None of those name
+/// anything beneath a directory handle, and refusing them before touching the filesystem
+/// rather than after changes nothing about what was asked for. Mid-walk: a <c>..</c> taken at
+/// the handle's own directory, or a symbolic link whose target leaves it.
 /// </para>
 /// </remarks>
 public sealed class SandboxEscapeException : CapIOException

@@ -28,7 +28,8 @@ public sealed partial class CorpusIntegrityTests
     /// <summary>
     /// Where a case says a path is refused before anything is looked up, the parser for that
     /// syntax refuses it, for the reason the case says; and where a case says a path reaches
-    /// the filesystem, the parser lets it through.
+    /// the filesystem, the parser lets it through. The parser is run as a directory handle
+    /// runs it, carrying a parent step through to resolution.
     /// </summary>
     /// <remarks>
     /// Checked under both syntaxes on every host, because the parser takes the syntax as an
@@ -51,9 +52,19 @@ public sealed partial class CorpusIntegrityTests
 
             string path = entry.Path.Replace(
                 "{outside}", syntax == CapPathSyntax.Windows ? @"C:\outside" : "/outside", StringComparison.Ordinal);
-            bool parsed = CapPath.TryParse(path, syntax, ParentLinkPolicy.Reject, out _, out CapPathError error);
+            bool parsed = CapPath.TryParse(
+                path, syntax, ParentLinkPolicy.Preserve, out CapPath parsedPath, out CapPathError error);
 
             Outcome opened = expected[Operation.OpenFile];
+
+            // A parent step is carried through the parser and refused by resolution, at the
+            // step that would climb above the root, so an escape spelled with one is not the
+            // parser's to decide.
+            if (opened == Outcome.Escape && parsed && parsedPath.ContainsParentLink)
+            {
+                continue;
+            }
+
             if (opened is Outcome.Escape or Outcome.Malformed)
             {
                 if (parsed || opened != AsOutcome(error))

@@ -135,6 +135,40 @@ public sealed class DeleteTreeTests : IDisposable
             () => _tree.Directory.DeleteTree(Path.Combine("..", "elsewhere")));
     }
 
+    /// <summary>A path that climbs and descends again, staying inside, names the tree it reaches.</summary>
+    [Fact]
+    public void A_path_that_climbs_and_stays_inside_removes_the_tree_it_names()
+    {
+        Make("a", "doomed", "leaf.txt");
+        Make("a", "b", "kept.txt");
+
+        _tree.Directory.DeleteTree("a/b/../doomed");
+
+        Assert.False(Directory.Exists(Path.Combine(_tree.HostPath, "a", "doomed")));
+        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "a", "b", "kept.txt")));
+    }
+
+    /// <summary>
+    /// A path ending in <c>..</c> is refused, and the directory it names is left whole.
+    /// </summary>
+    /// <remarks>
+    /// <c>a/..</c> names the handle's own directory, by where it sits rather than by a name in
+    /// its parent. Removing it would empty the whole tree the caller holds on the strength of
+    /// a path that never spelled that out, so there is no name here for a removal to act on.
+    /// </remarks>
+    [Fact]
+    public void A_path_ending_in_a_climb_removes_nothing()
+    {
+        Make("a", "b", "leaf.txt");
+
+        CapIOException thrown = Assert.ThrowsAny<CapIOException>(() => _tree.Directory.DeleteTree("a/b/.."));
+        Assert.Equal(CapErrorKind.InvalidArgument, thrown.Kind);
+        Assert.False(_tree.Directory.TryDeleteTree("a/.."));
+        Assert.Throws<SandboxEscapeException>(() => _tree.Directory.TryDeleteTree("a/../.."));
+
+        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "a", "b", "leaf.txt")));
+    }
+
     /// <summary>Emptying a directory leaves the directory.</summary>
     /// <remarks>
     /// The form a caller holding the root of a sandbox needs: there is no handle above that

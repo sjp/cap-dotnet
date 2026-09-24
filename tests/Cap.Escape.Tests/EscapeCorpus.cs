@@ -106,9 +106,9 @@ internal static class EscapeCorpus
         Expectation escape = Uniform(Outcome.Escape);
         Expectation malformed = Uniform(Outcome.Malformed);
 
-        // A parent step, in each position a check might look for it in and some it might not.
-        // None is ever collapsed as text -- including the one that would, collapsed, name a
-        // file that is inside -- because collapsing is wrong whenever a component is a link.
+        // A parent step that climbs above the root, in each position a check might look for it
+        // in and some it might not. Each is walked, never collapsed as text, and refused at the
+        // step that leaves -- however the rest of the path would read.
         foreach ((string name, string path) in new[]
         {
             ("parent", ".."),
@@ -122,17 +122,23 @@ internal static class EscapeCorpus
             cases.Add(new(name, ["L1"], path, escape, escape));
         }
 
-        // The same text stored in a link is walked for real, a step at a time from where the
-        // link sits, and is refused only if a step actually leaves. So a caller handing over
-        // these paths is refused, while a link holding them reaches the directory or the file
-        // they name -- and that difference is the whole reason `..` is never collapsed: the
-        // text alone cannot say where a step up lands.
-        cases.Add(new("parent-that-would-collapse-to-inside", ["L1"], "plain/../plain/marker",
-            escape.With(Operation.CreateSymlinkTo, Outcome.Success),
-            escape.With(Operation.CreateSymlinkTo, Outcome.Success)));
-        cases.Add(new("parent-trailing", ["L1"], "plain/..",
-            escape.With(Operation.CreateSymlinkTo, Outcome.Refused),
-            escape.With(Operation.CreateSymlinkTo, Outcome.Refused)));
+        // A parent step that stays beneath the root is walked like any other component: into
+        // `plain`, back out to the root, and into `plain` again.
+        cases.Add(new("parent-that-stays-inside", ["L1"], "plain/../plain/marker",
+            ExistingFile(), ExistingFile()));
+        cases.Add(new("parent-that-stays-inside-to-a-name-not-there", ["L1"], "plain/../plain/absent",
+            Absent(), Absent()));
+        cases.Add(new("parent-through-a-name-not-there", ["L1"], "absent/../plain/marker",
+            Uniform(Outcome.NotFound), Uniform(Outcome.NotFound)));
+
+        // A path ending in a parent step names the directory it climbs back to, here the root
+        // itself. It can be opened and described, and nothing can act on it as a name: there
+        // is none, and removing or moving what it names would reach a directory the caller
+        // never spelled out, up to and including the handle's own.
+        Expectation climbedBackTo = ExistingDirectory().With(
+            Operation.DeleteTree, Outcome.Refused,
+            (Operation.RenameFrom, Outcome.Refused));
+        cases.Add(new("parent-trailing", ["L1"], "plain/..", climbedBackTo, climbedBackTo));
 
         // Absolute, in each syntax. The target is the test's own directory, so that a bug
         // letting one through would reach something writable and be seen doing it.
@@ -281,6 +287,18 @@ internal static class EscapeCorpus
             Directory("sibling", $"../{OutsideDirectory}")));
         cases.Add(Link("nested-link-climbing-out", ["S2", "S5"], $"plain/up/{OutsideFile}", escapeOnTheWay,
             Directory("plain/up", $"../../{OutsideDirectory}")));
+
+        // A parent step after a link climbs from wherever the link led, not from where the
+        // link sits, which is the reason a parent step is never collapsed as text. `hop` leads
+        // to `plain/inner`, so `hop/..` is `plain`: collapsed, the same text would name the
+        // root, where there is no `marker`. And a climb that starts one level down from where
+        // the link led still stops at the root.
+        cases.Add(Link("parent-after-a-link-lands-beside-its-target", ["L1", "S3", "S5"], $"hop/../{PlainFile}",
+            Through(ExistingFile()),
+            new(SetupKind.Directory, "plain/inner"), Directory("hop", "plain/inner")));
+        cases.Add(Link("parent-after-a-link-climbing-out", ["L1", "S2", "S5"],
+            $"hop/../../../{OutsideDirectory}/{OutsideFile}", escapeOnTheWay,
+            new(SetupKind.Directory, "plain/inner"), Directory("hop", "plain/inner")));
 
         // Links that stay inside, which are followed: the control every refusal above is read
         // against. A climb that stops at the root and descends again is inside.

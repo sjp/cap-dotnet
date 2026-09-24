@@ -22,8 +22,8 @@ namespace Cap.Primitives;
 public enum ParentLinkPolicy
 {
     /// <summary>
-    /// Refuse the path with <see cref="CapPathError.ParentLink"/>. The default, and the
-    /// behaviour at any boundary where caller-supplied strings first arrive.
+    /// Refuse the path with <see cref="CapPathError.ParentLink"/>. The default, for a parse
+    /// whose result may reach code that does not walk <c>..</c> against a real handle.
     /// </summary>
     Reject = 0,
 
@@ -31,7 +31,8 @@ public enum ParentLinkPolicy
     /// Parse the path, preserve each <c>..</c> as a component of its own, and record the
     /// fact in <see cref="CapPath.ContainsParentLink"/>. For resolvers that implement
     /// upward movement as an actual step against a real handle, bounded by the sandbox root.
-    /// Choosing this without implementing that check is an escape.
+    /// Choosing this without implementing that check is an escape. A directory handle parses
+    /// every path it is given this way, since its resolvers do implement it.
     /// </summary>
     Preserve,
 }

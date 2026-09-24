@@ -38,7 +38,9 @@ string contents = dir.ReadAllText(userPath);   // throws SandboxEscapeException
 
 There is no check to get right. The path is resolved against the directory handle, one name
 at a time or in a single confined kernel call, and a name that would lead outside — a link,
-a `..`, an absolute path, a Windows device name — is refused by the resolution itself.
+a `..` that climbs above the directory, an absolute path, a Windows device name — is refused
+by the resolution itself. A `..` that stays inside is walked, a step at a time, never
+collapsed as text.
 
 Both snippets are taken verbatim from [`samples/ContainmentCheck`](samples/ContainmentCheck),
 which builds the link, runs them, and fails if either half does not behave as described

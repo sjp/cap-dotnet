@@ -41,6 +41,20 @@ public sealed class AtomicWriteTests : IDisposable
         Assert.Equal(contents, File.ReadAllBytes(Path.Combine(_tree.HostPath, "report")));
     }
 
+    /// <summary>A path that climbs and descends again, staying inside, publishes where it leads.</summary>
+    [Fact]
+    public void A_path_that_climbs_and_stays_inside_publishes_where_it_leads()
+    {
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
+
+        _tree.Directory.WriteAllTextAtomic("a/b/../report", "published");
+
+        Assert.Equal("published", File.ReadAllText(Path.Combine(_tree.HostPath, "a", "report")));
+        Assert.Throws<SandboxEscapeException>(() => _tree.Directory.WriteAllTextAtomic("a/../../report", "leaked"));
+        Assert.Throws<SandboxEscapeException>(() => _tree.Directory.WriteAllTextAtomic("..", "leaked"));
+        Assert.Throws<ArgumentException>(() => _tree.Directory.WriteAllTextAtomic("a/..", "nowhere"));
+    }
+
     /// <summary>
     /// Asking for the strongest durability is not refused anywhere.
     /// </summary>

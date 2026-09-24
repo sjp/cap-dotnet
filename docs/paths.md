@@ -79,20 +79,46 @@ lookup rather than a walk. That flag is deliberately narrow — a path containin
 insisting on a directory, is not a single lookup even with one component — so a resolver can
 act on it with no further checks.
 
-## `..` is refused, not collapsed
+## `..` is walked, not collapsed
 
-By default a `..` component causes the whole path to be refused.
+A `..` is never turned into string arithmetic, for the reason in the first section: collapsing
+is only correct when no component is a symbolic link, and whether one is cannot be known
+without asking the filesystem. A parser that collapses has committed to an answer it had no
+way to compute.
 
-It is never turned into string arithmetic, for the reason in the first section: collapsing is
-only correct when no component is a symbolic link, and whether one is cannot be known without
-asking the filesystem. A parser that collapses has committed to an answer it had no way to
-compute.
+`CapPath` offers two policies for it. Under `ParentLinkPolicy.Reject`, the default for
+`CapPath.TryParse`, a `..` anywhere causes the whole path to be refused, which is the safe
+answer for code that has no resolver of its own. Under `ParentLinkPolicy.Preserve` it is
+carried through as a component, and whatever resolves the path must handle it by taking an
+actual step against a real directory handle and re-checking the result against the sandbox
+root. Removing the component and the one before it from the list is the same lexical
+collapse, merely performed after the split rather than before, and it is wrong in exactly the
+same cases.
 
-A resolver may opt into carrying `..` through instead of refusing it, and one that does must
-handle it by taking an actual step against a real directory handle and re-checking the result
-against the sandbox root. Removing the component and the one before it from the list is the
-same lexical collapse, merely performed after the split rather than before, and it is wrong
-in exactly the same cases.
+A `Dir` parses every path it is given under `Preserve`, because its resolvers do take that
+step:
+
+- `dir/nested/../file` enters `nested`, steps back out and opens `dir/file`.
+- `link/../file` steps back from wherever `link` led, which only the walk can know.
+- A `..` taken at the handle's own directory is refused with `SandboxEscapeException`, even
+  when the rest of the path would lead back inside: `dir/../../dir/file` is refused.
+- A path ending in `..` names the directory the walk climbed back to. It can be opened,
+  described and asked about. It holds no name in its parent, so creating, removing, renaming
+  or linking at it is refused with a `CapIOException` whose kind is `InvalidArgument`, after
+  the path has been resolved, so that one climbing above the handle is still reported as an
+  escape. A file open refuses it as it refuses any path spelled as a directory.
+
+Refusing every `..` outright would not make a handle safer. A symbolic link inside the tree can
+already hold `..` in its target, and following it is the same walk under the same root test,
+so a written-out `..` reaches nothing a link could not.
+
+## A path spelled as a directory
+
+A path ending in a separator, or in `..`, has to name a directory. An operation that acts on
+something else refuses it according to what the name holds, as POSIX does. A file open that
+only opens is refused as missing, as passing through something that is not a directory, or as
+naming a directory. A file open that may create is refused as naming a directory whatever is
+there, since no file can be created under such a name.
 
 ## Windows names
 

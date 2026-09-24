@@ -17,8 +17,7 @@ namespace Cap.Primitives.Interop.Unix;
 /// resolution has had to reconsider which directory it is standing in — which is what a
 /// <c>..</c> component makes it do — so a path of plain names resolving through the very same
 /// rename never produces one. The retry therefore matters exactly for the paths that carry
-/// parent links through to the resolver, and not at all for those that refuse them at the
-/// parse.
+/// a <c>..</c> to the resolver, whether the caller wrote it or a link stores it.
 /// </para>
 /// <para>
 /// Asking again cannot be unconditional. Anything able to write inside the subtree can keep

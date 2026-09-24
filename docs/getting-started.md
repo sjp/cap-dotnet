@@ -84,7 +84,7 @@ Operations throw the same exceptions `System.IO` does where the meaning is the s
 
 | Exception | Means |
 |---|---|
-| `SandboxEscapeException` | The path would have led outside the handle: a `..`, an absolute, drive- or root-relative path, a Windows device name, or a link pointing out. Worth logging: something tried. |
+| `SandboxEscapeException` | The path would have led outside the handle: a `..` climbing above it, an absolute, drive- or root-relative path, a Windows device name, or a link pointing out. Worth logging: something tried. |
 | `CapIOException` | The base of the library's own `IOException`s, including the one above. |
 
 Every filesystem failure also carries a reason that code can act on without reading the message.

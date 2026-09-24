@@ -86,7 +86,7 @@ backends are described in [backends.md](backends.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| L1 | `..` component in caller input | Rejected at parse time; never collapsed lexically | path parsing | `CapPathParseTests.Rejects_parent_links_by_default`; escape corpus: `parent`, `parent-twice`, `parent-after-descent`, `dot-parent-dot`, `parent-trailing`, `parent-that-would-collapse-to-inside`, `parent-far-past-the-root` |
+| L1 | `..` component in caller input | Walked beneath the handle as a real step back, never collapsed lexically; a step above the handle is refused as an escape wherever it appears; a path ending in `..` is not a name any mutation can act on | path parsing; component walk; kernel-confined open | `DirParentStepTests`; escape corpus: `parent`, `parent-twice`, `parent-after-descent`, `dot-parent-dot`, `parent-to-a-file-outside`, `parent-far-past-the-root`, `parent-that-stays-inside*`, `parent-through-a-name-not-there`, `parent-trailing`, `parent-after-a-link-*` |
 | L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute`; escape corpus: `absolute-*`, `windows-absolute`, `windows-absolute-forward-slashes` |
 | L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state`; escape corpus: `windows-root-relative`, `windows-drive-relative` |
 | L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace`, `WindowsReservedNameTests.A_device_namespace_prefix_on_a_device_name_is_refused`; escape corpus: `windows-unc`, `unc-forward-slashes`, `windows-device-namespace-*`, `device-namespace-forward-slashes`, `windows-object-manager-namespace` |
@@ -97,6 +97,19 @@ backends are described in [backends.md](backends.md).
 the disk — is **wrong**, because if `a` is a symlink to `/etc` then the kernel resolves
 `a/../b` to `/b`, not `./b`. `System.IO.Path.GetFullPath` does exactly this collapsing,
 which is why it is banned inside `Cap.Primitives` by the build.
+
+So `..` is resolved rather than collapsed or refused. The walk steps back through a directory
+handle it already holds (§6.2), and the kernel-confined open lets the kernel take the step
+under `RESOLVE_BENEATH`, which refuses one that would leave. Either way a step taken at the
+handle's own directory is refused as an escape, even when the rest of the path would lead
+back inside. Refusing every `..` outright would not be a stronger guarantee: a symbolic link
+inside the tree can already hold `..` in its target, and following it is the same walk under
+the same root test (S2), so a `..` the caller writes can reach nothing a link could not.
+
+A path ending in `..` names a directory by where it sits, not by a name in its parent. It
+can be opened and described. Creating, removing, renaming or linking at it is refused before
+anything is changed, since removing what `a/..` names would remove a directory the caller
+never spelled out, up to and including the handle's own.
 
 The full parsing contract — what is accepted, what is refused, and what is deliberately left
 alone — is in [paths.md](paths.md).

@@ -12,8 +12,9 @@ string text = data.ReadAllText("settings/app.json");
 ```
 
 Paths use `/` on every platform, and `\` too on Windows. They must be relative: an absolute
-path, `..`, or a Windows device name is refused with `SandboxEscapeException` rather than
-resolved. Where a `System.IO` method would have created or found a path by joining strings,
+path or a Windows device name is refused with `SandboxEscapeException` rather than resolved.
+`..` is resolved beneath the handle, as a step back out of a directory the path entered, and
+refused with `SandboxEscapeException` when it would climb above the handle. Where a `System.IO` method would have created or found a path by joining strings,
 the replacement usually opens a `Dir` on the directory and works inside that, which is also
 what the [analyzer's `CAP0005`](analyzers.md#cap0005-paths-built-by-joining-strings) asks for.
 
