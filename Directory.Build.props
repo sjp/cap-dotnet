@@ -19,14 +19,18 @@
     <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
   </PropertyGroup>
 
-  <!-- Deterministic, source-linked builds. -->
+  <!--
+    Deterministic, source-linked builds. The PDB is embedded in each assembly rather than
+    published as a separate symbol package: Cap.Primitives travels inside the Cap.Std package,
+    and an embedded PDB goes wherever its assembly goes, so there is no second file to keep in
+    step with it and a debugger finds the sources through SourceLink without a symbol server.
+  -->
   <PropertyGroup>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <DebugType>embedded</DebugType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
@@ -46,13 +50,30 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
+  <!--
+    Package metadata. Versions follow SemVer and stay at 0.x until the escape corpus has held
+    across a release and the API has had an external review; docs/releasing.md has the policy.
+    A release sets the version from its tag. The prefix here only names local builds.
+  -->
   <PropertyGroup Condition="'$(CapIsProductCode)' == 'true'">
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionSuffix Condition="'$(VersionSuffix)' == ''">dev</VersionSuffix>
     <Authors>cap-dotnet contributors</Authors>
     <Product>cap-dotnet</Product>
-    <PackageProjectUrl>https://github.com/bytecodealliance/cap-std</PackageProjectUrl>
-    <!-- TODO: licence is not settled. cap-std is Apache-2.0-WITH-LLVM-exception OR
-         Apache-2.0 OR MIT; we must confirm before any upstream test data is copied.
-         Deliberately left unset so `dotnet pack` fails loudly until it is decided. -->
+    <Copyright>Copyright (c) cap-dotnet contributors</Copyright>
+    <PackageProjectUrl>https://github.com/sjp/cap-dotnet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sjp/cap-dotnet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>capability;security;sandbox;filesystem;path-traversal;cap-std</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(CapIsProductCode)' == 'true' and '$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)build/package/README.md" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="$(MSBuildThisFileDirectory)NOTICE" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
 
 </Project>

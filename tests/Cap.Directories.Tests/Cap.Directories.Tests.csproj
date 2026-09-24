@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Cap.Directories/Cap.Directories.csproj" />
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
   </ItemGroup>
 
 </Project>

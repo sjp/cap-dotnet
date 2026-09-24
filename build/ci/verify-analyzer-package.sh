@@ -28,10 +28,8 @@ export NUGET_PACKAGES="$work/packages"
 rm -rf "$feed" "$consumer" "$NUGET_PACKAGES"
 mkdir -p "$feed" "$consumer"
 
-for project in Cap.Primitives Cap.Std; do
-  dotnet pack "$repo/src/$project/$project.csproj" --configuration Release \
-    --output "$feed" -p:Version="$version" -nologo -v quiet
-done
+dotnet pack "$repo/src/Cap.Std/Cap.Std.csproj" --configuration Release \
+  --output "$feed" -p:Version="$version" -nologo -v quiet
 
 if ! unzip -l "$feed/Cap.Std.$version.nupkg" | grep -q 'analyzers/dotnet/cs/Cap.Analyzers.dll'; then
   echo "Cap.Std.$version.nupkg does not carry the analyzer." >&2

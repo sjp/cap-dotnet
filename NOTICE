@@ -1,0 +1,36 @@
+cap-dotnet
+Copyright (c) 2026 cap-dotnet contributors
+Licensed under the MIT License; see LICENSE.
+
+Third-party material
+====================
+
+The packages contain no code, test data or other material taken from another project.
+
+cap-dotnet is a port of cap-std (https://github.com/bytecodealliance/cap-std), which is
+licensed Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT. What this repository takes from
+cap-std is its design: the idea of a directory handle as the authority, and the shape of the
+API built on it. That is re-expressed in C# from scratch. cap-std's test suite was used as a
+checklist of cases to cover. Every test here was written for this repository, and none is a
+translation of an upstream test.
+
+The packages have no runtime dependencies beyond .NET itself. The analyzer shipped in
+Cap.Std runs inside the compiler that loads it, and brings no Roslyn assemblies of its own.
+
+Borrowing from upstream
+=======================
+
+If code or test data is ever copied or translated from cap-std, take it under cap-std's MIT
+option, which is compatible with this repository's licence. Then:
+
+  1. keep the upstream copyright notice in each file that carries the borrowed material;
+  2. add an entry below naming the upstream files, the commit they were taken from and the
+     files here that derive from them;
+  3. include cap-std's MIT licence text below that entry.
+
+The same applies to any other project's material, under that project's licence.
+
+Entries
+-------
+
+(none)

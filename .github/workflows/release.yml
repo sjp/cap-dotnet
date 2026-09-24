@@ -1,0 +1,157 @@
+name: Release
+
+# ---------------------------------------------------------------------------------------
+# Pushing a tag vX.Y.Z builds that commit's packages, attests their provenance, installs them
+# on every platform, and then publishes them to nuget.org and as a GitHub release.
+#
+# The steps before publishing are the ones CI runs on every change: the same pack script, the
+# same content checks, the same reproducibility check, the same install on three platforms.
+# A release adds only the attestation and the upload. What a human confirms before tagging
+# (the escape corpus, the nightly stress and fuzz runs, the benchmarks, the threat model) is
+# in the release checklist issue template, and docs/releasing.md walks through it.
+#
+# Publishing waits on the `release` environment, which should require a reviewer. It pushes
+# with NuGet trusted publishing: the job exchanges its GitHub OIDC token for an API key that
+# lasts an hour, so there is no long-lived key in the repository's secrets to steal.
+# ---------------------------------------------------------------------------------------
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  CI: true
+
+jobs:
+  pack:
+    name: pack, check and attest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Until 1.0 every release is 0.y.z (docs/releasing.md says when that changes), so a tag
+      # outside that range is a mistake and stops here. Leaving 0.x means editing this check,
+      # which is deliberate: it should be a decision, not a typo.
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not v0.MINOR.PATCH[-PRERELEASE]."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Pack and check the contents
+        run: build/ci/pack.sh "$RUNNER_TEMP/feed" "${{ steps.version.outputs.version }}"
+
+      - name: Build again from another directory and compare the assemblies
+        run: build/ci/check-reproducible.sh "$RUNNER_TEMP/reproducible"
+
+      # The attestation covers each .nupkg as built here, and each assembly inside one. The
+      # assemblies matter because nuget.org adds its repository signature to a package on
+      # upload, which changes the .nupkg's bytes but not the files in it. So a package
+      # downloaded from nuget.org is checked through its assemblies, and one downloaded from
+      # the GitHub release can be checked whole.
+      - name: Extract the assemblies to attest
+        run: |
+          for nupkg in "$RUNNER_TEMP"/feed/*.nupkg; do
+            unzip -q "$nupkg" '*.dll' -d "$RUNNER_TEMP/assemblies/$(basename "$nupkg" .nupkg)"
+          done
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/feed/*.nupkg
+            ${{ runner.temp }}/assemblies/**/*.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/feed/*.nupkg
+
+  install:
+    name: packages install (${{ matrix.name }})
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/feed
+      - name: Install into fresh consumers, build and run
+        shell: bash
+        run: >
+          build/ci/verify-package-install.sh
+          "${{ runner.temp }}/feed" "${{ needs.pack.outputs.version }}" "${{ runner.temp }}/install"
+
+  publish:
+    name: publish to nuget.org and GitHub
+    needs: [pack, install]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/feed
+
+      - name: Exchange the OIDC token for a short-lived nuget.org key
+        id: nuget
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to nuget.org
+        run: >
+          dotnet nuget push "$RUNNER_TEMP/feed/*.nupkg"
+          --api-key "${{ steps.nuget.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.pack.outputs.version }}
+        run: |
+          prerelease=()
+          if [[ "$VERSION" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/feed/*.nupkg \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$VERSION" --generate-notes "${prerelease[@]}"

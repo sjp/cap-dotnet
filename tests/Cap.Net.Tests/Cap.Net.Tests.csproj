@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
     <ProjectReference Include="../../src/Cap.Net/Cap.Net.csproj" />
   </ItemGroup>
 

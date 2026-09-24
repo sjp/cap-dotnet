@@ -6,6 +6,8 @@
     <Description>Internal path parsing, platform interop and sandboxed resolution algorithms for cap-dotnet. Not intended to be referenced directly.</Description>
     <!-- Adds build/CapBannedSymbols.Primitives.txt on top of the ambient-authority rules. -->
     <CapBanSystemIoPath>true</CapBanSystemIoPath>
+    <!-- Shipped inside the Cap.Std package, never as a package of its own; see Cap.Std.csproj. -->
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

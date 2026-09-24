@@ -79,7 +79,9 @@ escapes, and publish a GitHub Security Advisory when the fix ships.
 
 Pre-1.0, only the latest released version is supported. Note in
 particular that **a containment fix may change behaviour in a patch release**. Code that
-depended on an escape working was depending on a bug.
+depended on an escape working was depending on a bug. The versioning policy, and how to
+check that a package was built by this repository's CI, are in
+[docs/releasing.md](docs/releasing.md).
 
 ## A note on the test suite
 

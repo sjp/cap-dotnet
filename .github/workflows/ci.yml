@@ -357,6 +357,59 @@ jobs:
         run: build/ci/verify-analyzer-package.sh "$RUNNER_TEMP/analyzer-package"
 
   # ---------------------------------------------------------------------------------
+  # The packages exactly as a release builds them: packed once, on Linux, checked for what
+  # each must carry, and built a second time from another directory to show the assemblies
+  # are reproducible. The install jobs below then take that one feed to every platform,
+  # because a release publishes one set of packages, not one per platform.
+  # ---------------------------------------------------------------------------------
+  packages:
+    name: pack and check reproducibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Pack and check the contents
+        run: build/ci/pack.sh "$RUNNER_TEMP/feed" "0.0.0-ci.${{ github.run_number }}"
+      - name: Build again from another directory and compare the assemblies
+        run: build/ci/check-reproducible.sh "$RUNNER_TEMP/reproducible"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/feed/*.nupkg
+          retention-days: 7
+
+  package-install:
+    name: packages install (${{ matrix.name }})
+    needs: packages
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            os: ubuntu-latest
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: ${{ runner.temp }}/feed
+      - name: Install into fresh consumers, build and run
+        shell: bash
+        run: >
+          build/ci/verify-package-install.sh
+          "${{ runner.temp }}/feed" "0.0.0-ci.${{ github.run_number }}" "${{ runner.temp }}/install"
+
+  # ---------------------------------------------------------------------------------
   # The hot-path benchmarks against the committed figures in bench/baselines. Time is
   # compared as the ratio to the System.IO baseline measured in the same run, so a runner
   # that is slower today does not fail the gate and a library that is slower does; see

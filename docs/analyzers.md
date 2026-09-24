@@ -206,3 +206,8 @@ run-to-run noise.
 promised defaults in a real build. With nothing configured, `CAP0003` and `CAP0005` report
 and `File.*` is left alone. With `[assembly: CapabilityStrict]`, `File.*` and the rest are
 errors and the build fails. CI runs it on every change.
+
+[`build/ci/verify-package-install.sh`](../build/ci/verify-package-install.sh) covers the
+other way in. The other packages depend on `Cap.Std` with all of its assets, so a project that
+references only `Cap.Time`, say, gets the analyzer as well. The script builds such a project
+and checks that `CAP0003` reports in it.

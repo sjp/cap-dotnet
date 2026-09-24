@@ -10,9 +10,39 @@
     <CapBanSystemIoPath>true</CapBanSystemIoPath>
   </PropertyGroup>
 
+  <!--
+    Cap.Primitives ships inside this package, in lib/ beside Cap.Std.dll, and not as a package
+    of its own. Its few public types (AmbientAuthority, CapPath, SymlinkPolicy and the like)
+    are part of the API every package here shares, but the assembly is not a separate thing to
+    depend on or version: a package ID is a promise, and this one would promise a layer whose
+    shape is expected to change.
+
+    PrivateAssets="all" keeps it out of this package's dependency list, and also stops it
+    flowing on to projects that reference this one. So every project in the repository that
+    uses a type from it, including the other packages, references it directly. That is the
+    same view a package consumer gets: they receive the assembly with Cap.Std.
+
+    The other packages reference Cap.Std with PrivateAssets="none". NuGet's default for a
+    project reference would write the dependency as exclude="Build,Analyzers", so a project
+    that installed only Cap.Time, say, would get Cap.Std's types without its analyzer.
+  -->
   <ItemGroup>
-    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" PrivateAssets="all" />
   </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeCapPrimitivesInPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+
+  <Target Name="IncludeCapPrimitivesInPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <CapPrimitivesAssembly Include="@(ReferencePath)"
+                             Condition="'%(ReferencePath.ReferenceSourceTarget)' == 'ProjectReference' and '%(ReferencePath.Filename)' == 'Cap.Primitives'" />
+      <BuildOutputInPackage Include="@(CapPrimitivesAssembly)" />
+      <BuildOutputInPackage Include="@(CapPrimitivesAssembly->'%(RootDir)%(Directory)%(Filename).xml')" />
+    </ItemGroup>
+    <Error Condition="'@(CapPrimitivesAssembly)' == ''" Text="Cap.Primitives was not found among Cap.Std's references, so it cannot be packed inside Cap.Std." />
+  </Target>
 
   <!--
     The analyzer travels in this package rather than in one of its own, so that a project

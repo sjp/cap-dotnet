@@ -6,7 +6,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" />
+    <!--
+      Nothing here uses Cap.Std itself. The types this assembly needs are in Cap.Primitives,
+      which ships inside the Cap.Std package rather than as one of its own (see Cap.Std.csproj),
+      so Cap.Std is the dependency that brings them, and the analyzer with them
+      (PrivateAssets="none"; see Cap.Std.csproj).
+    -->
+    <ProjectReference Include="../Cap.Std/Cap.Std.csproj" PrivateAssets="none" />
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

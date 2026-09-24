@@ -8,7 +8,10 @@
   <ItemGroup>
     <!-- Unix domain sockets are named by a filesystem path, so they are a Dir capability,
          not a Pool capability. That is why this references Cap.Std. -->
-    <ProjectReference Include="../Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../Cap.Std/Cap.Std.csproj" PrivateAssets="none" />
+    <!-- Cap.Primitives ships inside Cap.Std, and Cap.Std carries the analyzer on to whoever
+         installs this package. Both are explained in Cap.Std.csproj. -->
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

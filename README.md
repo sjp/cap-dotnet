@@ -155,6 +155,7 @@ reviewed to know that — it was never given anything else.
 | [Path parsing](docs/paths.md) | What a path is allowed to be, and what is never rewritten on the way through. |
 | [Fuzzing](docs/fuzzing.md) | The fuzz targets and property tests, and what to do with a finding. |
 | [Benchmarks](docs/benchmarks.md) | Each operation against its `System.IO` equivalent, per backend. |
+| [Releasing](docs/releasing.md) | The packages, the versioning policy, and how to verify a package's provenance. |
 
 **Samples** — see [samples/README.md](samples/README.md): the demonstration above, a
 static file server, a plugin host that gives each plugin its own directory, a zip extractor
@@ -164,7 +165,7 @@ authority.
 ## Repository layout
 
 ```
-src/Cap.Primitives/    path parsing, interop, resolution algorithms (internal)
+src/Cap.Primitives/    path parsing, interop, resolution algorithms (ships inside Cap.Std)
 src/Cap.Std/           the public API: Dir, CapFile, CapMetadata
 src/Cap.Fs.Ext/        atomic writes, walks, handle-to-handle copy
 src/Cap.Net/           capability sockets: a Pool of permitted endpoints
@@ -203,3 +204,8 @@ backend the machine has.
 
 Escapes are vulnerabilities; please report them privately. See [SECURITY.md](SECURITY.md).
 So is a host quietly running a weaker resolution backend than it reports.
+
+## Licence
+
+MIT; see [LICENSE](LICENSE). [NOTICE](NOTICE) covers third-party material, of which there is
+currently none.

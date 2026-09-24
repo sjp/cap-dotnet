@@ -6,9 +6,9 @@ that, and most of it is ordinary .NET.
 
 ## Referencing it
 
-Reference `Cap.Std`. It brings in `Cap.Primitives`, which holds the few types every package
-shares — `AmbientAuthority`, `SymlinkPolicy`, `CapFileType` — and it carries the
-[analyzer](analyzers.md). Add `Cap.Fs.Ext` for atomic writes, walks, tree removal, copying and
+Reference `Cap.Std`. The package contains the `Cap.Primitives` assembly, which holds the few
+types every package shares (`AmbientAuthority`, `SymlinkPolicy`, `CapFileType`), and it
+carries the [analyzer](analyzers.md). Add `Cap.Fs.Ext` for atomic writes, walks, tree removal, copying and
 pattern matching ([convenience-layer.md](convenience-layer.md)).
 
 ```csharp
