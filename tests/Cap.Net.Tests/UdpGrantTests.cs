@@ -50,9 +50,8 @@ public sealed class UdpGrantTests
 
     /// <summary>Pointing a socket at an ungranted peer is refused too.</summary>
     /// <remarks>
-    /// The check has to happen here rather than on the sends that follow, because after this
-    /// the system will not send anywhere else — so this is the last moment at which there is
-    /// a destination to check.
+    /// A send that names no destination goes to the peer set here, so this is the last
+    /// moment at which that destination can be checked.
     /// </remarks>
     [Fact]
     public void An_ungranted_peer_cannot_be_connected_to()
@@ -69,6 +68,63 @@ public sealed class UdpGrantTests
     {
         Assert.Throws<EndpointNotGrantedException>(() =>
             CapUdpSocket.Bind(Pool.Empty, new IPEndPoint(IPAddress.Loopback, 0)));
+    }
+
+    /// <summary>
+    /// A socket pointed at a granted peer still has a send that names another destination
+    /// checked against the pool.
+    /// </summary>
+    /// <remarks>
+    /// Pointing a socket at a peer does not stop every system from sending elsewhere: on
+    /// Linux a send with an explicit address leaves by it, as
+    /// <see cref="Linux_lets_a_pointed_socket_send_to_an_explicit_address"/> shows. So the
+    /// refusal here has to come from the pool.
+    /// </remarks>
+    [Fact]
+    public async Task A_pointed_socket_still_checks_an_explicit_destination()
+    {
+        using CapUdpSocket granted = CapUdpSocket.Bind(Loopback, new IPEndPoint(IPAddress.Loopback, 0));
+        using CapUdpSocket ungranted = CapUdpSocket.Bind(Loopback, new IPEndPoint(IPAddress.Loopback, 0));
+
+        Pool onlyGranted = new PoolBuilder()
+            .InsertSocketAddress(granted.LocalEndPoint!, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapUdpSocket sender = CapUdpSocket.Open(onlyGranted, AddressFamily.InterNetwork);
+        sender.Connect(granted.LocalEndPoint!);
+
+        Assert.Throws<EndpointNotGrantedException>(() =>
+            sender.SendTo("ping"u8, ungranted.LocalEndPoint!));
+        await Assert.ThrowsAsync<EndpointNotGrantedException>(async () =>
+            await sender.SendToAsync(
+                "ping"u8.ToArray(), ungranted.LocalEndPoint!, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// On Linux the system itself sends from a pointed socket to an explicit address that is
+    /// not its peer, which is why the pool, not the system, has to refuse it.
+    /// </summary>
+    [Fact]
+    public async Task Linux_lets_a_pointed_socket_send_to_an_explicit_address()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("Only Linux is known to send to an explicit address from a pointed socket.");
+        }
+
+        using var peer = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        using var elsewhere = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        using var sender = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        peer.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        elsewhere.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+
+        sender.Connect(peer.LocalEndPoint!);
+        sender.SendTo("ping"u8, elsewhere.LocalEndPoint!);
+
+        byte[] buffer = new byte[16];
+        int received = await elsewhere.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("ping"u8.ToArray(), buffer[..received]);
     }
 
     /// <summary>

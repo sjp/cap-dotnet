@@ -381,11 +381,17 @@ public sealed class CapFile : IDisposable
     /// <para>
     /// A borrowed stream is given a copy of the handle rather than the handle itself,
     /// because a stream constructed over a handle closes that handle when it is disposed and
-    /// there is no way to ask it not to. The copy refers to the same open file — the same
-    /// position, the same access, the same appending behaviour — so it is a second way to
-    /// reach one file rather than a second opinion about what the name meant. That matters:
-    /// re-opening by name is exactly what a capability exists to avoid, and a name can hold
-    /// something else by the time it is asked again.
+    /// there is no way to ask it not to. The copy refers to the same open file, with the
+    /// same access and the same appending behaviour, so it is a second way to reach one
+    /// file rather than a second opinion about what the name meant. That matters: re-opening
+    /// by name is exactly what a capability exists to avoid, and a name can hold something
+    /// else by the time it is asked again.
+    /// </para>
+    /// <para>
+    /// What the copy does not share is a position. A <see cref="FileStream"/> keeps its own
+    /// and reads and writes at it by offset, so each stream taken from this handle moves
+    /// independently of every other, and this handle, whose reads and writes all name their
+    /// offset, has no position to share.
     /// </para>
     /// <para>
     /// <strong>Thread safety.</strong> The borrowing form is safe to call from any thread.

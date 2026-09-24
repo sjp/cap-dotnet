@@ -10,8 +10,11 @@ namespace Cap.Net;
 /// <para>
 /// A datagram socket has no connection to check once and be done with, so the check is made
 /// per datagram: every send names where it is going, and every one of those is tested against
-/// the pool. A socket that has been pointed at a peer with <see cref="Connect"/> is checked
-/// once, at that point, because after it the system will not send anywhere else.
+/// the pool. A socket that has been pointed at a peer with <see cref="Connect"/> has that peer
+/// checked once, at that point, and a send that names no destination goes to it. A send that
+/// does name one is checked like any other, whether or not the socket is pointed anywhere:
+/// some systems, Linux among them, let a pointed socket send to an explicit address that
+/// differs from its peer, so the check cannot be left to the system.
 /// </para>
 /// <para>
 /// <strong>What arrives is not checked.</strong> Anything able to route to this socket can
@@ -124,8 +127,10 @@ public sealed class CapUdpSocket : IDisposable
     /// <summary>Points this socket at one peer, if the pool grants it.</summary>
     /// <remarks>
     /// <para>
-    /// After this the system refuses to send anywhere else and discards what arrives from
-    /// anywhere else, which is why the check happens here and not on each subsequent send.
+    /// After this, a send that names no destination goes to this peer, which is why the
+    /// check for those sends happens here and not on each of them. A send that names a
+    /// destination is still checked on its own, since not every system refuses one that
+    /// differs from the peer. The system also discards what arrives from anywhere else.
     /// </para>
     /// <para>
     /// Safe to call from any thread. A send racing it on another thread may reach the peer
@@ -190,7 +195,9 @@ public sealed class CapUdpSocket : IDisposable
     /// <remarks>
     /// <para>
     /// The destination was checked by <see cref="Connect"/> and cannot have changed since:
-    /// the system will not send a datagram from a pointed socket anywhere else.
+    /// a send that names no destination goes to the socket's peer, and
+    /// <see cref="Connect"/>, which checks the pool before it points the socket anywhere,
+    /// is the only way to change that peer.
     /// </para>
     /// <para>Safe to call from several threads at once; each datagram is sent whole.</para>
     /// </remarks>
