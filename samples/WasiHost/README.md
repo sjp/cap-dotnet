@@ -50,7 +50,7 @@ guest's path passed through as it arrived:
 |---|---|
 | a preopen, or a directory descriptor | `Dir` |
 | a file descriptor | `CapFile`, plus the position `fd_read` and `fd_write` move |
-| `path_open` | `OpenFile`, or `OpenDir` for `O_DIRECTORY`; `FDFLAGS_APPEND` is `append: true` |
+| `path_open` | `OpenAny` for an open that only reads, `OpenFile` for one that creates, truncates or writes, `OpenDir` for `O_DIRECTORY`; `FDFLAGS_APPEND` is `append: true` |
 | `fd_fdstat_set_flags` with `FDFLAGS_APPEND` | `CapFile.IsAppending` |
 | `path_create_directory`, `path_remove_directory`, `path_unlink_file` | `CreateDir`, `DeleteDir`, `DeleteFile` |
 | `path_rename`, `path_link` | `Rename(..., replaceExisting: true)`, `CreateHardLink` |
@@ -58,7 +58,7 @@ guest's path passed through as it arrived:
 | `path_filestat_get` | `GetMetadata(path)` |
 | `path_filestat_set_times`, `fd_filestat_set_times` | `SetTimes(path, ...)`, and `SetTimes` on the `CapFile` or `Dir` |
 | `fd_readdir` | `EnumerateEntries` |
-| `LOOKUPFLAGS_SYMLINK_FOLLOW` | `noFollow: false` on `OpenFile` and `OpenDir`; `followLink: true` on `GetMetadata`, `SetTimes` and `CreateHardLink` |
+| `LOOKUPFLAGS_SYMLINK_FOLLOW` | `noFollow: false` on `OpenAny`, `OpenFile` and `OpenDir`; `followLink: true` on `GetMetadata`, `SetTimes` and `CreateHardLink` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
 | every other error code | `CapIOException.KindOf(exception)` |
 
@@ -114,9 +114,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Composed from two calls:**
 
-- **There is no open for "whatever the name holds".** A WASI open may name a file or a
-  directory without saying which. The adapter tries a file open, then a directory open: a
-  second resolution, and a window in which a rename can change which object is described.
 - **Metadata has no link count or status-change time**, and a directory entry has no
   identity. `filestat` reports both as zero, and `fd_readdir` describes every entry separately
   to learn its inode.

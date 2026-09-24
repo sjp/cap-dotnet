@@ -264,6 +264,149 @@ public sealed partial class Dir
     }
 
     /// <summary>
+    /// Opens whatever a name beneath this handle holds, a directory or a file, to read, and
+    /// says which it was.
+    /// </summary>
+    /// <param name="path">
+    /// A relative path of one or more components, refused and resolved as for
+    /// <see cref="OpenDir"/>. A path spelled so that its target must be a directory — one
+    /// ending in a separator or in <c>..</c> — opens only a directory.
+    /// </param>
+    /// <param name="share">
+    /// What other openers may do while the handle is open, if what is found is a file. See
+    /// <see cref="OpenFile"/>. A directory is shared as every directory handle is.
+    /// </param>
+    /// <param name="options">
+    /// Flags and hints for the open, if what is found is a file, with the meanings they have
+    /// for <see cref="OpenFile"/>. A directory is opened as <see cref="OpenDir"/> opens one,
+    /// whatever is asked here.
+    /// </param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link at the last component is refused rather than followed, as
+    /// <c>O_NOFOLLOW</c> asks of a POSIX open, with the meaning it has for
+    /// <see cref="OpenDir"/> and <see cref="OpenFile"/>.
+    /// </param>
+    /// <returns>
+    /// What was opened, holding either a directory carrying this handle's policy or a file open
+    /// to read. Dispose it, or take the handle out of it and dispose that.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// For a caller that does not know which kind a name holds, as <c>open(2)</c> without
+    /// <c>O_DIRECTORY</c> does not. Trying <see cref="OpenFile"/> and then
+    /// <see cref="OpenDir"/> would resolve the path twice, and a rename between the two could
+    /// make the answer describe a different object from the one the first attempt found.
+    /// This resolves it once, and reports the kind of the object it opened. On Windows, where
+    /// a directory and a file cannot be opened with the same options, the object is opened a
+    /// second time through the first handle, which reaches the same object and names nothing.
+    /// </para>
+    /// <para>
+    /// Only reads. A directory cannot be written, created or emptied by an open, so an open
+    /// that could do any of those is one of a file, and <see cref="OpenFile"/> is the method
+    /// for it.
+    /// </para>
+    /// <para>
+    /// Resolution, <c>..</c> and symbolic links, the last component included, are handled
+    /// exactly as <see cref="OpenDir"/> and <see cref="OpenFile"/> with
+    /// <see cref="FileMode.Open"/> handle them: a link is followed only under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> and only while its
+    /// target stays beneath this handle, one that leaves is refused with
+    /// <see cref="SandboxEscapeException"/>, and under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> every link is refused with
+    /// <see cref="CapIOException"/>. The kind reported is that of what a followed link leads
+    /// to.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is not a usable name, or <paramref name="share"/> asks for an
+    /// inheritable handle.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="share"/> or <paramref name="options"/> holds a value that is not defined.
+    /// </exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="FileNotFoundException">There is nothing at the name.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
+    /// <exception cref="CapIOException">
+    /// A symbolic link the policy will not follow is in the way, the name holds a link and
+    /// <paramref name="noFollow"/> is set, a component before the last is not a directory, the
+    /// path is spelled as a directory and names something else, or the platform cannot honour
+    /// part of the request.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public CapOpened OpenAny(
+        string path,
+        FileShare share = FileShare.Read,
+        FileOptions options = FileOptions.None,
+        bool noFollow = false)
+    {
+        FileOpenRequest request = Demand(FileMode.Open, FileAccess.Read, share, options, 0, append: false, noFollow);
+
+        CapPathError pathError = OpenAnyCore(path, in request, out CapOpened? opened, out CapError error);
+        if (pathError != CapPathError.None)
+        {
+            throw FailureTranslation.ToException(pathError, path, nameof(path));
+        }
+
+        return error.IsSuccess
+            ? opened!
+            : throw FailureTranslation.ToException(error, path, ExpectedTarget.Name);
+    }
+
+    /// <summary>
+    /// Opens whatever a name beneath this handle holds, reporting failure rather than
+    /// throwing.
+    /// </summary>
+    /// <param name="path">A relative path. See <see cref="OpenAny"/>.</param>
+    /// <param name="opened">What was opened, when this returns true.</param>
+    /// <returns>True when something was opened.</returns>
+    /// <remarks>
+    /// <para>
+    /// False covers every reason nothing was opened, a missing name and a containment refusal
+    /// alike. An application that audits escape attempts calls <see cref="OpenAny"/> and
+    /// catches <see cref="SandboxEscapeException"/>; this form deliberately reports no reason.
+    /// </para>
+    /// <para>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="OpenAny"/> describes; a refusal is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TryOpenAny(string path, [NotNullWhen(true)] out CapOpened? opened) =>
+        TryOpenAny(path, noFollow: false, out opened);
+
+    /// <summary>
+    /// Opens whatever a name beneath this handle holds, choosing whether a final symbolic
+    /// link is followed, and reports failure rather than throwing.
+    /// </summary>
+    /// <param name="path">A relative path. See <see cref="OpenAny"/>.</param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link at the last component is refused. See <see cref="OpenAny"/>.
+    /// </param>
+    /// <param name="opened">What was opened, when this returns true.</param>
+    /// <returns>True when something was opened.</returns>
+    /// <remarks>
+    /// Symbolic links are followed or refused exactly as <see cref="OpenAny"/> describes for
+    /// the same <paramref name="noFollow"/>, and every refusal, containment included, is
+    /// reported as false. Safe to call concurrently with any other member of this handle, from
+    /// any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TryOpenAny(string path, bool noFollow, [NotNullWhen(true)] out CapOpened? opened)
+    {
+        FileOpenRequest request = Demand(
+            FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: false, noFollow);
+        return Succeeded(OpenAnyCore(path, in request, out opened, out CapError error), error);
+    }
+
+    /// <summary>
     /// Creates a file beneath this handle, emptying it if the name is already taken.
     /// </summary>
     /// <param name="path">A relative path. Every component but the last must already exist.</param>
@@ -777,6 +920,48 @@ public sealed partial class Dir
             request.Access,
             request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles,
             request.Appends);
+
+        return CapPathError.None;
+    }
+
+    /// <summary>
+    /// Resolves a path and opens whatever it names, as a directory or as a file.
+    /// </summary>
+    /// <remarks>
+    /// A path spelled as a directory needs no refusal of its own here, unlike a file open:
+    /// resolution opens only a directory for it, and says what it found otherwise.
+    /// </remarks>
+    private CapPathError OpenAnyCore(
+        string path,
+        in FileOpenRequest request,
+        out CapOpened? opened,
+        out CapError error)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        opened = null;
+        error = CapError.Success;
+
+        if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
+        {
+            return pathError;
+        }
+
+        CapResult<OpenedNode> node = Resolver.OpenNode(_handle, in parsed, in request, _options);
+        if (!node.IsSuccess)
+        {
+            error = node.Error;
+            return CapPathError.None;
+        }
+
+        opened = node.Value.Directory is { } directory
+            ? new CapOpened(new Dir(directory, _options))
+            : new CapOpened(new CapFile(
+                node.Value.File!,
+                request.Access,
+                request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles,
+                appending: false));
 
         return CapPathError.None;
     }

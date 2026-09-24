@@ -278,6 +278,110 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// A directory and a file are opened here with different options: a directory with the
+    /// rights to look into it and the sharing every directory handle this backend holds uses,
+    /// a file with the caller's data access, sharing and file options. No single open can
+    /// ask for both, so the name is opened once with the right to ask what it is and nothing
+    /// else, and the object found is then opened again through that handle, with an empty
+    /// name, as whichever kind it turned out to be. The second open names nothing, so a
+    /// rename in between cannot make it reach a different object from the first.
+    /// </para>
+    /// <para>
+    /// The second open is asked again whether it reached a link, as every open here is: an
+    /// object can be made into a reparse point in place, without being renamed.
+    /// </para>
+    /// </remarks>
+    public CapResult<OpenedNode> OpenChildNode(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
+    {
+        Interlocked.Increment(ref _componentOpens);
+        CapError error = OpenRelative(
+            parent,
+            name,
+            QueryAccess,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        // Held as a directory handle only so that it can be the root of the second open. It
+        // was granted the right to ask what the object is and no other, and it is closed
+        // before this returns.
+        using SafeDirHandle found = new(raw, ownsHandle: true, CapAccess.None);
+
+        CapError kind = QueryAttributeTag(found, out FileAttributeTagInformation tagInfo);
+        kind = Classify(kind, in tagInfo);
+        if (kind.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(kind);
+        }
+
+        return (tagInfo.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0
+            ? ReopenNodeAsDirectory(found)
+            : ReopenNodeAsFile(found, in request);
+    }
+
+    /// <summary>
+    /// Opens the directory a handle refers to a second time, as a directory open for reading
+    /// opens one.
+    /// </summary>
+    private static CapResult<OpenedNode> ReopenNodeAsDirectory(SafeDirHandle found)
+    {
+        CapError error = OpenRelative(
+            found,
+            ReadOnlySpan<char>.Empty,
+            DirectoryAccess,
+            NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
+            NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        SafeDirHandle directory = new(raw, ownsHandle: true, CapAccess.Read);
+        CapError linkCheck = RefuseIfReparsePoint(directory);
+        if (linkCheck.IsFailure)
+        {
+            directory.Dispose();
+            return CapResult<OpenedNode>.Fail(linkCheck);
+        }
+
+        return CapResult<OpenedNode>.Ok(new OpenedNode(directory));
+    }
+
+    /// <summary>
+    /// Opens the file a handle refers to a second time, as <paramref name="request"/>
+    /// describes.
+    /// </summary>
+    private static CapResult<OpenedNode> ReopenNodeAsFile(SafeDirHandle found, in FileOpenRequest request)
+    {
+        CapError error = OpenFileRelative(found, ReadOnlySpan<char>.Empty, in request, out nint raw);
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        SafeFileHandle file = new(raw, ownsHandle: true);
+        CapError linkCheck = RefuseIfReparsePoint(file);
+        if (linkCheck.IsFailure)
+        {
+            file.Dispose();
+            return CapResult<OpenedNode>.Fail(linkCheck);
+        }
+
+        return CapResult<OpenedNode>.Ok(new OpenedNode(file));
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenConfinedDirectory(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
@@ -293,6 +397,14 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         in FileOpenRequest request,
         ConfinedResolveOptions options) =>
         CapResult<SafeFileHandle>.Fail(ConfinedOpenUnavailable);
+
+    /// <inheritdoc/>
+    public CapResult<OpenedNode> OpenConfinedNode(
+        SafeDirHandle root,
+        ReadOnlySpan<char> path,
+        in FileOpenRequest request,
+        ConfinedResolveOptions options) =>
+        CapResult<OpenedNode>.Fail(ConfinedOpenUnavailable);
 
     /// <inheritdoc/>
     public CapResult<DirectoryReader> OpenDirectoryReader(SafeDirHandle directory)

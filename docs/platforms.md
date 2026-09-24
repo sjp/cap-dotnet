@@ -56,6 +56,13 @@ directories. Creating either needs the privilege Windows grants to administrator
 Developer Mode. Junctions always store an absolute target, so they are always refused on
 the way through, whatever the symbolic-link policy says.
 
+**Opening a name without saying which kind takes two opens.** A directory and a file are
+opened with different options, so `OpenAny` opens the name once with the right to ask what it
+is and nothing more, then opens that object again through the handle it got, with an empty
+name, as a directory or with the file's sharing and options. The second open names nothing, so
+it reaches the same object and a rename in between can't change the answer. The extra call is
+the only difference from other platforms, where one open serves both kinds.
+
 **Setting a time to "now" reads the system clock.** The Windows call that sets a file's times
 has no value meaning "the moment this is recorded", as the Unix calls do, so for
 `CapFileTime.Now` the backend reads the system time and passes it in. It is the time a write

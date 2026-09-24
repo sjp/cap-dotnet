@@ -180,6 +180,14 @@ internal static class OperationRunner
                 observation.Objects.Add(root.GetMetadata(EscapeCorpus.LandingName).FileId);
                 break;
 
+            case Operation.OpenAny:
+                OpenAny(root, path, noFollow: false, observation);
+                break;
+
+            case Operation.OpenAnyNoFollow:
+                OpenAny(root, path, noFollow: true, observation);
+                break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unknown operation.");
         }
@@ -197,9 +205,33 @@ internal static class OperationRunner
         }
     }
 
+    private static void OpenAny(Dir root, string path, bool noFollow, Observation observation)
+    {
+        using CapOpened opened = root.OpenAny(path, noFollow: noFollow);
+        if (opened.IsDirectory)
+        {
+            using Dir directory = opened.TakeDir();
+            observation.Objects.Add(directory.GetMetadata().FileId);
+            foreach (DirEntry entry in directory.EnumerateEntries())
+            {
+                observation.Names.Add(entry.Name);
+            }
+        }
+        else
+        {
+            using CapFile file = opened.TakeFile();
+            ReadFrom(file, observation);
+        }
+    }
+
     private static void Read(Dir root, string path, Observation observation, bool noFollow = false)
     {
         using CapFile file = root.OpenFile(path, noFollow: noFollow);
+        ReadFrom(file, observation);
+    }
+
+    private static void ReadFrom(CapFile file, Observation observation)
+    {
         observation.Objects.Add(file.GetMetadata().FileId);
 
         byte[] buffer = new byte[ReadLimit];

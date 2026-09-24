@@ -136,6 +136,38 @@ internal interface IPlatformOps
         in FileOpenRequest request);
 
     /// <summary>
+    /// Opens whatever <paramref name="name"/> holds directly beneath
+    /// <paramref name="parent"/>, and says whether it was a directory or a file.
+    /// </summary>
+    /// <param name="parent">The directory the name is looked up in.</param>
+    /// <param name="name">A single component.</param>
+    /// <param name="request">
+    /// How a file found there is to be opened. Only a read of something that already exists
+    /// can mean anything for either kind, so any other request is refused with
+    /// <see cref="CapErrorCategory.InvalidArgument"/>. Its share and options apply to a file
+    /// alone; a directory is opened as <see cref="OpenChildDirectory"/> opens one for
+    /// <see cref="CapAccess.Read"/>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The name is looked up once. Opening it as a file and then, on finding a directory,
+    /// opening it again as a directory would look it up twice, and a rename between the two
+    /// could make the answer describe a different object from the one the first open found.
+    /// Where a platform needs different options for the two kinds, the second open is made
+    /// through the handle the first produced, which reaches the same object and names
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// Refuses to follow a link in the name, like every other member, and reports it as
+    /// <see cref="CapErrorCategory.SymbolicLink"/> for the caller to decide about.
+    /// </para>
+    /// </remarks>
+    CapResult<OpenedNode> OpenChildNode(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request);
+
+    /// <summary>
     /// Creates a file directly beneath <paramref name="parent"/> that has no name.
     /// </summary>
     /// <param name="parent">The directory the file's storage comes from.</param>
@@ -224,6 +256,21 @@ internal interface IPlatformOps
     /// </para>
     /// </remarks>
     CapResult<SafeFileHandle> OpenConfinedFile(
+        SafeDirHandle root,
+        ReadOnlySpan<char> path,
+        in FileOpenRequest request,
+        ConfinedResolveOptions options);
+
+    /// <summary>
+    /// The counterpart of <see cref="OpenChildNode"/> for a whole path, with the confinement,
+    /// reporting and internal retry of <see cref="OpenConfinedDirectory"/>.
+    /// </summary>
+    /// <remarks>
+    /// A link at the last component is followed unless <paramref name="request"/> asks for it
+    /// not to be, in which case it is refused as <see cref="CapErrorCategory.SymbolicLinkLoop"/>,
+    /// as the walk refuses it.
+    /// </remarks>
+    CapResult<OpenedNode> OpenConfinedNode(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         in FileOpenRequest request,

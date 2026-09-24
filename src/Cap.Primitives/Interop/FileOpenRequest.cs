@@ -138,6 +138,18 @@ internal readonly struct FileOpenRequest
     public bool FollowsFinalLink => Mode == FileMode.Open && !NoFollow;
 
     /// <summary>
+    /// Whether the request could be satisfied by a directory as well as by a file.
+    /// </summary>
+    /// <remarks>
+    /// Only a read of something that already exists: a directory cannot be created, emptied,
+    /// written or appended to by an open, so a request to do any of those names a file
+    /// whatever else it says, and an open that takes whatever the name holds refuses it rather
+    /// than quietly doing less than was asked.
+    /// </remarks>
+    public bool OpensAnyKind =>
+        Mode == FileMode.Open && Access == FileAccess.Read && !Appends && PreallocationSize == 0;
+
+    /// <summary>
     /// An open of a file that must already exist, sharing as widely as the platform allows.
     /// </summary>
     /// <remarks>

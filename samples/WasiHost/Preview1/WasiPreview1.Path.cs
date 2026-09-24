@@ -145,12 +145,10 @@ public sealed partial class WasiPreview1
     /// that refusal is passed on to the guest.
     /// </para>
     /// <para>
-    /// A WASI open that neither requires a directory nor creates anything may name a directory,
-    /// and then opens it. <see cref="Dir"/> has no open that takes whatever the name holds, so
-    /// a file open that fails is followed by a directory open of the same name. Both are
-    /// confined, so the pair can reach nothing either could not; what it costs is a second
-    /// resolution, and a window in which a rename can make the answer describe the second
-    /// object rather than the first.
+    /// A WASI open that neither requires a directory nor creates or writes anything may name a
+    /// directory, and then opens it, as <c>open(2)</c> without <c>O_DIRECTORY</c> does. That
+    /// open is <see cref="Dir.OpenAny"/>, which resolves the path once and says which kind it
+    /// found, so the descriptor made is always of the kind of the object opened.
     /// </para>
     /// <para>
     /// .NET will not create or empty a file through a handle that cannot write it, while
@@ -222,7 +220,22 @@ public sealed partial class WasiPreview1
         CapFile? file = null;
         try
         {
-            file = parent.Dir.OpenFile(path, mode, access, share, options, append: appends, noFollow: !follow);
+            if (mode == FileMode.Open && !write)
+            {
+                using CapOpened found = parent.Dir.OpenAny(path, share, options, noFollow: !follow);
+                if (found.IsDirectory)
+                {
+                    opened = DirectoryFor(found.TakeDir(), rightsBase, rightsInheriting, fdflags);
+                    return Errno.Success;
+                }
+
+                file = found.TakeFile();
+            }
+            else
+            {
+                file = parent.Dir.OpenFile(path, mode, access, share, options, append: appends, noFollow: !follow);
+            }
+
             FileType type = ToFileType(file.GetMetadata().Type);
             opened = new FileDescriptor(file, type, granted, rightsInheriting) { Flags = kept };
             return Errno.Success;
@@ -230,13 +243,6 @@ public sealed partial class WasiPreview1
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
         {
             file?.Dispose();
-
-            if (mode == FileMode.Open && !write &&
-                OpenDirectory(parent, path, follow, rightsBase, rightsInheriting, fdflags, out opened) == Errno.Success)
-            {
-                return Errno.Success;
-            }
-
             return ErrorMapping.ToErrno(e);
         }
     }

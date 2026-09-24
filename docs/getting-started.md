@@ -126,6 +126,7 @@ stream's usual single-caller rules.
 | Read or write a whole file | `dir.ReadAllText`, `ReadAllBytes`, `WriteAllBytes`, and their `Async` forms |
 | Write a file so that readers see all of it or none | `dir.WriteAllTextAtomic` (`Cap.Fs.Ext`) |
 | Open a file | `dir.OpenFile(path, mode, access)` → `CapFile` |
+| Open a name to read without knowing whether it holds a file or a directory | `dir.OpenAny(path)` → `CapOpened`, which says which and hands over the `Dir` or `CapFile` |
 | List a directory | `dir.EnumerateEntries()` → `DirEntry`, which opens what it names without a path |
 | Walk a tree, or match a pattern | `dir.Walk()`, `dir.Glob("**/*.json")` (`Cap.Fs.Ext`) |
 | Scratch space | `CapTempDir.NewIn(dir)`, `CapTempFile.NewAnonymous(dir)` |

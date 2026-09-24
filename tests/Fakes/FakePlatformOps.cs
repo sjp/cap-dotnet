@@ -174,6 +174,28 @@ internal sealed class FakePlatformOps : IPlatformOps
             : CapResult<SafeFileHandle>.Ok(RegisterFile(node));
     }
 
+    /// <inheritdoc/>
+    public CapResult<OpenedNode> OpenChildNode(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
+    {
+        _componentOpens++;
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        return node!.Type switch
+        {
+            CapNodeType.SymbolicLink => CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.SymbolicLink)),
+            CapNodeType.UnknownReparsePoint => CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.Reparse)),
+            CapNodeType.Directory => CapResult<OpenedNode>.Ok(new OpenedNode(Register(node, CapAccess.Read))),
+            _ => CapResult<OpenedNode>.Ok(new OpenedNode(RegisterFile(node))),
+        };
+    }
+
     /// <summary>Adds a file to the simulation and hands back a handle on it.</summary>
     private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
@@ -234,6 +256,24 @@ internal sealed class FakePlatformOps : IPlatformOps
         return node!.Type == CapNodeType.Directory
             ? CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.IsADirectory))
             : CapResult<SafeFileHandle>.Ok(RegisterFile(node));
+    }
+
+    /// <inheritdoc/>
+    public CapResult<OpenedNode> OpenConfinedNode(
+        SafeDirHandle root,
+        ReadOnlySpan<char> path,
+        in FileOpenRequest request,
+        ConfinedResolveOptions options)
+    {
+        CapError error = ResolveConfined(root, path, options, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        return CapResult<OpenedNode>.Ok(node!.Type == CapNodeType.Directory
+            ? new OpenedNode(Register(node, CapAccess.Read))
+            : new OpenedNode(RegisterFile(node)));
     }
 
     /// <inheritdoc/>

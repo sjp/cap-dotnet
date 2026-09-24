@@ -135,6 +135,32 @@ internal static class PortableResolver
     }
 
     /// <summary>
+    /// Opens whatever <paramref name="path"/> names beneath <paramref name="root"/>, a
+    /// directory or a file, with a single lookup of the last component.
+    /// </summary>
+    /// <remarks>
+    /// A path spelled as a directory still opens only a directory, as it would for either of
+    /// the other opens: the spelling is a statement of what the caller expects to find.
+    /// </remarks>
+    public static CapResult<OpenedNode> OpenNode(
+        SafeDirHandle root,
+        scoped in CapPath path,
+        scoped in FileOpenRequest request,
+        ConfinedResolveOptions options)
+    {
+        CapError error = Walk(
+            root, path, ResolutionTarget.Node, CapAccess.Read, in request, options, out Outcome outcome);
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        return CapResult<OpenedNode>.Ok(outcome.Directory is { } directory
+            ? new OpenedNode(directory)
+            : new OpenedNode(outcome.File!));
+    }
+
+    /// <summary>
     /// Resolves everything but the last component, and hands back the directory that
     /// component would be looked up in together with the component itself.
     /// </summary>
@@ -164,7 +190,7 @@ internal static class PortableResolver
     /// One loop rather than one per operation, because the interesting part — what
     /// <c>..</c> means, when a link may be followed, where the root is — is identical for
     /// all of them, and two copies of it would eventually disagree. Only the last step
-    /// differs, and that is the three-way switch at the end of the body.
+    /// differs, and that is the switch on the target at the end of the body.
     /// </remarks>
     private static CapError Walk(
         SafeDirHandle root,
@@ -362,6 +388,7 @@ internal static class PortableResolver
         // caller who wanted a file is told it found one of the other kind. The request can
         // come from a followed link's stored target as well as from the caller's path.
         bool asDirectory = target == ResolutionTarget.Directory || pending.RequiresDirectory;
+        bool keepsDirectory = target is ResolutionTarget.Directory or ResolutionTarget.Node;
 
         // A file open that may create or empty the file refuses a link here, wherever it
         // points: the write must land on the name the caller gave, not on whatever a link
@@ -377,7 +404,7 @@ internal static class PortableResolver
 
         if (asDirectory)
         {
-            CapAccess directoryAccess = target == ResolutionTarget.Directory ? access : CapAccess.None;
+            CapAccess directoryAccess = keepsDirectory ? access : CapAccess.None;
             CapResult<SafeDirHandle> opened = ops.OpenChildDirectory(stack.Top, name, directoryAccess);
             if (!opened.IsSuccess)
             {
@@ -426,6 +453,13 @@ internal static class PortableResolver
             }
         }
 
+        if (target == ResolutionTarget.Node)
+        {
+            return FinishNode(
+                ops, in stack, ref pending, name, path, in request, options, followFinal, ref linkBudget,
+                out followedLink, out outcome);
+        }
+
         CapResult<SafeFileHandle> file = ops.OpenChildFile(stack.Top, name, in request);
         if (!file.IsSuccess)
         {
@@ -437,6 +471,67 @@ internal static class PortableResolver
         }
 
         outcome = new Outcome(null, file.Value, null);
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// The last step of an open that takes whatever the name holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One call opens the name and reports which kind it found, so the kind is that of the
+    /// object opened. Trying a file open and then a directory open would look the name up
+    /// twice, and whatever can write in the directory could change what it held in between.
+    /// </para>
+    /// <para>
+    /// Whether the name is on another filesystem was already asked of the name, as a file
+    /// open asks it. A directory is asked again of its handle, as a directory open asks it,
+    /// since it is a directory that would carry later resolution onto the other filesystem.
+    /// </para>
+    /// </remarks>
+    private static CapError FinishNode(
+        IPlatformOps ops,
+        in DirectoryStack stack,
+        scoped ref PendingComponents pending,
+        scoped ReadOnlySpan<char> name,
+        scoped in CapPath path,
+        scoped in FileOpenRequest request,
+        ConfinedResolveOptions options,
+        bool followFinal,
+        ref int linkBudget,
+        out bool followedLink,
+        out Outcome outcome)
+    {
+        followedLink = false;
+        outcome = default;
+
+        CapResult<OpenedNode> opened = ops.OpenChildNode(stack.Top, name, in request);
+        if (!opened.IsSuccess)
+        {
+            return opened.Error.Category == CapErrorCategory.SymbolicLink
+                ? FollowLast(
+                    ops, in stack, ref pending, name, path.Syntax, options, followFinal, ref linkBudget,
+                    out followedLink)
+                : opened.Error;
+        }
+
+        if (opened.Value.Directory is { } directory)
+        {
+            if ((options & ConfinedResolveOptions.RefuseMountCrossing) != 0)
+            {
+                CapError crossing = CheckVolume(ops, in stack, directory, out _);
+                if (crossing.IsFailure)
+                {
+                    directory.Dispose();
+                    return crossing;
+                }
+            }
+
+            outcome = new Outcome(directory, null, null);
+            return CapError.Success;
+        }
+
+        outcome = new Outcome(null, opened.Value.File, null);
         return CapError.Success;
     }
 
@@ -455,6 +550,7 @@ internal static class PortableResolver
         switch (target)
         {
             case ResolutionTarget.Directory:
+            case ResolutionTarget.Node:
                 CapResult<SafeDirHandle> directory = stack.DetachTop(ops);
                 if (!directory.IsSuccess)
                 {
@@ -682,7 +778,8 @@ internal static class PortableResolver
     }
 
     /// <summary>
-    /// What a completed walk produced: exactly one of the three, according to the target.
+    /// What a completed walk produced: exactly one of the three, according to the target. An
+    /// open of whatever the name holds produces a directory or a file.
     /// </summary>
     private readonly struct Outcome
     {

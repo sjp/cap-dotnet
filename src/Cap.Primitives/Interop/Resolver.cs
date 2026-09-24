@@ -91,6 +91,43 @@ internal static class Resolver
     }
 
     /// <summary>
+    /// Opens whatever <paramref name="path"/> names beneath <paramref name="root"/>, a
+    /// directory or a file, by whichever strategy this platform provides.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a caller that does not know which kind the name holds and would otherwise try one
+    /// open and then the other. The pair would resolve the path twice, and a rename between
+    /// the two could make the answer describe a different object from the one the first
+    /// attempt found. This resolves it once, and the kind reported is read from the object
+    /// opened.
+    /// </para>
+    /// <para>
+    /// Only a read of something that already exists can mean the same thing for both kinds,
+    /// so <paramref name="request"/> must be one; anything else is refused as an invalid
+    /// argument. A link at the last component is followed, subject to the same policy as any
+    /// other component, unless the request asks for it not to be.
+    /// </para>
+    /// </remarks>
+    public static CapResult<OpenedNode> OpenNode(
+        SafeDirHandle root,
+        scoped in CapPath path,
+        scoped in FileOpenRequest request,
+        ConfinedResolveOptions options)
+    {
+        if (!request.OpensAnyKind)
+        {
+            return CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        IPlatformOps ops = PlatformOps.Current;
+
+        return ops.Capabilities.SupportsConfinedOpen
+            ? ops.OpenConfinedNode(root, path.Raw, in request, options)
+            : PortableResolver.OpenNode(root, in path, in request, options);
+    }
+
+    /// <summary>
     /// Resolves everything ahead of <paramref name="path"/>'s last component, and hands back
     /// the directory that component would be looked up in together with the component
     /// itself.

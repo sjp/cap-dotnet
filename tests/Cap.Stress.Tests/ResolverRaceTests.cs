@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using Cap.Primitives;
 using Cap.Std;
 
 namespace Cap.Stress.Tests;
@@ -319,6 +320,93 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
         }
 
         tally.RequireContest(context, Outcome.RefusedAsEscape, Outcome.OtherRefusal);
+    }
+
+    /// <summary>
+    /// A name swapped back and forth between a file and a directory, while it is opened
+    /// without saying which kind it holds, is always reported as the kind of the object the
+    /// open reached.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The kind is read from the handle the open produced, not from the name, so however the
+    /// name changes around the open, the kind reported and the handle given agree, and the
+    /// handle is one of the two objects the race put there. That the name is looked up only
+    /// once is shown exactly against the simulated filesystem, where a second lookup can be
+    /// seen; this race holds the real backends to the part a kernel lets a test observe.
+    /// </para>
+    /// <para>
+    /// The race counts as fought only if both objects were reached, so that each kind was
+    /// opened while the other was being swapped in.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(OnThisHost))]
+    public void A_name_swapped_between_a_file_and_a_directory_is_opened_as_the_kind_it_reports(string backend)
+    {
+        using StressArena arena = new();
+
+        string slot = arena.Inside("slot");
+        string other = arena.Inside("other");
+        Directory.CreateDirectory(slot);
+        File.WriteAllText(other, "inside");
+        CapFileId directory = StressArena.IdentityOf(slot);
+        CapFileId file = StressArena.IdentityOf(other);
+
+        long mismatches = 0;
+        bool bothSeen = false;
+
+        Tally tally = Race.Fight(
+            output,
+            "name swapped between a file and a directory",
+            backend,
+            arena,
+            () => new ThreadAdversary(() => HostOps.Exchange(slot, other)),
+            (root, _) =>
+            {
+                using CapOpened opened = root.OpenAny("slot");
+                CapMetadata metadata;
+                if (opened.IsDirectory)
+                {
+                    using Dir taken = opened.TakeDir();
+                    metadata = taken.GetMetadata();
+                }
+                else
+                {
+                    using CapFile taken = opened.TakeFile();
+                    metadata = taken.GetMetadata();
+                }
+
+                CapFileType reported = opened.IsDirectory ? CapFileType.Directory : CapFileType.File;
+                if (metadata.Type != reported)
+                {
+                    Interlocked.Increment(ref mismatches);
+                }
+
+                return metadata.FileId;
+            },
+            identity => identity == directory || identity == file ? Outcome.Consistent
+                : arena.IsOutside(identity) ? Outcome.Escaped
+                : Outcome.Unidentified,
+            StressSettings.Iterations,
+            beforeClassifying: counts => bothSeen = counts.TimesReached(directory) > 0 && counts.TimesReached(file) > 0);
+
+        string context = "name swapped between a file and a directory on " + backend;
+        Assert.True(
+            Interlocked.Read(ref mismatches) == 0,
+            $"{context}: {mismatches} opens reported a kind other than that of the handle they gave. {tally}");
+
+        if (HostOps.ExchangesAtomically)
+        {
+            tally.AssertOnly(context, Outcome.Consistent);
+        }
+
+        if (!bothSeen)
+        {
+            Assert.Skip(
+                $"In {tally.Attempts} attempts only one of the two objects was ever reached, so the " +
+                $"swaps never landed while the race was being run. {tally}");
+        }
     }
 
     /// <summary>

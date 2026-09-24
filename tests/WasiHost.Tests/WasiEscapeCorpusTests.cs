@@ -148,13 +148,15 @@ public sealed class WasiEscapeCorpusTests
         // A WASI path of nothing but "." names the directory it is resolved against, and a
         // guest may open that directory again, describe it and set its times; the library
         // refuses such a path as naming nothing beneath the handle. So opening, describing
-        // or setting the times of it succeeds, opening it as a file to read or write is
-        // refused because it is a directory, and everything else — removing it, renaming it,
+        // or setting the times of it succeeds, whether or not the open says it wants a
+        // directory, opening it as a file to read or write is refused because it is a
+        // directory, and everything else — removing it, renaming it,
         // linking it — is refused as before.
         if (NamesItself(entry.Path) && operation is
                 Operation.OpenDir or Operation.OpenDirNoFollow or Operation.GetMetadata or
                 Operation.GetMetadataFollowing or Operation.SetTimes or Operation.SetTimesFollowing or
-                Operation.Exists or Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile)
+                Operation.Exists or Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile or
+                Operation.OpenAny or Operation.OpenAnyNoFollow)
         {
             Outcome itself = operation is Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile
                 ? Outcome.Refused

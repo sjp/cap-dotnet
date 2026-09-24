@@ -203,6 +203,22 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// </remarks>
     private static CapError RefuseIfDirectory(int fd)
     {
+        CapError error = IsDirectory(fd, out bool isDirectory);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        return isDirectory
+            ? CapError.FromCategory(CapErrorCategory.IsADirectory)
+            : CapError.Success;
+    }
+
+    /// <summary>Asks an open descriptor whether it refers to a directory.</summary>
+    private static CapError IsDirectory(int fd, out bool isDirectory)
+    {
+        isDirectory = false;
+
         DarwinStat stat = default;
         int result;
         int errno = 0;
@@ -220,9 +236,76 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return DarwinErrno.ToError(errno);
         }
 
-        return stat.NodeType == CapNodeType.Directory
-            ? CapError.FromCategory(CapErrorCategory.IsADirectory)
-            : CapError.Success;
+        isDirectory = stat.NodeType == CapNodeType.Directory;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A read-only open without <c>O_DIRECTORY</c> succeeds on a directory here, and the
+    /// descriptor it gives is the one a directory open for reading gives, so one open serves
+    /// both kinds and the descriptor is asked afterwards which it reached. The kind is that
+    /// of the object opened, however the name has been reassigned since.
+    /// </remarks>
+    public CapResult<OpenedNode> OpenChildNode(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
+    {
+        if (!TryFileFlags(in request, out int flags, out CapError unsupported))
+        {
+            return CapResult<OpenedNode>.Fail(unsupported);
+        }
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<OpenedNode>.Fail(HandleLease.ClosedError);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        Interlocked.Increment(ref _componentOpens);
+
+        flags |= DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC | DarwinConstants.O_NONBLOCK;
+
+        int fd;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                fd = DarwinNative.OpenAt(lease.Descriptor, path, flags);
+                if (fd < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (fd < 0)
+        {
+            return CapResult<OpenedNode>.Fail(
+                TranslateOpenFailure(lease.Descriptor, encoded.Bytes, errno, noFollow: true));
+        }
+
+        ClearNonBlocking(fd);
+
+        CapError kind = IsDirectory(fd, out bool isDirectory);
+        if (kind.IsFailure)
+        {
+            new SafeFileHandle(fd, ownsHandle: true).Dispose();
+            return CapResult<OpenedNode>.Fail(kind);
+        }
+
+        return CapResult<OpenedNode>.Ok(isDirectory
+            ? new OpenedNode(new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read))
+            : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true)));
     }
 
     /// <inheritdoc/>
@@ -241,6 +324,14 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         in FileOpenRequest request,
         ConfinedResolveOptions options) =>
         CapResult<SafeFileHandle>.Fail(ConfinedOpenUnavailable);
+
+    /// <inheritdoc/>
+    public CapResult<OpenedNode> OpenConfinedNode(
+        SafeDirHandle root,
+        ReadOnlySpan<char> path,
+        in FileOpenRequest request,
+        ConfinedResolveOptions options) =>
+        CapResult<OpenedNode>.Fail(ConfinedOpenUnavailable);
 
     /// <inheritdoc/>
     public unsafe CapResult<DirectoryReader> OpenDirectoryReader(SafeDirHandle directory)

@@ -221,6 +221,59 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     /// <remarks>
+    /// A read-only open without <c>O_DIRECTORY</c> succeeds on a directory here, and the
+    /// descriptor it gives is the one a directory open for reading gives, so one open serves
+    /// both kinds and the descriptor is asked afterwards which it reached.
+    /// </remarks>
+    public CapResult<OpenedNode> OpenChildNode(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        in FileOpenRequest request)
+    {
+        if (!TryFileFlags(in request, out int flags, out CapError unsupported))
+        {
+            return CapResult<OpenedNode>.Fail(unsupported);
+        }
+
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<OpenedNode>.Fail(HandleLease.ClosedError);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        Interlocked.Increment(ref _componentOpens);
+
+        flags |= LinuxConstants.O_NOFOLLOW | LinuxConstants.O_CLOEXEC | LinuxConstants.O_NONBLOCK;
+
+        int fd;
+        int errno;
+        unsafe
+        {
+            fixed (byte* path = encoded.Bytes)
+            {
+                fd = LinuxNative.OpenAt(lease.Descriptor, path, flags);
+                errno = fd < 0 ? Marshal.GetLastPInvokeError() : 0;
+            }
+        }
+
+        if (fd < 0)
+        {
+            return CapResult<OpenedNode>.Fail(
+                TranslateOpenFailure(lease.Descriptor, encoded.Bytes, errno, noFollow: true));
+        }
+
+        return FinishNodeOpen(fd);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// <para>
     /// The name handed to the kernel is the directory itself, because that is the whole of
     /// what this open names: the flag asks for storage from the filesystem holding that
@@ -398,6 +451,33 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         return FinishFileOpen(fd, in request);
+    }
+
+    /// <inheritdoc/>
+    public CapResult<OpenedNode> OpenConfinedNode(
+        SafeDirHandle root,
+        ReadOnlySpan<char> path,
+        in FileOpenRequest request,
+        ConfinedResolveOptions options)
+    {
+        if (!TryFileFlags(in request, out int flags, out CapError unsupported))
+        {
+            return CapResult<OpenedNode>.Fail(unsupported);
+        }
+
+        flags |= LinuxConstants.O_CLOEXEC | LinuxConstants.O_NONBLOCK;
+        if (!request.FollowsFinalLink)
+        {
+            flags |= LinuxConstants.O_NOFOLLOW;
+        }
+
+        CapError error = OpenConfinedDescriptor(root, path, flags, mode: 0, options, out int fd);
+        if (error.IsFailure)
+        {
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        return FinishNodeOpen(fd);
     }
 
     /// <inheritdoc/>
@@ -1429,17 +1509,50 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// </remarks>
     private static CapError RefuseIfDirectory(int fd)
     {
-        ReadOnlySpan<byte> empty = [0];
-        CapError error = StatInto(fd, empty, LinuxConstants.AT_EMPTY_PATH, out CapNodeInfo info);
-
+        CapError error = IsDirectory(fd, out bool isDirectory);
         if (error.IsFailure)
         {
             return error;
         }
 
-        return info.Type == CapNodeType.Directory
+        return isDirectory
             ? CapError.FromCategory(CapErrorCategory.IsADirectory)
             : CapError.Success;
+    }
+
+    /// <summary>Asks an open descriptor whether it refers to a directory.</summary>
+    private static CapError IsDirectory(int fd, out bool isDirectory)
+    {
+        ReadOnlySpan<byte> empty = [0];
+        CapError error = StatInto(fd, empty, LinuxConstants.AT_EMPTY_PATH, out CapNodeInfo info);
+        isDirectory = error.IsSuccess && info.Type == CapNodeType.Directory;
+        return error;
+    }
+
+    /// <summary>
+    /// Turns a descriptor from an open that took whatever the name held into a handle of the
+    /// kind it turned out to be.
+    /// </summary>
+    /// <remarks>
+    /// Asked of the descriptor rather than of the name, so the kind is that of the object
+    /// opened, however the name has been reassigned since. A directory is handed back with
+    /// the authority a directory opened for reading carries, which is what the read-only
+    /// descriptor already is.
+    /// </remarks>
+    private static CapResult<OpenedNode> FinishNodeOpen(int fd)
+    {
+        ClearNonBlocking(fd);
+
+        CapError error = IsDirectory(fd, out bool isDirectory);
+        if (error.IsFailure)
+        {
+            new SafeFileHandle(fd, ownsHandle: true).Dispose();
+            return CapResult<OpenedNode>.Fail(error);
+        }
+
+        return CapResult<OpenedNode>.Ok(isDirectory
+            ? new OpenedNode(new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read))
+            : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true)));
     }
 
     /// <summary>

@@ -78,6 +78,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `Directory.CreateDirectory(p)` | `dir.OpenOrCreateDir(p)` | Returns a `Dir` on it. Creates the last name only; `Directory.CreateDirectory` creates every missing parent too, so call it once per level, holding each result, for a nested path. |
 | `Directory.CreateDirectory(p)`, new name expected | `dir.CreateDir(p)` | Fails if the name is taken. |
 | `new DirectoryInfo(p)` | `dir.OpenDir(p)` | A `Dir` rather than a description of a path. |
+| No equivalent: open `p` whichever it holds, as `open(2)` without `O_DIRECTORY` does | `dir.OpenAny(p)` | Reads only. Returns a `CapOpened`: check `IsDirectory`, then `TakeDir()` or `TakeFile()`. The path is resolved once, so the kind reported is that of the object opened, which trying `OpenFile` and then `OpenDir` can't promise. |
 | `Directory.Delete(p)` | `dir.DeleteDir(p)` | Empty directories only. |
 | `Directory.Delete(p, recursive: true)` | **Ext** `dir.DeleteTree(p)` | Never follows a link out of the tree; it removes the link. |
 | `Directory.Move(a, b)` | `dir.Rename(a, dir, b)` | |

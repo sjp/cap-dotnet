@@ -88,6 +88,8 @@ internal static class WasiOperationRunner
             Operation.HardLinkFrom => LinkAndDescribe(guest, path, reached),
             Operation.HardLinkFromFollowing => LinkAndDescribe(guest, path, reached, follow: true),
             Operation.HardLinkTo => Link(guest, EscapeCorpus.SourceFile, path),
+            Operation.OpenAny => OpenEither(guest, path, observation, reached),
+            Operation.OpenAnyNoFollow => OpenEither(guest, path, observation, reached, follow: false),
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "No WASI call does this."),
         };
 
@@ -209,6 +211,46 @@ internal static class WasiOperationRunner
             {
                 int read = (int)guest.ReadU32(TrampolineGuest.ResultSlot);
                 observation.Contents.Add(Encoding.UTF8.GetString(guest.Bytes(TrampolineGuest.DataSlot, read)));
+            }
+        }
+
+        _ = guest.Call("fd_close", (int)fd);
+        return errno;
+    }
+
+    /// <summary>
+    /// Opens a name without saying which kind it holds, as a guest's <c>open()</c> without
+    /// <c>O_DIRECTORY</c> would, then lists it if the descriptor describes a directory and
+    /// reads it otherwise.
+    /// </summary>
+    private static Errno OpenEither(
+        TrampolineGuest guest, string path, Observation observation, List<(ulong, ulong)> reached, bool follow = true)
+    {
+        Errno errno = Open(
+            guest, path, OFlags.None, Rights.FdRead | Rights.FdReaddir | Rights.FdFilestatGet, out uint fd, follow);
+        if (errno != Errno.Success)
+        {
+            return errno;
+        }
+
+        errno = Describe(guest, fd, reached);
+        if (errno == Errno.Success)
+        {
+            // The filetype follows the device and inode in the record the description wrote.
+            bool isDirectory = guest.Bytes(TrampolineGuest.ResultSlot + 16, 1)[0] == (byte)FileType.Directory;
+            if (isDirectory)
+            {
+                errno = List(guest, fd, observation);
+            }
+            else
+            {
+                guest.SetIoVec(TrampolineGuest.DataLength);
+                errno = guest.Call("fd_read", (int)fd, TrampolineGuest.IoVecSlot, 1, TrampolineGuest.ResultSlot);
+                if (errno == Errno.Success)
+                {
+                    int read = (int)guest.ReadU32(TrampolineGuest.ResultSlot);
+                    observation.Contents.Add(Encoding.UTF8.GetString(guest.Bytes(TrampolineGuest.DataSlot, read)));
+                }
             }
         }
 
