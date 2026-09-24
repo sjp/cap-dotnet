@@ -87,6 +87,21 @@ Operations throw the same exceptions `System.IO` does where the meaning is the s
 | `SandboxEscapeException` | The path would have led outside the handle: a `..`, an absolute, drive- or root-relative path, a Windows device name, or a link pointing out. Worth logging: something tried. |
 | `CapIOException` | The base of the library's own `IOException`s, including the one above. |
 
+Every filesystem failure also carries a reason that code can act on without reading the message.
+`CapIOException.Kind` holds it, and `CapIOException.KindOf(exception)` answers for any
+exception, including the framework types above:
+
+```csharp
+try
+{
+    dir.DeleteDir("cache");
+}
+catch (IOException e) when (CapIOException.KindOf(e) == CapErrorKind.NotEmpty)
+{
+    // Something was written to it since it was last cleared; leave it for next time.
+}
+```
+
 A path that is malformed rather than hostile — empty, or containing a character the platform
 cannot store in a name — is an `ArgumentException`.
 

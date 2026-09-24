@@ -26,10 +26,6 @@ namespace WasiHost.Tests;
 /// </remarks>
 public sealed class WasiTestsuiteTests
 {
-    private const string ErrorCodes =
-        "The library reports this failure as a CapIOException that carries no machine-readable " +
-        "reason, so the adapter can only answer EIO where the program expects a specific code.";
-
     private const string Timestamps =
         "Neither Dir nor CapFile can set a file's times, so the adapter answers ENOTSUP.";
 
@@ -43,17 +39,6 @@ public sealed class WasiTestsuiteTests
     /// </summary>
     internal static readonly Dictionary<string, string> KnownGaps = new()
     {
-        ["rust/dangling_symlink"] = ErrorCodes + " (A link the policy will not follow; ELOOP expected.)",
-        ["rust/nofollow_errors"] = ErrorCodes + " (A link the policy will not follow; ELOOP expected.)",
-        ["rust/symlink_loop"] = ErrorCodes + " (A link loop; ELOOP expected.)",
-        ["rust/path_link"] = ErrorCodes + " (A name already taken; EEXIST expected.)",
-        ["rust/path_open_create_existing"] = ErrorCodes + " (A name already taken; EEXIST expected.)",
-        ["rust/path_rename"] = ErrorCodes + " (A directory that is not empty; ENOTEMPTY expected.)",
-        ["rust/remove_nonempty_directory"] = ErrorCodes + " (A directory that is not empty; ENOTEMPTY expected.)",
-        ["rust/remove_directory_trailing_slashes"] = ErrorCodes + " (A component that is not a directory; ENOTDIR expected.)",
-        ["rust/unlink_file_trailing_slashes"] = ErrorCodes + " (A directory where a file was named; EISDIR expected.)",
-        ["rust/path_symlink_trailing_slashes"] =
-            ErrorCodes + " (A link created at a name spelled as a directory; ENOENT expected.)",
         ["rust/interesting_paths"] =
             "Dir refuses every path containing '..', even one whose resolution stays inside the " +
             "directory, and WASI resolves those.",

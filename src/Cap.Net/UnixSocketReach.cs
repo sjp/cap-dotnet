@@ -46,6 +46,7 @@ internal static class UnixSocketReach
         // hide why the caller did not get what they expected.
         throw named.Kind == CapFileType.Symlink
             ? new CapIOException(
+                CapErrorKind.SymbolicLink,
                 $"'{path}' is a symbolic link, and a connection is made to what a name holds " +
                 "rather than to what it points at. Following it would resolve the target with " +
                 "the whole process's authority, which the directory handle exists to prevent.")

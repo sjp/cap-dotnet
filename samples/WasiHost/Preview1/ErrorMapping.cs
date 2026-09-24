@@ -7,33 +7,45 @@ namespace WasiHost.Preview1;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Mapped by exception type alone, because the type is all the library promises. Several
-/// different failures — a name already taken, a directory that is not empty, a component
-/// that is not a directory, a link the policy will not follow — all arrive as
-/// <see cref="CapIOException"/>, told apart only by their message. A message is prose for a
-/// person and may change in any release, so it is not read here, and those failures all
-/// become <see cref="Errno.Io"/>. A guest that checks for <c>EEXIST</c> or <c>ENOTEMPTY</c>
-/// therefore sees the wrong code. The sample's README lists this with the other places the
-/// library does not yet give the adapter what WASI asks for.
+/// Mapped from the reason the library attaches to every filesystem failure,
+/// <see cref="CapIOException.KindOf(Exception)"/>, and never from the message, which is prose
+/// for a person and may change in any release. The reason is the same on every platform, so
+/// a guest sees the same code whichever system the host runs on.
 /// </para>
 /// <para>
-/// The containment refusal is mapped exactly. <see cref="SandboxEscapeException"/> becomes
+/// The containment refusal is mapped exactly. <see cref="CapErrorKind.Escaped"/> becomes
 /// <see cref="Errno.NotCapable"/>, which is the code WASI reserves for "this descriptor does
-/// not grant that".
+/// not grant that". A link the handle's policy will not follow becomes
+/// <see cref="Errno.Loop"/>, as a POSIX open that refuses to follow a link reports it.
 /// </para>
 /// </remarks>
 internal static class ErrorMapping
 {
     public static Errno ToErrno(Exception exception) => exception switch
     {
-        SandboxEscapeException => Errno.NotCapable,
-        FileNotFoundException or DirectoryNotFoundException => Errno.NoEnt,
-        UnauthorizedAccessException => Errno.Access,
-        PathTooLongException => Errno.NameTooLong,
         ObjectDisposedException => Errno.BadF,
         ArgumentException => Errno.Inval,
         NotSupportedException => Errno.NotSup,
-        IOException => Errno.Io,
+        IOException or UnauthorizedAccessException => CapIOException.KindOf(exception) switch
+        {
+            CapErrorKind.Escaped => Errno.NotCapable,
+            CapErrorKind.NotFound => Errno.NoEnt,
+            CapErrorKind.PermissionDenied => Errno.Access,
+            CapErrorKind.AlreadyExists => Errno.Exist,
+            CapErrorKind.NotADirectory => Errno.NotDir,
+            CapErrorKind.IsADirectory => Errno.IsDir,
+            CapErrorKind.NotEmpty => Errno.NotEmpty,
+            CapErrorKind.SymbolicLink or CapErrorKind.LinkNotFollowed => Errno.Loop,
+            CapErrorKind.NotALink => Errno.Inval,
+            CapErrorKind.CrossDevice => Errno.XDev,
+            CapErrorKind.ReadOnlyFilesystem => Errno.RoFs,
+            CapErrorKind.InvalidArgument => Errno.Inval,
+            CapErrorKind.NotSupported => Errno.NotSup,
+            CapErrorKind.NameTooLong => Errno.NameTooLong,
+            CapErrorKind.OutOfHandles => Errno.MFile,
+            CapErrorKind.ConcurrentChange => Errno.Again,
+            _ => Errno.Io,
+        },
         _ => throw exception,
     };
 

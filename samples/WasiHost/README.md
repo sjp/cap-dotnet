@@ -57,6 +57,7 @@ guest's path passed through as it arrived:
 | `path_filestat_get` | `GetMetadata(path)` |
 | `fd_readdir` | `EnumerateEntries` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
+| every other error code | `CapIOException.KindOf(exception)` |
 
 The adapter never builds a host path and never resolves a guest path itself. It looks inside a
 path in one case only: a path made of nothing but `.` components names the directory it is
@@ -72,8 +73,11 @@ against directly is also made through WASI calls, with the path as bytes in gues
 every backend and under both symbolic-link policies. Each must come to the same outcome, and
 nothing outside the sandbox may change or be seen. The call is made by a small guest that
 re-exports each import, so it crosses the engine exactly as a real guest's would. Two
-differences are expected and asserted: a path of only `.` opens the directory itself, and
-WASI's rename replaces a name that is taken where the library call the corpus makes refuses.
+differences in outcome are expected and asserted: a path of only `.` opens the directory
+itself, and WASI's rename replaces a name that is taken where the library call the corpus
+makes refuses. Two more are differences only in the code: `link` reports a directory given a
+second name as `EPERM`, and `readlink` reports a name that holds no link as `EINVAL`, the code
+a malformed path also gets.
 
 **The WebAssembly WASI test suite.** Its preview 1 programs that are given a directory — 49
 of them, written in Rust and C — are run against the adapter. Fetch the suite
@@ -84,7 +88,7 @@ export CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh /tmp)
 dotnet test --project tests/WasiHost.Tests
 ```
 
-32 pass. The other 17 fail because the library does not yet offer something WASI needs, and
+42 pass. The other 7 fail because the library does not yet offer something WASI needs, and
 the test asserts that each of those still fails, so a gap that closes is noticed.
 
 ## What the library does not yet offer
@@ -96,11 +100,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Programs that fail:**
 
-- **Failures carry no machine-readable reason.** A name already taken, a directory that is
-  not empty, a component that is not a directory, and a link the policy will not follow all
-  arrive as `CapIOException`, told apart only by their message. The adapter answers `EIO`
-  where a program expects `EEXIST`, `ENOTEMPTY`, `ENOTDIR`, `EISDIR` or `ELOOP`. Ten
-  programs fail for this reason alone.
 - **`..` inside the directory is refused.** `Dir` refuses every path containing `..`, even
   `dir/nested/../file`, which stays inside. WASI resolves those, confined, as cap-std does.
   (`interesting_paths`)

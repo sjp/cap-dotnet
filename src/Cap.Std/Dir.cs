@@ -1101,7 +1101,7 @@ public sealed partial class Dir : IDisposable
         FailureTranslation.ThrowIfClosed(error);
         return error.IsSuccess
             ? clone!
-            : throw new CapIOException($"The directory handle could not be duplicated. ({error})");
+            : throw new CapIOException(FailureTranslation.KindOf(error.Category), $"The directory handle could not be duplicated. ({error})");
     }
 
     /// <summary>
@@ -1170,6 +1170,7 @@ public sealed partial class Dir : IDisposable
         return error.IsSuccess
             ? restricted!
             : throw new CapIOException(
+                FailureTranslation.KindOf(error.Category),
                 $"The directory handle could not be duplicated under the stricter policy. ({error})");
     }
 
@@ -1801,10 +1802,13 @@ public sealed partial class Dir : IDisposable
             // A trailing separator is a request that the target be a directory, which a
             // removal of anything else cannot satisfy. The distinction is carried by the
             // parser rather than rediscovered from the string, and it is dropped by the split
-            // into components, so it has to be applied here or not at all.
+            // into components, so it has to be applied here or not at all. Nothing is
+            // removed either way; the name is only looked at to say which refusal it is: a
+            // directory where a file removal was asked for, something that is not the
+            // directory the spelling promised, or nothing at all.
             if (!directory && lookup.RequiresDirectory)
             {
-                error = CapError.FromCategory(CapErrorCategory.IsADirectory);
+                error = RefuseAsDirectory(lookup.Directory, lookup.Name, existing: CapErrorCategory.IsADirectory);
                 return CapPathError.None;
             }
 
@@ -1848,9 +1852,13 @@ public sealed partial class Dir : IDisposable
                 return pathError;
             }
 
+            // A link is not a directory, so a name spelled as one cannot be where it is made.
+            // The link is never created under such a name; the name is only looked at to
+            // report what POSIX reports: that it is missing, that a directory already holds
+            // it, or that something other than a directory does.
             if (!targetIsDirectory && lookup.RequiresDirectory)
             {
-                error = CapError.FromCategory(CapErrorCategory.IsADirectory);
+                error = RefuseAsDirectory(lookup.Directory, lookup.Name, existing: CapErrorCategory.AlreadyExists);
                 return CapPathError.None;
             }
 
@@ -1859,6 +1867,31 @@ public sealed partial class Dir : IDisposable
 
             return CapPathError.None;
         }
+    }
+
+    /// <summary>
+    /// The refusal for a name spelled with a trailing separator that an operation cannot act
+    /// on as a directory, according to what the name holds.
+    /// </summary>
+    /// <param name="parent">The directory the name is beneath.</param>
+    /// <param name="name">The name, without its separator.</param>
+    /// <param name="existing">What to report when the name holds a directory.</param>
+    /// <remarks>
+    /// Only ever a refusal: the name is described without following it, and nothing is done
+    /// to it, so what it holds changing in the meantime can alter which failure is reported
+    /// but never lets the operation go ahead. A name holding anything other than a directory,
+    /// a link included, is not the directory the spelling asked for.
+    /// </remarks>
+    private static CapError RefuseAsDirectory(SafeDirHandle parent, ReadOnlySpan<char> name, CapErrorCategory existing)
+    {
+        CapError described = PlatformOps.Current.StatChild(parent, name, out CapNodeInfo info);
+        if (described.IsFailure)
+        {
+            return described;
+        }
+
+        return CapError.FromCategory(
+            info.Type == CapNodeType.Directory ? existing : CapErrorCategory.NotADirectory);
     }
 
     /// <summary>
@@ -1916,6 +1949,16 @@ public sealed partial class Dir : IDisposable
                     if (described.IsFailure)
                     {
                         return described;
+                    }
+
+                    // A second name for a file, spelled as a directory, is refused by what that
+                    // name holds, as it is when a link of any kind is made there: missing, a
+                    // directory already, or something else that is not the directory the
+                    // spelling promised.
+                    if (!rename && !source.RequiresDirectory && info.Type != CapNodeType.Directory)
+                    {
+                        return RefuseAsDirectory(
+                            destination.Directory, destination.Name, existing: CapErrorCategory.AlreadyExists);
                     }
 
                     // A directory cannot be given a second name on any filesystem this runs on,

@@ -18,6 +18,13 @@ namespace Cap.Std;
 /// peculiar to resolving a path under confinement, which have no counterpart in an API where
 /// every path is resolved with the whole process's authority.
 /// </para>
+/// <para>
+/// Which of those outcomes it was is <see cref="Kind"/>, so that a caller can act on the
+/// reason (retry under another name when one is taken, say, or treat a directory that is not
+/// empty differently from a name that is not a directory) without reading the message.
+/// <see cref="KindOf(Exception)"/> answers the same question for the framework's types as
+/// well, so one call covers every failure a filesystem member reports.
+/// </para>
 /// </remarks>
 public class CapIOException : IOException
 {
@@ -40,5 +47,64 @@ public class CapIOException : IOException
     public CapIOException(string? message, Exception? innerException)
         : base(message, innerException)
     {
+    }
+
+    /// <summary>Creates the exception with a reason and a message.</summary>
+    /// <param name="kind">Why the operation failed, for code to act on.</param>
+    /// <param name="message">What went wrong, for a person reading the log.</param>
+    public CapIOException(CapErrorKind kind, string? message)
+        : base(message)
+    {
+        Kind = kind;
+    }
+
+    /// <summary>Creates the exception with a reason, a message and an underlying cause.</summary>
+    /// <param name="kind">Why the operation failed, for code to act on.</param>
+    /// <param name="message">What went wrong, for a person reading the log.</param>
+    /// <param name="innerException">The failure that caused this one.</param>
+    public CapIOException(CapErrorKind kind, string? message, Exception? innerException)
+        : base(message, innerException)
+    {
+        Kind = kind;
+    }
+
+    /// <summary>Why the operation failed.</summary>
+    /// <remarks>
+    /// <see cref="CapErrorKind.Other"/> when the exception was created without one. Always
+    /// <see cref="CapErrorKind.Escaped"/> on a <see cref="SandboxEscapeException"/>.
+    /// </remarks>
+    public CapErrorKind Kind { get; }
+
+    /// <summary>
+    /// Why a filesystem operation failed, whichever exception type it was reported with.
+    /// </summary>
+    /// <param name="exception">What an operation threw.</param>
+    /// <returns>
+    /// <see cref="Kind"/> for a <see cref="CapIOException"/>. For the framework's types this
+    /// library reports some failures with, the reason each one stands for:
+    /// <see cref="CapErrorKind.NotFound"/> for <see cref="FileNotFoundException"/> and
+    /// <see cref="DirectoryNotFoundException"/>, <see cref="CapErrorKind.PermissionDenied"/>
+    /// for <see cref="UnauthorizedAccessException"/>, and
+    /// <see cref="CapErrorKind.NameTooLong"/> for <see cref="PathTooLongException"/>.
+    /// <see cref="CapErrorKind.Other"/> for anything else.
+    /// </returns>
+    /// <remarks>
+    /// Those framework types are kept, rather than every failure becoming a
+    /// <see cref="CapIOException"/>, because code ported from path-based APIs already has
+    /// <c>catch</c> clauses for them. This is what lets a caller that would rather switch on
+    /// a reason do so without knowing which failures arrive as which type.
+    /// </remarks>
+    public static CapErrorKind KindOf(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        return exception switch
+        {
+            CapIOException cap => cap.Kind,
+            FileNotFoundException or DirectoryNotFoundException => CapErrorKind.NotFound,
+            UnauthorizedAccessException => CapErrorKind.PermissionDenied,
+            PathTooLongException => CapErrorKind.NameTooLong,
+            _ => CapErrorKind.Other,
+        };
     }
 }

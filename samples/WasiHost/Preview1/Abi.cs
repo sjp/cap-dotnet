@@ -14,6 +14,7 @@ public enum Errno : ushort
 {
     Success = 0,
     Access = 2,
+    Again = 6,
     BadF = 8,
     Exist = 20,
     Fault = 21,
@@ -22,15 +23,19 @@ public enum Errno : ushort
     Io = 29,
     IsDir = 31,
     Loop = 32,
+    MFile = 33,
     NameTooLong = 37,
     NoEnt = 44,
     NoSys = 52,
     NotDir = 54,
+    NotEmpty = 55,
     NotSup = 58,
     NotSock = 57,
     Overflow = 61,
     Perm = 63,
+    RoFs = 69,
     SPipe = 70,
+    XDev = 75,
 
     /// <summary>
     /// The descriptor does not carry the authority the call needs — including a path that

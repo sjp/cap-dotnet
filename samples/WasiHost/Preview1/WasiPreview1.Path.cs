@@ -366,9 +366,17 @@ public sealed partial class WasiPreview1
     }
 
     /// <remarks>
+    /// <para>
     /// A hard link to what a final symbolic link points at is not something the library can
     /// make: <see cref="Dir.CreateHardLink"/> links the name it is given. Asking to follow is
-    /// therefore reported as unsupported.
+    /// therefore refused as an invalid argument, which is also how Wasmtime's own host answers
+    /// it.
+    /// </para>
+    /// <para>
+    /// The library reports a directory given a second name as
+    /// <see cref="CapErrorKind.IsADirectory"/>, which says what was wrong with the request.
+    /// <c>link(2)</c> reports it as <c>EPERM</c>, and that is the code a guest checks for.
+    /// </para>
     /// </remarks>
     private Errno PathLink(
         GuestMemory memory,
@@ -393,8 +401,12 @@ public sealed partial class WasiPreview1
                     if (error == Errno.Success)
                     {
                         return (lookup & LookupFlags.SymlinkFollow) != 0
-                            ? Errno.NotSup
-                            : ErrorMapping.Run(() => source.Dir.CreateHardLink(oldPath, target.Dir, newPath));
+                            ? Errno.Inval
+                            : ErrorMapping.Run(() => source.Dir.CreateHardLink(oldPath, target.Dir, newPath)) switch
+                            {
+                                Errno.IsDir => Errno.Perm,
+                                Errno other => other,
+                            };
                     }
                 }
             }

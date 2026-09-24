@@ -158,6 +158,21 @@ public sealed class WasiEscapeCorpusTests
             return ([Outcome.Refused, Outcome.Success], "WASI's rename replaces a name that is taken");
         }
 
+        // link(2) reports a directory given a second name as EPERM, and the adapter answers
+        // as it does, where the library refuses the request as naming a directory.
+        if (operation == Operation.HardLinkFrom && direct == Outcome.Refused)
+        {
+            return ([Outcome.Refused, Outcome.Denied], "link reports a directory given a second name as EPERM");
+        }
+
+        // readlink(2) reports a name that holds no link as EINVAL, which is also the code a
+        // malformed path gets. Where the corpus expects the library's refusal to read
+        // something that is not a link, a guest may see either.
+        if (operation == Operation.ReadLink && direct == Outcome.Refused)
+        {
+            return ([Outcome.Refused, Outcome.Malformed], "readlink reports a name that holds no link as EINVAL");
+        }
+
         return ([direct], why);
     }
 

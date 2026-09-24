@@ -232,6 +232,7 @@ public static partial class DirExtensions
                 if (source.GetMetadata().FileId == _destinationRoot)
                 {
                     throw new CapIOException(
+                        CapErrorKind.InvalidArgument,
                         $"'{entry.Name}' is the directory this copy is writing into, so " +
                         $"copying it would copy what the copy had just written. A copy's " +
                         $"destination cannot be inside its source.");
@@ -314,6 +315,7 @@ public static partial class DirExtensions
                 existing.Type == CapFileType.Directory)
             {
                 throw new CapIOException(
+                    CapErrorKind.IsADirectory,
                     $"'{name}' is a file in the source and a directory in the destination. A " +
                     $"copy replaces files, not directories with files; remove the directory " +
                     $"first if it is meant to go.");
@@ -367,6 +369,7 @@ public static partial class DirExtensions
 
                 default:
                     throw new CapIOException(
+                        CapErrorKind.NotSupported,
                         $"'{entry.Name}' is a {metadata.Type} and a copy has no faithful " +
                         $"equivalent for one. It is not followed and not read: doing either " +
                         $"would reach outside the tree being copied, or would block on " +

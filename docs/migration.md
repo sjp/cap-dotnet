@@ -128,4 +128,6 @@ the `CapFile` as well, as above.
 `FileNotFoundException`, `DirectoryNotFoundException`, `UnauthorizedAccessException` and
 `IOException` mean what they mean in `System.IO`, so existing handlers keep working.
 `SandboxEscapeException`, an `IOException`, is new: the path would have led outside the
-`Dir`. See [getting-started.md](getting-started.md#what-refusals-look-like).
+`Dir`. Code that told failures apart by `HResult` or by the message should use
+`CapIOException.KindOf(exception)` instead: it gives the same `CapErrorKind` on every
+platform. See [getting-started.md](getting-started.md#what-refusals-look-like).

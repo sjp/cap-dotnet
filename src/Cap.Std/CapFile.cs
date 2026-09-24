@@ -429,6 +429,7 @@ public sealed class CapFile : IDisposable
         {
             FailureTranslation.ThrowIfClosed(copy.Error);
             throw new CapIOException(
+                FailureTranslation.KindOf(copy.Error.Category),
                 $"The open file could not be copied, so no stream could be given one of its " +
                 $"own. ({copy.Error})");
         }
