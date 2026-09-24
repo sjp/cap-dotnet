@@ -35,8 +35,8 @@ internal enum Outcome
 
     /// <summary>
     /// Refused as a permission failure. Every case is built from objects the test owns, so
-    /// this is never the right answer; it is expected only where it is recorded as a known
-    /// defect, so that the defect is visible rather than mistaken for a pass.
+    /// this is never the right answer and no case expects it. It is an outcome of its own so
+    /// that a permission failure is reported as one, rather than passing as some other refusal.
     /// </summary>
     Denied,
 }
@@ -387,17 +387,6 @@ internal sealed class Expectation
     }
 
     /// <summary>
-    /// How a volume that cannot hold a link refuses to make one.
-    /// </summary>
-    /// <remarks>
-    /// A known defect on Linux: the kernel reports a volume without links as a permission
-    /// failure, and the library passes that on as one, where its contract is to report a
-    /// filesystem that cannot do what was asked. Nothing is created either way; the refusal is
-    /// only mislabelled. Elsewhere the documented refusal is expected.
-    /// </remarks>
-    private static Outcome UnsupportedLinkRefusal => OperatingSystem.IsLinux() ? Outcome.Denied : Outcome.Refused;
-
-    /// <summary>
     /// The outcome once the handle's policy and the host's features are taken into account.
     /// </summary>
     /// <param name="operation">The operation.</param>
@@ -438,13 +427,13 @@ internal sealed class Expectation
             // rather than half-succeed.
             if ((features & HostFeature.Symlinks) == 0 && operation == Operation.CreateSymlinkAt)
             {
-                outcome = UnsupportedLinkRefusal;
+                outcome = Outcome.Refused;
             }
 
             if ((features & HostFeature.HardLinks) == 0 &&
                 operation is Operation.HardLinkFrom or Operation.HardLinkTo)
             {
-                outcome = UnsupportedLinkRefusal;
+                outcome = Outcome.Refused;
             }
         }
 

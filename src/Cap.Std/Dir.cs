@@ -898,7 +898,7 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the operation.</exception>
     /// <exception cref="CapIOException">
     /// The new name is taken, the two names are on different filesystems, the entry is a
-    /// directory, or the operation failed otherwise.
+    /// directory, the filesystem has no hard links, or the operation failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
     public void CreateHardLink(string path, Dir toDir, string to)
@@ -1912,8 +1912,10 @@ public sealed partial class Dir : IDisposable
                 // Linux and macOS refuse a second name for a directory as a permission failure,
                 // which would reach the caller as the filesystem refusing access to something it
                 // can read perfectly well. The refusal is reclassified after the fact rather than
-                // anticipated, so that the link itself is still one call.
-                if (linked.Category == CapErrorCategory.PermissionDenied &&
+                // anticipated, so that the link itself is still one call. A volume with no hard
+                // links refuses a directory the same way, and a directory is the more precise
+                // answer there too, since no volume would have linked one.
+                if (linked.Category is CapErrorCategory.PermissionDenied or CapErrorCategory.NotSupported &&
                     PlatformOps.Current.StatChild(source.Directory, source.Name, out CapNodeInfo refused).IsSuccess &&
                     refused.Type == CapNodeType.Directory)
                 {

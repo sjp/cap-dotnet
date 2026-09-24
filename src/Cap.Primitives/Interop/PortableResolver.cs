@@ -248,9 +248,10 @@ internal static class PortableResolver
                 return last;
             }
 
-            // Only reachable when the path ended on `..`, since every other component either
-            // returns or leaves something pending. The walk is standing on the directory the
-            // path named, and there is no final name for an operation to act on.
+            // Only reachable when the path ended on `..`, or on a link whose target names the
+            // directory holding it, since every other component either returns or leaves
+            // something pending. The walk is standing on the directory the path named, and
+            // there is no final name for an operation to act on.
             return FinishAtStack(ops, ref stack, target, out outcome);
         }
         finally
@@ -346,8 +347,9 @@ internal static class PortableResolver
         // A trailing separator, or a final `.` or `..`, is a request that the target be a
         // directory: `foo/` must fail where `foo` would have succeeded on a regular file.
         // So the last step opens a directory in that case whatever was asked for, and a
-        // caller who wanted a file is told it found one of the other kind.
-        bool asDirectory = target == ResolutionTarget.Directory || path.RequiresDirectory;
+        // caller who wanted a file is told it found one of the other kind. The request can
+        // come from a followed link's stored target as well as from the caller's path.
+        bool asDirectory = target == ResolutionTarget.Directory || pending.RequiresDirectory;
 
         if (asDirectory)
         {
@@ -411,7 +413,8 @@ internal static class PortableResolver
     }
 
     /// <summary>
-    /// Produces the result for a path that ended by stepping back up, such as <c>a/..</c>.
+    /// Produces the result for a path that ended on a directory already held, such as
+    /// <c>a/..</c>, or a link storing <c>.</c>.
     /// </summary>
     private static CapError FinishAtStack(
         IPlatformOps ops,
@@ -521,6 +524,16 @@ internal static class PortableResolver
         if (!CapPath.TryParse(
                 target.Value, syntax, ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError error))
         {
+            // A target such as `.` or `./.` is spelled out and has no components, so the parser
+            // refuses it as naming nothing -- which is right for a caller's path and wrong for a
+            // link. From where the link lives it names the directory holding the link, and the
+            // walk is already standing there: there is nothing to push, and resolution carries
+            // on from that directory, as the kernel's own resolution does.
+            if (error == CapPathError.Empty && target.Value.Length > 0)
+            {
+                return CapError.Success;
+            }
+
             return TranslateLinkTarget(error);
         }
 

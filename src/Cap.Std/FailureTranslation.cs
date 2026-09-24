@@ -100,14 +100,16 @@ internal static class FailureTranslation
             CapErrorCategory.ReadOnlyFilesystem =>
                 new CapIOException($"'{path}' is on a filesystem mounted read-only. ({error})"),
 
-            // Reported rather than worked around. The platform cannot make the refusal part of
-            // the operation, and the alternative -- looking first and acting if the answer was
-            // favourable -- has a window in which the answer changes, which is the whole class
-            // of bug this library exists to remove.
+            // Reported rather than worked around. Either the volume cannot hold what was asked
+            // for -- a symbolic link or a second name on a FAT volume -- or the platform cannot
+            // make a refusal part of the operation, and the alternative -- looking first and
+            // acting if the answer was favourable -- has a window in which the answer changes,
+            // which is the whole class of bug this library exists to remove.
             CapErrorCategory.NotSupported =>
                 new CapIOException(
                     $"'{path}' could not be operated on: the filesystem does not implement what " +
-                    $"the operation needs in order to be performed as one step. ({error})"),
+                    $"the operation needs, such as a kind of entry it cannot hold or a way of " +
+                    $"performing the operation as one step. ({error})"),
 
             // The name turned out to be a symbolic link where the operation needed the thing
             // itself. Inside the subtree, so not an escape -- only a step the operation will not

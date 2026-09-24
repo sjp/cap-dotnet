@@ -165,6 +165,19 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
     internal static partial long GetDents64(long number, int fd, byte* buffer, nuint count);
 
+    /// <summary>
+    /// Describes the filesystem a descriptor is on, into a buffer of at least
+    /// <see cref="LinuxConstants.StatfsBufferBytes"/> bytes.
+    /// </summary>
+    /// <remarks>
+    /// Only the first field, the filesystem's type number, is read, and it is a machine word
+    /// on both targets. The structure is not declared: its tail differs between C libraries
+    /// and nothing past the first field is wanted, so a buffer comfortably larger than every
+    /// layout is passed instead of a declaration that would have to match each one.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
+    internal static partial int Fstatfs(int fd, byte* buffer);
+
     /// <summary><c>statx</c>, by syscall number.</summary>
     /// <remarks><paramref name="number"/> must be <see cref="LinuxConstants.SYS_statx"/>.</remarks>
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]

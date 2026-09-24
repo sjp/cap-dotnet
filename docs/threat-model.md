@@ -327,17 +327,6 @@ stops being true fails its test like any other wrong expectation.
 |---|---|---|---|
 | `deeper-than-the-walk-descends` | `openat2` | Resolves the path | The depth bound belongs to the walk, which holds a handle per level; the kernel's confined open holds none |
 | `longer-than-the-kernel-takes-at-once` | `openat2` | Refused for length, where the walk reports the first missing name | The kernel is handed the whole path at once and refuses one longer than its own limit |
-| `dot`, `dot-slash-dot` (followed as a link's target) | the walk, on every platform | Reported as not found, where the kernel reports a directory | A defect: a link whose target resolves to the directory holding it is taken to name nothing. Both refuse, and nothing is reached |
-| `trailing-separator-on-a-file` (followed as a link's target) | the walk, on every platform | Opens the file, where the kernel refuses it | A defect: a trailing separator in a stored target is dropped when the link is followed. The file is inside; the walk is only more permissive about its spelling |
-
-One more is recorded against the volume rather than a backend. On Linux, creating a symbolic
-link or a hard link on a filesystem that cannot hold one — vfat, in the CI matrix — is reported
-as a permission failure, because that is how the kernel reports it and the library passes it on;
-the documented refusal is the one for a filesystem that cannot do what was asked. Nothing is
-created either way.
-
-The last two rows and this one are defects rather than design, and are recorded so that they
-cannot be mistaken for either. None reaches anything outside the sandbox.
 
 ## 5. Explicit non-goals
 

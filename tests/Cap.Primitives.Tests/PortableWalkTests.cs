@@ -601,6 +601,79 @@ public sealed class PortableWalkTests
         });
     }
 
+    /// <summary>
+    /// A trailing separator in a link's stored target insists on a directory exactly as one
+    /// in the caller's path does, and survives the target being resolved in place of the link.
+    /// </summary>
+    [Fact]
+    public void A_trailing_separator_stored_in_a_link_insists_on_a_directory()
+    {
+        FakeFileSystem fs = Sandbox();
+        _ = fs.AddFile("sandbox/data");
+        FakeNode dir = fs.AddDirectory("sandbox/dir");
+        _ = fs.AddSymbolicLink("sandbox/plain", "data");
+        _ = fs.AddSymbolicLink("sandbox/slashed", "data/");
+        _ = fs.AddSymbolicLink("sandbox/through", "slashed");
+        _ = fs.AddSymbolicLink("sandbox/slashed-link", "plain/");
+        _ = fs.AddSymbolicLink("sandbox/dir-slashed", "dir/");
+
+        Run(fs, (ops, root) =>
+        {
+            CapResult<SafeFileHandle> plain =
+                PortableResolver.OpenFile(root, Parse("plain"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+            Assert.True(plain.IsSuccess, plain.Error.FailureDescription);
+            plain.Value!.Dispose();
+
+            // In the link, in a link the link leads to, on a link that leads on to the file,
+            // and in the caller's path with the link being what the separator follows.
+            foreach (string path in new[] { "slashed", "through", "slashed-link", "plain/" })
+            {
+                CapResult<SafeFileHandle> file =
+                    PortableResolver.OpenFile(root, Parse(path), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+                Assert.False(file.IsSuccess, $"'{path}' opened a file through a target spelled as a directory.");
+                Assert.Equal(CapErrorCategory.NotADirectory, file.Error.Category);
+            }
+
+            using SafeDirHandle opened = OpenDirectory(ops, root, "dir-slashed");
+            AssertIs(ops, dir, opened);
+        });
+    }
+
+    /// <summary>
+    /// A link storing <c>.</c> names the directory holding it: a directory to open, a place
+    /// to resolve on from, and not a file.
+    /// </summary>
+    [Fact]
+    public void A_link_to_dot_names_the_directory_holding_it()
+    {
+        FakeFileSystem fs = Sandbox();
+        FakeNode holder = fs.AddDirectory("sandbox/a");
+        FakeNode inner = fs.AddDirectory("sandbox/a/inner");
+        _ = fs.AddSymbolicLink("sandbox/a/self", ".");
+        _ = fs.AddSymbolicLink("sandbox/a/self-again", "./.");
+
+        Run(fs, (ops, root) =>
+        {
+            foreach (string link in new[] { "self", "self-again" })
+            {
+                using (SafeDirHandle opened = OpenDirectory(ops, root, $"a/{link}"))
+                {
+                    AssertIs(ops, holder, opened);
+                }
+
+                using (SafeDirHandle opened = OpenDirectory(ops, root, $"a/{link}/inner"))
+                {
+                    AssertIs(ops, inner, opened);
+                }
+
+                CapResult<SafeFileHandle> file =
+                    PortableResolver.OpenFile(root, Parse($"a/{link}"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+                Assert.False(file.IsSuccess);
+                Assert.Equal(CapErrorCategory.IsADirectory, file.Error.Category);
+            }
+        });
+    }
+
     /// <summary>A mount appearing inside the sandbox can be refused.</summary>
     /// <remarks>
     /// Whoever writes the mount table is outside the trust boundary, so a filesystem grafted

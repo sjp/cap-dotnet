@@ -299,6 +299,24 @@ internal static class LinuxConstants
     public const ushort S_IFDIR = 0x4000;
     public const ushort S_IFLNK = 0xA000;
 
+    // --- Filesystem type numbers ---------------------------------------------------------------
+
+    /// <summary>
+    /// The size of the buffer handed to <c>fstatfs</c>. The structure is 120 bytes on both
+    /// targets under both common C libraries; the margin is so that a layout that grows can
+    /// never write past the buffer.
+    /// </summary>
+    public const int StatfsBufferBytes = 256;
+
+    /// <summary>FAT in every variant the kernel mounts: <c>msdos</c>, <c>vfat</c>, <c>umsdos</c>.</summary>
+    public const long MSDOS_SUPER_MAGIC = 0x4D44;
+
+    /// <summary>exFAT.</summary>
+    public const long EXFAT_SUPER_MAGIC = 0x2011BAB0;
+
+    /// <summary>The <c>/proc</c> filesystem. Known on every system, which is what tests use it for.</summary>
+    public const long PROC_SUPER_MAGIC = 0x9FA0;
+
     // --- Syscall numbers -------------------------------------------------------------------------
 
     /// <summary>

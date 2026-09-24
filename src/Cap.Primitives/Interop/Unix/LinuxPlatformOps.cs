@@ -921,7 +921,17 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             }
         }
 
-        return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
+        if (result >= 0)
+        {
+            return CapError.Success;
+        }
+
+        // For this call the kernel's permission code has one meaning: the filesystem cannot
+        // hold a symbolic link at all. Passed on as a permission failure it would send the
+        // caller looking at modes and ownership, which have nothing to do with it.
+        return errno == PosixErrno.EPERM
+            ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
+            : LinuxErrno.ToError(errno);
     }
 
     /// <inheritdoc/>
@@ -966,7 +976,46 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             }
         }
 
-        return result < 0 ? LinuxErrno.ToError(errno) : CapError.Success;
+        if (result >= 0)
+        {
+            return CapError.Success;
+        }
+
+        // The kernel's permission code covers several refusals here: a filesystem with no hard
+        // links, a directory, a file marked immutable or append-only, and the hardening that
+        // stops a second name being made for a file the caller does not own. Only the first is
+        // not about permission, and it is the only one that is a property of the volume, so
+        // the volume is asked. Both names are
+        // on it, or the refusal would have been the cross-device one.
+        return errno == PosixErrno.EPERM && HasNoHardLinks(toLease.Descriptor)
+            ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
+            : LinuxErrno.ToError(errno);
+    }
+
+    /// <summary>
+    /// Whether a descriptor is on a filesystem the kernel cannot give a second name on.
+    /// </summary>
+    /// <remarks>
+    /// A list rather than a probe, because the only probe is to try making a link, which is
+    /// what just failed. False whenever the question cannot be answered, so that an unknown
+    /// volume keeps the kernel's own reading of the failure.
+    /// </remarks>
+    internal static bool HasNoHardLinks(int fd) =>
+        TryGetFilesystemType(fd, out long type) &&
+        type is LinuxConstants.MSDOS_SUPER_MAGIC or LinuxConstants.EXFAT_SUPER_MAGIC;
+
+    /// <summary>Reads the type number of the filesystem a descriptor is on.</summary>
+    internal static unsafe bool TryGetFilesystemType(int fd, out long type)
+    {
+        byte* buffer = stackalloc byte[LinuxConstants.StatfsBufferBytes];
+        if (LinuxNative.Fstatfs(fd, buffer) < 0)
+        {
+            type = 0;
+            return false;
+        }
+
+        type = *(nint*)buffer;
+        return true;
     }
 
     /// <summary>Removes one name beneath a directory descriptor.</summary>

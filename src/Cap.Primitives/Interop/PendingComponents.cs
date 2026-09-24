@@ -35,7 +35,7 @@ internal ref struct PendingComponents
     /// <summary>Starts with the caller's path and nothing followed.</summary>
     public PendingComponents(scoped in CapPath path)
     {
-        _path = new Frame(path.Text, path.Syntax);
+        _path = new Frame(path.Text, path.Syntax, path.RequiresDirectory);
         _followed = null;
         _followedCount = 0;
     }
@@ -57,6 +57,43 @@ internal ref struct PendingComponents
             }
 
             return _path.HasMore;
+        }
+    }
+
+    /// <summary>
+    /// Whether the component just taken has to turn out to be a directory, because a trailing
+    /// separator or a final <c>.</c> or <c>..</c> follows it. Meaningful once
+    /// <see cref="HasMore"/> is false, which is when the walk asks it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The requirement belongs to whichever string had the separator, and a link's stored
+    /// target can have one as well as the caller's path: <c>file/</c> stored in a link is a
+    /// link that must lead to a directory, and following it to a regular file fails as the
+    /// kernel's own resolution fails. Losing the flag when the target is spliced in would make
+    /// the walk more permissive about a link's spelling than the platform it stands in for.
+    /// </para>
+    /// <para>
+    /// Every frame still held when the last component is taken ended with that component,
+    /// since the one it came from has nothing after it and each frame beneath was
+    /// interrupted at a link that was its own last component. So the requirement is any of
+    /// theirs: a caller's <c>link/</c> where the link stores <c>a/b</c> needs <c>b</c> to be a
+    /// directory, and so does a caller's <c>link</c> where it stores <c>a/b/</c>.
+    /// </para>
+    /// </remarks>
+    public readonly bool RequiresDirectory
+    {
+        get
+        {
+            for (int i = _followedCount - 1; i >= 0; i--)
+            {
+                if (_followed![i].RequiresDirectory)
+                {
+                    return true;
+                }
+            }
+
+            return _path.RequiresDirectory;
         }
     }
 
@@ -96,7 +133,7 @@ internal ref struct PendingComponents
             return false;
         }
 
-        _followed[_followedCount++] = new Frame(target.Text, target.Syntax);
+        _followed[_followedCount++] = new Frame(target.Text, target.Syntax, target.RequiresDirectory);
         return true;
     }
 
@@ -118,10 +155,11 @@ internal ref struct PendingComponents
         private readonly CapPathSyntax _syntax;
         private int _cursor;
 
-        public Frame(string source, CapPathSyntax syntax)
+        public Frame(string source, CapPathSyntax syntax, bool requiresDirectory)
         {
             _source = source;
             _syntax = syntax;
+            RequiresDirectory = requiresDirectory;
             _cursor = 0;
             SkipNothingComponents();
         }
@@ -132,6 +170,9 @@ internal ref struct PendingComponents
         /// asking it is the walk's test for "was that the last one", once per step.
         /// </summary>
         public readonly bool HasMore => _source is not null && _cursor < _source.Length;
+
+        /// <summary>Whether the string's last component has to be a directory.</summary>
+        public bool RequiresDirectory { get; }
 
         public bool TryNext(out ReadOnlySpan<char> component)
         {

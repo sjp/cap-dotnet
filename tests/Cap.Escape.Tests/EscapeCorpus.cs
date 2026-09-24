@@ -80,12 +80,6 @@ internal static class EscapeCorpus
     /// </summary>
     private const int OverDeepLevels = 260;
 
-    /// <summary>
-    /// The backends that resolve a path one name at a time. Windows is among them: it has no
-    /// confined open, and runs the same walk over its own native calls.
-    /// </summary>
-    private static readonly string[] PortableWalks = [Backends.LinuxWalk, Backends.DarwinWalk, Backends.Windows];
-
     /// <summary>The table.</summary>
     public static IReadOnlyList<EscapeCase> Cases { get; } = Build();
 
@@ -184,14 +178,8 @@ internal static class EscapeCorpus
         // Stored in a link, the same text names the directory the link is in, which is not a
         // file to open.
         Expectation self = malformed.With(Operation.CreateSymlinkTo, Outcome.Refused);
-        KnownDifference selfOnTheWalk = new(
-            PortableWalks,
-            malformed.With(Operation.CreateSymlinkTo, Outcome.NotFound),
-            "a known defect in the walk: a link whose target resolves to the directory holding it " +
-            "is reported as naming nothing, where the kernel reports a directory. Both refuse, " +
-            "and nothing is reached; they disagree only about why.");
-        cases.Add(new("dot", ["L5"], ".", self, self) { Differences = [selfOnTheWalk] });
-        cases.Add(new("dot-slash-dot", ["L5"], "./.", self, self) { Differences = [selfOnTheWalk] });
+        cases.Add(new("dot", ["L5"], ".", self, self));
+        cases.Add(new("dot-slash-dot", ["L5"], "./.", self, self));
 
         // Repeated and trailing separators, and "." components, are dropped -- and every
         // component that is left is still checked.
@@ -200,19 +188,7 @@ internal static class EscapeCorpus
         cases.Add(new("trailing-separator-on-a-directory", ["L5"], "plain/",
             ExistingDirectory(), ExistingDirectory()));
         Expectation fileAsDirectory = Uniform(Outcome.Refused);
-        cases.Add(new("trailing-separator-on-a-file", ["L5"], "plain/marker/", fileAsDirectory, fileAsDirectory)
-        {
-            Differences =
-            [
-                new(
-                    PortableWalks,
-                    fileAsDirectory.With(Operation.CreateSymlinkTo, Outcome.Success),
-                    "a known defect in the walk: a trailing separator in a link's stored target is " +
-                    "dropped when the link is followed, so a link to 'file/' opens the file where the " +
-                    "kernel refuses it. The file is inside; the walk is only more permissive about " +
-                    "its spelling."),
-            ],
-        });
+        cases.Add(new("trailing-separator-on-a-file", ["L5"], "plain/marker/", fileAsDirectory, fileAsDirectory));
 
         // A NUL ends the string where it reaches the kernel, so a name holding one would be
         // checked as one name and opened as another.
