@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>WasiHost.Preview1</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../../src/Cap.Rand/Cap.Rand.csproj" />
+    <!--
+      The analyzer a consumer of the Cap.Std package gets automatically. Referenced by project
+      because the sample builds against the source; with [assembly: CapabilityStrict] any
+      filesystem, clock or entropy call in the adapter that did not come through what the host
+      handed it is a build error.
+    -->
+    <ProjectReference Include="../../../src/Cap.Analyzers/Cap.Analyzers.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+    <PackageReference Include="Wasmtime" />
+  </ItemGroup>
+
+</Project>

@@ -22,6 +22,7 @@
     <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
     <Project Path="tests/Cap.Fuzz.Tests/Cap.Fuzz.Tests.csproj" />
     <Project Path="tests/Cap.Analyzers.Tests/Cap.Analyzers.Tests.csproj" />
+    <Project Path="tests/WasiHost.Tests/WasiHost.Tests.csproj" />
   </Folder>
   <Folder Name="/fuzz/">
     <Project Path="fuzz/Cap.Fuzz/Cap.Fuzz.csproj" />
@@ -40,6 +41,10 @@
     <Project Path="samples/PluginHost/Host/PluginHost.csproj" />
     <Project Path="samples/PluginHost/Plugins/Snoop/Snoop.csproj" />
     <Project Path="samples/PluginHost/Plugins/Notes/Notes.csproj" />
+  </Folder>
+  <Folder Name="/samples/WasiHost/">
+    <Project Path="samples/WasiHost/Preview1/WasiHost.Preview1.csproj" />
+    <Project Path="samples/WasiHost/Host/WasiHost.csproj" />
   </Folder>
   <Folder Name="/solution items/">
     <File Path="Directory.Build.props" />

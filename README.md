@@ -159,8 +159,8 @@ reviewed to know that — it was never given anything else.
 
 **Samples** — see [samples/README.md](samples/README.md): the demonstration above, a
 static file server, a plugin host that gives each plugin its own directory, a zip extractor
-that cannot be made to write outside its destination, and an audit of where a process took
-authority.
+that cannot be made to write outside its destination, an audit of where a process took
+authority, and a WebAssembly host whose guests' preopened directories are `Dir` handles.
 
 ## Repository layout
 

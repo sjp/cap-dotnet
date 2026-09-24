@@ -29,6 +29,7 @@
     <InternalsVisibleTo Include="Cap.Benchmarks" />
     <InternalsVisibleTo Include="Cap.Fuzz" />
     <InternalsVisibleTo Include="Cap.Fuzz.Tests" />
+    <InternalsVisibleTo Include="WasiHost.Tests" />
   </ItemGroup>
 
 </Project>

@@ -138,3 +138,30 @@ Extracting a hostile archive into /tmp/cap-archive-extractor-AJHBEz/out:
 
 It is also the program whose NativeAOT size is recorded in [docs/aot.md](../docs/aot.md).
 CI publishes it as a native executable on every platform and runs the demonstration.
+
+## `WasiHost`
+
+A WebAssembly host whose guests' filesystem is a set of `Dir` handles: a
+`wasi_snapshot_preview1` implementation in C#, running guests on Wasmtime.
+
+```bash
+dotnet run --project samples/WasiHost/Host                                   # the demonstration
+dotnet run --project samples/WasiHost/Host -- run --dir ./data::/ program.wasm
+```
+
+The demonstration runs a guest that tries to read each of its arguments, handed a directory
+as `/` and paths that reach out of it by `..`, by an absolute path and through links:
+
+```
+  notes.txt: read "the guest's own notes"
+  ../secret.txt: refused, ENOTCAPABLE
+  docs/../../secret.txt: refused, ENOTCAPABLE
+  shortcut: refused, ENOTCAPABLE
+```
+
+A preopened directory is a `Dir` with nothing added, and each `path_*` call is one call on it.
+The adapter is built with `[assembly: CapabilityStrict]` and is handed its clock and entropy
+source as well, so a guest reaches nothing the host did not give it. Its tests run the escape
+corpus through WASI calls made by a guest, and the WebAssembly WASI test suite's filesystem
+programs. The sample's [README](WasiHost/README.md) lists what the library does not yet offer
+that WASI asks for.

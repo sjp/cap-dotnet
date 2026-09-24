@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>WasiHost.Tests</RootNamespace>
+    <AssemblyName>WasiHost.Tests</AssemblyName>
+    <!-- The throwaway directory in tests/Scenarios, placed wherever the run was told to. -->
+    <CapUsesScratchTree>true</CapUsesScratchTree>
+    <!-- Every backend this host has, substituted in turn for the length of one case. -->
+    <CapRunsEachBackend>true</CapRunsEachBackend>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../samples/WasiHost/Preview1/WasiHost.Preview1.csproj" />
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+    <ProjectReference Include="../../src/Cap.Rand/Cap.Rand.csproj" />
+    <ProjectReference Include="../../src/Cap.Time/Cap.Time.csproj" />
+    <PackageReference Include="Wasmtime" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+  <!--
+    The escape corpus, compiled in from its own suite rather than copied, so that the attacks
+    driven through the WASI layer are exactly the ones driven through the library directly:
+    a case added there is run here too.
+  -->
+  <ItemGroup>
+    <Compile Include="../Cap.Escape.Tests/Arena.cs" Link="Corpus/Arena.cs" />
+    <Compile Include="../Cap.Escape.Tests/CorpusModel.cs" Link="Corpus/CorpusModel.cs" />
+    <Compile Include="../Cap.Escape.Tests/CorpusSupport.cs" Link="Corpus/CorpusSupport.cs" />
+    <Compile Include="../Cap.Escape.Tests/DefendsAttribute.cs" Link="Corpus/DefendsAttribute.cs" />
+    <Compile Include="../Cap.Escape.Tests/EscapeCorpus.cs" Link="Corpus/EscapeCorpus.cs" />
+    <Compile Include="../Cap.Escape.Tests/HostFilesystem.cs" Link="Corpus/HostFilesystem.cs" />
+    <Compile Include="../Cap.Escape.Tests/OperationRunner.cs" Link="Corpus/OperationRunner.cs" />
+  </ItemGroup>
+
+</Project>

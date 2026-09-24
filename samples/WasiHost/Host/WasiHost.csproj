@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WasiHost</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Preview1/WasiHost.Preview1.csproj" />
+    <ProjectReference Include="../../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../../src/Cap.Rand/Cap.Rand.csproj" />
+    <ProjectReference Include="../../../src/Cap.Time/Cap.Time.csproj" />
+    <PackageReference Include="Wasmtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The demonstration's guest, compiled from its text when the demonstration runs. -->
+    <EmbeddedResource Include="read-each-argument.wat" LogicalName="read-each-argument.wat" />
+  </ItemGroup>
+
+</Project>

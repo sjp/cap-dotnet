@@ -83,6 +83,18 @@ jobs:
         run: |
           echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
+      # ---------------------------------------------------------------------------------
+      # The WebAssembly WASI test suite's programs, run against the WASI host sample. Fetched
+      # at a pinned commit rather than kept in the repository, since they come to about a
+      # hundred megabytes. The list of programs expected to fail was recorded on Linux, so the
+      # suite runs on the Linux legs; elsewhere its cases skip.
+      # ---------------------------------------------------------------------------------
+      - name: Fetch the WASI test suite
+        if: runner.os == 'Linux'
+        run: |
+          echo "CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+          echo "CAPDOTNET_EXPECT_WASI_TESTSUITE=1" >> "$GITHUB_ENV"
+
       - name: Test
         env:
           # See docs/backends.md. Read by the capability probe in Cap.Primitives.
@@ -107,7 +119,7 @@ jobs:
         run: |
           set -euo pipefail
           for project in samples/ContainmentCheck samples/StaticFileServer samples/PluginHost/Host \
-                         samples/ArchiveExtractor samples/AmbientAudit; do
+                         samples/ArchiveExtractor samples/AmbientAudit samples/WasiHost/Host; do
             echo "::group::$project"
             dotnet run --project "$project" --configuration Release --no-build
             echo "::endgroup::"

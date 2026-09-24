@@ -22,6 +22,14 @@
     <PackageVersion Include="SharpFuzz" Version="2.3.0" />
   </ItemGroup>
 
+  <ItemGroup Label="Samples">
+    <!--
+      The WebAssembly engine the WASI host sample runs guests on. Only the sample and its tests
+      reference it; nothing that ships depends on it.
+    -->
+    <PackageVersion Include="Wasmtime" Version="48.0.2" />
+  </ItemGroup>
+
   <ItemGroup Label="Benchmarking">
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
   </ItemGroup>
