@@ -2463,10 +2463,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Two requests in the ordinary case and three when the object redirects. The first
+    /// Three requests in the ordinary case and four when the object redirects. The first
     /// carries the times, the length and the attributes together, so those describe one
-    /// instant rather than several; the second carries the identity, which no single reply
-    /// combines with the rest. The reparse tag is asked for only when the attributes say
+    /// instant rather than several; the second carries the identity and the third the link
+    /// count, neither of which any single reply combines with the rest. The reparse tag is asked for only when the attributes say
     /// there is one, because the whole reason to want it — telling a symbolic link from a
     /// structure of unknown shape that merely looks like one — does not arise otherwise.
     /// </para>
@@ -2490,6 +2490,12 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         }
 
         error = QueryId(handle, out FileIdInformation id);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        error = QueryStandard(handle, out FileStandardInformation standard);
         if (error.IsFailure)
         {
             return error;
@@ -2525,6 +2531,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             // Zero is how this platform says a creation time was never recorded, and it is
             // reported as absent rather than as the start of 1601.
             basic.CreationTime > 0 ? FileTimes.ToDateTimeOffset(basic.CreationTime) : null,
+            // The same convention for the change time, which a filesystem without a
+            // metadata-change clock of its own -- FAT and its descendants -- leaves at zero.
+            basic.ChangeTime > 0 ? FileTimes.ToDateTimeOffset(basic.ChangeTime) : null,
+            standard.NumberOfLinks,
             unixMode: null,
             (FileAttributes)basic.FileAttributes);
 
@@ -2549,6 +2559,34 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             &value,
             (uint)sizeof(FileNetworkOpenInformation),
             NtConstants.FileNetworkOpenInformationClass);
+
+        if (NtStatusCodes.IsFailure(nt))
+        {
+            return NtStatusCodes.ToError(nt);
+        }
+
+        result = value;
+        return CapError.Success;
+    }
+
+    private static unsafe CapError QueryStandard(SafeHandle handle, out FileStandardInformation result)
+    {
+        result = default;
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        IoStatusBlock status = default;
+        FileStandardInformation value = default;
+        int nt = NtNative.NtQueryInformationFile(
+            lease.Raw,
+            &status,
+            &value,
+            (uint)sizeof(FileStandardInformation),
+            NtConstants.FileStandardInformationClass);
 
         if (NtStatusCodes.IsFailure(nt))
         {

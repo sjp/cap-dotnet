@@ -493,6 +493,9 @@ internal static class NtConstants
     /// <summary>Asks for the volume serial and the 128-bit file identifier.</summary>
     public const uint FileIdInformationClass = 59;
 
+    /// <summary>Asks for the sizes, the link count and the deletion and directory flags.</summary>
+    public const uint FileStandardInformationClass = 5;
+
     /// <summary>
     /// Ask for the times, the length and the attributes in one reply. Cheaper than asking
     /// separately, and the fields then describe one instant rather than several.
@@ -500,15 +503,26 @@ internal static class NtConstants
     public const uint FileNetworkOpenInformationClass = 34;
 
     /// <summary>
-    /// Asks a directory read for each entry's name, attributes and reparse tag.
+    /// Asks a directory read for each entry's name, attributes, reparse tag and 64-bit file
+    /// identifier.
     /// </summary>
     /// <remarks>
-    /// The tag is the reason for this class rather than the plainer one. It arrives in the
-    /// field an ordinary entry uses for the size of its extended attributes, which is how
-    /// this platform has always reported it, and without it an entry that redirects could
-    /// only be known to redirect and not by what mechanism.
+    /// The tag arrives in the field an ordinary entry uses for the size of its extended
+    /// attributes, which is how this platform has always reported it. Used only where the
+    /// filesystem does not offer <see cref="FileIdExtdDirectoryInformationClass"/>.
     /// </remarks>
-    public const uint FileFullDirectoryInformationClass = 2;
+    public const uint FileIdFullDirectoryInformationClass = 38;
+
+    /// <summary>
+    /// Asks a directory read for each entry's name, attributes, reparse tag and 128-bit file
+    /// identifier.
+    /// </summary>
+    /// <remarks>
+    /// The tag has a field of its own here, and the identifier is the full width a
+    /// description of the object reports, so an entry's identity compares equal to the
+    /// object's.
+    /// </remarks>
+    public const uint FileIdExtdDirectoryInformationClass = 60;
 
     // --- Directory query flags -----------------------------------------------------------
 

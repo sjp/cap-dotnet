@@ -592,7 +592,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// maintains one. A filesystem that does not leaves the field at zero, and that is read
     /// here as "no creation time" rather than as the start of 1970 — a file created at the
     /// instant the epoch began is not a thing that happens, and reporting one would be a
-    /// worse answer than reporting none.
+    /// worse answer than reporting none. The status-change time gets no such reading: the
+    /// kernel keeps it for every object on every filesystem, so it is always reported.
     /// </remarks>
     private static CapNodeStat Describe(in DarwinStat raw) => new(
         UnixFileTypes.FromMode(raw.Mode),
@@ -604,6 +605,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         raw.BirthTime.Seconds > 0
             ? UnixTimestamps.FromParts(raw.BirthTime.Seconds, raw.BirthTime.Nanoseconds)
             : null,
+        UnixTimestamps.FromParts(raw.ChangeTime.Seconds, raw.ChangeTime.Nanoseconds),
+        raw.HardLinkCount,
         UnixFileTypes.PermissionsFromMode(raw.Mode),
         windowsAttributes: null,
         raw.UserId);

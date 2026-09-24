@@ -143,7 +143,7 @@ public sealed partial class Dir
 
     private IEnumerable<DirEntry> Enumerate()
     {
-        using DirectoryReader reader = BeginRead();
+        using DirectoryReader reader = BeginRead(out ulong volumeId);
 
         while (true)
         {
@@ -158,12 +158,7 @@ public sealed partial class Dir
                 yield break;
             }
 
-            // The name is copied out here and nowhere else. The reader hands back a view of
-            // storage it reuses, so this is the one allocation an entry costs, and an
-            // enumeration that is scanning for something in particular pays it for every
-            // entry either way -- there is no shape of this API that hands back a borrowed
-            // name and still lets a caller keep one.
-            yield return new DirEntry(this, reader.CurrentName.ToString(), reader.CurrentType);
+            yield return Entry(reader, volumeId);
         }
     }
 
@@ -171,6 +166,7 @@ public sealed partial class Dir
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         DirectoryReader? reader = null;
+        ulong volumeId = 0;
         List<DirEntry> batch = new(AsyncBatchSize);
 
         try
@@ -184,8 +180,8 @@ public sealed partial class Dir
                 more = await Task.Run(
                     () =>
                     {
-                        reader ??= BeginRead();
-                        return FillBatch(reader, batch);
+                        reader ??= BeginRead(out volumeId);
+                        return FillBatch(reader, volumeId, batch);
                     },
                     cancellationToken).ConfigureAwait(false);
 
@@ -206,7 +202,7 @@ public sealed partial class Dir
     /// Gathers up to a batch of entries.
     /// </summary>
     /// <returns>False when the directory has been read to its end.</returns>
-    private bool FillBatch(DirectoryReader reader, List<DirEntry> batch)
+    private bool FillBatch(DirectoryReader reader, ulong volumeId, List<DirEntry> batch)
     {
         batch.Clear();
 
@@ -223,27 +219,63 @@ public sealed partial class Dir
                 return false;
             }
 
-            batch.Add(new DirEntry(this, reader.CurrentName.ToString(), reader.CurrentType));
+            batch.Add(Entry(reader, volumeId));
         }
 
         return true;
     }
 
     /// <summary>
-    /// Opens this directory for reading, with a position of its own.
+    /// Turns the entry the reader is positioned on into one a caller can keep.
     /// </summary>
     /// <remarks>
+    /// The name is copied out here and nowhere else. The reader hands back a view of storage
+    /// it reuses, so this is the one allocation an entry costs, and an enumeration that is
+    /// scanning for something in particular pays it for every entry either way -- there is
+    /// no shape of this API that hands back a borrowed name and still lets a caller keep one.
+    /// </remarks>
+    private DirEntry Entry(DirectoryReader reader, ulong volumeId) =>
+        new(
+            this,
+            reader.CurrentName.ToString(),
+            reader.CurrentType,
+            new CapFileId(volumeId, reader.CurrentNodeId));
+
+    /// <summary>
+    /// Opens this directory for reading, with a position of its own, and says which volume
+    /// it is on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// Every enumeration gets its own, because the position a directory read advances belongs
     /// to the open object rather than to the handle. Two enumerations of one handle sharing
     /// a position would each see about half the directory and neither would be told.
+    /// </para>
+    /// <para>
+    /// The volume is asked for once here rather than per entry, because a directory entry
+    /// records which object it refers to but not which volume that object is on. Every entry
+    /// is on the directory's own volume, a mount point's entry included: what the directory
+    /// records there is the directory the mount covers.
+    /// </para>
     /// </remarks>
-    private DirectoryReader BeginRead()
+    private DirectoryReader BeginRead(out ulong volumeId)
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
         CapResult<DirectoryReader> opened = PlatformOps.Current.OpenDirectoryReader(_handle);
-        return opened.IsSuccess
-            ? opened.Value
-            : throw FailureTranslation.ToEnumerationException(opened.Error);
+        if (!opened.IsSuccess)
+        {
+            throw FailureTranslation.ToEnumerationException(opened.Error);
+        }
+
+        CapError error = PlatformOps.Current.StatHandle(_handle, out CapNodeInfo info);
+        if (error.IsFailure)
+        {
+            opened.Value.Dispose();
+            throw FailureTranslation.ToEnumerationException(error);
+        }
+
+        volumeId = info.VolumeId;
+        return opened.Value;
     }
 }

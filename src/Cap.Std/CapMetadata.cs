@@ -108,6 +108,44 @@ public readonly struct CapMetadata
     public DateTimeOffset? CreationTime => _stat.CreationTime;
 
     /// <summary>
+    /// When anything about the object last changed — its contents, its permissions, its
+    /// names, its link count — or null where nothing recorded it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Unix calls this the status-change time and Windows the change time, and on both it is
+    /// kept by the filesystem rather than by whoever writes to the object: there is no way to
+    /// set it, which is what makes it worth having. A file whose last-write time has been put
+    /// back to an earlier date still shows here that something happened to it.
+    /// </para>
+    /// <para>
+    /// Null for the reason <see cref="CreationTime"/> can be, and more rarely: every Unix
+    /// filesystem keeps one, and on Windows the FAT family does not. It is not the creation
+    /// time, which the Unix field's abbreviation is often taken to mean.
+    /// </para>
+    /// </remarks>
+    public DateTimeOffset? ChangeTime => _stat.ChangeTime;
+
+    /// <summary>
+    /// How many directory entries refer to the object.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// One for an ordinary file with a single name, more for a file that has hard links, and
+    /// zero for one whose last name has been removed while a handle still holds it open. What
+    /// it means for a directory differs by filesystem: on many Unix filesystems it counts the
+    /// directory's own entry, its <c>.</c> and each subdirectory's <c>..</c>, while others
+    /// and Windows report one.
+    /// </para>
+    /// <para>
+    /// A count, not a list. Finding the other names means walking the directories that might
+    /// hold them and comparing <see cref="FileId"/>; nothing here or on any platform this runs
+    /// on maps an object back to its names.
+    /// </para>
+    /// </remarks>
+    public long LinkCount => _stat.LinkCount;
+
+    /// <summary>
     /// What the filesystem records about who may do what with the object.
     /// </summary>
     /// <remarks>

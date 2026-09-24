@@ -43,6 +43,7 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
     // kind byte, and then the name, terminated and padded out to the stated length. Laid out
     // by hand rather than declared as a structure because the name has no fixed size, so a
     // structure would describe only the part before it and the offsets would still be needed.
+    private const int InodeOffset = 0;
     private const int RecordLengthOffset = 16;
     private const int KindOffset = 18;
     private const int NameOffset = 19;
@@ -135,7 +136,8 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
             name,
             _alwaysLookUp
                 ? CapFileType.Unknown
-                : UnixFileTypes.FromDirectoryEntry(remaining[KindOffset]));
+                : UnixFileTypes.FromDirectoryEntry(remaining[KindOffset]),
+            MemoryMarshal.Read<ulong>(remaining[InodeOffset..]));
         advanced = true;
         return CapError.Success;
     }

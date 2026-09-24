@@ -698,7 +698,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         const uint Wanted =
             LinuxConstants.STATX_TYPE | LinuxConstants.STATX_MODE | LinuxConstants.STATX_INO |
             LinuxConstants.STATX_SIZE | LinuxConstants.STATX_ATIME | LinuxConstants.STATX_MTIME |
-            LinuxConstants.STATX_UID | LinuxConstants.STATX_BTIME;
+            LinuxConstants.STATX_UID | LinuxConstants.STATX_NLINK | LinuxConstants.STATX_CTIME |
+            LinuxConstants.STATX_BTIME;
 
         StatxBuffer buffer = default;
         long result;
@@ -726,12 +727,14 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return LinuxErrno.ToError(errno);
         }
 
-        // Everything but the creation time is required, for the same reason the resolution
-        // stat requires its own fields: a value the kernel did not fill in reads as zero,
-        // and a zero length or a zero inode is a plausible-looking answer rather than an
-        // obviously missing one. The creation time is the exception because it is genuinely
-        // optional on this platform, and it is reported as absent rather than as the epoch.
-        const uint Required = Wanted & ~LinuxConstants.STATX_BTIME;
+        // Everything but the two optional times is required, for the same reason the
+        // resolution stat requires its own fields: a value the kernel did not fill in reads
+        // as zero, and a zero length, a zero inode or a zero link count is a
+        // plausible-looking answer rather than an obviously missing one. The creation time is
+        // genuinely optional on this platform, and the status-change time is one a
+        // filesystem that synthesises its metadata may leave out; both are reported as
+        // absent rather than as the epoch.
+        const uint Required = Wanted & ~(LinuxConstants.STATX_BTIME | LinuxConstants.STATX_CTIME);
         if ((buffer.Mask & Required) != Required)
         {
             return CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, LinuxErrno.EOPNOTSUPP);
@@ -739,6 +742,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         DateTimeOffset? created = (buffer.Mask & LinuxConstants.STATX_BTIME) != 0
             ? UnixTimestamps.FromParts(buffer.BirthTime.Seconds, buffer.BirthTime.Nanoseconds)
+            : null;
+
+        DateTimeOffset? changed = (buffer.Mask & LinuxConstants.STATX_CTIME) != 0
+            ? UnixTimestamps.FromParts(buffer.ChangeTime.Seconds, buffer.ChangeTime.Nanoseconds)
             : null;
 
         stat = new CapNodeStat(
@@ -749,6 +756,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             UnixTimestamps.FromParts(buffer.AccessTime.Seconds, buffer.AccessTime.Nanoseconds),
             UnixTimestamps.FromParts(buffer.ModifyTime.Seconds, buffer.ModifyTime.Nanoseconds),
             created,
+            changed,
+            buffer.HardLinkCount,
             UnixFileTypes.PermissionsFromMode(buffer.Mode),
             windowsAttributes: null,
             buffer.UserId);

@@ -65,6 +65,8 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.GetLastAccessTimeUtc(p)` | `dir.GetMetadata(p).LastAccessTime` | |
 | `File.GetCreationTimeUtc(p)` | `dir.GetMetadata(p).CreationTime` | Null where the filesystem records none, rather than a made-up date. |
 | `new FileInfo(p).Length` | `dir.GetMetadata(p).Length` | |
+| No equivalent: the link count, `st_nlink` | `dir.GetMetadata(p).LinkCount` | |
+| No equivalent: the status-change time, `st_ctime` or Windows `ChangeTime` | `dir.GetMetadata(p).ChangeTime` | Null where the filesystem records none, which on Windows is the FAT family. |
 | `File.SetLastWriteTimeUtc(p, t)`, `File.SetLastAccessTimeUtc(p, t)` | `dir.SetTimes(p, lastWrite: CapFileTime.At(t))`, and `lastAccess:` | Does not follow a symbolic link at `p` unless given `followLink: true`: the link's own times are set, where `File.SetLastWriteTime` sets its target's. `CapFileTime.Now` asks the system to stamp the time of the change. On an open file, `file.SetTimes(...)`, which needs a handle opened for writing. |
 | `File.SetCreationTime` | none | Not every platform can set one. |
 | `File.SetAttributes`, `File.SetUnixFileMode` | none | Not provided. **Ext** `CopyTo` carries permissions across a copy when asked. |
@@ -82,7 +84,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `Directory.Delete(p)` | `dir.DeleteDir(p)` | Empty directories only. |
 | `Directory.Delete(p, recursive: true)` | **Ext** `dir.DeleteTree(p)` | Never follows a link out of the tree; it removes the link. |
 | `Directory.Move(a, b)` | `dir.Rename(a, dir, b)` | |
-| `Directory.EnumerateFileSystemEntries(p)`, `GetFileSystemEntries` | `dir.OpenDir(p).EnumerateEntries()` | Yields `DirEntry` values, which carry the name and kind and open what they name directly. |
+| `Directory.EnumerateFileSystemEntries(p)`, `GetFileSystemEntries` | `dir.OpenDir(p).EnumerateEntries()` | Yields `DirEntry` values, which carry the name, kind and `FileId` and open what they name directly. |
 | `Directory.EnumerateFiles(p)`, `GetFiles` | `EnumerateEntries().Where(e => e.Type == CapFileType.File)` | |
 | `Directory.EnumerateDirectories(p)`, `GetDirectories` | `EnumerateEntries().Where(e => e.Type == CapFileType.Directory)` | |
 | `Directory.EnumerateFiles(p, "*.json")` | **Ext** `dir.Glob("*.json")` | |

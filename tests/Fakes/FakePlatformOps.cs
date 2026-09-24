@@ -644,7 +644,11 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.PermissionDenied);
         }
 
-        _ = Parent(parent).Entries.Remove(name.ToString());
+        if (Parent(parent).Entries.Remove(name.ToString()))
+        {
+            node.LinkCount--;
+        }
+
         return CapError.Success;
     }
 
@@ -777,6 +781,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         destination!.Entries[target] = node!;
+        node!.LinkCount++;
         return CapError.Success;
     }
 

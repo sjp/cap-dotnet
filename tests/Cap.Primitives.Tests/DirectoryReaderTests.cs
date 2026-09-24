@@ -148,6 +148,44 @@ public sealed class DirectoryReaderTests : IDisposable
     }
 
     /// <summary>
+    /// Each entry's identity is read from the directory record and agrees with a description
+    /// of the name.
+    /// </summary>
+    /// <remarks>
+    /// Checked at this layer because each backend reads the identifier out of a record it
+    /// lays out by hand, at an offset of its own; a wrong offset reads some other field, which
+    /// is a number like any other and fails nothing until it is compared.
+    /// </remarks>
+    [Fact]
+    public void An_entry_carries_the_identity_a_description_reports()
+    {
+        File.WriteAllText(Path.Combine(_root, "file"), "x");
+        Directory.CreateDirectory(Path.Combine(_root, "directory"));
+
+        using SafeDirHandle root = OpenRoot(CapAccess.Read);
+        CapResult<DirectoryReader> opened = Ops.OpenDirectoryReader(root);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+
+        using DirectoryReader reader = opened.Value;
+        int seen = 0;
+        while (true)
+        {
+            Assert.True(reader.Read(out bool advanced).IsSuccess);
+            if (!advanced)
+            {
+                break;
+            }
+
+            Assert.True(Ops.DescribeChild(root, reader.CurrentName, out CapNodeStat stat).IsSuccess);
+            Assert.Equal(stat.NodeId, reader.CurrentNodeId);
+            Assert.NotEqual(UInt128.Zero, reader.CurrentNodeId);
+            seen++;
+        }
+
+        Assert.Equal(2, seen);
+    }
+
+    /// <summary>
     /// Reads a directory of two files, removes the one not yet reported, and answers what the
     /// second entry's kind came back as.
     /// </summary>

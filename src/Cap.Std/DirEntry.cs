@@ -44,12 +44,14 @@ public readonly struct DirEntry
     private readonly Dir? _directory;
     private readonly string? _name;
     private readonly CapFileType _type;
+    private readonly CapFileId _fileId;
 
-    internal DirEntry(Dir directory, string name, CapFileType type)
+    internal DirEntry(Dir directory, string name, CapFileType type, CapFileId fileId)
     {
         _directory = directory;
         _name = name;
         _type = type;
+        _fileId = fileId;
     }
 
     /// <summary>
@@ -75,6 +77,39 @@ public readonly struct DirEntry
     /// make.
     /// </remarks>
     public CapFileType Type => _type;
+
+    /// <summary>
+    /// Which object the entry referred to, as the directory read reported it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Free, like <see cref="Type"/>: every platform this runs on records an object's
+    /// identity in the directory entry itself, so an enumeration can notice two names for one
+    /// object, or a directory it has already been through, without looking anything up. The
+    /// volume half is the volume of the directory being read, taken once for the whole
+    /// enumeration.
+    /// </para>
+    /// <para>
+    /// <strong>Comparable with <see cref="CapMetadata.FileId"/>, with two exceptions.</strong>
+    /// For an ordinary entry the two are the same value. They differ where what the
+    /// directory records is not what a description of the name reports: an entry on Unix that
+    /// is a mount point records the directory the mount covers, on the directory's own
+    /// volume, while a description reports the root of what is mounted there, on its volume;
+    /// and a union filesystem, such as the one container images are commonly built on, may
+    /// record numbers in its directories that no description repeats. Entries compared with
+    /// other entries are not affected by either.
+    /// </para>
+    /// <para>
+    /// A snapshot, like <see cref="Type"/>. It describes what held the name when the directory
+    /// was read, and the identifier may since have been given to something else; see
+    /// <see cref="CapFileId"/> for why that makes it right for questions about one pass and
+    /// wrong for anything kept.
+    /// </para>
+    /// <para>
+    /// An entry holding a symbolic link identifies the link, not what it leads to.
+    /// </para>
+    /// </remarks>
+    public CapFileId FileId => _fileId;
 
     /// <summary>
     /// Opens the entry as a directory.
@@ -260,8 +295,9 @@ public readonly struct DirEntry
     /// <remarks>
     /// <para>
     /// Not free, and not part of the enumeration. A directory read answers what each entry is
-    /// and nothing else, so everything beyond <see cref="Type"/> — the length, the times, the
-    /// permissions — costs a separate lookup of the name. That is why it is a method rather
+    /// and which object it refers to and nothing else, so everything beyond <see cref="Type"/>
+    /// and <see cref="FileId"/> — the length, the times, the permissions — costs a separate
+    /// lookup of the name. That is why it is a method rather
     /// than a property, and why an enumeration that does not call it pays nothing for it.
     /// </para>
     /// <para>

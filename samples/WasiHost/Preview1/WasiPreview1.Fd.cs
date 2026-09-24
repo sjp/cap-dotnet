@@ -556,6 +556,11 @@ public sealed partial class WasiPreview1
     /// which POSIX also permits of a directory changed during a listing.
     /// </para>
     /// <para>
+    /// Each entry's inode comes from the listing itself, which records it alongside the name,
+    /// so an entry costs no lookup and its inode describes the same entry the name and type
+    /// do.
+    /// </para>
+    /// <para>
     /// WASI lists <c>.</c> and <c>..</c> first. The library lists neither, because neither is a
     /// name beneath the handle, so they are added here; <c>..</c> is given inode 0, since
     /// asking what lies above a handle is exactly what a handle cannot do.
@@ -585,8 +590,7 @@ public sealed partial class WasiPreview1
             entries.Add(("..", FileType.Directory, 0));
             foreach (DirEntry entry in directory.Dir.EnumerateEntries())
             {
-                ulong inode = directory.Dir.TryGetMetadata(entry.Name, out CapMetadata metadata) ? Inode(metadata) : 0;
-                entries.Add((entry.Name, ToFileType(entry.Type), inode));
+                entries.Add((entry.Name, ToFileType(entry.Type), (ulong)entry.FileId.NodeId));
             }
         });
 
@@ -624,8 +628,8 @@ public sealed partial class WasiPreview1
     private static ulong Inode(in CapMetadata metadata) => (ulong)metadata.FileId.NodeId;
 
     /// <summary>
-    /// Writes a <c>filestat</c> record. The library does not report a link count or a status
-    /// change time, so both are written as zero.
+    /// Writes a <c>filestat</c> record. A status-change time the filesystem does not record is
+    /// written as zero, which is the only way the record has of saying nothing.
     /// </summary>
     private static Errno WriteFilestat(GuestMemory memory, uint address, FileType type, CapMetadata? metadata)
     {
@@ -640,9 +644,14 @@ public sealed partial class WasiPreview1
         {
             BinaryPrimitives.WriteUInt64LittleEndian(record, known.FileId.VolumeId);
             BinaryPrimitives.WriteUInt64LittleEndian(record[8..], Inode(known));
+            BinaryPrimitives.WriteUInt64LittleEndian(record[24..], (ulong)known.LinkCount);
             BinaryPrimitives.WriteUInt64LittleEndian(record[32..], (ulong)known.Length);
             BinaryPrimitives.WriteUInt64LittleEndian(record[40..], Nanoseconds(known.LastAccessTime));
             BinaryPrimitives.WriteUInt64LittleEndian(record[48..], Nanoseconds(known.LastWriteTime));
+            if (known.ChangeTime is { } changed)
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(record[56..], Nanoseconds(changed));
+            }
         }
 
         return Errno.Success;

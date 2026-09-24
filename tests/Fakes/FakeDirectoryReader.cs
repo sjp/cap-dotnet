@@ -50,7 +50,7 @@ internal sealed class FakeDirectoryReader : DirectoryReader
         (string name, FakeNode node) = _entries[_index++];
         _name = name;
 
-        SetCurrent(name, node.HidesKindFromDirectoryRead ? CapFileType.Unknown : node.FileType);
+        SetCurrent(name, node.HidesKindFromDirectoryRead ? CapFileType.Unknown : node.FileType, node.NodeId);
         advanced = true;
         return CapError.Success;
     }

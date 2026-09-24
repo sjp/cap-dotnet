@@ -226,3 +226,35 @@ internal struct FileNetworkOpenInformation
     /// <summary>The size the native API expects, checked by the layout tests.</summary>
     public static unsafe int StructSize => sizeof(FileNetworkOpenInformation);
 }
+
+/// <summary>The reply to a request for a file's link count and sizes.</summary>
+/// <remarks>
+/// Asked for the link count alone; the sizes it repeats are taken from the reply that
+/// carries the times, so that the length and the times describe one instant. The two flags
+/// are single bytes followed by padding the native declaration leaves implicit, which is
+/// declared here so that the structure is the size the system writes.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileStandardInformation
+{
+    /// <summary>The space reserved for the file, which is not its length.</summary>
+    public long AllocationSize;
+
+    /// <summary>The file's length in bytes.</summary>
+    public long EndOfFile;
+
+    /// <summary>How many directory entries refer to the file.</summary>
+    public uint NumberOfLinks;
+
+    /// <summary>Nonzero when the file has been marked for deletion.</summary>
+    public byte DeletePending;
+
+    /// <summary>Nonzero when the file is a directory.</summary>
+    public byte Directory;
+
+    /// <summary>Padding the native declaration leaves implicit. Never read.</summary>
+    public ushort Reserved;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileStandardInformation);
+}

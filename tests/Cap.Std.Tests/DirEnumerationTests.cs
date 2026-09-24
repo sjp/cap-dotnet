@@ -116,6 +116,61 @@ public sealed partial class DirEnumerationTests : IDisposable
         Assert.Equal(CapFileType.Directory, kinds["folder"]);
     }
 
+    /// <summary>Each entry carries the identity a description of its name reports.</summary>
+    [Fact]
+    public void An_entry_carries_the_identity_of_what_it_names()
+    {
+        File.WriteAllText(Host("plain"), "x");
+        Directory.CreateDirectory(Host("folder"));
+
+        using Dir root = OpenRoot();
+        Dictionary<string, CapFileId> identities = Identities(root);
+
+        Assert.Equal(root.GetMetadata("plain").FileId, identities["plain"]);
+        Assert.Equal(root.GetMetadata("folder").FileId, identities["folder"]);
+        Assert.NotEqual(identities["plain"], identities["folder"]);
+    }
+
+    /// <summary>An entry holding a symbolic link identifies the link, not its target.</summary>
+    /// <remarks>
+    /// The case that tells the directory's own record apart from a lookup that followed the
+    /// link: the link and its target are different objects.
+    /// </remarks>
+    [Fact]
+    public void An_entry_for_a_link_identifies_the_link()
+    {
+        RequireSymbolicLinks();
+
+        File.WriteAllText(Host("plain"), "x");
+        File.CreateSymbolicLink(Host("to-plain"), "plain");
+
+        using Dir root = OpenRoot();
+        Dictionary<string, CapFileId> identities = Identities(root);
+
+        Assert.Equal(root.GetMetadata("to-plain").FileId, identities["to-plain"]);
+        Assert.NotEqual(identities["plain"], identities["to-plain"]);
+    }
+
+    /// <summary>Two names for one file are two entries with one identity.</summary>
+    [Fact]
+    public void Hard_links_are_two_entries_with_one_identity()
+    {
+        File.WriteAllText(Host("first"), "shared");
+        File.WriteAllText(Host("other"), "shared");
+
+        using Dir root = OpenRoot();
+
+        if (!root.TryCreateHardLink("first", root, "second"))
+        {
+            Assert.Skip("A second name for one file could not be created here.");
+        }
+
+        Dictionary<string, CapFileId> identities = Identities(root);
+
+        Assert.Equal(identities["first"], identities["second"]);
+        Assert.NotEqual(identities["first"], identities["other"]);
+    }
+
     /// <summary>A link to a directory is reported as a link, not as a directory.</summary>
     /// <remarks>
     /// The single most important answer this API gives. A caller walking a tree decides
@@ -398,18 +453,18 @@ public sealed partial class DirEnumerationTests : IDisposable
 
         using Dir root = OpenRoot();
 
-        List<string> asynchronous = [];
+        List<(string Name, CapFileId Id)> asynchronous = [];
         await foreach (DirEntry entry in root.EnumerateEntriesAsync(TestContext.Current.CancellationToken))
         {
-            asynchronous.Add(entry.Name);
+            asynchronous.Add((entry.Name, entry.FileId));
         }
 
-        string[] synchronous = [.. root.EnumerateEntries().Select(entry => entry.Name)];
+        (string Name, CapFileId Id)[] synchronous = [.. root.EnumerateEntries().Select(entry => (entry.Name, entry.FileId))];
 
         Assert.Equal(200, asynchronous.Count);
         Assert.Equal(
-            synchronous.Order(StringComparer.Ordinal),
-            asynchronous.Order(StringComparer.Ordinal));
+            synchronous.OrderBy(entry => entry.Name, StringComparer.Ordinal),
+            asynchronous.OrderBy(entry => entry.Name, StringComparer.Ordinal));
     }
 
     /// <summary>A token that is already signalled stops the enumeration before it starts.</summary>
@@ -520,6 +575,9 @@ public sealed partial class DirEnumerationTests : IDisposable
 
     private static Dictionary<string, CapFileType> Kinds(Dir dir) =>
         dir.EnumerateEntries().ToDictionary(entry => entry.Name, entry => entry.Type, StringComparer.Ordinal);
+
+    private static Dictionary<string, CapFileId> Identities(Dir dir) =>
+        dir.EnumerateEntries().ToDictionary(entry => entry.Name, entry => entry.FileId, StringComparer.Ordinal);
 
     private void Seed(int count, string? within = null)
     {

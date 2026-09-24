@@ -117,6 +117,82 @@ public sealed class DirMetadataTests : IDisposable
     }
 
     /// <summary>
+    /// The change time is from around now, and it is its own clock rather than the
+    /// last-write time under another name.
+    /// </summary>
+    /// <remarks>
+    /// Putting the last-write time back is itself a change to the object, so the change time
+    /// stays in the present while the last-write time goes to the date it was given. A field
+    /// read from the wrong offset, or filled from the last-write time, follows it into the
+    /// past.
+    /// </remarks>
+    [Fact]
+    public void The_change_time_records_that_the_write_time_was_put_back()
+    {
+        DateTimeOffset before = DateTimeOffset.UtcNow.AddMinutes(-5);
+        File.WriteAllText(Host("backdated"), "x");
+        File.SetLastWriteTimeUtc(Host("backdated"), new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc));
+        DateTimeOffset after = DateTimeOffset.UtcNow.AddMinutes(5);
+
+        using Dir root = OpenRoot();
+        CapMetadata metadata = root.GetMetadata("backdated");
+
+        Assert.Equal(2001, metadata.LastWriteTime.Year);
+
+        // Absent only where the filesystem keeps no such clock, which no Unix filesystem
+        // does and which on Windows is the FAT family, never the volume a test runs on.
+        Assert.NotNull(metadata.ChangeTime);
+        Assert.InRange(metadata.ChangeTime.Value, before, after);
+    }
+
+    /// <summary>A file with one name reports one link, and a second name raises the count.</summary>
+    [Fact]
+    public void The_link_count_follows_the_names_a_file_has()
+    {
+        File.WriteAllText(Host("counted"), "x");
+
+        using Dir root = OpenRoot();
+
+        Assert.Equal(1, root.GetMetadata("counted").LinkCount);
+
+        if (!root.TryCreateHardLink("counted", root, "counted-again"))
+        {
+            Assert.Skip("A second name for one file could not be created here.");
+        }
+
+        Assert.Equal(2, root.GetMetadata("counted").LinkCount);
+        Assert.Equal(2, root.GetMetadata("counted-again").LinkCount);
+
+        root.DeleteFile("counted");
+
+        Assert.Equal(1, root.GetMetadata("counted-again").LinkCount);
+    }
+
+    /// <summary>
+    /// An open file whose last name is removed reports no links, and still describes itself.
+    /// </summary>
+    /// <remarks>
+    /// Unix only, because it is the only family on which a name can be removed while the file
+    /// is open without the opener having agreed to it in advance.
+    /// </remarks>
+    [Fact]
+    public void An_open_file_whose_last_name_is_gone_reports_no_links()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("An open file's name cannot be removed out from under it here.");
+        }
+
+        File.WriteAllText(Host("orphan"), "x");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("orphan");
+        root.DeleteFile("orphan");
+
+        Assert.Equal(0, file.GetMetadata().LinkCount);
+    }
+
+    /// <summary>
     /// The permissions are the ones this platform records, and the other platform's
     /// accessor says so rather than inventing a value.
     /// </summary>

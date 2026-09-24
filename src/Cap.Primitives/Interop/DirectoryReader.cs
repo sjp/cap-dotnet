@@ -57,6 +57,19 @@ internal abstract class DirectoryReader : IDisposable
     public CapFileType CurrentType { get; private set; }
 
     /// <summary>
+    /// The identity of the object the entry refers to within its filesystem, as the directory
+    /// records it: a Unix inode number, or a Windows file identifier.
+    /// </summary>
+    /// <remarks>
+    /// Read from the same record as the name, so it costs nothing and describes the entry as
+    /// the read found it. It is the directory's record rather than the object's own answer,
+    /// and the two can differ: on Unix an entry that is a mount point records the directory
+    /// the mount covers rather than the root of what is mounted there, and a union
+    /// filesystem may record a number of its own that no description of the object repeats.
+    /// </remarks>
+    public UInt128 CurrentNodeId { get; private set; }
+
+    /// <summary>
     /// Moves to the next entry.
     /// </summary>
     /// <param name="advanced">
@@ -129,23 +142,25 @@ internal abstract class DirectoryReader : IDisposable
     /// came from — so the entry could be listed and never opened, and one such name would
     /// make its whole directory useless.
     /// </remarks>
-    protected void SetCurrent(ReadOnlySpan<byte> name, CapFileType type)
+    protected void SetCurrent(ReadOnlySpan<byte> name, CapFileType type, UInt128 nodeId)
     {
         int count = PathEncoding.GetCharCount(name);
         EnsureCapacity(count);
 
         PathEncoding.TryGetChars(name, _name, out _length);
         CurrentType = type;
+        CurrentNodeId = nodeId;
     }
 
     /// <summary>Records the entry the reader has moved to, from a name already in characters.</summary>
-    protected void SetCurrent(ReadOnlySpan<char> name, CapFileType type)
+    protected void SetCurrent(ReadOnlySpan<char> name, CapFileType type, UInt128 nodeId)
     {
         EnsureCapacity(name.Length);
 
         name.CopyTo(_name);
         _length = name.Length;
         CurrentType = type;
+        CurrentNodeId = nodeId;
     }
 
     /// <summary>The names every directory holds for itself and for the one above it.</summary>

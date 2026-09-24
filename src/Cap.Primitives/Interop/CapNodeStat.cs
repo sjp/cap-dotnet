@@ -37,6 +37,8 @@ internal readonly struct CapNodeStat
         DateTimeOffset lastAccessTime,
         DateTimeOffset lastWriteTime,
         DateTimeOffset? creationTime,
+        DateTimeOffset? changeTime,
+        long linkCount,
         UnixFileMode? unixMode,
         FileAttributes? windowsAttributes,
         uint? unixOwnerId = null)
@@ -48,6 +50,8 @@ internal readonly struct CapNodeStat
         LastAccessTime = lastAccessTime;
         LastWriteTime = lastWriteTime;
         CreationTime = creationTime;
+        ChangeTime = changeTime;
+        LinkCount = linkCount;
         UnixMode = unixMode;
         WindowsAttributes = windowsAttributes;
         UnixOwnerId = unixOwnerId;
@@ -88,6 +92,15 @@ internal readonly struct CapNodeStat
     /// When the object was created, or null where the filesystem does not record it.
     /// </summary>
     public DateTimeOffset? CreationTime { get; }
+
+    /// <summary>
+    /// When the object's metadata or contents last changed, or null where the filesystem
+    /// does not record it.
+    /// </summary>
+    public DateTimeOffset? ChangeTime { get; }
+
+    /// <summary>How many directory entries refer to the object.</summary>
+    public long LinkCount { get; }
 
     /// <summary>
     /// The Unix permission and mode bits, or null on a platform that has none.

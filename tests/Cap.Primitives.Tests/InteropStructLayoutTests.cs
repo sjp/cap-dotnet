@@ -188,6 +188,29 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The Windows reply carrying the link count is 24 bytes, with the count after the two
+    /// sizes.
+    /// </summary>
+    /// <remarks>
+    /// The two flags after the count are single bytes, and the native declaration leaves the
+    /// padding after them implicit; a declaration that stopped at the flags would be two bytes
+    /// short of the buffer the system fills.
+    /// </remarks>
+    [Fact]
+    public void Windows_link_count_reply_matches_the_native_layout()
+    {
+        Assert.Equal(24, FileStandardInformation.StructSize);
+        Assert.Equal(
+            16,
+            Marshal.OffsetOf<FileStandardInformation>(
+                nameof(FileStandardInformation.NumberOfLinks)).ToInt32());
+        Assert.Equal(
+            20,
+            Marshal.OffsetOf<FileStandardInformation>(
+                nameof(FileStandardInformation.DeletePending)).ToInt32());
+    }
+
+    /// <summary>
     /// The Windows reply carrying the times, the length and the attributes is 56 bytes, with
     /// the creation time first.
     /// </summary>

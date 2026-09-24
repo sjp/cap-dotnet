@@ -80,6 +80,20 @@ internal sealed class FakeNode
     public DateTimeOffset? CreationTime { get; set; }
 
     /// <summary>
+    /// When anything about this object last changed, or null to model a filesystem that does
+    /// not say.
+    /// </summary>
+    public DateTimeOffset? ChangeTime { get; set; }
+
+    /// <summary>How many directory entries refer to this object.</summary>
+    /// <remarks>
+    /// Kept up to date by the simulation's hard-link creation and file removal, which are the
+    /// operations a test of the count exercises. A rename that replaces a name is not counted
+    /// against what it replaced.
+    /// </remarks>
+    public long LinkCount { get; set; } = 1;
+
+    /// <summary>
     /// The Unix mode bits, when the simulation is standing in for a Unix platform.
     /// </summary>
     /// <remarks>
@@ -110,6 +124,8 @@ internal sealed class FakeNode
         LastAccessTime,
         LastWriteTime,
         CreationTime,
+        ChangeTime,
+        LinkCount,
         UnixMode,
         UnixMode is null ? WindowsAttributes : null);
 

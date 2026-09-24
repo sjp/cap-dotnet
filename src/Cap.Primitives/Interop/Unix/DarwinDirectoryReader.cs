@@ -108,7 +108,8 @@ internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
         {
             SetCurrent(
                 new ReadOnlySpan<byte>(name, NameLength),
-                _alwaysLookUp ? CapFileType.Unknown : UnixFileTypes.FromDirectoryEntry(_entry.Kind));
+                _alwaysLookUp ? CapFileType.Unknown : UnixFileTypes.FromDirectoryEntry(_entry.Kind),
+                _entry.Inode);
         }
 
         advanced = true;

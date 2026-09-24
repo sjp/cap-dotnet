@@ -57,7 +57,7 @@ guest's path passed through as it arrived:
 | `path_symlink`, `path_readlink` | `CreateSymlink` or `CreateDirSymlink`, `ReadLink` |
 | `path_filestat_get` | `GetMetadata(path)` |
 | `path_filestat_set_times`, `fd_filestat_set_times` | `SetTimes(path, ...)`, and `SetTimes` on the `CapFile` or `Dir` |
-| `fd_readdir` | `EnumerateEntries` |
+| `fd_readdir` | `EnumerateEntries`, with `DirEntry.FileId` as each entry's inode |
 | `LOOKUPFLAGS_SYMLINK_FOLLOW` | `noFollow: false` on `OpenAny`, `OpenFile` and `OpenDir`; `followLink: true` on `GetMetadata`, `SetTimes` and `CreateHardLink` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
 | every other error code | `CapIOException.KindOf(exception)` |
@@ -114,9 +114,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Composed from two calls:**
 
-- **Metadata has no link count or status-change time**, and a directory entry has no
-  identity. `filestat` reports both as zero, and `fd_readdir` describes every entry separately
-  to learn its inode.
 - **A link's kind has to be guessed.** Windows records whether a link names a file or a
   directory, and won't traverse one made as the wrong kind. `Dir` asks the caller to choose
   between `CreateSymlink` and `CreateDirSymlink`. WASI doesn't say, so the adapter opens the

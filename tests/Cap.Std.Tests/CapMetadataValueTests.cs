@@ -138,6 +138,7 @@ public sealed class CapMetadataValueTests
 
         Assert.Equal(CapFileType.Unknown, metadata.Type);
         Assert.Null(metadata.CreationTime);
+        Assert.Null(metadata.ChangeTime);
         Assert.False(metadata.Permissions.TryGetUnixMode(out _));
         Assert.False(metadata.Permissions.TryGetWindowsAttributes(out _));
     }
@@ -149,6 +150,7 @@ public sealed class CapMetadataValueTests
         DateTimeOffset accessed = new(2020, 1, 2, 3, 4, 5, TimeSpan.Zero);
         DateTimeOffset written = new(2021, 6, 7, 8, 9, 10, TimeSpan.Zero);
         DateTimeOffset created = new(2019, 11, 12, 13, 14, 15, TimeSpan.Zero);
+        DateTimeOffset changed = new(2022, 3, 4, 5, 6, 7, TimeSpan.Zero);
 
         CapMetadata metadata = new(new CapNodeStat(
             CapFileType.Fifo,
@@ -158,6 +160,8 @@ public sealed class CapMetadataValueTests
             accessed,
             written,
             created,
+            changed,
+            linkCount: 3,
             UnixFileMode.OtherExecute,
             windowsAttributes: null));
 
@@ -166,6 +170,8 @@ public sealed class CapMetadataValueTests
         Assert.Equal(accessed, metadata.LastAccessTime);
         Assert.Equal(written, metadata.LastWriteTime);
         Assert.Equal(created, metadata.CreationTime);
+        Assert.Equal(changed, metadata.ChangeTime);
+        Assert.Equal(3, metadata.LinkCount);
         Assert.Equal(11ul, metadata.FileId.VolumeId);
         Assert.Equal(new UInt128(2, 3), metadata.FileId.NodeId);
     }
@@ -192,6 +198,8 @@ public sealed class CapMetadataValueTests
             DateTimeOffset.UnixEpoch,
             DateTimeOffset.UnixEpoch,
             creationTime: null,
+            changeTime: null,
+            linkCount: 1,
             unixMode,
             windowsAttributes));
 }
