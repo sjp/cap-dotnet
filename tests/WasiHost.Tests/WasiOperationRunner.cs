@@ -70,6 +70,7 @@ internal static class WasiOperationRunner
             Operation.CreateFile => CreateAndWrite(guest, path, reached),
             Operation.CreateDir => WithPath(guest, "path_create_directory", path),
             Operation.GetMetadata or Operation.Exists => DescribePath(guest, path, reached),
+            Operation.SetTimes => SetTimes(guest, path, reached),
             Operation.ReadLink => ReadLink(guest, path),
             Operation.DeleteFile => WithPath(guest, "path_unlink_file", path),
             Operation.DeleteDir => WithPath(guest, "path_remove_directory", path),
@@ -133,6 +134,21 @@ internal static class WasiOperationRunner
         }
 
         return errno;
+    }
+
+    /// <summary>
+    /// Sets a name's last-write time without following a final link, then describes it the
+    /// same way to learn what was reached.
+    /// </summary>
+    private static Errno SetTimes(TrampolineGuest guest, string path, List<(ulong, ulong)> reached)
+    {
+        int length = guest.WritePath(TrampolineGuest.PathSlot, path);
+        long written = (EscapeCorpus.PlantedTime - DateTimeOffset.UnixEpoch).Ticks * 100;
+        Errno errno = guest.Call(
+            "path_filestat_set_times", TrampolineGuest.Root, 0, TrampolineGuest.PathSlot, length,
+            0L, written, (int)FstFlags.Mtim);
+
+        return errno == Errno.Success ? DescribePath(guest, path, reached) : errno;
     }
 
     private static Errno ReadLink(TrampolineGuest guest, string path)

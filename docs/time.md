@@ -76,6 +76,15 @@ day, do not give it a provider that reports it. Derive one that overrides `GetUt
 return a fixed instant and leaves the timestamp and timers alone. A host that exposes the
 WASI interfaces can make the same split when it implements them over a provider it was given.
 
+**A handle that can write a file can also tell the time.** Every write stamps the file with
+the time it was made, and describing the file reads that stamp back. `CapFileTime.Now`, which
+asks the filesystem to stamp a file's times with the moment of the change, is the same thing
+asked for directly, so it needs no clock and grants none. On Unix the kernel supplies that
+moment itself. The Windows call that sets times has no way to ask for it, so the Windows
+backend reads the system time at that point and passes it in: the same time the system would
+have stamped a write with. A component that must not learn the time of day must not be given
+a handle it can write through either.
+
 **It is an audit, not a lock.** The system clock can be reached from anywhere in the process
 through `DateTime.UtcNow` and its relatives, and nothing here changes that for code outside
 this library. The token makes the place the clock enters searchable, and it is recorded like

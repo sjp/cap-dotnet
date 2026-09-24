@@ -1,4 +1,5 @@
 using Cap.Fs.Ext;
+using Cap.Primitives;
 using Cap.Std;
 
 namespace Cap.Escape.Tests;
@@ -109,6 +110,11 @@ internal static class OperationRunner
                 break;
 
             case Operation.GetMetadata:
+                observation.Objects.Add(root.GetMetadata(path).FileId);
+                break;
+
+            case Operation.SetTimes:
+                root.SetTimes(path, lastWrite: CapFileTime.At(EscapeCorpus.PlantedTime));
                 observation.Objects.Add(root.GetMetadata(path).FileId);
                 break;
 

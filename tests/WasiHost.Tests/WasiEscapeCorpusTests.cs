@@ -146,12 +146,14 @@ public sealed class WasiEscapeCorpusTests
         Outcome direct = expectation.Resolve(operation, deny, features);
 
         // A WASI path of nothing but "." names the directory it is resolved against, and a
-        // guest may open that directory again and describe it; the library refuses such a
-        // path as naming nothing beneath the handle. So opening or describing it succeeds,
-        // opening it as a file to read or write is refused because it is a directory, and
-        // everything else — removing it, renaming it, linking it — is refused as before.
+        // guest may open that directory again, describe it and set its times; the library
+        // refuses such a path as naming nothing beneath the handle. So opening, describing
+        // or setting the times of it succeeds, opening it as a file to read or write is
+        // refused because it is a directory, and everything else — removing it, renaming it,
+        // linking it — is refused as before.
         if (NamesItself(entry.Path) && operation is
-                Operation.OpenDir or Operation.GetMetadata or Operation.Exists or Operation.OpenFile or Operation.CreateFile)
+                Operation.OpenDir or Operation.GetMetadata or Operation.SetTimes or Operation.Exists or
+                Operation.OpenFile or Operation.CreateFile)
         {
             Outcome itself = operation is Operation.OpenFile or Operation.CreateFile ? Outcome.Refused : Outcome.Success;
             return ([itself], "a WASI path of only '.' names the preopened directory itself");

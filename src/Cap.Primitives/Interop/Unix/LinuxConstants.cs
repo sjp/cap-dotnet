@@ -150,6 +150,17 @@ internal static class LinuxConstants
     /// </summary>
     public const int O_CLOEXEC = 0x80000;
 
+    // --- setting times --------------------------------------------------------------------
+
+    /// <summary>
+    /// Stands in a time's nanoseconds field for "the moment the change is recorded", taken
+    /// by the kernel.
+    /// </summary>
+    public const long UTIME_NOW = (1L << 30) - 1;
+
+    /// <summary>Stands in a time's nanoseconds field for "leave this time alone".</summary>
+    public const long UTIME_OMIT = (1L << 30) - 2;
+
     // --- *at() flags -----------------------------------------------------------------------
 
     /// <summary>Resolve relative to the process working directory.</summary>

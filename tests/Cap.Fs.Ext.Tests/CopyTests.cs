@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Cap.Primitives;
 using Cap.Std;
 
 namespace Cap.Fs.Ext.Tests;
@@ -357,6 +358,84 @@ public sealed class CopyTests : IDisposable
         Assert.NotEqual(
             UnixFileMode.UserRead | UnixFileMode.UserWrite,
             File.GetUnixFileMode(Path.Combine(_tree.HostPath, "destination", "private.txt")));
+    }
+
+    /// <summary>
+    /// When asked, files, directories and recreated links arrive with the source's times,
+    /// whether the copy creates each file or replaces one already there.
+    /// </summary>
+    /// <remarks>
+    /// The directory is the case that needs care: every entry the copy makes inside it moves
+    /// its last-write time on, so its times have to be set after its contents, not when it is
+    /// created.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Times_are_carried_across_when_asked(bool overwrite)
+    {
+        DateTimeOffset written = new DateTimeOffset(2003, 4, 5, 6, 7, 8, TimeSpan.Zero).AddTicks(1234567);
+        DateTimeOffset accessed = new DateTimeOffset(2004, 5, 6, 7, 8, 9, TimeSpan.Zero).AddTicks(7654321);
+
+        Make("source", "top.txt");
+        Make("source", "nested", "inner.txt");
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        File.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), "top.txt");
+        if (overwrite)
+        {
+            Make("destination", "top.txt");
+        }
+
+        Dir root = _tree.Directory;
+        foreach (string name in (string[])["source/top.txt", "source/nested/inner.txt", "source/pointer", "source/nested"])
+        {
+            root.SetTimes(name, CapFileTime.At(accessed), CapFileTime.At(written));
+        }
+
+        Copy(new CopyOptions { PreserveTimes = true, Symlinks = CopyAction.Recreate, Overwrite = overwrite });
+
+        foreach (string name in (string[])["destination/top.txt", "destination/nested/inner.txt", "destination/pointer", "destination/nested"])
+        {
+            CapMetadata copied = root.GetMetadata(name);
+            Assert.Equal(written, copied.LastWriteTime);
+            Assert.Equal(accessed, copied.LastAccessTime);
+        }
+
+        // Recreated as a link, so the times checked above are the link's own.
+        Assert.Equal(CapFileType.Symlink, root.GetMetadata("destination/pointer").Type);
+    }
+
+    /// <summary>Without being asked, a copy carries the time it was made, as any new file does.</summary>
+    [Fact]
+    public void Times_are_not_carried_across_unless_asked()
+    {
+        DateTimeOffset written = new(2003, 4, 5, 6, 7, 8, TimeSpan.Zero);
+
+        Make("source", "top.txt");
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        _tree.Directory.SetTimes("source/top.txt", lastWrite: CapFileTime.At(written));
+
+        Copy();
+
+        Assert.NotEqual(written, _tree.Directory.GetMetadata("destination/top.txt").LastWriteTime);
+    }
+
+    /// <summary>
+    /// The directory the copy writes into keeps its own times: the copy fills it and does not
+    /// reproduce it.
+    /// </summary>
+    [Fact]
+    public void The_destination_directory_keeps_its_own_times()
+    {
+        DateTimeOffset written = new(2003, 4, 5, 6, 7, 8, TimeSpan.Zero);
+
+        Make("source", "top.txt");
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        _tree.Directory.SetTimes("source", lastWrite: CapFileTime.At(written));
+
+        Copy(new CopyOptions { PreserveTimes = true });
+
+        Assert.NotEqual(written, _tree.Directory.GetMetadata("destination").LastWriteTime);
     }
 
     /// <summary>A copy whose destination lies inside its source is refused.</summary>

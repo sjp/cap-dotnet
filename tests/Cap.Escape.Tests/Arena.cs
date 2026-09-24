@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 
 namespace Cap.Escape.Tests;
@@ -106,18 +107,23 @@ internal sealed class Arena : IDisposable
     /// Everything outside the sandbox, as text that changes if anything there does.
     /// </summary>
     /// <remarks>
-    /// Links are recorded by what they store and never followed, and files by a digest of
-    /// their contents. What is compared is what an attack would change: an entry appearing,
-    /// disappearing, changing kind, being retargeted or being written to.
+    /// Links are recorded by what they store and never followed, files by a digest of their
+    /// contents, and files and directories by when they were last written. What is compared is
+    /// what an attack would change: an entry appearing, disappearing, changing kind, being
+    /// retargeted, being written to or having its times reset.
     /// </remarks>
     /// <param name="alsoExcluded">
     /// Directories beside the sandbox that the operation is entitled to change, such as the
     /// destination of a copy.
     /// </param>
-    public string SnapshotOutside(params string[] alsoExcluded) => Snapshot(HostPath, [SandboxPath, .. alsoExcluded]);
+    public string SnapshotOutside(params string[] alsoExcluded) =>
+        Snapshot(HostPath, [SandboxPath, .. alsoExcluded], withTimes: true);
 
-    /// <summary>Everything inside the sandbox, recorded the same way.</summary>
-    public string SnapshotSandbox() => Snapshot(SandboxPath, []);
+    /// <summary>
+    /// Everything inside the sandbox, recorded the same way except for times, which an
+    /// operation beneath the handle is entitled to change.
+    /// </summary>
+    public string SnapshotSandbox() => Snapshot(SandboxPath, [], withTimes: false);
 
     /// <summary>Whether a name beneath the sandbox is taken, without following a link.</summary>
     public bool ExistsInside(string path)
@@ -177,15 +183,16 @@ internal sealed class Arena : IDisposable
         return Path.IsPathRooted(expanded) ? expanded : expanded.Replace('/', Path.DirectorySeparatorChar);
     }
 
-    private static string Snapshot(string root, string[] excluded)
+    private static string Snapshot(string root, string[] excluded, bool withTimes)
     {
         List<string> lines = [];
-        Record(new DirectoryInfo(root), root, excluded, lines);
+        Record(new DirectoryInfo(root), root, excluded, withTimes, lines);
         lines.Sort(StringComparer.Ordinal);
         return string.Join('\n', lines);
     }
 
-    private static void Record(DirectoryInfo directory, string root, string[] excluded, List<string> lines)
+    private static void Record(
+        DirectoryInfo directory, string root, string[] excluded, bool withTimes, List<string> lines)
     {
         foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos())
         {
@@ -201,16 +208,23 @@ internal sealed class Arena : IDisposable
             }
             else if (entry is DirectoryInfo nested)
             {
-                lines.Add($"{relative}/");
-                Record(nested, root, excluded, lines);
+                lines.Add($"{relative}/{Written(entry, withTimes)}");
+                Record(nested, root, excluded, withTimes, lines);
             }
             else
             {
                 byte[] digest = SHA256.HashData(File.ReadAllBytes(entry.FullName));
-                lines.Add($"{relative} {Convert.ToHexString(digest)}");
+                lines.Add($"{relative} {Convert.ToHexString(digest)}{Written(entry, withTimes)}");
             }
         }
     }
+
+    /// <summary>
+    /// The last-write time, for an entry that is not a link. Access times are left out:
+    /// reading a file may move one on, and reading is not an attack.
+    /// </summary>
+    private static string Written(FileSystemInfo entry, bool withTimes) =>
+        withTimes ? $" written {entry.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture)}" : string.Empty;
 }
 
 /// <summary>What a case needs from the host, found once per run.</summary>

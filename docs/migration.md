@@ -64,7 +64,9 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.GetLastAccessTimeUtc(p)` | `dir.GetMetadata(p).LastAccessTime` | |
 | `File.GetCreationTimeUtc(p)` | `dir.GetMetadata(p).CreationTime` | Null where the filesystem records none, rather than a made-up date. |
 | `new FileInfo(p).Length` | `dir.GetMetadata(p).Length` | |
-| `File.SetAttributes`, `File.SetUnixFileMode`, `File.SetLastWriteTime`, `File.SetCreationTime`, `File.SetLastAccessTime` | none | Not provided. **Ext** `CopyTo` carries permissions across a copy. |
+| `File.SetLastWriteTimeUtc(p, t)`, `File.SetLastAccessTimeUtc(p, t)` | `dir.SetTimes(p, lastWrite: CapFileTime.At(t))`, and `lastAccess:` | Does not follow a symbolic link at `p`: the link's own times are set, where `File.SetLastWriteTime` sets its target's. `CapFileTime.Now` asks the system to stamp the time of the change. On an open file, `file.SetTimes(...)`, which needs a handle opened for writing. |
+| `File.SetCreationTime` | none | Not every platform can set one. |
+| `File.SetAttributes`, `File.SetUnixFileMode` | none | Not provided. **Ext** `CopyTo` carries permissions across a copy when asked. |
 | `File.Encrypt`, `File.Decrypt` | none | |
 
 ## `Directory`
@@ -84,6 +86,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `Directory.EnumerateFiles(p, "*.json")` | **Ext** `dir.Glob("*.json")` | |
 | `Directory.EnumerateFiles(p, "*", SearchOption.AllDirectories)` | **Ext** `dir.Walk()` | `WalkEntry.Depth` and `.Directory` stand in for the relative path. |
 | `Directory.GetLastWriteTimeUtc(p)` etc. | `dir.GetMetadata(p)` | As for files. |
+| `Directory.SetLastWriteTimeUtc(p, t)` etc. | `dir.SetTimes(p, lastWrite: CapFileTime.At(t))` | As for files. On an open directory, `dir.SetTimes(...)`. |
 | `Directory.CreateSymbolicLink(p, target)` | `dir.CreateDirSymlink(p, target)` | |
 | `Directory.GetCurrentDirectory()`, `SetCurrentDirectory` | none, by design | The working directory is process-wide state that any code can change. Pass a `Dir`. |
 | `Directory.GetParent(p)`, `DirectoryInfo.Parent` | none, by design | A handle confers nothing above itself. Keep the parent's `Dir` if you need it. |

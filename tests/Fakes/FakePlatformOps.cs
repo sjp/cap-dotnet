@@ -403,6 +403,44 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite)
+    {
+        if (!TryResolveHandle(handle, out FakeNode? node))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        ApplyTimes(node!, lastAccess, lastWrite);
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError SetChildTimes(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapFileTime lastAccess,
+        CapFileTime lastWrite)
+    {
+        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        ApplyTimes(node!, lastAccess, lastWrite);
+        return CapError.Success;
+    }
+
+    private void ApplyTimes(FakeNode node, CapFileTime lastAccess, CapFileTime lastWrite)
+    {
+        node.LastAccessTime = Resolve(lastAccess, node.LastAccessTime);
+        node.LastWriteTime = Resolve(lastWrite, node.LastWriteTime);
+
+        DateTimeOffset Resolve(CapFileTime time, DateTimeOffset current) =>
+            time.IsNow ? _fileSystem.Now : time.TryGetValue(out DateTimeOffset value) ? value : current;
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         if (!TryResolveHandle(handle, out FakeNode? node))

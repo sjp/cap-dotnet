@@ -108,6 +108,25 @@ internal static unsafe partial class DarwinNative
     internal static partial int FChmod(int fd, uint mode);
 
     /// <summary>
+    /// Sets the last-access and last-write times of a name relative to a directory
+    /// descriptor, or of the descriptor itself when the name is empty and the flags say so.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="times"/> points at two entries, access first. A symbolic link at the
+    /// name is followed unless <c>AT_SYMLINK_NOFOLLOW</c> is passed.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "utimensat", SetLastError = true)]
+    internal static partial int UtimensAt(int directoryFd, byte* path, UnixTimespec* times, int flags);
+
+    /// <summary>Sets the last-access and last-write times of an open object.</summary>
+    /// <remarks>
+    /// By descriptor rather than by name, for the reason <see cref="FChmod"/> is.
+    /// <paramref name="times"/> points at two entries, access first.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "futimens", SetLastError = true)]
+    internal static partial int FUtimens(int fd, UnixTimespec* times);
+
+    /// <summary>
     /// The same call, for the commands whose argument is a buffer rather than a number.
     /// </summary>
     /// <remarks>

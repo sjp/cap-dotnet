@@ -22,6 +22,7 @@ what a program moving between Linux, macOS and Windows will notice.
 | Unix-domain sockets through a `Dir` | yes | no | no |
 | Permissions reported as | Unix mode | Unix mode | file attributes |
 | Creation time | where the filesystem records it | yes | yes |
+| Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
 
 ## Windows
 
@@ -53,6 +54,11 @@ kinds on Windows and will not be traversed as the wrong one: use `CreateDirSymli
 directories. Creating either needs the privilege Windows grants to administrators and to
 Developer Mode. Junctions always store an absolute target, so they are always refused on
 the way through, whatever the symbolic-link policy says.
+
+**Setting a time to "now" reads the system clock.** The Windows call that sets a file's times
+has no value meaning "the moment this is recorded", as the Unix calls do, so for
+`CapFileTime.Now` the backend reads the system time and passes it in. It is the time a write
+would have been stamped with.
 
 **Paths.** `/` and `\` both separate components. Drive-relative (`C:file`), root-relative
 (`\file`), UNC (`\\server\share`) and device-namespace (`\\?\`, `\\.\`) paths are refused;

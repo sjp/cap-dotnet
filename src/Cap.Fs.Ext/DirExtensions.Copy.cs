@@ -160,7 +160,7 @@ public static partial class DirExtensions
         {
             try
             {
-                Push(source, Destination, ownsSource: false, ownsDestination: false);
+                Push(source, Destination, ownsSource: false, ownsDestination: false, times: null);
 
                 while (_levels.Count > 0)
                 {
@@ -168,7 +168,15 @@ public static partial class DirExtensions
                     if (!level.Entries.MoveNext())
                     {
                         _levels.RemoveAt(_levels.Count - 1);
-                        level.Dispose();
+                        try
+                        {
+                            Finish(level);
+                        }
+                        finally
+                        {
+                            level.Dispose();
+                        }
+
                         continue;
                     }
 
@@ -253,7 +261,7 @@ public static partial class DirExtensions
                 Apply(target, metadata, entry.Name);
                 _directories++;
 
-                Push(source, target, ownsSource: true, ownsDestination: true);
+                Push(source, target, ownsSource: true, ownsDestination: true, times: metadata);
                 kept = true;
             }
             finally
@@ -338,7 +346,13 @@ public static partial class DirExtensions
             }
         }
 
-        /// <summary>Writes the source's contents, and its permissions if asked, into a file.</summary>
+        /// <summary>
+        /// Writes the source's contents into a file, and its permissions and times if asked.
+        /// </summary>
+        /// <remarks>
+        /// The times are set last, after every write, so that nothing written afterwards moves
+        /// them on again.
+        /// </remarks>
         private void Fill(CapFile source, CapFile target, in CapMetadata metadata, string name)
         {
             _bytes += Transfer(source, target);
@@ -346,6 +360,12 @@ public static partial class DirExtensions
             if (_options.PreservePermissions)
             {
                 Demand(target.SetPermissions(metadata.Permissions), name);
+            }
+
+            if (_options.PreserveTimes)
+            {
+                target.SetTimes(
+                    CapFileTime.At(metadata.LastAccessTime), CapFileTime.At(metadata.LastWriteTime));
             }
         }
 
@@ -431,6 +451,12 @@ public static partial class DirExtensions
                 level.Destination.CreateSymlink(entry.Name, target);
             }
 
+            if (_options.PreserveTimes)
+            {
+                level.Destination.SetTimes(
+                    entry.Name, CapFileTime.At(metadata.LastAccessTime), CapFileTime.At(metadata.LastWriteTime));
+            }
+
             _symlinks++;
         }
 
@@ -440,6 +466,24 @@ public static partial class DirExtensions
             if (_options.PreservePermissions)
             {
                 Demand(target.SetPermissions(metadata.Permissions), name);
+            }
+        }
+
+        /// <summary>
+        /// Gives a copied directory the source's times, if asked, once everything inside it
+        /// has been copied.
+        /// </summary>
+        /// <remarks>
+        /// Left until the directory is finished because every entry created in it moves its
+        /// last-write time on. The directory the copy writes into has no times to carry, since
+        /// the copy does not reproduce it.
+        /// </remarks>
+        private void Finish(CopyLevel level)
+        {
+            if (_options.PreserveTimes && level.Times is { } source)
+            {
+                level.Destination.SetTimes(
+                    CapFileTime.At(source.LastAccessTime), CapFileTime.At(source.LastWriteTime));
             }
         }
 
@@ -488,8 +532,8 @@ public static partial class DirExtensions
             }
         }
 
-        private void Push(Dir source, Dir destination, bool ownsSource, bool ownsDestination) =>
-            _levels.Add(new CopyLevel(source, destination, ownsSource, ownsDestination));
+        private void Push(Dir source, Dir destination, bool ownsSource, bool ownsDestination, CapMetadata? times) =>
+            _levels.Add(new CopyLevel(source, destination, ownsSource, ownsDestination, times));
     }
 
     /// <summary>One pair of open directories the copy is working between.</summary>
@@ -498,10 +542,11 @@ public static partial class DirExtensions
         private readonly bool _ownsSource;
         private readonly bool _ownsDestination;
 
-        public CopyLevel(Dir source, Dir destination, bool ownsSource, bool ownsDestination)
+        public CopyLevel(Dir source, Dir destination, bool ownsSource, bool ownsDestination, CapMetadata? times)
         {
             Source = source;
             Destination = destination;
+            Times = times;
             _ownsSource = ownsSource;
             _ownsDestination = ownsDestination;
             Entries = source.EnumerateEntries().GetEnumerator();
@@ -512,6 +557,12 @@ public static partial class DirExtensions
 
         /// <summary>The directory being written.</summary>
         public Dir Destination { get; }
+
+        /// <summary>
+        /// The source directory's description, whose times the destination is given when it
+        /// is finished. Null for the directory the copy writes into.
+        /// </summary>
+        public CapMetadata? Times { get; }
 
         /// <summary>The reading in progress.</summary>
         public IEnumerator<DirEntry> Entries { get; }

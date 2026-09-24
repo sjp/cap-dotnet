@@ -41,7 +41,7 @@ public sealed partial class WasiPreview1
         Define(linker, "fd_filestat_get", "ii", static (h, m, a) => h.FdFilestatGet(m, U(a[0]), U(a[1])));
         Define(linker, "fd_filestat_set_size", "iI", static (h, _, a) => h.FdFilestatSetSize(U(a[0]), a[1].AsInt64()));
         Define(linker, "fd_filestat_set_times", "iIIi", static (h, _, a) =>
-            h.FdFilestatSetTimes(U(a[0]), (FstFlags)U(a[3])));
+            h.FdFilestatSetTimes(U(a[0]), (ulong)a[1].AsInt64(), (ulong)a[2].AsInt64(), (FstFlags)U(a[3])));
         Define(linker, "fd_pread", "iiiIi", static (h, m, a) =>
             h.FdRead(m, U(a[0]), U(a[1]), U(a[2]), a[3].AsInt64(), U(a[4])));
         Define(linker, "fd_read", "iiii", static (h, m, a) => h.FdRead(m, U(a[0]), U(a[1]), U(a[2]), null, U(a[3])));
@@ -60,7 +60,9 @@ public sealed partial class WasiPreview1
         Define(linker, "path_filestat_get", "iiiii", static (h, m, a) =>
             h.PathFilestatGet(m, U(a[0]), (LookupFlags)U(a[1]), U(a[2]), U(a[3]), U(a[4])));
         Define(linker, "path_filestat_set_times", "iiiiIIi", static (h, m, a) =>
-            h.PathFilestatSetTimes(m, U(a[0]), U(a[2]), U(a[3]), (FstFlags)U(a[6])));
+            h.PathFilestatSetTimes(
+                m, U(a[0]), (LookupFlags)U(a[1]), U(a[2]), U(a[3]),
+                (ulong)a[4].AsInt64(), (ulong)a[5].AsInt64(), (FstFlags)U(a[6])));
         Define(linker, "path_link", "iiiiiii", static (h, m, a) =>
             h.PathLink(m, U(a[0]), (LookupFlags)U(a[1]), U(a[2]), U(a[3]), U(a[4]), U(a[5]), U(a[6])));
         Define(linker, "path_open", "iiiiiIIii", static (h, m, a) =>

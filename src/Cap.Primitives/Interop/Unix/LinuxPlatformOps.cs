@@ -713,6 +713,99 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// A file handle is set directly. A directory handle may be one opened for traversal
+    /// alone, which the kernel does not accept for a call on the descriptor itself, so a
+    /// directory is set by naming it through its own handle with an empty name, which reaches
+    /// the object the handle holds and nothing else.
+    /// </para>
+    /// <para>
+    /// A kernel that predates empty names for this call rejects that as an invalid argument.
+    /// The directory is then opened again through its own handle, as <c>.</c>, and set through
+    /// that. This needs read permission on the directory, which the owner normally has.
+    /// </para>
+    /// </remarks>
+    public unsafe CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite)
+    {
+        UnixTimespec* times = stackalloc UnixTimespec[2];
+        times[0] = UnixTimestamps.ToTimespec(lastAccess, LinuxConstants.UTIME_NOW, LinuxConstants.UTIME_OMIT);
+        times[1] = UnixTimestamps.ToTimespec(lastWrite, LinuxConstants.UTIME_NOW, LinuxConstants.UTIME_OMIT);
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        if (handle is not SafeDirHandle)
+        {
+            return LinuxNative.FUtimens(lease.Descriptor, times) < 0
+                ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
+                : CapError.Success;
+        }
+
+        byte empty = 0;
+        if (LinuxNative.UtimensAt(lease.Descriptor, &empty, times, LinuxConstants.AT_EMPTY_PATH) == 0)
+        {
+            return CapError.Success;
+        }
+
+        int errno = Marshal.GetLastPInvokeError();
+        if (errno != PosixErrno.EINVAL)
+        {
+            return LinuxErrno.ToError(errno);
+        }
+
+        byte* self = stackalloc byte[] { (byte)'.', 0 };
+        int fd = LinuxNative.OpenAt(
+            lease.Descriptor,
+            self,
+            LinuxConstants.O_RDONLY | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC);
+        if (fd < 0)
+        {
+            return LinuxErrno.ToError(Marshal.GetLastPInvokeError());
+        }
+
+        using SafeFileHandle reopened = new(fd, ownsHandle: true);
+        return LinuxNative.FUtimens(fd, times) < 0
+            ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
+            : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public unsafe CapError SetChildTimes(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapFileTime lastAccess,
+        CapFileTime lastWrite)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        UnixTimespec* times = stackalloc UnixTimespec[2];
+        times[0] = UnixTimestamps.ToTimespec(lastAccess, LinuxConstants.UTIME_NOW, LinuxConstants.UTIME_OMIT);
+        times[1] = UnixTimestamps.ToTimespec(lastWrite, LinuxConstants.UTIME_NOW, LinuxConstants.UTIME_OMIT);
+
+        fixed (byte* path = encoded.Bytes)
+        {
+            return LinuxNative.UtimensAt(lease.Descriptor, path, times, LinuxConstants.AT_SYMLINK_NOFOLLOW) < 0
+                ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
+                : CapError.Success;
+        }
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         using HandleLease lease = handle.Lease();

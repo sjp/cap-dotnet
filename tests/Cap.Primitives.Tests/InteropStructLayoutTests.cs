@@ -88,6 +88,22 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The pair of times handed to the calls that set them is two sixteen-byte records on both
+    /// Unix platforms, seconds first.
+    /// </summary>
+    /// <remarks>
+    /// The call reads two of them from the pointer it is given, so a record declared a word
+    /// short would give it the access time's nanoseconds as the write time's seconds.
+    /// </remarks>
+    [Fact]
+    public void Unix_time_pair_entries_are_sixteen_bytes()
+    {
+        Assert.Equal(16, Marshal.SizeOf<UnixTimespec>());
+        Assert.Equal(0, Marshal.OffsetOf<UnixTimespec>(nameof(UnixTimespec.Seconds)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<UnixTimespec>(nameof(UnixTimespec.Nanoseconds)).ToInt32());
+    }
+
+    /// <summary>
     /// The macOS directory record is the 64-bit-inode layout, with the name starting at the
     /// twenty-first byte.
     /// </summary>

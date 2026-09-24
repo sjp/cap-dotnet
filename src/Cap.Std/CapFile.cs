@@ -1,3 +1,4 @@
+using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Microsoft.Win32.SafeHandles;
 
@@ -181,6 +182,63 @@ public sealed class CapFile : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         Demand();
         RandomAccess.SetLength(_handle, length);
+    }
+
+    /// <summary>
+    /// Sets when the file was last read and last written.
+    /// </summary>
+    /// <param name="lastAccess">
+    /// What to do with the last-access time. Left as it is unless given.
+    /// </param>
+    /// <param name="lastWrite">
+    /// What to do with the last-write time. Left as it is unless given.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <strong>Needs a handle that can write,</strong> on every platform. Some systems let
+    /// the file's owner change its times through a handle opened only for reading, and others
+    /// do not. Requiring write access everywhere means a handle given out so that something
+    /// can read a file never lets that reader change anything about it, times included.
+    /// </para>
+    /// <para>
+    /// <see cref="CapFileTime.Now"/> is filled in by the system as it records the change;
+    /// nothing here reads a clock. A given instant is stored as precisely as the filesystem
+    /// allows. The creation time is not settable: some systems cannot change it at all.
+    /// </para>
+    /// <para>
+    /// A write made afterwards may change the last-write time again, as any write does.
+    /// Safe to call from any thread.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Acts on the object this handle refers to; no name is
+    /// consulted, so there is no link to follow. To set a link's own times, ask the directory
+    /// that holds it about the name.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="UnauthorizedAccessException">
+    /// This handle cannot write, or the filesystem refused the change.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// An instant was given that this platform cannot record at all.
+    /// </exception>
+    /// <exception cref="CapIOException">The change could not be made.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
+    public void SetTimes(CapFileTime lastAccess = default, CapFileTime lastWrite = default)
+    {
+        Demand();
+
+        if ((_access & FileAccess.Write) == 0)
+        {
+            throw new UnauthorizedAccessException(
+                "This file was opened without write access, so its times cannot be changed " +
+                "through it. Open it for writing to change them.");
+        }
+
+        CapError error = PlatformOps.Current.SetHandleTimes(_handle, lastAccess, lastWrite);
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToTimesException(error);
+        }
     }
 
     /// <summary>

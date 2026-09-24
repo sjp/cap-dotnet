@@ -62,6 +62,13 @@ internal static class EscapeCorpus
     /// <summary>The name operations that move or link the case's path land on.</summary>
     public const string LandingName = "landing";
 
+    /// <summary>
+    /// The last-write time the operation that sets times gives what the case's path names:
+    /// far enough in the past that it cannot be the time anything was made during a run, so
+    /// that an outside entry given it is seen in the snapshot of what lies outside.
+    /// </summary>
+    public static readonly DateTimeOffset PlantedTime = new(2001, 9, 9, 1, 46, 40, TimeSpan.Zero);
+
     /// <summary>The link the operation that stores the path as a link target creates.</summary>
     public const string CreatedLinkName = "created-link";
 

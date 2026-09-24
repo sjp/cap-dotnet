@@ -55,6 +55,7 @@ guest's path passed through as it arrived:
 | `path_rename`, `path_link` | `Rename(..., replaceExisting: true)`, `CreateHardLink` |
 | `path_symlink`, `path_readlink` | `CreateSymlink` or `CreateDirSymlink`, `ReadLink` |
 | `path_filestat_get` | `GetMetadata(path)` |
+| `path_filestat_set_times`, `fd_filestat_set_times` | `SetTimes(path, ...)`, and `SetTimes` on the `CapFile` or `Dir` |
 | `fd_readdir` | `EnumerateEntries` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
 | every other error code | `CapIOException.KindOf(exception)` |
@@ -67,6 +68,10 @@ directory to its target to see what kind of link to make; see below.
 
 `path_symlink` with a rooted target, such as `/`, answers `ENOTCAPABLE`: `Dir` refuses to
 store one, as WASI hosts do.
+
+`fd_filestat_set_times` on a file needs a descriptor opened for writing. `CapFile.SetTimes`
+refuses a handle that can only read, so a file opened only to read is not given that right,
+and the call answers `ENOTCAPABLE`.
 
 ## Tests
 
@@ -94,7 +99,7 @@ export CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh /tmp)
 dotnet test --project tests/WasiHost.Tests
 ```
 
-44 pass. The other 5 fail because the library does not yet offer something WASI needs, and
+46 pass. The other 3 fail because the library does not yet offer something WASI needs, and
 the test asserts that each of those still fails, so a gap that closes is noticed.
 
 ## What the library does not yet offer
@@ -106,9 +111,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Programs that fail:**
 
-- **Timestamps cannot be set.** Neither `Dir` nor `CapFile` has a way to set a file's times,
-  so `fd_filestat_set_times` and `path_filestat_set_times` answer `ENOTSUP`.
-  (`fd_filestat_set`, `symlink_filestat`)
 - **Appending is only a `FileMode`.** `FileMode.Append` creates the file, allows only writing
   and cannot truncate. An open that appends and also reads or truncates can't be expressed,
   nor can turning appending on or off on an open file. (`fd_flags_set`, `path_filestat`,
@@ -123,7 +125,9 @@ either could not reach alone. Those cases are listed too, with what they cost.
   forever, and so would everything opened beneath it. So a no-follow directory open is made
   twice: once through the strict view, and once through the ordinary handle, which is kept if
   it is the same directory. Describing what a final link leads to is done by opening the
-  target, which needs permission to open it. A hard link to what a final link leads to is not
+  target, which needs permission to open it. Setting the times of what a final link leads to
+  is done the same way: the target is opened for writing, or failing that as a directory, and
+  set through the handle. That needs permission to write the file. A hard link to what a final link leads to is not
   possible at all. An open that creates or truncates never follows a final link, whatever the
   lookup asks: `Dir` refuses a link at the name for every mode but `FileMode.Open`, so the
   adapter reports that refusal where WASI would create or empty the file the link leads to.

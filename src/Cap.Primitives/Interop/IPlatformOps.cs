@@ -395,6 +395,42 @@ internal interface IPlatformOps
         FileAttributes? windowsAttributes);
 
     /// <summary>
+    /// Sets the last-access and last-write times of an already-open object.
+    /// </summary>
+    /// <param name="handle">An open directory or file handle, as for
+    /// <see cref="DescribeHandle"/>.</param>
+    /// <param name="lastAccess">What to do with the last-access time.</param>
+    /// <param name="lastWrite">What to do with the last-write time.</param>
+    /// <remarks>
+    /// <para>
+    /// Acts on the object rather than a name, so it changes what was opened, whatever that
+    /// is called by now.
+    /// </para>
+    /// <para>
+    /// A time given as <see cref="CapFileTime.Now"/> is taken by the system when it records
+    /// the change, not read from a clock by the caller. An instant the platform cannot record
+    /// at all is reported as <see cref="CapErrorCategory.InvalidArgument"/>; one it can record
+    /// only less precisely is rounded by the filesystem.
+    /// </para>
+    /// </remarks>
+    CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite);
+
+    /// <summary>
+    /// Sets the last-access and last-write times of the entry named by
+    /// <paramref name="name"/> directly beneath <paramref name="parent"/>, without following
+    /// it if it is a link.
+    /// </summary>
+    /// <remarks>
+    /// A link here has its own times changed, and its target is not reached. The same rules
+    /// for the times themselves apply as for <see cref="SetHandleTimes"/>.
+    /// </remarks>
+    CapError SetChildTimes(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapFileTime lastAccess,
+        CapFileTime lastWrite);
+
+    /// <summary>
     /// Produces a second, independent handle to the same directory.
     /// </summary>
     /// <remarks>

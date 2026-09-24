@@ -29,4 +29,21 @@ internal static class FileTimes
     /// <summary>Builds an instant from a stored count.</summary>
     public static DateTimeOffset ToDateTimeOffset(long ticks) =>
         Origin.AddTicks(Math.Clamp(ticks, 0, MaximumTicks));
+
+    /// <summary>
+    /// Builds the stored count for an instant a caller asked for, when the platform can store
+    /// it.
+    /// </summary>
+    /// <param name="value">The instant.</param>
+    /// <param name="ticks">The count, when this returns true.</param>
+    /// <returns>
+    /// False for an instant at or before the origin. The count is stored as a signed number,
+    /// but a set request reads zero as "leave this alone" and the negative values as orders
+    /// to stop or resume updating the time, so none of them can stand for an instant.
+    /// </returns>
+    public static bool TryToTicks(DateTimeOffset value, out long ticks)
+    {
+        ticks = value.UtcTicks - Origin.UtcTicks;
+        return ticks > 0;
+    }
 }

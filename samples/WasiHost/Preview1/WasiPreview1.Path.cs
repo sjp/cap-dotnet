@@ -1,4 +1,5 @@
 using System.Text;
+using Cap.Primitives;
 using Cap.Std;
 
 namespace WasiHost.Preview1;
@@ -251,7 +252,9 @@ public sealed partial class WasiPreview1
 
         if (!writeRequested)
         {
-            granted &= ~(Rights.FdWrite | Rights.FdAllocate | Rights.FdFilestatSetSize);
+            // Setting a file's times needs a handle that can write, so a descriptor opened only
+            // to read cannot be given the right to.
+            granted &= ~(Rights.FdWrite | Rights.FdAllocate | Rights.FdFilestatSetSize | Rights.FdFilestatSetTimes);
         }
 
         FdFlags kept = fdflags & (FdFlags.Append | FdFlags.NonBlock | FdFlags.Sync | FdFlags.DSync | FdFlags.RSync);
@@ -349,20 +352,72 @@ public sealed partial class WasiPreview1
             : WriteFilestat(memory, resultAddress, ToFileType(metadata.Type), metadata);
     }
 
+    /// <summary>
+    /// Sets the times of what a path names.
+    /// </summary>
     /// <remarks>
-    /// The library has no way to set a timestamp, so after the arguments are checked this is
-    /// reported as unsupported.
+    /// Without <see cref="LookupFlags.SymlinkFollow"/>, this is <see cref="Dir.SetTimes(string, CapFileTime, CapFileTime)"/>,
+    /// which sets a link's own times. With it, the guest wants the times of what a final link
+    /// leads to, and the library sets those only through a handle on the target. So the target
+    /// is opened, as a file for writing and failing that as a directory, and its times are set
+    /// through the handle. That needs permission to write the file, which setting its times by
+    /// name would not.
     /// </remarks>
-    private Errno PathFilestatSetTimes(GuestMemory memory, uint fd, uint pathAddress, uint pathLength, FstFlags flags)
+    private Errno PathFilestatSetTimes(
+        GuestMemory memory,
+        uint fd,
+        LookupFlags lookup,
+        uint pathAddress,
+        uint pathLength,
+        ulong atim,
+        ulong mtim,
+        FstFlags flags)
     {
-        Errno error = GetDirectory(fd, Rights.PathFilestatSetTimes, out _);
+        Errno error = GetDirectory(fd, Rights.PathFilestatSetTimes, out DirectoryDescriptor directory);
         if (error != Errno.Success)
         {
             return error;
         }
 
-        error = memory.ReadPath(pathAddress, pathLength, out _);
-        return error != Errno.Success ? error : ValidateTimes(flags) ?? Errno.NotSup;
+        error = memory.ReadPath(pathAddress, pathLength, out string path);
+        if (error != Errno.Success)
+        {
+            return error;
+        }
+
+        if (ValidateTimes(flags) is { } invalid)
+        {
+            return invalid;
+        }
+
+        CapFileTime lastAccess = ToFileTime(atim, flags, FstFlags.Atim, FstFlags.AtimNow);
+        CapFileTime lastWrite = ToFileTime(mtim, flags, FstFlags.Mtim, FstFlags.MtimNow);
+        if (NamesItself(path))
+        {
+            return ErrorMapping.Run(() => directory.Dir.SetTimes(lastAccess, lastWrite));
+        }
+
+        if ((lookup & LookupFlags.SymlinkFollow) == 0)
+        {
+            return ErrorMapping.Run(() => directory.Dir.SetTimes(path, lastAccess, lastWrite));
+        }
+
+        return ErrorMapping.Run(() =>
+        {
+            try
+            {
+                using CapFile file = directory.Dir.OpenFile(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+                file.SetTimes(lastAccess, lastWrite);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException &&
+                                      directory.Dir.TryOpenDir(path, out Dir? target))
+            {
+                using (target)
+                {
+                    target!.SetTimes(lastAccess, lastWrite);
+                }
+            }
+        });
     }
 
     /// <remarks>

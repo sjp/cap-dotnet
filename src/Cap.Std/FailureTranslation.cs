@@ -312,6 +312,43 @@ internal static class FailureTranslation
     };
 
     /// <summary>
+    /// Builds the exception for a failure to set the times of what an open handle refers to.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the describing form because the messages say what was being changed.
+    /// Like it, there is no path to quote.
+    /// </remarks>
+    public static Exception ToTimesException(CapError error) => error.Category switch
+    {
+        CapErrorCategory.Closed => DisposedDuringCall(),
+
+        CapErrorCategory.InvalidArgument => UnrecordableTime(error),
+
+        CapErrorCategory.PermissionDenied =>
+            new UnauthorizedAccessException(
+                $"The filesystem would not change the times of what this handle refers to. ({error})"),
+
+        _ => new CapIOException(
+            KindOf(error.Category),
+            $"The times of what this handle refers to could not be changed. ({error})"),
+    };
+
+    /// <summary>
+    /// Builds the exception for an instant the platform refused to record.
+    /// </summary>
+    /// <remarks>
+    /// The request was well formed and the filesystem was reached; the value itself is one
+    /// this platform has no way to store, such as an instant before the start of its
+    /// calendar. That is a fault in the argument, not in the filesystem, so it is reported as
+    /// one.
+    /// </remarks>
+    public static ArgumentOutOfRangeException UnrecordableTime(CapError error) =>
+        new(
+            null,
+            $"One of the times given is earlier or later than this platform can record. " +
+            $"({error})");
+
+    /// <summary>
     /// Builds the exception for a path the parser refused, before anything was opened.
     /// </summary>
     /// <param name="error">Why the path was refused.</param>

@@ -183,6 +183,11 @@ the source had and the copy's caller did not ask for.
   A value recorded by one platform is never translated into the other's. A link's own
   permissions are never carried across on any platform, because setting them would mean
   following the link.
+- `PreserveTimes` (off): each copied file, directory and recreated link is given the source's
+  last-access and last-write times. A link's own times are set, not its target's. A
+  directory's are set after everything inside it has been copied, since adding entries moves
+  its last-write time on. Creation times are not carried, and the directory the copy writes
+  into keeps its own.
 - `MaxDepth` (256): as for a walk.
 
 A destination inside the source is refused, noticed by identity rather than by comparing

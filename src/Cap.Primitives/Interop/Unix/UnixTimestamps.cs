@@ -1,4 +1,17 @@
+using System.Runtime.InteropServices;
+
 namespace Cap.Primitives.Interop.Unix;
+
+/// <summary>
+/// A <c>struct timespec</c> as both Unix platforms lay it out on a 64-bit process: whole
+/// seconds, then nanoseconds, each a machine word.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct UnixTimespec
+{
+    public long Seconds;
+    public long Nanoseconds;
+}
 
 /// <summary>
 /// Turns the seconds-and-nanoseconds pair every Unix filesystem timestamp arrives as into a
@@ -50,5 +63,44 @@ internal static class UnixTimestamps
 
         long ticks = Math.Clamp(nanoseconds, 0, 999_999_999) / TimeSpan.NanosecondsPerTick;
         return DateTimeOffset.FromUnixTimeSeconds(seconds).AddTicks(ticks);
+    }
+
+    /// <summary>
+    /// Builds the entry a call that sets times is given for one of them.
+    /// </summary>
+    /// <param name="time">What the caller asked for.</param>
+    /// <param name="now">
+    /// The value this platform reserves in the nanoseconds field for "the time the change is
+    /// recorded". It differs between the two Unix platforms, which is why it is passed in.
+    /// </param>
+    /// <param name="omit">The value it reserves for "leave this time alone".</param>
+    /// <remarks>
+    /// An instant is split into seconds rounded towards the past and a non-negative remainder,
+    /// which is the form the kernel requires even before 1970. Every instant a
+    /// <see cref="DateTimeOffset"/> can hold fits, so nothing here is refused; a filesystem
+    /// that stores a narrower range clamps what it is given, which is its own documented
+    /// behaviour and not something a caller can ask for otherwise.
+    /// </remarks>
+    public static UnixTimespec ToTimespec(CapFileTime time, long now, long omit)
+    {
+        if (time.IsNow)
+        {
+            return new UnixTimespec { Seconds = 0, Nanoseconds = now };
+        }
+
+        if (!time.TryGetValue(out DateTimeOffset value))
+        {
+            return new UnixTimespec { Seconds = 0, Nanoseconds = omit };
+        }
+
+        long ticks = value.UtcTicks - DateTimeOffset.UnixEpoch.UtcTicks;
+        long seconds = Math.DivRem(ticks, TimeSpan.TicksPerSecond, out long remainder);
+        if (remainder < 0)
+        {
+            seconds--;
+            remainder += TimeSpan.TicksPerSecond;
+        }
+
+        return new UnixTimespec { Seconds = seconds, Nanoseconds = remainder * TimeSpan.NanosecondsPerTick };
     }
 }

@@ -77,6 +77,9 @@ internal enum Operation
     /// <summary>Describes what the name holds.</summary>
     GetMetadata,
 
+    /// <summary>Sets the times of what the name holds, without following a link there.</summary>
+    SetTimes,
+
     /// <summary>Asks whether the name is taken. Never throws.</summary>
     Exists,
 
@@ -273,6 +276,7 @@ internal sealed class Expectation
             [Operation.CreateFile] = Outcome.Success,
             [Operation.CreateDir] = Outcome.Refused,
             [Operation.GetMetadata] = Outcome.Success,
+            [Operation.SetTimes] = Outcome.Success,
             [Operation.Exists] = Outcome.Success,
             [Operation.ReadLink] = Outcome.Refused,
             [Operation.DeleteFile] = Outcome.Success,
@@ -297,6 +301,7 @@ internal sealed class Expectation
             [Operation.CreateFile] = Outcome.Refused,
             [Operation.CreateDir] = Outcome.Refused,
             [Operation.GetMetadata] = Outcome.Success,
+            [Operation.SetTimes] = Outcome.Success,
             [Operation.Exists] = Outcome.Success,
             [Operation.ReadLink] = Outcome.Refused,
             [Operation.DeleteFile] = Outcome.Refused,
@@ -321,6 +326,7 @@ internal sealed class Expectation
             [Operation.CreateFile] = Outcome.Success,
             [Operation.CreateDir] = Outcome.Success,
             [Operation.GetMetadata] = Outcome.NotFound,
+            [Operation.SetTimes] = Outcome.NotFound,
             [Operation.Exists] = Outcome.NotFound,
             [Operation.ReadLink] = Outcome.NotFound,
             [Operation.DeleteFile] = Outcome.NotFound,
@@ -351,6 +357,7 @@ internal sealed class Expectation
             [Operation.CreateFile] = Outcome.Refused,
             [Operation.CreateDir] = Outcome.Refused,
             [Operation.GetMetadata] = Outcome.Success,
+            [Operation.SetTimes] = Outcome.Success,
             [Operation.Exists] = Outcome.Success,
             [Operation.ReadLink] = Outcome.Success,
             [Operation.DeleteFile] = Outcome.Success,

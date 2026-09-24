@@ -193,6 +193,17 @@ internal static unsafe partial class NtNative
         uint pathLength,
         uint flags);
 
+    /// <summary>
+    /// The current time, in the hundred-nanosecond count timestamps are stored as.
+    /// </summary>
+    /// <remarks>
+    /// Read only when a caller asks for a file's time to be set to the moment it is set. The
+    /// call that sets times here has no way of saying that, as the Unix one does, so the
+    /// backend reads the time the system would have stamped and passes it in.
+    /// </remarks>
+    [LibraryImport("kernel32.dll")]
+    internal static partial void GetSystemTimePreciseAsFileTime(long* fileTime);
+
     /// <summary>A pseudo-handle for the current process, for the handle-duplicating call.</summary>
     [LibraryImport("kernel32.dll")]
     internal static partial nint GetCurrentProcess();

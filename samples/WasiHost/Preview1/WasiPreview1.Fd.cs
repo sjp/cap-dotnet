@@ -189,18 +189,47 @@ public sealed partial class WasiPreview1
         return size < 0 ? Errno.Inval : ErrorMapping.Run(() => file.File.SetLength(size));
     }
 
-    /// <remarks>
-    /// Neither <see cref="CapFile"/> nor <see cref="Dir"/> can set a timestamp, so after the
-    /// arguments are checked this reports the call as unsupported.
-    /// </remarks>
-    private Errno FdFilestatSetTimes(uint fd, FstFlags flags)
+    private Errno FdFilestatSetTimes(uint fd, ulong atim, ulong mtim, FstFlags flags)
     {
-        if (!_descriptors.ContainsKey(fd))
+        if (!_descriptors.TryGetValue(fd, out Descriptor? descriptor))
         {
             return Errno.BadF;
         }
 
-        return ValidateTimes(flags) ?? Errno.NotSup;
+        if (ValidateTimes(flags) is { } invalid)
+        {
+            return invalid;
+        }
+
+        if ((descriptor.RightsBase & Rights.FdFilestatSetTimes) == 0)
+        {
+            return Errno.NotCapable;
+        }
+
+        CapFileTime lastAccess = ToFileTime(atim, flags, FstFlags.Atim, FstFlags.AtimNow);
+        CapFileTime lastWrite = ToFileTime(mtim, flags, FstFlags.Mtim, FstFlags.MtimNow);
+        return descriptor switch
+        {
+            FileDescriptor file => ErrorMapping.Run(() => file.File.SetTimes(lastAccess, lastWrite)),
+            DirectoryDescriptor directory => ErrorMapping.Run(() => directory.Dir.SetTimes(lastAccess, lastWrite)),
+            _ => Errno.NotSup,
+        };
+    }
+
+    /// <summary>
+    /// Turns one of a <c>*_filestat_set_times</c> call's times into what the library takes:
+    /// the value given, the time of the change, or no change.
+    /// </summary>
+    private static CapFileTime ToFileTime(ulong nanoseconds, FstFlags flags, FstFlags given, FstFlags now)
+    {
+        if ((flags & now) != 0)
+        {
+            return CapFileTime.Now;
+        }
+
+        return (flags & given) != 0
+            ? CapFileTime.At(DateTimeOffset.UnixEpoch.AddTicks((long)(nanoseconds / 100)))
+            : CapFileTime.Unchanged;
     }
 
     private static Errno? ValidateTimes(FstFlags flags)

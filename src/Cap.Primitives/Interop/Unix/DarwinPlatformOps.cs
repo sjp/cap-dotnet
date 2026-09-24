@@ -616,6 +616,60 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Set through the descriptor for a directory as for a file: every directory handle here
+    /// is opened for reading, which this call accepts.
+    /// </remarks>
+    public unsafe CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite)
+    {
+        UnixTimespec* times = stackalloc UnixTimespec[2];
+        times[0] = UnixTimestamps.ToTimespec(lastAccess, DarwinConstants.UTIME_NOW, DarwinConstants.UTIME_OMIT);
+        times[1] = UnixTimestamps.ToTimespec(lastWrite, DarwinConstants.UTIME_NOW, DarwinConstants.UTIME_OMIT);
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        return DarwinNative.FUtimens(lease.Descriptor, times) < 0
+            ? DarwinErrno.ToError(Marshal.GetLastPInvokeError())
+            : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public unsafe CapError SetChildTimes(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapFileTime lastAccess,
+        CapFileTime lastWrite)
+    {
+        using HandleLease lease = parent.Lease();
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(name, scratch);
+        if (!encoded.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        UnixTimespec* times = stackalloc UnixTimespec[2];
+        times[0] = UnixTimestamps.ToTimespec(lastAccess, DarwinConstants.UTIME_NOW, DarwinConstants.UTIME_OMIT);
+        times[1] = UnixTimestamps.ToTimespec(lastWrite, DarwinConstants.UTIME_NOW, DarwinConstants.UTIME_OMIT);
+
+        fixed (byte* path = encoded.Bytes)
+        {
+            return DarwinNative.UtimensAt(lease.Descriptor, path, times, DarwinConstants.AT_SYMLINK_NOFOLLOW) < 0
+                ? DarwinErrno.ToError(Marshal.GetLastPInvokeError())
+                : CapError.Success;
+        }
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
         using HandleLease lease = handle.Lease();

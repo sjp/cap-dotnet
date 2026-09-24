@@ -71,6 +71,12 @@ internal sealed class FakeFileSystem
     /// </summary>
     public string? TemporaryDirectory { get; set; } = "/tmp";
 
+    /// <summary>
+    /// The instant the simulation records when it is asked to stamp a time with the moment of
+    /// the change, as a real filesystem takes it from the system clock.
+    /// </summary>
+    public DateTimeOffset Now { get; set; } = new(2001, 2, 3, 4, 5, 6, TimeSpan.Zero);
+
     /// <summary>Creates a directory, and any missing directories above it.</summary>
     public FakeNode AddDirectory(string path) => Create(path, CapNodeType.Directory, null, 0);
 

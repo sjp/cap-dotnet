@@ -169,6 +169,221 @@ public sealed partial class Dir
     }
 
     /// <summary>
+    /// Sets when the directory this handle refers to was last read and last written.
+    /// </summary>
+    /// <param name="lastAccess">
+    /// What to do with the last-access time. Left as it is unless given.
+    /// </param>
+    /// <param name="lastWrite">
+    /// What to do with the last-write time. Left as it is unless given.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Applied to the object rather than to a name, so it changes the directory this handle
+    /// was opened on, whatever it is called now. Adding, removing or renaming an entry
+    /// afterwards changes the last-write time again, as it always does.
+    /// </para>
+    /// <para>
+    /// <see cref="CapFileTime.Now"/> is filled in by the system as it records the change;
+    /// nothing here reads a clock. A given instant is stored as precisely as the filesystem
+    /// allows. The creation time is not settable: some systems cannot change it at all.
+    /// </para>
+    /// <para>
+    /// No symbolic link is involved: the handle refers to a directory, never to a link.
+    /// Safe to call concurrently with any other member of this handle, from any thread.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// An instant was given that this platform cannot record at all.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the change.</exception>
+    /// <exception cref="CapIOException">The change could not be made.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public void SetTimes(CapFileTime lastAccess = default, CapFileTime lastWrite = default)
+    {
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        CapError error = PlatformOps.Current.SetHandleTimes(_handle, lastAccess, lastWrite);
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToTimesException(error);
+        }
+    }
+
+    /// <summary>
+    /// Sets when what a name beneath this handle holds was last read and last written.
+    /// </summary>
+    /// <param name="path">A relative path to the name.</param>
+    /// <param name="lastAccess">
+    /// What to do with the last-access time. Left as it is unless given.
+    /// </param>
+    /// <param name="lastWrite">
+    /// What to do with the last-write time. Left as it is unless given.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// <strong>It sets the name's times, and does not follow a link that holds it.</strong>
+    /// A symbolic link has its own times changed, and whatever it points at is not reached,
+    /// whether that is inside this handle, outside it or nowhere. This is the same rule
+    /// <see cref="GetMetadata(string)"/> follows, so what this sets is what that reports. To
+    /// change the times of what a link leads to, open the target and set them through the
+    /// handle you get back.
+    /// </para>
+    /// <para>
+    /// Path resolution up to the last component is confined exactly as it is for an open. A
+    /// path spelled so that it must name a directory, one ending in a separator, is acted on
+    /// only if a directory holds the name. A path ending in <c>..</c> names the directory it
+    /// climbs back to, and that directory's times are set.
+    /// </para>
+    /// <para>
+    /// <see cref="CapFileTime.Now"/> is filled in by the system as it records the change;
+    /// nothing here reads a clock. A given instant is stored as precisely as the filesystem
+    /// allows. The creation time is not settable: some systems cannot change it at all.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links, in short.</strong> The last component is never followed,
+    /// under either policy. A link before it is followed while its target stays beneath this
+    /// handle and refused with <see cref="SandboxEscapeException"/> when it leaves, and under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> is refused with
+    /// <see cref="CapIOException"/> wherever it points.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// An instant was given that this platform cannot record at all.
+    /// </exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="FileNotFoundException">There is no such name.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above it is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the change.</exception>
+    /// <exception cref="CapIOException">The change could not be made.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public void SetTimes(string path, CapFileTime lastAccess = default, CapFileTime lastWrite = default)
+    {
+        CapPathError pathError = SetTimesCore(path, lastAccess, lastWrite, out CapError error, out bool refusedTime);
+        if (pathError != CapPathError.None)
+        {
+            throw FailureTranslation.ToException(pathError, path, nameof(path));
+        }
+
+        if (refusedTime)
+        {
+            throw FailureTranslation.UnrecordableTime(error);
+        }
+
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToException(error, path, ExpectedTarget.Name);
+        }
+    }
+
+    /// <summary>
+    /// Sets when what a name beneath this handle holds was last read and last written,
+    /// reporting failure rather than throwing.
+    /// </summary>
+    /// <param name="path">A relative path to the name. See
+    /// <see cref="SetTimes(string, CapFileTime, CapFileTime)"/>.</param>
+    /// <param name="lastAccess">What to do with the last-access time.</param>
+    /// <param name="lastWrite">What to do with the last-write time.</param>
+    /// <returns>True when the times were set.</returns>
+    /// <remarks>
+    /// <para>
+    /// A name that is missing, refused or not writable is reported as false. A time the
+    /// platform cannot record at all still throws: that is a fault in the argument, and it
+    /// would be refused wherever the name pointed.
+    /// </para>
+    /// <para>
+    /// Symbolic links are treated exactly as
+    /// <see cref="SetTimes(string, CapFileTime, CapFileTime)"/> describes: a link at the last
+    /// component has its own times set under either policy. Safe to call concurrently with any
+    /// other member of this handle, from any thread.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// An instant was given that this platform cannot record at all.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TrySetTimes(string path, CapFileTime lastAccess = default, CapFileTime lastWrite = default)
+    {
+        CapPathError pathError = SetTimesCore(path, lastAccess, lastWrite, out CapError error, out bool refusedTime);
+        if (refusedTime)
+        {
+            throw FailureTranslation.UnrecordableTime(error);
+        }
+
+        return pathError == CapPathError.None && error.IsSuccess;
+    }
+
+    /// <summary>
+    /// Resolves the path to a directory and a name, and sets the times of what holds the
+    /// name without following it.
+    /// </summary>
+    /// <param name="path">The path the caller gave.</param>
+    /// <param name="lastAccess">What to do with the last-access time.</param>
+    /// <param name="lastWrite">What to do with the last-write time.</param>
+    /// <param name="error">Why the change was not made, when it was not.</param>
+    /// <param name="refusedTime">
+    /// Whether the failure was the platform refusing one of the times, rather than anything
+    /// about the name. Only the call that sets the times can report that, so it is told apart
+    /// here and not by the error's category, which resolution uses for other things.
+    /// </param>
+    /// <remarks>
+    /// A path that must name a directory is checked by describing the name first. Something
+    /// else could take the name between that check and the change. If it does, the change
+    /// lands on an entry in the same directory, which the caller could have named directly.
+    /// </remarks>
+    private CapPathError SetTimesCore(
+        string path,
+        CapFileTime lastAccess,
+        CapFileTime lastWrite,
+        out CapError error,
+        out bool refusedTime)
+    {
+        refusedTime = false;
+
+        CapPathError pathError = Locate(path, out NameLookup lookup, out error, describing: true);
+        using (lookup)
+        {
+            if (pathError != CapPathError.None || error.IsFailure)
+            {
+                return pathError;
+            }
+
+            if (lookup.NamesDirectoryItself)
+            {
+                error = PlatformOps.Current.SetHandleTimes(lookup.Directory, lastAccess, lastWrite);
+            }
+            else
+            {
+                if (lookup.RequiresDirectory)
+                {
+                    error = PlatformOps.Current.DescribeChild(lookup.Directory, lookup.Name, out CapNodeStat stat);
+                    if (error.IsFailure)
+                    {
+                        return CapPathError.None;
+                    }
+
+                    if (stat.Type != CapFileType.Directory)
+                    {
+                        error = CapError.FromCategory(CapErrorCategory.NotADirectory);
+                        return CapPathError.None;
+                    }
+                }
+
+                error = PlatformOps.Current.SetChildTimes(lookup.Directory, lookup.Name, lastAccess, lastWrite);
+            }
+
+            refusedTime = error.Category == CapErrorCategory.InvalidArgument;
+            return CapPathError.None;
+        }
+    }
+
+    /// <summary>
     /// Resolves the path to a directory and a name, and describes what holds the name.
     /// </summary>
     /// <remarks>

@@ -63,6 +63,7 @@ internal sealed class TrampolineGuest : IDisposable
         ("fd_write", "iiii"),
         ("path_create_directory", "iii"),
         ("path_filestat_get", "iiiii"),
+        ("path_filestat_set_times", "iiiiIIi"),
         ("path_link", "iiiiiii"),
         ("path_open", "iiiiiIIii"),
         ("path_readlink", "iiiiii"),

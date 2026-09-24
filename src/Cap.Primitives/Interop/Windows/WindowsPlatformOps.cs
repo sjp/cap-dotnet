@@ -582,14 +582,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         if (handle is SafeDirHandle directory)
         {
-            CapError opened = OpenRelative(
-                directory,
-                ReadOnlySpan<char>.Empty,
-                NtConstants.FILE_WRITE_ATTRIBUTES | NtConstants.SYNCHRONIZE,
-                NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
-                NtConstants.FILE_OPEN_REPARSE_POINT,
-                out nint reopened);
-
+            CapError opened = ReopenForAttributes(directory, out nint reopened);
             if (opened.IsFailure)
             {
                 return opened;
@@ -612,6 +605,164 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         }
 
         return WriteAttributes(lease.Raw, attributes);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A directory is set through a second opening of the object, for the reason its
+    /// permissions are. A file is set through its handle, which carries the right to change
+    /// attributes when it was opened for writing and not otherwise.
+    /// </remarks>
+    public CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite)
+    {
+        if (!TryBuildTimes(lastAccess, lastWrite, out FileBasicInformation basic))
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_PARAMETER);
+        }
+
+        if (handle is SafeDirHandle directory)
+        {
+            CapError opened = ReopenForAttributes(directory, out nint reopened);
+            if (opened.IsFailure)
+            {
+                return opened;
+            }
+
+            try
+            {
+                return WriteBasicInformation(reopened, in basic);
+            }
+            finally
+            {
+                _ = NtNative.NtClose(reopened);
+            }
+        }
+
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        return WriteBasicInformation(lease.Raw, in basic);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The name is opened for changing attributes alone and without following a reparse
+    /// point, so a link has its own times changed and what it points at is not reached.
+    /// </remarks>
+    public CapError SetChildTimes(
+        SafeDirHandle parent,
+        ReadOnlySpan<char> name,
+        CapFileTime lastAccess,
+        CapFileTime lastWrite)
+    {
+        if (!TryBuildTimes(lastAccess, lastWrite, out FileBasicInformation basic))
+        {
+            return CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_PARAMETER);
+        }
+
+        CapError error = OpenRelative(
+            parent,
+            name,
+            NtConstants.FILE_WRITE_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        try
+        {
+            return WriteBasicInformation(raw, in basic);
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
+    }
+
+    /// <summary>
+    /// Opens the directory a handle already refers to a second time, with the right to change
+    /// its attributes.
+    /// </summary>
+    /// <remarks>
+    /// A handle on a directory here is granted the rights to look into it and no more. The
+    /// opening is aimed at the handle with an empty name, which reaches the object the handle
+    /// already refers to and names nothing that could be substituted in the meantime.
+    /// </remarks>
+    private static CapError ReopenForAttributes(SafeDirHandle directory, out nint reopened) =>
+        OpenRelative(
+            directory,
+            ReadOnlySpan<char>.Empty,
+            NtConstants.FILE_WRITE_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
+            NtConstants.FILE_OPEN_REPARSE_POINT,
+            out reopened);
+
+    /// <summary>
+    /// Fills in the times of a request to change an object's basic information, leaving
+    /// every other field at the zero that means "leave this alone".
+    /// </summary>
+    /// <returns>False when an instant asked for is one this platform cannot store.</returns>
+    /// <remarks>
+    /// The call has no value meaning "the moment this is recorded", so the current time is
+    /// read here, once, and used for both times that ask for it. That is the time the system
+    /// would have stamped a write with, and a caller holding a handle able to write could
+    /// learn it that way already.
+    /// </remarks>
+    private static unsafe bool TryBuildTimes(
+        CapFileTime lastAccess,
+        CapFileTime lastWrite,
+        out FileBasicInformation basic)
+    {
+        basic = default;
+
+        long now = 0;
+        if (lastAccess.IsNow || lastWrite.IsNow)
+        {
+            NtNative.GetSystemTimePreciseAsFileTime(&now);
+        }
+
+        return TryBuildTime(lastAccess, now, out basic.LastAccessTime) &&
+               TryBuildTime(lastWrite, now, out basic.LastWriteTime);
+    }
+
+    private static bool TryBuildTime(CapFileTime time, long now, out long ticks)
+    {
+        if (time.IsNow)
+        {
+            ticks = now;
+            return true;
+        }
+
+        if (time.TryGetValue(out DateTimeOffset value))
+        {
+            return FileTimes.TryToTicks(value, out ticks);
+        }
+
+        ticks = 0;
+        return true;
+    }
+
+    /// <summary>Writes a basic-information request to an open object.</summary>
+    private static unsafe CapError WriteBasicInformation(nint handle, in FileBasicInformation basic)
+    {
+        FileBasicInformation copy = basic;
+        IoStatusBlock status = default;
+        int nt = NtNative.NtSetInformationFile(
+            handle,
+            &status,
+            &copy,
+            (uint)FileBasicInformation.StructSize,
+            NtConstants.FileBasicInformationClass);
+
+        return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
     }
 
     /// <summary>Writes an attribute set to an open object.</summary>

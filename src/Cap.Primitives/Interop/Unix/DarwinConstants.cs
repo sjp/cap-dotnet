@@ -70,6 +70,17 @@ internal static class DarwinConstants
     /// <summary>Resolve relative to the process working directory. Note that this is not the Linux value.</summary>
     public const int AT_FDCWD = -2;
 
+    // --- setting times --------------------------------------------------------------------
+
+    /// <summary>
+    /// Stands in a time's nanoseconds field for "the moment the change is recorded", taken
+    /// by the kernel. Not the Linux value.
+    /// </summary>
+    public const long UTIME_NOW = -1;
+
+    /// <summary>Stands in a time's nanoseconds field for "leave this time alone". Not the Linux value.</summary>
+    public const long UTIME_OMIT = -2;
+
     /// <summary>Report on a symbolic link itself rather than on what it points at.</summary>
     public const int AT_SYMLINK_NOFOLLOW = 0x0020;
 

@@ -12,7 +12,7 @@ public sealed class CopyOptions
 {
     /// <summary>
     /// The ordinary settings: files and directories only, nothing overwritten, permissions
-    /// left to the destination.
+    /// and times left to the destination.
     /// </summary>
     public static CopyOptions Default { get; } = new();
 
@@ -103,6 +103,29 @@ public sealed class CopyOptions
     /// </para>
     /// </remarks>
     public bool PreservePermissions { get; init; }
+
+    /// <summary>
+    /// Whether each copied object is given the last-access and last-write times the source
+    /// object had.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Off, so that copies carry the time they were made, as any newly written object does.
+    /// With it on, each copied file, directory and recreated symbolic link is given the
+    /// source's two times. A link's own times are set, not its target's. A directory's are set
+    /// once everything inside it has been copied, since adding entries to it would otherwise
+    /// move its last-write time on again.
+    /// </para>
+    /// <para>
+    /// The creation time is not carried across: not every platform can set one. Times on the
+    /// directory the copy writes into are left alone, because the copy fills that directory
+    /// and does not reproduce it.
+    /// </para>
+    /// <para>
+    /// A refusal to set them stops the copy, as a refusal to carry permissions does.
+    /// </para>
+    /// </remarks>
+    public bool PreserveTimes { get; init; }
 
     /// <summary>
     /// How many levels below the source the copy will descend.
