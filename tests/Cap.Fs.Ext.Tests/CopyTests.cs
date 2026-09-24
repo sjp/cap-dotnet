@@ -103,6 +103,29 @@ public sealed class CopyTests : IDisposable
         Assert.Equal(Path.Combine("..", "outside"), new FileInfo(copied).LinkTarget);
     }
 
+    /// <summary>
+    /// A link whose target is rooted cannot be made again beneath a handle, so it stops the
+    /// copy, and whatever held its name in the destination is left alone even when
+    /// overwriting was asked for.
+    /// </summary>
+    [Fact]
+    public void A_link_with_a_rooted_target_stops_the_copy_before_the_destination_is_touched()
+    {
+        Make("outside", "secret.txt");
+        Make("destination", "pointer");
+        string rooted = Path.Combine(_tree.HostPath, "outside");
+        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
+        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), rooted);
+
+        SandboxEscapeException refusal = Assert.Throws<SandboxEscapeException>(
+            () => Copy(new CopyOptions { Symlinks = CopyAction.Recreate, Overwrite = true }));
+
+        Assert.Contains(rooted, refusal.Message, StringComparison.Ordinal);
+        string existing = Path.Combine(_tree.HostPath, "destination", "pointer");
+        Assert.Null(new FileInfo(existing).LinkTarget);
+        Assert.Equal("contents", File.ReadAllText(existing));
+    }
+
     /// <summary>A named pipe stops the copy, and can be skipped.</summary>
     /// <remarks>
     /// The kind that would do the most damage if it were read: a copy that opened it would

@@ -54,7 +54,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.Move(a, b, overwrite: true)` | `dir.Rename(a, dir, b, replaceExisting: true)` | |
 | `File.Replace(a, b, backup)` | two `Rename` calls | There is no single-call equivalent. |
 | `File.Copy(a, b)` | `using` both `dir.OpenFile(a).AsStream()` and `dir.CreateNewFile(b).AsStream()`, then `Stream.CopyTo` | **Ext** `source.CopyTo(destination)` copies a whole tree between two `Dir`s. |
-| `File.CreateSymbolicLink(p, target)` | `dir.CreateSymlink(p, target)` | `dir.CreateDirSymlink` for a link to a directory, which Windows records differently. The target is stored as written; whether it can be followed is decided when it is used. |
+| `File.CreateSymbolicLink(p, target)` | `dir.CreateSymlink(p, target)` | `dir.CreateDirSymlink` for a link to a directory, which Windows records differently. A relative target is stored as written; whether it can be followed is decided when it is used. A rooted target (`/etc`, `C:\dir`) is refused with `SandboxEscapeException`, where `File.CreateSymbolicLink` accepts one. |
 | `File.ResolveLinkTarget(p, false)`, `FileInfo.LinkTarget` | `dir.ReadLink(p)` | |
 | `File.ResolveLinkTarget(p, true)` | open through the link instead | Resolution follows a link only while it stays inside the tree; there is no call that hands back where it leads as a path. |
 | Creating a hard link | `dir.CreateHardLink(p, toDir, to)` | Both ends need a `Dir`. |

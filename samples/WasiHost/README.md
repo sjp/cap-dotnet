@@ -53,16 +53,20 @@ guest's path passed through as it arrived:
 | `path_open` | `OpenFile`, or `OpenDir` for `O_DIRECTORY` |
 | `path_create_directory`, `path_remove_directory`, `path_unlink_file` | `CreateDir`, `DeleteDir`, `DeleteFile` |
 | `path_rename`, `path_link` | `Rename(..., replaceExisting: true)`, `CreateHardLink` |
-| `path_symlink`, `path_readlink` | `CreateSymlink`, `ReadLink` |
+| `path_symlink`, `path_readlink` | `CreateSymlink` or `CreateDirSymlink`, `ReadLink` |
 | `path_filestat_get` | `GetMetadata(path)` |
 | `fd_readdir` | `EnumerateEntries` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
 | every other error code | `CapIOException.KindOf(exception)` |
 
 The adapter never builds a host path and never resolves a guest path itself. It looks inside a
-path in one case only: a path made of nothing but `.` components names the directory it is
+path in two cases only. A path made of nothing but `.` components names the directory it is
 resolved against, which the library refuses as naming nothing beneath the handle, so that
-path is answered from the descriptor's own `Dir`.
+path is answered from the descriptor's own `Dir`. And `path_symlink` joins the link's
+directory to its target to see what kind of link to make; see below.
+
+`path_symlink` with a rooted target, such as `/`, answers `ENOTCAPABLE`: `Dir` refuses to
+store one, as WASI hosts do.
 
 ## Tests
 
@@ -90,7 +94,7 @@ export CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh /tmp)
 dotnet test --project tests/WasiHost.Tests
 ```
 
-43 pass. The other 6 fail because the library does not yet offer something WASI needs, and
+44 pass. The other 5 fail because the library does not yet offer something WASI needs, and
 the test asserts that each of those still fails, so a gap that closes is noticed.
 
 ## What the library does not yet offer
@@ -102,9 +106,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Programs that fail:**
 
-- **A symbolic link can be made with a target no resolution will follow.**
-  `Dir.CreateSymlink` stores an absolute target. WASI refuses to create one.
-  (`symlink_create`)
 - **Timestamps cannot be set.** Neither `Dir` nor `CapFile` has a way to set a file's times,
   so `fd_filestat_set_times` and `path_filestat_set_times` answer `ENOTSUP`.
   (`fd_filestat_set`, `symlink_filestat`)
@@ -132,6 +133,12 @@ either could not reach alone. Those cases are listed too, with what they cost.
 - **Metadata has no link count or status-change time**, and a directory entry has no
   identity. `filestat` reports both as zero, and `fd_readdir` describes every entry separately
   to learn its inode.
+- **A link's kind has to be guessed.** Windows records whether a link names a file or a
+  directory, and won't traverse one made as the wrong kind. `Dir` asks the caller to choose
+  between `CreateSymlink` and `CreateDirSymlink`. WASI doesn't say, so the adapter opens the
+  target as a directory from where the link will sit, beneath the same descriptor, and makes a
+  directory link if that works and a file link otherwise. A target made or replaced later
+  may be of the other kind. On other platforms the two kinds are the same link.
 - **A directory's own entries cannot be committed.** `fd_sync` on a directory answers
   `ENOTSUP`.
 

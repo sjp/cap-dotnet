@@ -718,17 +718,38 @@ public sealed partial class Dir : IDisposable
     /// Creates a symbolic link to a file beneath this handle.
     /// </summary>
     /// <param name="linkPath">A relative path naming the link to create.</param>
-    /// <param name="target">The text the link stores, kept exactly as given.</param>
+    /// <param name="target">
+    /// The text the link stores, kept exactly as given. Must be relative: a rooted target is
+    /// refused.
+    /// </param>
     /// <remarks>
     /// <para>
-    /// <strong>The target is data, not a path this call resolves.</strong> It is stored as
-    /// written: not checked against the subtree, not required to exist, not rewritten.
-    /// Containment is enforced where a link is followed rather than where it is made — a
-    /// stored target that leaves the subtree is refused by resolution under every policy, and
-    /// refused from the text before anything is looked up, so nothing is gained by refusing
-    /// it here. Refusing here would also refuse links that are perfectly good: whether a
-    /// relative target escapes depends on where the link ends up, which is not knowable when
-    /// it is created.
+    /// <strong>The target is text, not a path this call resolves.</strong> It is stored as
+    /// written: not required to exist, not rewritten. Containment is enforced where a link is
+    /// followed — a stored target that leaves the subtree is refused by resolution under every
+    /// policy — but a link persists on disk, where programs that are not confined to this
+    /// handle, such as a shell, a backup job or a web server serving the same tree, follow it
+    /// wherever it points.
+    /// </para>
+    /// <para>
+    /// <strong>A rooted target is refused</strong> with <see cref="SandboxEscapeException"/>,
+    /// and nothing is created: <c>/etc</c>, and on Windows also <c>C:\dir</c>,
+    /// <c>C:dir</c>, <c>\dir</c> and network or device paths. Such a target names
+    /// somewhere outside the subtree from wherever the link sits, so there is no link it
+    /// could make that anything beneath the handle would follow. Rootedness is read by the
+    /// running platform's path rules, the same ones resolution applies to a link it meets.
+    /// </para>
+    /// <para>
+    /// <strong>A relative target that climbs out is stored.</strong> Whether <c>../x</c>
+    /// leaves the subtree depends on where the link sits, and a rename beneath the handle can
+    /// later move it somewhere the same text does, so refusing it at creation would promise
+    /// something no check here can keep. A caller that must not leave such links for other
+    /// programs to find has to decide which targets it accepts itself.
+    /// </para>
+    /// <para>
+    /// Creation is unaffected by <see cref="SymlinkPolicy"/>: the policy governs whether a
+    /// link is followed, and creating one follows nothing. A handle that refuses every link
+    /// can still make one, as it can still remove one.
     /// </para>
     /// <para>
     /// <strong>Windows records which kind of link this is, and this is the file kind.</strong>
@@ -760,7 +781,8 @@ public sealed partial class Dir : IDisposable
     /// contains a NUL character.
     /// </exception>
     /// <exception cref="SandboxEscapeException">
-    /// <paramref name="linkPath"/> named something outside this handle's authority.
+    /// <paramref name="linkPath"/> named something outside this handle's authority, or
+    /// <paramref name="target"/> is rooted.
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the link is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
@@ -769,12 +791,13 @@ public sealed partial class Dir : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public void CreateSymlink(string linkPath, string target) =>
-        Complete(
-            SymlinkCore(linkPath, target, targetIsDirectory: false, out CapError error, out ExpectedTarget expected),
+        CompleteSymlink(
+            SymlinkCore(linkPath, target, targetIsDirectory: false, out CapError error, out ExpectedTarget expected, out bool rootedTarget),
             linkPath,
-            nameof(linkPath),
+            target,
             error,
-            expected);
+            expected,
+            rootedTarget);
 
     /// <summary>
     /// Creates a symbolic link to a file, reporting failure rather than throwing.
@@ -786,7 +809,8 @@ public sealed partial class Dir : IDisposable
     /// Symbolic links in <paramref name="linkPath"/> are treated exactly as
     /// <see cref="CreateSymlink"/> describes: the last component is never followed, a link on
     /// the way is followed or refused by this handle's policy, and a refusal is reported as
-    /// false. Safe to call concurrently with any other member of this handle, from any thread.
+    /// false. A rooted target is refused as <see cref="CreateSymlink"/> describes, and reported
+    /// as false. Safe to call concurrently with any other member of this handle, from any thread.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
@@ -794,7 +818,7 @@ public sealed partial class Dir : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateSymlink(string linkPath, string target) =>
-        Succeeded(SymlinkCore(linkPath, target, targetIsDirectory: false, out CapError error, out _), error);
+        Succeeded(SymlinkCore(linkPath, target, targetIsDirectory: false, out CapError error, out _, out _), error);
 
     /// <summary>
     /// Creates a symbolic link to a directory beneath this handle.
@@ -804,7 +828,8 @@ public sealed partial class Dir : IDisposable
     /// <remarks>
     /// <para>
     /// The directory-kind counterpart of <see cref="CreateSymlink"/>, and everything said
-    /// there about the stored target applies unchanged. The two are separate members because
+    /// there about the stored target applies unchanged: a rooted target is refused, and a
+    /// relative one is stored as given. The two are separate members because
     /// Windows records the kind in the link and will not traverse one made as the wrong kind;
     /// on every other platform a link has no kind and these do the same thing. Choosing
     /// between them in portable code is therefore not pedantry — it is the only way the
@@ -824,7 +849,8 @@ public sealed partial class Dir : IDisposable
     /// contains a NUL character.
     /// </exception>
     /// <exception cref="SandboxEscapeException">
-    /// <paramref name="linkPath"/> named something outside this handle's authority.
+    /// <paramref name="linkPath"/> named something outside this handle's authority, or
+    /// <paramref name="target"/> is rooted.
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the link is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
@@ -833,12 +859,13 @@ public sealed partial class Dir : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public void CreateDirSymlink(string linkPath, string target) =>
-        Complete(
-            SymlinkCore(linkPath, target, targetIsDirectory: true, out CapError error, out ExpectedTarget expected),
+        CompleteSymlink(
+            SymlinkCore(linkPath, target, targetIsDirectory: true, out CapError error, out ExpectedTarget expected, out bool rootedTarget),
             linkPath,
-            nameof(linkPath),
+            target,
             error,
-            expected);
+            expected,
+            rootedTarget);
 
     /// <summary>
     /// Creates a symbolic link to a directory, reporting failure rather than throwing.
@@ -848,8 +875,9 @@ public sealed partial class Dir : IDisposable
     /// <returns>True when the link was created.</returns>
     /// <remarks>
     /// Symbolic links in <paramref name="linkPath"/> are treated exactly as
-    /// <see cref="CreateSymlink"/> describes, and a refusal is reported as false. Safe to call
-    /// concurrently with any other member of this handle, from any thread.
+    /// <see cref="CreateSymlink"/> describes, and a refusal, including of a rooted target, is
+    /// reported as false. Safe to call concurrently with any other member of this handle, from
+    /// any thread.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path is null.</exception>
     /// <exception cref="ArgumentException">
@@ -857,7 +885,7 @@ public sealed partial class Dir : IDisposable
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateDirSymlink(string linkPath, string target) =>
-        Succeeded(SymlinkCore(linkPath, target, targetIsDirectory: true, out CapError error, out _), error);
+        Succeeded(SymlinkCore(linkPath, target, targetIsDirectory: true, out CapError error, out _, out _), error);
 
     /// <summary>
     /// Gives an existing entry a second name, beneath another handle or beneath this one.
@@ -1788,6 +1816,32 @@ public sealed partial class Dir : IDisposable
         }
     }
 
+    /// <summary>
+    /// Turns a link creation's outcome into nothing, or the exception explaining the failure.
+    /// </summary>
+    /// <remarks>
+    /// A refused target is the one failure that is about the text stored rather than about
+    /// the name the link was to be made at, so it is reported against the target.
+    /// </remarks>
+    private static void CompleteSymlink(
+        CapPathError pathError,
+        string linkPath,
+        string target,
+        CapError error,
+        ExpectedTarget expected,
+        bool rootedTarget)
+    {
+        if (rootedTarget)
+        {
+            throw new SandboxEscapeException(
+                $"'{target}' was not stored as the target of '{linkPath}': it is rooted, so it " +
+                $"names somewhere outside the directory the handle grants authority over from " +
+                $"wherever the link sits. ({error})");
+        }
+
+        Complete(pathError, linkPath, nameof(linkPath), error, expected);
+    }
+
     /// <summary>Whether a core's outcome was a success, for the reporting overloads.</summary>
     private static bool Succeeded(CapPathError pathError, CapError error) =>
         pathError == CapPathError.None && error.IsSuccess;
@@ -1915,9 +1969,11 @@ public sealed partial class Dir : IDisposable
         string target,
         bool targetIsDirectory,
         out CapError error,
-        out ExpectedTarget expected)
+        out ExpectedTarget expected,
+        out bool rootedTarget)
     {
         ArgumentException.ThrowIfNullOrEmpty(target);
+        rootedTarget = false;
 
         // Refused here, as it is in a path, rather than left to the platform: the kernel reads
         // a target up to its first NUL, so the link would store less than it was given, and
@@ -1948,6 +2004,18 @@ public sealed partial class Dir : IDisposable
             if (!targetIsDirectory && lookup.RequiresDirectory)
             {
                 error = RefuseAsDirectory(lookup.Directory, lookup.Name, existing: CapErrorCategory.AlreadyExists);
+                return CapPathError.None;
+            }
+
+            // A rooted target names somewhere from a root this handle confers no authority
+            // over, wherever the link sits, so it is refused from its text alone, by the same
+            // reading of "rooted" that resolution applies when it meets one. Resolution beneath
+            // a handle would refuse to follow it anyway; the link is refused here because
+            // other programs reading the same tree would not.
+            if (CapPath.IsRooted(target, CapPath.HostSyntax))
+            {
+                rootedTarget = true;
+                error = CapError.FromCategory(CapErrorCategory.Escaped);
                 return CapPathError.None;
             }
 

@@ -69,6 +69,17 @@ internal static class EscapeCorpus
     public const string CreatedLinkTarget = "plain/marker";
 
     /// <summary>
+    /// Whether a case's path, stored as a link's target, is rooted on this host, and so refused
+    /// before the link is made. Answered by the framework rather than the library, so that the
+    /// two readings are checked against each other; the placeholders always stand for rooted
+    /// host paths.
+    /// </summary>
+    public static bool IsRootedTarget(string path) =>
+        path.StartsWith("{outside}", StringComparison.Ordinal) ||
+        path.StartsWith("{sandbox}", StringComparison.Ordinal) ||
+        Path.IsPathRooted(path);
+
+    /// <summary>
     /// Longer than the forty links this library follows and than the limits the kernels apply
     /// to their own resolution, so that every backend refuses it for its own reasons.
     /// </summary>

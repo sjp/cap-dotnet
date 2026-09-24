@@ -132,6 +132,7 @@ alone — is in [paths.md](paths.md).
 | S13 | Symlink at the *final* component of an operation that changes something | Acted on as a name, never followed — the link is removed, moved or linked to as itself, and its target is neither reached nor looked up. Keeps working under the policy that refuses every link, since a handle held in order to distrust a subtree's links must be able to clear them out | all backends | `DirMutationTests.Removing_a_symbolic_link_removes_the_link_and_not_its_target`, `.A_handle_that_refuses_to_follow_links_can_still_remove_one`, `.Removing_a_directory_refuses_a_link_that_points_at_one`; escape corpus: every case whose last component is a link, through every operation that changes something |
 | S14 | Symlink in a non-final component of an operation that changes something | Resolved exactly as it is for an open: the prefix goes through the same confined resolution, so a link that leaves the subtree cannot aim a removal or a rename outside it | all backends | `DirMutationTests.A_link_used_as_a_directory_component_cannot_carry_a_removal_outside`, `ResolveParentTests.A_link_that_leaves_the_subtree_is_refused`, `.A_link_used_as_a_directory_component_is_followed`; escape corpus: every case with a link before the last component, through every operation that changes something |
 | S15 | Symlink at the *final* component of an open that creates or truncates a file (every `FileMode` but `Open`, and `CreateFile`, `WriteAllBytes`, `WriteAllBytesAsync`), including one whose target is inside | Refused under every policy, without the link being read, whether it leads to a file or a directory and whether or not it dangles; the link and its target are left as they were. A write names its file by a name somebody else often chose, and following a link planted under that name would empty or create a different file inside the tree. Links before the last component are still followed under the handle's policy, and an open of an existing file still follows a final link | all backends | `FinalLinkWriteTests.A_mode_that_creates_or_truncates_refuses_a_link_at_the_name`, `.The_whole_file_writes_refuse_a_link_at_the_name`; escape corpus: `link-to-a-file-inside`, `link-to-a-directory-inside-as-the-name`, `dangling-link-inside`, and every case whose last component is a link, through `CreateFile` |
+| S16 | Creating a symlink whose target leaves the sandbox, for a program outside the library to follow later | A rooted target (`/etc`, and on Windows also `C:\dir`, `C:dir`, `\dir`, UNC and device paths) is refused with `SandboxEscapeException` and nothing is created, under every policy and for both kinds of link; rootedness is read by the running platform's path rules, as resolution reads a link it meets. A relative target is stored as given, one that climbs out included, and refused when followed (S2). A recursive copy that would recreate a link with a rooted target fails before touching the destination name | `Dir` link creation; recursive copy; all backends | `CreatedLinkTargetTests.A_rooted_target_is_refused_and_nothing_is_created`, `.A_relative_target_that_climbs_out_is_stored_and_refused_when_followed`, `.A_target_inside_is_stored_and_followed`, `CopyTests.A_link_with_a_rooted_target_stops_the_copy_before_the_destination_is_touched`; escape corpus: every rooted case through `CreateSymlinkTo` leaves no link |
 | S10 | Symlink planted concurrently, between two steps of a resolution | Must not redirect resolution outside the sandbox root. Kernel-atomic on the `openat2` backend; bounded but not eliminated elsewhere — see §6.1 | all backends; stress races | `PortableWalkTests.A_directory_swapped_for_an_escaping_link_mid_walk_does_not_escape`, `.A_rename_under_the_walk_does_not_redirect_it`, `.A_link_swapped_back_for_a_directory_before_it_is_read_is_looked_at_again`; stress races: `ResolverRaceTests`, `TreeRaceTests`, `DerivationRaceTests` — see §6.1 |
 
 The rows above are also encoded as a single table of cases that every backend is driven
@@ -191,6 +192,19 @@ a single confined operation, asking the kernel to re-anchor absolute targets als
 clamp an upward step at the root instead of refusing it. A link trying to climb out would
 stop being a reported refusal and become a successful open of a different file, and that
 platform would disagree with the others about the same tree. Both are worse than refusing.
+
+*A rooted link target is refused when the link is made; a climbing one is not.* Nothing
+beneath a handle follows a link that leaves, so refusing one when it is made is not about
+this library. It is about what else reads the tree: a link persists on disk, and a shell, a
+backup job or a web server serving the same directory follows it wherever it points. A
+rooted target names somewhere outside from wherever the link sits, so it can be refused
+from its text, and WASI hosts refuse it the same way. A relative target that climbs out
+cannot be judged that way. `../x` leaves or stays depending on where the link sits, and a
+rename beneath the handle can later move a link to where the same text leaves, so a check
+at creation would promise something no check can keep. A caller that must not leave such
+links behind has to decide which relative targets it accepts. Creating a link is not
+governed by the symlink policy either: the policy says whether links are followed, and
+making one follows nothing, just as removing one doesn't.
 
 ### 4.3 Windows name handling
 

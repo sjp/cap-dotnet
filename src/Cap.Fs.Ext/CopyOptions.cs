@@ -30,6 +30,12 @@ public sealed class CopyOptions
     /// the name without following it, and under none of the three settings is it followed,
     /// read through or descended into.
     /// </para>
+    /// <para>
+    /// <see cref="CopyAction.Recreate"/> stores the same target text in the new link, which
+    /// cannot be done for a rooted target: a link beneath a handle may not store one. Such a
+    /// link stops the copy with <see cref="Cap.Std.SandboxEscapeException"/>, before anything
+    /// already at its name in the destination is touched.
+    /// </para>
     /// </remarks>
     public CopyAction Symlinks { get; init; } = CopyAction.Fail;
 

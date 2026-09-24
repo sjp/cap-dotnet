@@ -100,6 +100,13 @@ public sealed class EscapeCorpusTests
             (difference is null ? string.Empty : $" (a known difference on this backend: {difference})") +
             (observation.Detail is null ? "." : $": {observation.Detail.GetType().Name}: {observation.Detail.Message}"));
 
+        // A rooted target is refused before the link is made, whatever the rest of the case
+        // makes of it, so it never reaches the disk for a program outside the sandbox to follow.
+        if (operation == Operation.CreateSymlinkTo && EscapeCorpus.IsRootedTarget(entry.Path))
+        {
+            Assert.False(observation.LinkCreated, $"{context}: a link to a rooted target was created.");
+        }
+
         if (observation.Outcome != Outcome.Success && !observation.LinkCreated)
         {
             oracle.AssertUnchangedInside(context);
@@ -114,6 +121,15 @@ public sealed class EscapeCorpusTests
         EscapeCase entry, string backend, SymlinkPolicy policy, Operation operation, HostFeature features)
     {
         bool deny = policy == SymlinkPolicy.Deny;
+
+        // A rooted target is refused as an escape before a link is made, under either policy,
+        // so neither what the path would name nor whether the new link could be followed
+        // comes into it. The placeholders always stand for rooted host paths.
+        if (operation == Operation.CreateSymlinkTo && EscapeCorpus.IsRootedTarget(entry.Path))
+        {
+            return (Outcome.Escape, null);
+        }
+
         foreach (KnownDifference known in entry.Differences)
         {
             if (known.Backends.Contains(backend))

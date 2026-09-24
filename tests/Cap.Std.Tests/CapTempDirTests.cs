@@ -164,8 +164,8 @@ public sealed class CapTempDirTests
 
             CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
             string path = HostPath(temp.Directory);
-            temp.Directory.CreateSymlink("escape", victim);
-            temp.Directory.CreateDirSymlink("escape-dir", outside);
+            File.CreateSymbolicLink(Path.Join(path, "escape"), victim);
+            Directory.CreateSymbolicLink(Path.Join(path, "escape-dir"), outside);
 
             temp.Dispose();
 

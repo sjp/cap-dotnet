@@ -39,9 +39,6 @@ public sealed class WasiTestsuiteTests
     /// </summary>
     internal static readonly Dictionary<string, string> KnownGaps = new()
     {
-        ["rust/symlink_create"] =
-            "Dir.CreateSymlink stores an absolute target, which no resolution beneath a handle " +
-            "will ever follow; WASI refuses to create such a link.",
         ["rust/fd_filestat_set"] = Timestamps,
         ["rust/symlink_filestat"] = Timestamps,
         ["rust/fd_flags_set"] = Appending,

@@ -470,8 +470,21 @@ public sealed partial class WasiPreview1
     }
 
     /// <remarks>
+    /// <para>
     /// The target is stored as the guest wrote it. What it names is decided whenever the link
-    /// is followed, and it is followed only by resolution that is confined in the same way.
+    /// is followed, and it is followed only by resolution that is confined in the same way. A
+    /// rooted target is refused by the library, which answers <c>ENOTCAPABLE</c>, as WASI
+    /// hosts refuse one.
+    /// </para>
+    /// <para>
+    /// WASI does not say what kind of object a link names, and Windows needs to know: a link
+    /// made as the wrong kind there cannot be traversed. So the target is looked up from where
+    /// the link will sit, beneath the same descriptor, and a directory link is made when it
+    /// names a directory now; anything else, including nothing yet, gets a file link. This is
+    /// a guess about the present, not a promise about the future: a target created or
+    /// replaced later may be of the other kind. Everywhere but Windows the two kinds are the
+    /// same link.
+    /// </para>
     /// </remarks>
     private Errno PathSymlink(
         GuestMemory memory, uint targetAddress, uint targetLength, uint fd, uint pathAddress, uint pathLength)
@@ -479,7 +492,40 @@ public sealed partial class WasiPreview1
         Errno error = memory.ReadPath(targetAddress, targetLength, out string target);
         return error != Errno.Success
             ? error
-            : WithPath(memory, fd, Rights.PathSymlink, pathAddress, pathLength, (dir, path) => dir.CreateSymlink(path, target));
+            : WithPath(memory, fd, Rights.PathSymlink, pathAddress, pathLength, (dir, path) =>
+            {
+                if (NamesDirectory(dir, path, target))
+                {
+                    dir.CreateDirSymlink(path, target);
+                }
+                else
+                {
+                    dir.CreateSymlink(path, target);
+                }
+            });
+    }
+
+    /// <summary>
+    /// Whether a link at <paramref name="linkPath"/> storing <paramref name="target"/> would
+    /// currently lead to a directory beneath <paramref name="dir"/>.
+    /// </summary>
+    /// <remarks>
+    /// A relative target is read from the directory the link sits in, so it is looked up
+    /// after that directory's part of the link's path. Anything that cannot be opened as a
+    /// directory beneath the handle, a target that leaves it included, answers false.
+    /// </remarks>
+    private static bool NamesDirectory(Dir dir, string linkPath, string target)
+    {
+        int slash = linkPath.TrimEnd('/').LastIndexOf('/');
+        string fromLink = slash < 0 ? target : $"{linkPath[..(slash + 1)]}{target}";
+
+        if (!dir.TryOpenDir(fromLink, out Dir? reached))
+        {
+            return false;
+        }
+
+        reached.Dispose();
+        return true;
     }
 
     /// <summary>Runs a call that needs one directory descriptor and one path, and nothing back.</summary>

@@ -387,6 +387,12 @@ public static partial class DirExtensions
         /// when something follows it rather than when it is created.
         /// </para>
         /// <para>
+        /// The one exception is a rooted target, which no link beneath a handle may store, so
+        /// the copy fails there rather than leaving the link out. It is refused before a name
+        /// taken in the destination is cleared, so that a copy that cannot make the link does
+        /// not first remove what was there.
+        /// </para>
+        /// <para>
         /// Windows records which kind of object a link expects to find, and a link created as
         /// the wrong kind cannot be traversed at all — so the source link's own directory flag
         /// decides which kind is made. Everywhere else links are untyped and the flag is
@@ -396,6 +402,14 @@ public static partial class DirExtensions
         private void Relink(CopyLevel level, DirEntry entry, in CapMetadata metadata)
         {
             string target = level.Source.ReadLink(entry.Name);
+
+            if (CapPath.IsRooted(target, CapPath.HostSyntax))
+            {
+                throw new SandboxEscapeException(
+                    $"'{entry.Name}' is a symbolic link to '{target}', which is rooted, and a link " +
+                    $"beneath a handle cannot store a rooted target, so it cannot be made again in " +
+                    $"the destination.");
+            }
 
             if (_options.Overwrite)
             {

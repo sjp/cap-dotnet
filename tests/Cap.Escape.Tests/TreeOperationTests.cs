@@ -117,9 +117,10 @@ public sealed class TreeOperationTests
             Assert.False(arena.ExistsInside(EscapeCorpus.PlainDirectory));
         }
 
-        if (operation == TreeOperation.CopyRecreatingLinks)
+        // Carried across as the text it stores, not as what it names -- when the copy reached
+        // it before stopping at a rooted one, which depends on the order the directory lists in.
+        if (operation == TreeOperation.CopyRecreatingLinks && Path.Exists(Path.Join(destination, "escape-dir")))
         {
-            // Carried across as the text it stores, not as what it names.
             Assert.Equal(
                 $"../{EscapeCorpus.OutsideDirectory}".Replace('/', Path.DirectorySeparatorChar),
                 new FileInfo(Path.Join(destination, "escape-dir")).LinkTarget);
@@ -127,11 +128,17 @@ public sealed class TreeOperationTests
     }
 
     /// <summary>
-    /// What each operation comes to. A copy that refuses links fails at the first one; every
-    /// other operation completes, having treated each link as an entry and never as a way in.
+    /// What each operation comes to. A copy that refuses links fails at the first one, and one
+    /// that makes them again fails at the first with a rooted target, which no link beneath a
+    /// handle may store; every other operation completes, having treated each link as an entry
+    /// and never as a way in.
     /// </summary>
-    private static Outcome Expected(TreeOperation operation) =>
-        operation == TreeOperation.CopyRefusingLinks ? Outcome.Refused : Outcome.Success;
+    private static Outcome Expected(TreeOperation operation) => operation switch
+    {
+        TreeOperation.CopyRefusingLinks => Outcome.Refused,
+        TreeOperation.CopyRecreatingLinks => Outcome.Escape,
+        _ => Outcome.Success,
+    };
 
     /// <summary>A tree holding every shape of link that leads somewhere it should not.</summary>
     private static List<SetupStep> HostileTree(HostFeature features)

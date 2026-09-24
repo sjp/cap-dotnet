@@ -156,10 +156,13 @@ because the one thing a copy must not do is put an object of a different kind un
 name and say nothing: a copy that followed a link would reach outside the tree it was given,
 and a copy that read a named pipe would block until something wrote to it.
 
-A recreated link carries its target text unchanged — not resolved, not rewritten, not
-checked. What the text means is decided from wherever the new link sits, so a relative target
-that reached one place from the source may reach another from the destination. Containment is
-enforced when something follows the link, as it is for any other link.
+A recreated link carries its target text unchanged — not resolved and not rewritten. What the
+text means is decided from wherever the new link sits, so a relative target that reached one
+place from the source may reach another from the destination. Containment is enforced when
+something follows the link, as it is for any other link. A rooted target (`/etc`, and on Windows
+also `C:\dir`, `\dir` or a network path) is the exception: no link beneath a handle may store one,
+so recreating it stops the copy with `SandboxEscapeException`, before anything already at that
+name in the destination is touched.
 
 Hard links become independent files, holding the same bytes and sharing nothing. Preserving
 the sharing would produce a destination in which writing one file changes another — a property

@@ -123,6 +123,14 @@ public sealed class WasiEscapeCorpusTests
         EscapeCase entry, string backend, SymlinkPolicy policy, Operation operation, HostFeature features)
     {
         bool deny = policy == SymlinkPolicy.Deny;
+
+        // A rooted target is refused before a link is made, whichever policy the descriptor
+        // has, as it is when the library is called directly.
+        if (operation == Operation.CreateSymlinkTo && EscapeCorpus.IsRootedTarget(entry.Path))
+        {
+            return ([Outcome.Escape], null);
+        }
+
         Expectation expectation = entry.ExpectationFor(features);
         string? why = null;
         foreach (KnownDifference known in entry.Differences)
