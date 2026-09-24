@@ -36,25 +36,92 @@ public sealed partial class Dir
     }
 
     /// <summary>
-    /// Asks the filesystem to commit this directory's own record of what it holds.
+    /// Waits for this directory's own record of what it holds to reach the storage device.
+    /// </summary>
+    /// <param name="toDisk">
+    /// Whether to wait. False does nothing at all and returns true, as
+    /// <see cref="CapFile.Flush(bool)"/> does: nothing here holds a change to the directory
+    /// back, so there is no buffer of this library's own to empty. The parameter keeps the
+    /// two handles' flushes the same shape, so code committing a file and then the directory
+    /// that names it reads as two uses of one operation.
+    /// </param>
+    /// <returns>
+    /// True once the directory has been committed, or when <paramref name="toDisk"/> is false.
+    /// False where the platform has no way to commit a directory, which is Windows: there,
+    /// nothing was done and nothing failed.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// <strong>The step that makes a name durable.</strong> Committing a file's contents says
+    /// nothing about the entry that reaches them: the entry that binds a name to a file lives
+    /// in the directory, and until the directory has been committed a power loss can leave a
+    /// fully written file that no name reaches, or a rename that never happened. An operation
+    /// that promises a name will still be there afterwards — write a file, flush it, rename it
+    /// into place — ends by flushing the directory the name is in. The same goes for creating,
+    /// removing or renaming any entry whose survival matters. A rename between two directories
+    /// changes both, and both need flushing.
+    /// </para>
+    /// <para>
+    /// <strong>Per platform.</strong> On Linux and macOS this is <c>fsync</c> on the
+    /// directory's handle. On macOS <c>fsync</c> hands the change to the drive, which may
+    /// still hold it in its own cache for a while. On Windows it returns false. There,
+    /// committing a directory's entries means flushing the whole volume, which needs a
+    /// privilege an ordinary process does not hold and would stall every other writer on the
+    /// disk. Reporting that it did nothing is more honest than doing that under this name, or
+    /// than succeeding silently, and a caller who needs the guarantee can find out it does not
+    /// have it. The rename that publishes a file is still atomic there for anything reading the
+    /// directory while the machine is running. Only durability across a power loss is missing.
+    /// </para>
+    /// <para>
+    /// A false return is not an exception because it is not a failure. The caller decides
+    /// whether a weaker guarantee on that platform is acceptable, as the atomic writes in the
+    /// convenience layer do, and a <c>catch</c> would push every caller that accepts it to
+    /// write platform checks around an ordinary call. A commit that the platform supports and
+    /// that fails is thrown, and should not be retried, since the kernel may not report the
+    /// same failure twice.
+    /// </para>
+    /// <para>
+    /// Asked of the handle, so no name is resolved and no symbolic link is involved. It
+    /// commits the directory this handle was opened on, whatever it is now called. Safe to
+    /// call from any thread. Changes to the directory that had finished before the call are
+    /// covered. A change still in progress on another thread may or may not be.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the commit.</exception>
+    /// <exception cref="CapIOException">The commit failed.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool Flush(bool toDisk)
+    {
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        if (!toDisk)
+        {
+            return true;
+        }
+
+        CapError error = SyncContents();
+        if (error.IsSuccess)
+        {
+            return true;
+        }
+
+        return error.Category == CapErrorCategory.NotSupported
+            ? false
+            : throw FailureTranslation.ToFlushException(error);
+    }
+
+    /// <summary>
+    /// Asks the filesystem to commit this directory's own record of what it holds, and reports
+    /// the answer as a value.
     /// </summary>
     /// <returns>
     /// The platform's answer, so that a caller can tell a refusal from a system that has no
     /// such request at all.
     /// </returns>
     /// <remarks>
-    /// <para>
-    /// The step that makes a name durable. Committing a file's contents says nothing about
-    /// the entry that reaches them, so an operation promising that a file will be there after
-    /// the power fails has to commit the directory as well — and only the directory's own
-    /// handle can be asked.
-    /// </para>
-    /// <para>
-    /// Internal because it is a step of the operations that publish a file rather than
-    /// something a caller composes for themselves. Reported rather than thrown for the same
-    /// reason: the one platform that cannot do it at all is a case the caller above decides
-    /// about, not a failure.
-    /// </para>
+    /// The form of <see cref="Flush(bool)"/> for operations inside the library that publish a
+    /// name. They quote that name when something fails, which a handle-level exception cannot
+    /// do.
     /// </remarks>
     internal CapError SyncContents()
     {

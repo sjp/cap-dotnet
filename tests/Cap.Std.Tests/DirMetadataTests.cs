@@ -340,6 +340,51 @@ public sealed class DirMetadataTests : IDisposable
         Assert.True(fromHandle.IsSameFileAs(root.GetMetadata("branch")));
     }
 
+    /// <summary>
+    /// Committing a directory's entries succeeds where the platform can do it, and says it did
+    /// nothing where it cannot, rather than failing.
+    /// </summary>
+    /// <remarks>
+    /// The sequence is the one a caller building its own durable publish goes through, and
+    /// the published name is checked afterwards so a flush that disturbed the directory would
+    /// show. Only Windows lacks the request, so every other platform must report a commit.
+    /// </remarks>
+    [Fact]
+    public void A_directory_commits_its_entries_where_the_platform_can()
+    {
+        using Dir root = OpenRoot();
+        using (CapFile file = root.CreateFile("draft"))
+        {
+            file.Write("contents"u8, 0);
+            file.Flush(toDisk: true);
+        }
+
+        root.Rename("draft", root, "final", replaceExisting: true);
+
+        Assert.Equal(!OperatingSystem.IsWindows(), root.Flush(toDisk: true));
+        Assert.Equal("contents", File.ReadAllText(Host("final")));
+    }
+
+    /// <summary>Not asking to wait does nothing, and reports nothing left undone.</summary>
+    [Fact]
+    public void A_directory_flush_that_does_not_wait_reports_success_everywhere()
+    {
+        using Dir root = OpenRoot();
+
+        Assert.True(root.Flush(toDisk: false));
+    }
+
+    /// <summary>A disposed handle refuses to flush, whether or not it would have waited.</summary>
+    [Fact]
+    public void A_disposed_directory_refuses_to_flush()
+    {
+        Dir root = OpenRoot();
+        root.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => root.Flush(toDisk: true));
+        Assert.Throws<ObjectDisposedException>(() => root.Flush(toDisk: false));
+    }
+
     /// <summary>An open file describes itself.</summary>
     [Fact]
     public void An_open_file_describes_itself()

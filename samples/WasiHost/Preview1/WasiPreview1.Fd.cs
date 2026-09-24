@@ -82,12 +82,22 @@ public sealed partial class WasiPreview1
         return descriptor switch
         {
             FileDescriptor file => ErrorMapping.Run(() => file.File.Flush(toDisk: true)),
-
-            // Committing a directory's own entries is something the library does inside its
-            // durable writes, and does not offer on its own.
-            DirectoryDescriptor => Errno.NotSup,
+            DirectoryDescriptor directory => SyncDirectory(directory.Dir),
             _ => Errno.Inval,
         };
+    }
+
+    /// <remarks>
+    /// A directory has no data apart from its entries, so <c>fd_sync</c> and
+    /// <c>fd_datasync</c> both commit them. Where the platform cannot commit a directory the
+    /// guest hears <c>ENOTSUP</c>, which is the truth, rather than a success it would build a
+    /// durability promise on.
+    /// </remarks>
+    private static Errno SyncDirectory(Dir dir)
+    {
+        bool committed = false;
+        Errno result = ErrorMapping.Run(() => committed = dir.Flush(toDisk: true));
+        return result == Errno.Success && !committed ? Errno.NotSup : result;
     }
 
     private Errno FdFdstatGet(GuestMemory memory, uint fd, uint address)

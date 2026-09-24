@@ -145,7 +145,7 @@ public enum Rights : ulong
         PollFdReadwrite,
 
     /// <summary>Everything a directory's descriptor can use.</summary>
-    Directory = FdFdstatSetFlags | FdSync | FdAdvise | PathCreateDirectory | PathCreateFile |
+    Directory = FdDatasync | FdFdstatSetFlags | FdSync | FdAdvise | PathCreateDirectory | PathCreateFile |
         PathLinkSource | PathLinkTarget | PathOpen | FdReaddir | PathReadlink |
         PathRenameSource | PathRenameTarget | PathFilestatGet | PathFilestatSetSize |
         PathFilestatSetTimes | FdFilestatGet | FdFilestatSetTimes | PathSymlink |

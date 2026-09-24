@@ -57,9 +57,11 @@ internal sealed class TrampolineGuest : IDisposable
     private static readonly (string Name, string Signature)[] Imports =
     [
         ("fd_close", "i"),
+        ("fd_datasync", "i"),
         ("fd_filestat_get", "ii"),
         ("fd_read", "iiii"),
         ("fd_readdir", "iiiIi"),
+        ("fd_sync", "i"),
         ("fd_write", "iiii"),
         ("path_create_directory", "iii"),
         ("path_filestat_get", "iiiii"),

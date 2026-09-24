@@ -87,6 +87,10 @@ unusable on that platform and push everybody towards the weaker setting everywhe
 atomicity of the move still holds; it is durability across a power loss, and nothing else,
 that is missing.
 
+A caller composing its own durable publish (write, `CapFile.Flush(toDisk: true)`, rename)
+finishes with `Dir.Flush(toDisk: true)` on the directory the name is in. It returns false on
+Windows for the same reason.
+
 ## Walking
 
 `Walk()` yields every entry beneath a handle, parents before their children, by descending

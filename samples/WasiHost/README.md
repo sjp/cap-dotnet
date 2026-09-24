@@ -57,6 +57,7 @@ guest's path passed through as it arrived:
 | `path_symlink`, `path_readlink` | `CreateSymlink` or `CreateDirSymlink`, `ReadLink` |
 | `path_filestat_get` | `GetMetadata(path)` |
 | `path_filestat_set_times`, `fd_filestat_set_times` | `SetTimes(path, ...)`, and `SetTimes` on the `CapFile` or `Dir` |
+| `fd_sync`, `fd_datasync` | `Flush(toDisk: true)` on the `CapFile` or `Dir` |
 | `fd_readdir` | `EnumerateEntries`, with `DirEntry.FileId` as each entry's inode |
 | `LOOKUPFLAGS_SYMLINK_FOLLOW` | `noFollow: false` on `OpenAny`, `OpenFile` and `OpenDir`; `followLink: true` on `GetMetadata`, `SetTimes` and `CreateHardLink` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
@@ -74,6 +75,10 @@ store one, as WASI hosts do.
 `fd_filestat_set_times` on a file needs a descriptor opened for writing. `CapFile.SetTimes`
 refuses a handle that can only read, so a file opened only to read is not given that right,
 and the call answers `ENOTCAPABLE`.
+
+`fd_sync` and `fd_datasync` on a directory descriptor both commit its entries, since a
+directory has no data apart from them. On Windows, where `Dir.Flush` returns false because
+there is no way to commit a directory, they answer `ENOTSUP`.
 
 ## Tests
 
@@ -120,8 +125,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
   target as a directory from where the link will sit, beneath the same descriptor, and makes a
   directory link if that works and a file link otherwise. A target made or replaced later
   may be of the other kind. On other platforms the two kinds are the same link.
-- **A directory's own entries cannot be committed.** `fd_sync` on a directory answers
-  `ENOTSUP`.
 
 **Refused where WASI would act:**
 

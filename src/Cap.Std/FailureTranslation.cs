@@ -334,6 +334,26 @@ internal static class FailureTranslation
     };
 
     /// <summary>
+    /// Builds the exception for a failure to commit a directory's entries to storage.
+    /// </summary>
+    /// <remarks>
+    /// Like the other handle forms, there is no path to quote. A platform with no such request
+    /// is not a failure and never gets here. The caller reports it as a value.
+    /// </remarks>
+    public static Exception ToFlushException(CapError error) => error.Category switch
+    {
+        CapErrorCategory.Closed => DisposedDuringCall(),
+
+        CapErrorCategory.PermissionDenied =>
+            new UnauthorizedAccessException(
+                $"The filesystem would not commit this directory's entries. ({error})"),
+
+        _ => new CapIOException(
+            KindOf(error.Category),
+            $"This directory's entries could not be committed to storage. ({error})"),
+    };
+
+    /// <summary>
     /// Builds the exception for a failure to write to, or to change the appending of, an
     /// open file.
     /// </summary>
