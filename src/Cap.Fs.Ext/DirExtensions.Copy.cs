@@ -76,8 +76,8 @@ public static partial class DirExtensions
     /// Safe to call from any thread, and concurrently with other work on either handle; the
     /// copy's own state belongs to the call. Two copies writing into the same destination at
     /// once do not coordinate: without <see cref="CopyOptions.Overwrite"/> each stops at a name
-    /// the other took first, and with it a file both write may end up holding a mixture of the
-    /// two. Whatever the interleaving, every read stays inside the source's subtree and every
+    /// the other took first, and with it a file both write ends up as one copy's file or the
+    /// other's, whole. Whatever the interleaving, every read stays inside the source's subtree and every
     /// write inside the destination's.
     /// </para>
     /// <para>
@@ -269,27 +269,82 @@ public static partial class DirExtensions
         /// <remarks>
         /// The source is opened from the entry, so it is opened through the handle that listed
         /// it and the open refuses a name that has since become a link. The destination is
-        /// created rather than opened, so nothing already sitting at the name is written
-        /// through — except where the caller asked for replacement, and then the contents are
-        /// replaced rather than the name being redirected.
+        /// never opened through its name: without replacement it is created exclusively, so a
+        /// taken name stops the copy, and with replacement the copy is made under a scratch
+        /// name and moved onto the real one. Either way nothing already at the name is written
+        /// through, so a link there cannot steer the contents into whatever it points at.
         /// </remarks>
         private void CopyFile(CopyLevel level, DirEntry entry, in CapMetadata metadata)
         {
             using CapFile source = entry.OpenFile(
                 FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.SequentialScan, 0);
 
-            using CapFile target = _options.Overwrite
-                ? level.Destination.CreateFile(entry.Name)
-                : level.Destination.CreateNewFile(entry.Name);
+            if (_options.Overwrite)
+            {
+                Replace(level.Destination, entry.Name, source, metadata);
+            }
+            else
+            {
+                using CapFile target = level.Destination.CreateNewFile(entry.Name);
+                Fill(source, target, metadata, entry.Name);
+            }
 
+            _files++;
+        }
+
+        /// <summary>
+        /// Writes a file under a scratch name beside the destination name, then moves it onto
+        /// that name.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A move acts on the name, not on what the name refers to, so whatever was there — a
+        /// file, or a link to anything at all — is replaced and never written through. A link
+        /// is gone afterwards and its target is left exactly as it was.
+        /// </para>
+        /// <para>
+        /// A directory at the name is refused before anything is written. The move would
+        /// refuse it too, but each platform reports that in its own way, and a copy that has
+        /// been told to replace files still has no business deciding to replace a directory.
+        /// </para>
+        /// </remarks>
+        private void Replace(Dir directory, string name, CapFile source, in CapMetadata metadata)
+        {
+            if (directory.TryGetMetadata(name, out CapMetadata existing) &&
+                existing.Type == CapFileType.Directory)
+            {
+                throw new CapIOException(
+                    $"'{name}' is a file in the source and a directory in the destination. A " +
+                    $"copy replaces files, not directories with files; remove the directory " +
+                    $"first if it is meant to go.");
+            }
+
+            string? scratch = Claim(directory, asynchronous: false, out CapFile target);
+            try
+            {
+                using (target)
+                {
+                    Fill(source, target, metadata, name);
+                }
+
+                directory.Rename(scratch, directory, name, replaceExisting: true);
+                scratch = null;
+            }
+            finally
+            {
+                Abandon(directory, scratch);
+            }
+        }
+
+        /// <summary>Writes the source's contents, and its permissions if asked, into a file.</summary>
+        private void Fill(CapFile source, CapFile target, in CapMetadata metadata, string name)
+        {
             _bytes += Transfer(source, target);
 
             if (_options.PreservePermissions)
             {
-                Demand(target.SetPermissions(metadata.Permissions), entry.Name);
+                Demand(target.SetPermissions(metadata.Permissions), name);
             }
-
-            _files++;
         }
 
         /// <summary>Deals with an entry that is neither a file nor a directory.</summary>

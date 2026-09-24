@@ -56,17 +56,25 @@ public sealed class CopyOptions
     /// with a file, or the reverse, is not something a copy should decide to do.
     /// </para>
     /// <para>
+    /// <strong>A file is replaced as a name, not rewritten in place.</strong> The copy is
+    /// written under a scratch name in the same directory and then moved onto the name, so
+    /// what was there is swapped for a new file rather than truncated and refilled. A copy
+    /// that fails part of the way through a file leaves the old file as it was. The new file
+    /// is a new object: it does not keep the old one's permissions (it gets the source's, with
+    /// <see cref="PreservePermissions"/>, or what a new file gets otherwise), and any other
+    /// hard link to the old file still holds the old contents.
+    /// </para>
+    /// <para>
     /// <strong>Symbolic links already in the destination.</strong> With this off, a link at a
     /// name the copy needs stops the copy like any other taken name, whatever it points at.
-    /// With it on, a link where the source has a directory still stops the copy, because the
-    /// directory is opened in a way that refuses to follow one; a link where the source has a
-    /// link is removed as a name and the new link made in its place. A link where the source
-    /// has a file is different: the file is opened for writing through the name, and that
-    /// open follows a link as the destination handle's policy allows, so the contents land in
-    /// whatever the link points at inside the destination's subtree and the link is left in
-    /// place. A link that leaves the subtree is refused. A destination that must not be
-    /// written through links is passed as a handle restricted with
-    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// With it on, a link where the source has a file is replaced by the copied file, like any
+    /// other file: the link is gone afterwards, and whatever it pointed at, inside the
+    /// destination's subtree or not, is left untouched. A link where the source has a link is
+    /// removed as a name and the new link made in its place. A link where the source has a
+    /// directory still stops the copy, because the directory is opened in a way that refuses
+    /// to follow one; the copy never descends into a directory a link chose, and never removes
+    /// a link to make room for one. Nothing already in the destination is ever written
+    /// through a link.
     /// </para>
     /// </remarks>
     public bool Overwrite { get; init; }

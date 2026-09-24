@@ -201,6 +201,95 @@ public sealed class CopyTests : IDisposable
             File.ReadAllText(Path.Combine(_tree.HostPath, "destination", "report.txt")));
     }
 
+    /// <summary>
+    /// A link at a file's name in the destination is replaced by the file, and whatever it
+    /// pointed at is left alone.
+    /// </summary>
+    /// <remarks>
+    /// The case that matters is a link to another file in the same destination tree: a copy
+    /// that opened the name for writing would follow it and overwrite that other file, so
+    /// whoever placed the link would choose which file in the tree the copy rewrites.
+    /// </remarks>
+    [Fact]
+    public void A_link_at_a_file_name_is_replaced_rather_than_written_through()
+    {
+        Make("source", "report.txt");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        Directory.CreateDirectory(destination);
+        File.WriteAllText(Path.Combine(destination, "keep.txt"), "untouched");
+        File.CreateSymbolicLink(Path.Combine(destination, "report.txt"), "keep.txt");
+
+        CopyReport report = Copy(new CopyOptions { Overwrite = true });
+
+        FileInfo copied = new(Path.Combine(destination, "report.txt"));
+        Assert.Equal(1, report.Files);
+        Assert.Null(copied.LinkTarget);
+        Assert.Equal("contents", File.ReadAllText(copied.FullName));
+        Assert.Equal("untouched", File.ReadAllText(Path.Combine(destination, "keep.txt")));
+        Assert.Equal(
+            ["keep.txt", "report.txt"],
+            Directory.GetFileSystemEntries(destination).Select(Path.GetFileName).Order());
+    }
+
+    /// <summary>
+    /// A link at a file's name is replaced the same way wherever it points, including outside
+    /// the destination and at nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("outside")]
+    [InlineData("dangling")]
+    public void A_link_at_a_file_name_is_replaced_wherever_it_points(string kind)
+    {
+        Make("source", "report.txt");
+        Make("outside", "secret.txt");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        Directory.CreateDirectory(destination);
+        string target = kind == "outside"
+            ? Path.Combine("..", "outside", "secret.txt")
+            : "missing.txt";
+        File.CreateSymbolicLink(Path.Combine(destination, "report.txt"), target);
+
+        Copy(new CopyOptions { Overwrite = true });
+
+        FileInfo copied = new(Path.Combine(destination, "report.txt"));
+        Assert.Null(copied.LinkTarget);
+        Assert.Equal("contents", File.ReadAllText(copied.FullName));
+        Assert.Equal("contents", File.ReadAllText(Path.Combine(_tree.HostPath, "outside", "secret.txt")));
+        Assert.False(File.Exists(Path.Combine(destination, "missing.txt")));
+    }
+
+    /// <summary>
+    /// A link at a directory's name in the destination stops the copy, and the directory it
+    /// points at is not copied into.
+    /// </summary>
+    [Fact]
+    public void A_link_at_a_directory_name_stops_the_copy_even_when_overwriting()
+    {
+        Make("source", "nested", "inner.txt");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        Directory.CreateDirectory(Path.Combine(destination, "elsewhere"));
+        Directory.CreateSymbolicLink(Path.Combine(destination, "nested"), "elsewhere");
+
+        Assert.Throws<CapIOException>(() => Copy(new CopyOptions { Overwrite = true }));
+
+        Assert.Equal("elsewhere", new DirectoryInfo(Path.Combine(destination, "nested")).LinkTarget);
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(destination, "elsewhere")));
+    }
+
+    /// <summary>A directory where the source has a file stops the copy, and is left in place.</summary>
+    [Fact]
+    public void A_directory_at_a_file_name_stops_the_copy_even_when_overwriting()
+    {
+        Make("source", "report.txt");
+        Make("destination", "report.txt", "inside.txt");
+
+        Assert.Throws<CapIOException>(() => Copy(new CopyOptions { Overwrite = true }));
+
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        Assert.True(File.Exists(Path.Combine(destination, "report.txt", "inside.txt")));
+        Assert.Equal(["report.txt"], Directory.GetFileSystemEntries(destination).Select(Path.GetFileName));
+    }
+
     /// <summary>Permissions are carried across when the caller asks for them.</summary>
     [Fact]
     public void Permissions_are_carried_across_when_asked()

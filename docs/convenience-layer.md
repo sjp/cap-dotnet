@@ -161,7 +161,12 @@ the source had and the copy's caller did not ask for.
 
 - `Overwrite` (off): a name already taken in the destination stops the copy. With it on, a
   file is replaced and a directory is copied into; a name holding one kind where the source
-  has the other still stops the copy.
+  has the other still stops the copy. A file is replaced as a name: it is written under a
+  scratch name beside the destination and moved over it, so a symbolic link at that name is
+  replaced by the file and its target is left alone, rather than being overwritten through
+  the link. The new file does not keep the old one's permissions or its other hard links. A
+  link where the source has a directory stops the copy, so the copy never descends into a
+  directory that a link in the destination chose.
 - `PreservePermissions` (off): each copied file and directory is given the source's
   permissions as its platform records them — mode bits on Unix, attribute flags on Windows.
   A value recorded by one platform is never translated into the other's. A link's own
