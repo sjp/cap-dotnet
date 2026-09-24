@@ -42,9 +42,11 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
     /// never removes or changes anything outside.
     /// </summary>
     /// <remarks>
-    /// Rounds alternate between removing the tree by name and emptying it through a handle,
-    /// since the two start differently — one resolves a name and the other has been holding the
-    /// directory all along — and share everything after that.
+    /// Rounds cycle through removing the tree by name, emptying it through a handle, and
+    /// disposing of a scratch directory holding it, since the three start differently — one
+    /// resolves a name, the others have been holding the directory all along, and the scratch
+    /// directory's handle carries the policy it was made under rather than one the caller chose
+    /// for the removal — and share everything after that.
     /// </remarks>
     [Theory]
     [MemberData(nameof(OnThisHost))]
@@ -54,7 +56,6 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
         arena.RequireSymbolicLinks();
         PopulateOutside(arena);
 
-        string victim = arena.Inside("victim");
         Tally tally = new();
         string context = "tree removed under attack on " + backend;
         string outsideBefore = arena.SnapshotOutside();
@@ -66,20 +67,32 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
         {
             for (int round = 0; round < rounds; round++)
             {
+                int mode = round % 3;
+
+                // The scratch directory is made before the tree is built inside it, so that its
+                // own creation is not part of what the attacker races.
+                CapTempDir? scratch = mode == 2 ? CapTempDir.NewIn(root) : null;
+                string name = scratch?.Name ?? "victim";
+                string victim = arena.Inside(name);
+
                 string[] levels = BuildTree(victim, arena.Outside(StressArena.DirectoryName));
                 SwappingAttacker attacker = new(levels);
                 using (ThreadAdversary adversary = new(attacker.Cycle))
                 {
                     try
                     {
-                        if (round % 2 == 0)
+                        if (mode == 0)
                         {
-                            root.DeleteTree("victim");
+                            root.DeleteTree(name);
+                        }
+                        else if (mode == 1)
+                        {
+                            using Dir tree = root.OpenDir(name);
+                            tree.DeleteTreeContents();
                         }
                         else
                         {
-                            using Dir tree = root.OpenDir("victim");
-                            tree.DeleteTreeContents();
+                            scratch!.Dispose();
                         }
 
                         tally.Record(Outcome.Consistent);

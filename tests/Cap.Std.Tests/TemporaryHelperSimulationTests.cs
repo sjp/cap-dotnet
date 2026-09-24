@@ -238,4 +238,74 @@ public sealed class TemporaryHelperSimulationTests
             Assert.Null(fs.Find(Inside(name)));
         }
     }
+
+    /// <summary>
+    /// A subdirectory swapped for a link to another directory in the tree, between being
+    /// listed and being opened, is not emptied through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The scratch directory carries <see cref="SymlinkPolicy.FollowWithinSandbox"/>, under
+    /// which an open of a link that stays inside is followed. Disposal must not inherit that:
+    /// what it opens has to be what it listed, or a link swapped in would redirect part of the
+    /// removal onto a directory it was never asked to reach that way.
+    /// </para>
+    /// <para>
+    /// Disposal removes the link's target in the end anyway, when it comes to it by its own
+    /// name, so the final state cannot tell the two apart. What can is the target's state each
+    /// time disposal looks at the swapped name, the last of which is its removal: by then the
+    /// link has been dealt with, and the target must still hold what it held.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Disposal_does_not_empty_a_directory_through_a_link_swapped_in_beneath_it()
+    {
+        FakeFileSystem fs = Simulated();
+        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
+        {
+            CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
+            Assert.Equal(SymlinkPolicy.FollowWithinSandbox, temp.Directory.SymlinkPolicy);
+            string name = temp.Name;
+
+            // Created first so that disposal reaches it before the directory it will lead to.
+            temp.Directory.CreateDir("swapped").Dispose();
+            temp.Directory.CreateDir("target").Dispose();
+            temp.Directory.CreateFile("target/survivor").Dispose();
+
+            FakeNode tree = fs.Find(Inside(name))!;
+            FakeNode target = fs.Find(Inside($"{name}/target"))!;
+            bool swapped = false;
+            bool intact = true;
+            fs.BeforeLookup = (directory, entry) =>
+            {
+                if (directory != tree || entry != "swapped")
+                {
+                    return;
+                }
+
+                if (!swapped)
+                {
+                    swapped = true;
+                    fs.Replace(Inside($"{name}/swapped"), new FakeNode
+                    {
+                        Type = CapNodeType.SymbolicLink,
+                        LinkTarget = "target",
+                        VolumeId = 1,
+                        NodeId = fs.NextNodeId(),
+                    });
+                }
+                else
+                {
+                    intact &= target.Entries.ContainsKey("survivor");
+                }
+            };
+
+            temp.Dispose();
+            fs.BeforeLookup = null;
+
+            Assert.True(swapped);
+            Assert.True(intact, "The target was emptied through the link before disposal reached it.");
+            Assert.Null(fs.Find(Inside(name)));
+        }
+    }
 }

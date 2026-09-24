@@ -26,6 +26,17 @@ namespace Cap.Std;
 /// something they own is not removed.
 /// </para>
 /// <para>
+/// <strong>Both entry points do their work through a handle that refuses symbolic
+/// links,</strong> whatever policy the caller's own handle carries. Removing a tree is the one
+/// operation where following a link is never what was meant: a name at the top that is a link
+/// would redirect the whole removal somewhere else, and a directory further down that turns
+/// into a link between being listed and being entered would do the same to a subtree — even
+/// when the link leads somewhere inside the handle's own subtree, what it leads to is not what
+/// was listed and not what the caller asked to be removed. Narrowing the policy for the
+/// duration makes those refusals come from resolution rather than from a check that something
+/// could be arranged to pass.
+/// </para>
+/// <para>
 /// <strong>This is not atomic, and nothing can make it so.</strong> It is many operations,
 /// and an entry created while it runs may or may not be removed. What it guarantees is the
 /// containment: every operation it performs lands inside the subtree it was given.
@@ -51,12 +62,33 @@ internal static class TreeRemoval
     /// Success when it is empty, or the first failure that stopped it from becoming empty.
     /// </returns>
     /// <remarks>
+    /// <para>
     /// Takes the directory as a handle rather than as a name beneath one, because the caller
     /// that empties a directory it created has been holding that handle since it created it.
     /// Going back to the name to start the work would introduce a lookup where there was
     /// none, and a lookup is a thing that can be answered differently the second time.
+    /// </para>
+    /// <para>
+    /// <strong>The work is done through a handle that refuses symbolic links,</strong> a
+    /// duplicate of <paramref name="directory"/> narrowed for the duration, for the reason
+    /// the class gives. The handle passed in is the directory emptied however it was reached,
+    /// since there is no name to resolve on the way in; the narrowing governs every directory
+    /// entered beneath it, so one swapped for a link after being listed is not entered and its
+    /// name is unlinked as the link.
+    /// </para>
     /// </remarks>
-    public static CapError Empty(Dir directory) => EmptyOpen(directory, MaximumDepth);
+    public static CapError Empty(Dir directory)
+    {
+        if (!directory.TryRestrict(SymlinkPolicy.Deny, out Dir? strict))
+        {
+            return CapError.FromCategory(CapErrorCategory.OutOfHandles);
+        }
+
+        using (strict)
+        {
+            return EmptyOpen(strict, MaximumDepth);
+        }
+    }
 
     /// <summary>
     /// Removes the directory named <paramref name="name"/> beneath <paramref name="parent"/>,
@@ -74,13 +106,10 @@ internal static class TreeRemoval
     /// something else in the meantime is removed as the name it now is rather than followed.
     /// </para>
     /// <para>
-    /// <strong>The work is done through a handle that refuses symbolic links,</strong>
-    /// whatever policy the caller's own handle carries. Removing a tree is the one operation
-    /// where following a link is never what was meant: the name at the top would redirect the
-    /// whole removal somewhere else, and a directory further down that turns into a link
-    /// between being listed and being entered would do the same to a subtree. Narrowing the
-    /// policy for the duration makes both refusals come from resolution rather than from a
-    /// check that something could be arranged to pass.
+    /// <strong>The work is done through a handle that refuses symbolic links,</strong> a
+    /// duplicate of <paramref name="parent"/> narrowed for the duration, for the reason the
+    /// class gives. Here it covers the name at the top as well as every directory beneath it,
+    /// so a link at <paramref name="name"/> is refused rather than followed.
     /// </para>
     /// <para>
     /// A name that is not a directory — a file, a link, or nothing at all — is reported rather

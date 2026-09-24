@@ -164,9 +164,7 @@ public static partial class DirExtensions
     {
         ArgumentNullException.ThrowIfNull(dir);
 
-        using Dir strict = dir.Restrict(SymlinkPolicy.Deny);
-
-        CapError error = TreeRemoval.Empty(strict);
+        CapError error = TreeRemoval.Empty(dir);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToEnumerationException(error);

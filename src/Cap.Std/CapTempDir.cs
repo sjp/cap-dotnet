@@ -294,12 +294,11 @@ public sealed class CapTempDir : IDisposable
     /// <para>
     /// <strong>Symbolic links.</strong> A link found in the tree is never descended into: it
     /// is unlinked as a link, and what it points at, file or directory, is not removed
-    /// through it. Nothing outside the scratch directory is reached under any policy. The one
-    /// case in which a link is followed is a race: a directory that something replaces with a
-    /// link between being listed and being opened is opened under the policy the scratch
-    /// directory carries, so under <see cref="SymlinkPolicy.FollowWithinSandbox"/> a link to
-    /// another directory inside the scratch tree can be emptied through — which removes
-    /// nothing the disposal was not removing anyway.
+    /// through it. The removal works through a duplicate of the scratch directory's handle
+    /// narrowed to <see cref="SymlinkPolicy.Deny"/>, whatever policy the scratch directory
+    /// carries, so a directory that something replaces with a link between being listed and
+    /// being opened is not entered either — not even when the link leads to another directory
+    /// inside the scratch tree — and its name is unlinked as the link.
     /// </para>
     /// <para>
     /// Disposing twice does nothing the second time.
