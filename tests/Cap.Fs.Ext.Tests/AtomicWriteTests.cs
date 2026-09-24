@@ -320,14 +320,17 @@ public sealed class AtomicWriteTests : IDisposable
     }
 
     /// <summary>
-    /// On Windows, a directory symbolic link or a junction at the name makes the publish fail,
-    /// and leaves the link, the directory it points at and the rest of the tree as they were.
+    /// On Windows, a directory symbolic link or a junction at the name makes the publish fail
+    /// with a failure that names the link as the obstacle, and leaves the link, the directory
+    /// it points at and the rest of the tree as they were.
     /// </summary>
     /// <remarks>
     /// Both kinds of link are directory entries there, and the filesystem refuses to move a
     /// file over a directory. Removing the link first and then moving the file would leave a
     /// moment in which the name holds nothing, which is the one thing the operation promises
-    /// never to do, so the refusal is reported rather than worked around.
+    /// never to do, so the refusal is reported rather than worked around. It is reported as a
+    /// link rather than as access denied, so a caller does not go looking for a permissions
+    /// problem that is not there.
     /// </remarks>
     [Theory]
     [InlineData("symlink")]
@@ -352,12 +355,10 @@ public sealed class AtomicWriteTests : IDisposable
             Directory.CreateSymbolicLink(link, "elsewhere");
         }
 
-        Exception thrown = Assert.ThrowsAny<Exception>(
+        CapIOException thrown = Assert.Throws<CapIOException>(
             () => _tree.Directory.WriteAllTextAtomic("report", "new"));
 
-        Assert.True(
-            thrown is UnauthorizedAccessException or IOException,
-            $"The refusal was reported as {thrown.GetType().Name}: {thrown.Message}");
+        Assert.Equal(CapErrorKind.SymbolicLink, thrown.Kind);
         Assert.NotNull(new DirectoryInfo(link).LinkTarget);
         Assert.Equal(["inner"], Directory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
         Assert.Equal("untouched", File.ReadAllText(Path.Combine(elsewhere, "inner")));

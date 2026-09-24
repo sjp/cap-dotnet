@@ -687,7 +687,11 @@ public sealed partial class Dir : IDisposable
     /// policy: a link at <paramref name="from"/> is moved as itself, and a link already
     /// holding <paramref name="to"/> is a name like any other — it makes the destination
     /// taken, or is replaced when replacement is asked for, and what it points at is not
-    /// touched. A link met before the last component of either path is followed or refused
+    /// touched. On Windows a link to a directory, whether a directory symbolic link or a
+    /// junction, is a directory entry that the filesystem will not move anything over, so
+    /// replacing one fails with a <see cref="CapIOException"/> whose kind is
+    /// <see cref="CapErrorKind.SymbolicLink"/>. It is not moved aside to make room: that would
+    /// leave a moment in which the name holds nothing. A link met before the last component of either path is followed or refused
     /// under the policy of the handle that path is resolved against, exactly as
     /// <see cref="OpenDir"/> describes — refused with <see cref="SandboxEscapeException"/> if
     /// its target leaves that handle's subtree, and with <see cref="CapIOException"/> under
@@ -708,7 +712,8 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the move.</exception>
     /// <exception cref="CapIOException">
     /// The destination is taken and replacement was not asked for, the two names are on
-    /// different filesystems, or the move failed otherwise.
+    /// different filesystems, on Windows a link to a directory holds the destination, or the
+    /// move failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
     public void Rename(string from, Dir toDir, string to, bool replaceExisting = false)

@@ -64,7 +64,9 @@ public static partial class DirExtensions
     /// pointed at is neither written nor removed, wherever it points and whether or not its
     /// target exists. The exception is a link to a directory on Windows — a directory symbolic
     /// link or a junction — which is a directory entry there and cannot be moved over: the
-    /// publish fails, and the link and what it points at are left as they were. The scratch
+    /// publish fails with a <see cref="CapIOException"/> whose kind is
+    /// <see cref="CapErrorKind.SymbolicLink"/>, and the link and what it points at are left as
+    /// they were. The scratch
     /// file is created exclusively, so a link planted at its name makes the creation fail
     /// rather than redirecting it.
     /// </para>
@@ -76,7 +78,9 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
-    /// <exception cref="CapIOException">The write or the move failed.</exception>
+    /// <exception cref="CapIOException">
+    /// The write or the move failed, or on Windows a link to a directory holds the name.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static void WriteAllBytesAtomic(
         this Dir dir,
@@ -134,7 +138,9 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
-    /// <exception cref="CapIOException">The write or the move failed.</exception>
+    /// <exception cref="CapIOException">
+    /// The write or the move failed, or on Windows a link to a directory holds the name.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static void WriteAllTextAtomic(
         this Dir dir,
@@ -183,7 +189,9 @@ public static partial class DirExtensions
     /// pointed at is neither written nor removed, wherever it points and whether or not its
     /// target exists. The exception is a link to a directory on Windows — a directory symbolic
     /// link or a junction — which is a directory entry there and cannot be moved over: the
-    /// publish fails, and the link and what it points at are left as they were. The scratch
+    /// publish fails with a <see cref="CapIOException"/> whose kind is
+    /// <see cref="CapErrorKind.SymbolicLink"/>, and the link and what it points at are left as
+    /// they were. The scratch
     /// file is created exclusively, so a link planted at its name makes the creation fail
     /// rather than redirecting it.
     /// </para>
@@ -196,7 +204,9 @@ public static partial class DirExtensions
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
-    /// <exception cref="CapIOException">The write or the move failed.</exception>
+    /// <exception cref="CapIOException">
+    /// The write or the move failed, or on Windows a link to a directory holds the name.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static async Task WriteAllBytesAtomicAsync(
         this Dir dir,
@@ -254,7 +264,9 @@ public static partial class DirExtensions
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
-    /// <exception cref="CapIOException">The write or the move failed.</exception>
+    /// <exception cref="CapIOException">
+    /// The write or the move failed, or on Windows a link to a directory holds the name.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static Task WriteAllTextAtomicAsync(
         this Dir dir,

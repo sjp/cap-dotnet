@@ -1295,10 +1295,24 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     /// <remarks>
+    /// <para>
     /// The destination is named by a handle and a single name rather than by a path, which
     /// is what keeps the far end of the move as confined as the near end. Refusing an
     /// existing destination is the filesystem's own behaviour when the replace flag is
     /// absent, so it costs no extra call and leaves no window.
+    /// </para>
+    /// <para>
+    /// A directory symbolic link or a junction is a directory entry on this platform, and the
+    /// filesystem will not move anything over a directory, so replacing one fails where on
+    /// Unix the link would simply be replaced. The refusal is kept, because the alternative,
+    /// moving the link aside and then moving the entry in, leaves a moment in which the name
+    /// holds nothing. What the filesystem reports for it reads as a permissions refusal or as
+    /// a directory in the way, neither of which says a link was the obstacle, so a failed
+    /// replacement looks at what holds the destination and reports a directory link there as
+    /// <see cref="CapErrorCategory.SymbolicLink"/>. The look comes after the failure and only
+    /// chooses how it is reported, so a change to the name in between can at worst mislabel
+    /// a refusal; it cannot turn one into a replacement.
+    /// </para>
     /// </remarks>
     public CapError RenameChild(
         SafeDirHandle fromParent,
@@ -1332,21 +1346,72 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             // the system is, and an invalid-argument report is one of them. Falling back on
             // it is safe even when the argument was genuinely wrong: the older form then
             // fails the same way and its failure is what gets reported.
-            if (renamed.Category is not (CapErrorCategory.NotSupported or CapErrorCategory.InvalidArgument))
+            if (renamed.Category is CapErrorCategory.NotSupported or CapErrorCategory.InvalidArgument)
             {
-                return renamed;
+                // The older form carries a plain flag in the first byte rather than a flag
+                // word, so the value is recomputed rather than reused: the newer form's second
+                // flag has the numeric value the older form reads as "replace", and passing it
+                // through would turn a refusal into exactly the replacement it was asked to
+                // prevent.
+                renamed = SetDestinationName(
+                    raw,
+                    toParent,
+                    toName,
+                    NtConstants.FileRenameInformationClass,
+                    replaceExisting ? 1u : 0u);
             }
 
-            // The older form carries a plain flag in the first byte rather than a flag word,
-            // so the value is recomputed rather than reused: the newer form's second flag has
-            // the numeric value the older form reads as "replace", and passing it through
-            // would turn a refusal into exactly the replacement it was asked to prevent.
-            return SetDestinationName(
-                raw,
-                toParent,
-                toName,
-                NtConstants.FileRenameInformationClass,
-                replaceExisting ? 1u : 0u);
+            bool refused = renamed.Category is CapErrorCategory.PermissionDenied or CapErrorCategory.IsADirectory;
+            return replaceExisting && refused
+                ? ExplainRefusedReplacement(renamed, toParent, toName)
+                : renamed;
+        }
+        finally
+        {
+            _ = NtNative.NtClose(raw);
+        }
+    }
+
+    /// <summary>
+    /// Reports a replacement refused because a directory link holds the destination as the
+    /// link it is, and passes any other refusal through unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Only the category changes. The status the filesystem returned stays as the raw code,
+    /// so the refusal as the filesystem made it is still there to read. Any failure to look
+    /// at the destination leaves the original report as it was.
+    /// </remarks>
+    private static CapError ExplainRefusedReplacement(
+        CapError refusal,
+        SafeDirHandle toParent,
+        ReadOnlySpan<char> toName)
+    {
+        CapError error = OpenRelative(
+            toParent,
+            toName,
+            NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+            NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+            out nint raw);
+
+        if (error.IsFailure)
+        {
+            return refusal;
+        }
+
+        try
+        {
+            if (QueryAttributeTag(raw, out FileAttributeTagInformation info).IsFailure)
+            {
+                return refusal;
+            }
+
+            const uint directoryReparsePoint =
+                NtConstants.FILE_ATTRIBUTE_DIRECTORY | NtConstants.FILE_ATTRIBUTE_REPARSE_POINT;
+
+            return (info.FileAttributes & directoryReparsePoint) == directoryReparsePoint &&
+                ReparseTags.IsFilesystemLink(info.ReparseTag)
+                ? CapError.Create(CapErrorCategory.SymbolicLink, refusal.Source, refusal.RawCode)
+                : refusal;
         }
         finally
         {

@@ -62,7 +62,10 @@ something outside it, or nothing — is neither written nor removed. On Windows 
 directory, whether a directory symbolic link or a junction, is a directory entry, and the
 filesystem will not move a file over one. There the publish fails and leaves the link and
 its target as they were. Removing the link first would leave a moment when the name holds
-nothing, which the operation promises never to do.
+nothing, which the operation promises never to do. The failure is a `CapIOException` whose
+`Kind` is `SymbolicLink` rather than an access-denied error, so a caller can tell a link in
+the way from a permissions problem. `Dir.Rename` with `replaceExisting` reports the same case
+the same way.
 
 ### Durability
 

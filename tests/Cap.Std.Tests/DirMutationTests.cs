@@ -373,6 +373,64 @@ public sealed class DirMutationTests : IDisposable
         Assert.False(File.Exists(Host("source")));
     }
 
+    /// <summary>
+    /// On Windows, replacing a directory symbolic link fails as a link in the way, and leaves
+    /// the link and what it points at alone.
+    /// </summary>
+    /// <remarks>
+    /// A link to a directory is a directory entry there, and the filesystem will not move a
+    /// file over a directory. What it reports for that reads as a permissions problem, which
+    /// would send a caller looking in the wrong place, so the link is named as the obstacle.
+    /// </remarks>
+    [Fact]
+    public void On_windows_replacing_a_directory_link_is_refused_as_a_link()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows records a link to a directory as a directory entry.");
+        }
+
+        Directory.CreateDirectory(Host("elsewhere"));
+        File.WriteAllText(Host("elsewhere", "inner"), "untouched");
+        Directory.CreateSymbolicLink(Host("destination"), "elsewhere");
+        File.WriteAllText(Host("source"), "new");
+
+        using Dir root = OpenRoot();
+
+        CapIOException thrown = Assert.Throws<CapIOException>(
+            () => root.Rename("source", root, "destination", replaceExisting: true));
+
+        Assert.Equal(CapErrorKind.SymbolicLink, thrown.Kind);
+        Assert.NotNull(new DirectoryInfo(Host("destination")).LinkTarget);
+        Assert.Equal("untouched", File.ReadAllText(Host("elsewhere", "inner")));
+        Assert.Equal("new", File.ReadAllText(Host("source")));
+    }
+
+    /// <summary>
+    /// On Windows, replacing a real directory is not reported as a link, since there is none.
+    /// </summary>
+    [Fact]
+    public void On_windows_replacing_a_directory_is_not_reported_as_a_link()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Covers how this platform's refusal to move a file over a directory is reported.");
+        }
+
+        Directory.CreateDirectory(Host("destination"));
+        File.WriteAllText(Host("source"), "new");
+
+        using Dir root = OpenRoot();
+
+        Exception thrown = Assert.ThrowsAny<Exception>(
+            () => root.Rename("source", root, "destination", replaceExisting: true));
+
+        Assert.False(
+            thrown is CapIOException { Kind: CapErrorKind.SymbolicLink },
+            $"A plain directory was reported as a link: {thrown.Message}");
+        Assert.True(Directory.Exists(Host("destination")));
+    }
+
     /// <summary>A missing source is a missing thing, not an escape.</summary>
     [Fact]
     public void A_move_of_something_that_is_not_there_fails()
