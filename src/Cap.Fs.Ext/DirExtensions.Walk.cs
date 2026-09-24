@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
@@ -62,11 +63,11 @@ public static partial class DirExtensions
     /// own, reporting <see cref="CapFileType.Symlink"/>, and is not descended into unless
     /// <see cref="WalkOptions.FollowSymlinks"/> asks for that, the starting handle's policy
     /// allows it and the link resolves inside the subtree; a link leading out is yielded and
-    /// never entered. Following turns on the cycle check described there. A directory, or an
-    /// entry the filesystem did not classify, is entered by an ordinary open of its name, so
-    /// a link met that way — a directory swapped for one after it was listed, or a link on a
-    /// filesystem that does not report kinds — is entered as the policy would follow it, and
-    /// never outside the subtree.
+    /// never entered. Following turns on the cycle check described there. When links are not
+    /// followed, every descent is an open that refuses a link, so a link is never entered
+    /// however the directory read reported it: a directory swapped for one after it was
+    /// listed, or a link on a filesystem that does not say what its entries are, is yielded
+    /// and not descended into.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
@@ -272,6 +273,13 @@ public static partial class DirExtensions
         /// same answer arrived at without trusting the claim.
         /// </para>
         /// <para>
+        /// The same holds for links. When they are not being followed the open itself refuses
+        /// one, rather than relying on the read having called it a link: an entry reported as
+        /// a directory or as unclassified that is in fact a link fails the open and is not
+        /// entered. The handle that open produces still carries the starting handle's policy,
+        /// so what a caller can do through an entry's directory does not depend on its depth.
+        /// </para>
+        /// <para>
         /// The depth is checked after the open rather than before it, so a tree that is deep
         /// in entries that turn out not to be directories is not refused for a descent that
         /// was never going to happen.
@@ -279,7 +287,7 @@ public static partial class DirExtensions
         /// </remarks>
         public void Enter(DirEntry entry, int[]? states = null)
         {
-            if (!MayDescend(entry.Type) || !entry.TryOpenDir(out Dir? child))
+            if (!MayDescend(entry.Type) || !TryOpen(entry, out Dir? child))
             {
                 return;
             }
@@ -368,6 +376,12 @@ public static partial class DirExtensions
             CapFileType.Symlink => _options.FollowSymlinks,
             _ => false,
         };
+
+        /// <summary>Opens an entry as the next level down, following a link only when asked to.</summary>
+        private bool TryOpen(DirEntry entry, [NotNullWhen(true)] out Dir? child) =>
+            _options.FollowSymlinks
+                ? entry.TryOpenDir(out child)
+                : _levels[^1].Directory.TryOpenDirRefusingLinks(entry.Name, out child);
 
         /// <summary>Opens a directory's entries and makes it the level the walk is reading.</summary>
         private void Push(Dir directory, bool owned, int[]? states)

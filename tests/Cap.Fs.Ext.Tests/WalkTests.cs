@@ -112,6 +112,27 @@ public sealed class WalkTests : IDisposable
         Assert.Equal(2, seen);
     }
 
+    /// <summary>
+    /// The directories a walk enters without following links carry the starting handle's
+    /// policy, not the stricter one their opens were resolved under.
+    /// </summary>
+    /// <remarks>
+    /// Refusing links on the way down is the walk's own promise. The handles it hands out are
+    /// the caller's to act through, and one that refused links only because it happened to be
+    /// deep in the tree would make the same call succeed or fail depending on where the entry
+    /// was found.
+    /// </remarks>
+    [Fact]
+    public void The_directories_entered_keep_the_starting_handles_policy()
+    {
+        Make("a", "b", "deep.txt");
+
+        List<SymlinkPolicy> policies = [.. _tree.Directory.Walk().Select(e => e.Directory.SymlinkPolicy)];
+
+        Assert.Equal(SymlinkPolicy.FollowWithinSandbox, _tree.Directory.SymlinkPolicy);
+        Assert.All(policies, policy => Assert.Equal(SymlinkPolicy.FollowWithinSandbox, policy));
+    }
+
     /// <summary>A link that makes a cycle stops the walk going round it.</summary>
     /// <remarks>
     /// A link pointing at a directory above it turns a finite filesystem into an infinite

@@ -95,7 +95,7 @@ foreach (WalkEntry entry in root.Walk(new WalkOptions { SkipHidden = true }))
 | Option | Default | Effect |
 |---|---|---|
 | `MaxDepth` | 256 | How far below the start the walk descends. A deeper tree stops the walk with a failure rather than being quietly cut short. |
-| `FollowSymlinks` | off | Whether a link naming a directory is entered. It cannot widen the handle's own policy: a handle that refuses links keeps refusing them. |
+| `FollowSymlinks` | off | Whether a link naming a directory is entered. Off, every descent is an open that refuses a link, so a link is not entered even when the directory read called it a directory or could not say what it was; the directories entered keep the starting handle's policy. On, it cannot widen that policy: a handle that refuses links keeps refusing them. |
 | `SkipHidden` | off | Leaves out names beginning with a dot, and on Windows anything carrying the hidden attribute. A skipped directory is not entered. |
 
 The walk keeps its own stack rather than calling itself, so a tree built to be deep ends as a

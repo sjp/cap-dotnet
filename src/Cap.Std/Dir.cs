@@ -1339,6 +1339,33 @@ public sealed partial class Dir : IDisposable
     internal ConfinedResolveOptions Options => _options;
 
     /// <summary>
+    /// Opens a directory beneath this one without following a symbolic link anywhere on the
+    /// way, the last component included, and hands it back under this handle's own policy.
+    /// </summary>
+    /// <param name="path">A relative path. See <see cref="OpenDir"/>.</param>
+    /// <param name="dir">The handle, when this returns true.</param>
+    /// <returns>True when a directory was opened; false for every refusal and failure.</returns>
+    /// <remarks>
+    /// <para>
+    /// For a tree walk that has promised not to pass through links. Deciding that from the
+    /// kind a directory read reported is not enough: the kind is a snapshot taken before the
+    /// open, some filesystems do not report one at all, and a directory can be swapped for a
+    /// link between the two. Refusing links in the open itself is the only answer that holds
+    /// whatever happened in between.
+    /// </para>
+    /// <para>
+    /// The resolution is stricter than this handle's policy, but the handle produced is not.
+    /// That is not a widening: the new handle names a directory reached without a link, and
+    /// carries exactly the policy it would have carried had <see cref="OpenDir"/> opened it.
+    /// Returning it restricted would silently change what the walk's caller can do through
+    /// the handles it is given, depending only on how deep they are.
+    /// </para>
+    /// </remarks>
+    internal bool TryOpenDirRefusingLinks(string path, [NotNullWhen(true)] out Dir? dir) =>
+        OpenDirCore(path, out dir, out CapError error, ConfinedResolveOptions.RefuseSymlinks) == CapPathError.None &&
+        error.IsSuccess;
+
+    /// <summary>
     /// Removes a name beneath this handle, reporting the platform's own answer.
     /// </summary>
     /// <param name="name">A single component.</param>
@@ -1959,7 +1986,11 @@ public sealed partial class Dir : IDisposable
     }
 
 
-    private CapPathError OpenDirCore(string path, out Dir? dir, out CapError error)
+    private CapPathError OpenDirCore(
+        string path,
+        out Dir? dir,
+        out CapError error,
+        ConfinedResolveOptions stricter = ConfinedResolveOptions.None)
     {
         ArgumentNullException.ThrowIfNull(path);
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
@@ -1977,7 +2008,11 @@ public sealed partial class Dir : IDisposable
             return pathError;
         }
 
-        CapResult<SafeDirHandle> opened = Resolver.OpenDirectory(_handle, in parsed, CapAccess.Read, _options);
+        CapResult<SafeDirHandle> opened = Resolver.OpenDirectory(
+            _handle,
+            in parsed,
+            CapAccess.Read,
+            _options | stricter);
         if (!opened.IsSuccess)
         {
             error = opened.Error;

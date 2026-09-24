@@ -6,8 +6,8 @@ using Cap.Std;
 namespace Cap.Stress.Tests;
 
 /// <summary>
-/// Removing and copying whole trees while an attacker swaps directories in them for links
-/// pointing outside.
+/// Removing, copying and walking whole trees while an attacker swaps directories in them for
+/// links.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,6 +33,9 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
 
     /// <summary>How deep each round's tree is.</summary>
     private const int Depth = 4;
+
+    /// <summary>What names the files only the links' target holds.</summary>
+    private const string DecoyPrefix = "decoy";
 
     /// <summary>The backends this host has, as the test framework's rows.</summary>
     public static TheoryData<string> OnThisHost => new(Backends.OnThisHost);
@@ -217,6 +220,146 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
         StressReport.Publish(output, "tree copied under attack", backend, tally);
         descriptors.AssertNoneLeaked(context);
         tally.RequireContest(context, Outcome.Consistent, Outcome.RefusedAsEscape, Outcome.OtherRefusal, Outcome.Missing);
+    }
+
+    /// <summary>
+    /// Walking a tree without following links, while its directories are swapped for links to
+    /// another directory in the same tree, never lists anything through one of those links.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The links here stay inside, so containment is not what is being tested: every backend
+    /// would follow them under the handle's policy, and that is exactly the danger. A walk that
+    /// decided whether to descend from the kind the directory read reported would enter a name
+    /// read as a directory that the attacker had since made a link, and list the directory the
+    /// link names a second time, somewhere the caller never asked to look.
+    /// </para>
+    /// <para>
+    /// The directory the links name holds files found nowhere else, so each walk may list each
+    /// of them once and no more. Rounds cycle through the walk, its asynchronous form and a
+    /// pattern search, which share the descent but reach it differently.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(OnThisHost))]
+    public void Walking_a_tree_under_attack_without_following_links_never_passes_through_one(string backend)
+    {
+        using StressArena arena = new();
+        arena.RequireSymbolicLinks();
+
+        Tally tally = new();
+        string context = "tree walked under attack on " + backend;
+        Descriptors descriptors = Descriptors.Before(arena.HostPath);
+        string tree = arena.Inside("walked");
+        int rounds = StressSettings.Rounds(AttemptsPerRound);
+        long met = 0;
+
+        using (BackendScope scope = Backends.Enter(backend))
+        using (Dir root = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire()))
+        {
+            Assert.Equal(SymlinkPolicy.FollowWithinSandbox, root.SymlinkPolicy);
+
+            for (int round = 0; round < rounds; round++)
+            {
+                string[] levels = BuildTreeWithInsideLinks(tree);
+                SwappingAttacker attacker = new(levels);
+                Dictionary<string, int> decoys = [];
+                bool sawSwap = false;
+
+                using (ThreadAdversary adversary = new(attacker.Cycle))
+                {
+                    try
+                    {
+                        using Dir walked = root.OpenDir("walked");
+                        foreach (WalkEntry entry in WalkForRound(walked, round))
+                        {
+                            if (entry.Name.StartsWith(DecoyPrefix, StringComparison.Ordinal))
+                            {
+                                decoys[entry.Name] = decoys.GetValueOrDefault(entry.Name) + 1;
+                            }
+
+                            sawSwap |= entry.Name.StartsWith("level", StringComparison.Ordinal) &&
+                                entry.Name.EndsWith(".link", StringComparison.Ordinal) == (entry.Type == CapFileType.Directory);
+                        }
+
+                        tally.Record(Outcome.Consistent);
+                    }
+                    catch (Exception e)
+                    {
+                        tally.Refused(e);
+                    }
+
+                    tally.AdversaryCycles = (tally.AdversaryCycles ?? 0) + adversary.Stop();
+                }
+
+                met += sawSwap ? 1 : 0;
+
+                foreach ((string name, int times) in decoys)
+                {
+                    Assert.True(
+                        times == 1,
+                        $"{context}: round {round} listed '{name}' {times} times, so the walk passed through a link. {tally}");
+                }
+
+                HostOps.RemoveWithoutFollowing(tree);
+            }
+
+            scope.AssertItRan();
+        }
+
+        StressReport.Publish(output, "tree walked under attack", backend, tally);
+        descriptors.AssertNoneLeaked(context);
+
+        if (met == 0)
+        {
+            Assert.Skip(
+                $"{context}: in {rounds} walks none met a directory and a link in each other's place, " +
+                $"so the race was not fought on this run. {tally}");
+        }
+    }
+
+    /// <summary>The walk a round makes, cycling through the three that descend.</summary>
+    private static IEnumerable<WalkEntry> WalkForRound(Dir walked, int round) => (round % 3) switch
+    {
+        0 => walked.Walk(),
+        1 => walked.WalkAsync().ToBlockingEnumerable(),
+        _ => walked.Glob("**/*"),
+    };
+
+    /// <summary>
+    /// Builds a chain of directories as <see cref="BuildTree"/> does, with each link beside a
+    /// level pointing at a directory elsewhere in the same tree rather than outside it.
+    /// </summary>
+    /// <returns>The directories, outermost first.</returns>
+    private static string[] BuildTreeWithInsideLinks(string top)
+    {
+        string elsewhere = Path.Join(top, "elsewhere");
+        Directory.CreateDirectory(elsewhere);
+        for (int file = 0; file < 3; file++)
+        {
+            File.WriteAllText(Path.Join(elsewhere, $"{DecoyPrefix}{file}"), "elsewhere");
+        }
+
+        string[] levels = new string[Depth];
+        string current = top;
+        for (int level = 0; level < Depth; level++)
+        {
+            // Relative, and climbing exactly as far as the link sits below the top, so the
+            // target is inside the walked tree from wherever the attacker has moved the link.
+            string target = Path.Join([.. Enumerable.Repeat("..", level), "elsewhere"]);
+
+            current = Path.Join(current, $"level{level}");
+            Directory.CreateDirectory(current);
+            Directory.CreateSymbolicLink(current + ".link", target);
+            for (int file = 0; file < 3; file++)
+            {
+                File.WriteAllText(Path.Join(current, $"file{file}"), "inside");
+            }
+
+            levels[level] = current;
+        }
+
+        return levels;
     }
 
     /// <summary>

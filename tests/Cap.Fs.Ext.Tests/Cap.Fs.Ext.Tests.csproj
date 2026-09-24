@@ -5,6 +5,8 @@
     <AssemblyName>Cap.Fs.Ext.Tests</AssemblyName>
     <!-- The throwaway directory in tests/Scenarios. -->
     <CapUsesScratchTree>true</CapUsesScratchTree>
+    <!-- The simulated filesystem in tests/Fakes, for trees a real filesystem will not produce. -->
+    <CapUsesPlatformFake>true</CapUsesPlatformFake>
   </PropertyGroup>
 
   <ItemGroup>

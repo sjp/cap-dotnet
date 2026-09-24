@@ -67,14 +67,13 @@ public sealed class WalkOptions
     /// still reported as an entry.
     /// </para>
     /// <para>
-    /// <strong>Off is decided by the kind the directory read reported.</strong> An entry the
-    /// read called a directory, or one the filesystem declined to classify, is entered by an
-    /// ordinary open of its name, and that open follows a link as the handle's own policy
-    /// allows. So a directory swapped for a link between being listed and being entered, or a
-    /// link on a filesystem that does not report what its entries are, can be entered with
-    /// this off — though only when the link resolves inside the subtree, since one that leaves
-    /// is refused under every policy. A caller that must never pass through a link walks a
-    /// handle restricted with <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>.
+    /// <strong>Off holds whatever the directory read reported.</strong> Each descent is an
+    /// open that refuses a link, so a link is never entered even when the read called it a
+    /// directory or declined to say what it was — a directory swapped for a link between
+    /// being listed and being entered, or a link on a filesystem that does not report the
+    /// kinds of its entries. Such a name is yielded as an entry and nothing beneath it is
+    /// visited. The directories the walk does enter are handed back under the starting
+    /// handle's own policy, not a stricter one.
     /// </para>
     /// </remarks>
     public bool FollowSymlinks { get; init; }
