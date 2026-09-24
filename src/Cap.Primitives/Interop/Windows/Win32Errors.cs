@@ -30,6 +30,7 @@ internal static class Win32Errors
     public const int ERROR_NOT_A_REPARSE_POINT = 4390;
     public const int ERROR_REPARSE_TAG_INVALID = 4393;
     public const int ERROR_REPARSE_TAG_MISMATCH = 4394;
+    public const int ERROR_IO_PENDING = 997;
 
     /// <summary>Reads a Win32 error as a portable category.</summary>
     public static CapErrorCategory Classify(int error) => error switch

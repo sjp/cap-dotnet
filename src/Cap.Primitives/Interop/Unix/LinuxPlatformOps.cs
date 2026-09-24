@@ -858,6 +858,80 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// An ordinary copy. Appending is a flag on the open file here, and a copy shares the
+    /// open file.
+    /// </remarks>
+    public CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle) => DuplicateFile(handle);
+
+    /// <inheritdoc/>
+    public CapError SetFileAppending(SafeFileHandle handle, bool appending)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        int flags = LinuxNative.Fcntl(lease.Descriptor, LinuxConstants.F_GETFL, 0);
+        if (flags < 0)
+        {
+            return LinuxErrno.ToError(Marshal.GetLastPInvokeError());
+        }
+
+        int wanted = appending ? flags | LinuxConstants.O_APPEND : flags & ~LinuxConstants.O_APPEND;
+        if (wanted == flags)
+        {
+            return CapError.Success;
+        }
+
+        return LinuxNative.Fcntl(lease.Descriptor, LinuxConstants.F_SETFL, wanted) < 0
+            ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
+            : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A positioned write, which this kernel puts at the end of the file whatever offset it
+    /// is given while the descriptor appends. Using it rather than a write at the
+    /// descriptor's position means a write that races appending being turned off lands at
+    /// the offset the caller named, not at a position the caller never chose.
+    /// </remarks>
+    public unsafe CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        fixed (byte* start = buffer)
+        {
+            int done = 0;
+            while (done < buffer.Length)
+            {
+                nint written = LinuxNative.PWrite(
+                    lease.Descriptor, start + done, (nuint)(buffer.Length - done), fileOffset + done);
+
+                if (written < 0)
+                {
+                    int errno = Marshal.GetLastPInvokeError();
+                    if (errno == PosixErrno.EINTR)
+                    {
+                        continue;
+                    }
+
+                    return LinuxErrno.ToError(errno);
+                }
+
+                done += (int)written;
+            }
+        }
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
     public CapError CreateChildDirectory(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
@@ -1240,10 +1314,15 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 flags |= LinuxConstants.O_TRUNC;
                 break;
             case FileMode.Append:
-                flags |= LinuxConstants.O_CREAT | LinuxConstants.O_APPEND;
+                flags |= LinuxConstants.O_CREAT;
                 break;
             default:
                 break;
+        }
+
+        if (request.Appends)
+        {
+            flags |= LinuxConstants.O_APPEND;
         }
 
         if ((request.Options & FileOptions.WriteThrough) != 0)

@@ -716,6 +716,86 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// An ordinary copy. Appending is a flag on the open file here, and a copy shares the
+    /// open file.
+    /// </remarks>
+    public CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle) => DuplicateFile(handle);
+
+    /// <inheritdoc/>
+    public CapError SetFileAppending(SafeFileHandle handle, bool appending)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        int flags = DarwinNative.Fcntl(lease.Descriptor, DarwinConstants.F_GETFL, 0);
+        if (flags < 0)
+        {
+            return DarwinErrno.ToError(Marshal.GetLastPInvokeError());
+        }
+
+        int wanted = appending ? flags | DarwinConstants.O_APPEND : flags & ~DarwinConstants.O_APPEND;
+        if (wanted == flags)
+        {
+            return CapError.Success;
+        }
+
+        return DarwinNative.Fcntl(lease.Descriptor, DarwinConstants.F_SETFL, wanted) < 0
+            ? DarwinErrno.ToError(Marshal.GetLastPInvokeError())
+            : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// A write at the descriptor's position rather than at the offset. POSIX says a
+    /// positioned write on a descriptor that appends goes to the offset, Linux puts it at the
+    /// end, and this system does not document which it does. A write at the position is
+    /// defined to go to the end everywhere, and moving the position there is part of the same
+    /// step.
+    /// </para>
+    /// <para>
+    /// The position is shared with every copy of the descriptor, but nothing this library
+    /// hands out reads or writes at it: a file handle names its offset on every call, and a
+    /// stream keeps a position of its own.
+    /// </para>
+    /// </remarks>
+    public unsafe CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        fixed (byte* start = buffer)
+        {
+            int done = 0;
+            while (done < buffer.Length)
+            {
+                nint written = DarwinNative.Write(lease.Descriptor, start + done, (nuint)(buffer.Length - done));
+                if (written < 0)
+                {
+                    int errno = Marshal.GetLastPInvokeError();
+                    if (errno == PosixErrno.EINTR)
+                    {
+                        continue;
+                    }
+
+                    return DarwinErrno.ToError(errno);
+                }
+
+                done += (int)written;
+            }
+        }
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
     public CapError CreateChildDirectory(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
@@ -1071,10 +1151,15 @@ internal sealed class DarwinPlatformOps : IPlatformOps
                 flags |= DarwinConstants.O_TRUNC;
                 break;
             case FileMode.Append:
-                flags |= DarwinConstants.O_CREAT | DarwinConstants.O_APPEND;
+                flags |= DarwinConstants.O_CREAT;
                 break;
             default:
                 break;
+        }
+
+        if (request.Appends)
+        {
+            flags |= DarwinConstants.O_APPEND;
         }
 
         if ((request.Options & FileOptions.WriteThrough) != 0)

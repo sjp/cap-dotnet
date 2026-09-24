@@ -463,6 +463,18 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle) => DuplicateFile(handle);
+
+    /// <inheritdoc/>
+    /// <remarks>The fake holds no file contents, so there is no setting to keep.</remarks>
+    public CapError SetFileAppending(SafeFileHandle handle, bool appending) => CapError.Success;
+
+    /// <inheritdoc/>
+    /// <remarks>The fake holds no file contents, so there is nothing to write to.</remarks>
+    public CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
     public CapError CreateChildDirectory(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,

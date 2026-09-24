@@ -22,6 +22,7 @@ what a program moving between Linux, macOS and Windows will notice.
 | Unix-domain sockets through a `Dir` | yes | no | no |
 | Permissions reported as | Unix mode | Unix mode | file attributes |
 | Creation time | where the filesystem records it | yes | yes |
+| Appending (`append: true`, `CapFile.IsAppending`) | a flag on the open file, shared with streams taken from it | same | applied by `CapFile` to its own writes; a stream taken while it is on gets a handle that can only append |
 | Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
 
 ## Windows

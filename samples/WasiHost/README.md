@@ -50,7 +50,8 @@ guest's path passed through as it arrived:
 |---|---|
 | a preopen, or a directory descriptor | `Dir` |
 | a file descriptor | `CapFile`, plus the position `fd_read` and `fd_write` move |
-| `path_open` | `OpenFile`, or `OpenDir` for `O_DIRECTORY` |
+| `path_open` | `OpenFile`, or `OpenDir` for `O_DIRECTORY`; `FDFLAGS_APPEND` is `append: true` |
+| `fd_fdstat_set_flags` with `FDFLAGS_APPEND` | `CapFile.IsAppending` |
 | `path_create_directory`, `path_remove_directory`, `path_unlink_file` | `CreateDir`, `DeleteDir`, `DeleteFile` |
 | `path_rename`, `path_link` | `Rename(..., replaceExisting: true)`, `CreateHardLink` |
 | `path_symlink`, `path_readlink` | `CreateSymlink` or `CreateDirSymlink`, `ReadLink` |
@@ -99,8 +100,9 @@ export CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh /tmp)
 dotnet test --project tests/WasiHost.Tests
 ```
 
-46 pass. The other 3 fail because the library does not yet offer something WASI needs, and
-the test asserts that each of those still fails, so a gap that closes is noticed.
+All 49 pass. A program that fails because the library does not offer something WASI needs
+is listed as a known gap in the test, which asserts that it still fails, so a gap that
+closes is noticed. None is listed now.
 
 ## What the library does not yet offer
 
@@ -108,13 +110,6 @@ Running a real WASI host over `Dir` is a review of the API by a demanding caller
 found are listed here. The adapter reports each as an error rather than working around it,
 except where two library calls together can do what is asked without reaching anything
 either could not reach alone. Those cases are listed too, with what they cost.
-
-**Programs that fail:**
-
-- **Appending is only a `FileMode`.** `FileMode.Append` creates the file, allows only writing
-  and cannot truncate. An open that appends and also reads or truncates can't be expressed,
-  nor can turning appending on or off on an open file. (`fd_flags_set`, `path_filestat`,
-  `pwrite-with-append`)
 
 **Composed from two calls:**
 

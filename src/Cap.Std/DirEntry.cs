@@ -149,6 +149,7 @@ public readonly struct DirEntry
     /// <param name="share">What other openers may do while the handle is open.</param>
     /// <param name="options">Flags and hints for the open.</param>
     /// <param name="preallocationSize">How much room to claim in advance.</param>
+    /// <param name="append">Whether every write goes to the end of the file.</param>
     /// <returns>The open file.</returns>
     /// <remarks>
     /// <para>
@@ -185,8 +186,9 @@ public readonly struct DirEntry
         FileAccess access = FileAccess.Read,
         FileShare share = FileShare.Read,
         FileOptions options = FileOptions.None,
-        long preallocationSize = 0) =>
-        Owner.OpenFile(Name, mode, access, share, options, preallocationSize);
+        long preallocationSize = 0,
+        bool append = false) =>
+        Owner.OpenFile(Name, mode, access, share, options, preallocationSize, append);
 
     /// <summary>
     /// Opens the entry as a file to read, reporting failure rather than throwing.
@@ -217,6 +219,7 @@ public readonly struct DirEntry
     /// <param name="share">What other openers may do while the handle is open.</param>
     /// <param name="options">Flags and hints for the open.</param>
     /// <param name="preallocationSize">How much room to claim in advance.</param>
+    /// <param name="append">Whether every write goes to the end of the file.</param>
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when it was opened.</returns>
     /// <remarks>
@@ -246,8 +249,9 @@ public readonly struct DirEntry
         FileShare share,
         FileOptions options,
         long preallocationSize,
+        bool append,
         [NotNullWhen(true)] out CapFile? file) =>
-        Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, out file);
+        Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, append, out file);
 
     /// <summary>
     /// Describes what the entry's name holds now.

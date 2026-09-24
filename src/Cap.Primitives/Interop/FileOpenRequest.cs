@@ -38,13 +38,15 @@ internal readonly struct FileOpenRequest
         FileAccess access,
         FileShare share,
         FileOptions options,
-        long preallocationSize)
+        long preallocationSize,
+        bool append = false)
     {
         Mode = mode;
         Access = access;
         Share = share;
         Options = options;
         PreallocationSize = preallocationSize;
+        Appends = append || mode == FileMode.Append;
     }
 
     /// <summary>Whether the name may be created, and what happens to what is already there.</summary>
@@ -70,6 +72,16 @@ internal readonly struct FileOpenRequest
     /// How much space to reserve for a file this open creates, or zero to reserve none.
     /// </summary>
     public long PreallocationSize { get; }
+
+    /// <summary>
+    /// Whether every write through the handle is to go to the end of the file.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Mode"/>, as it is in POSIX, where appending is a flag that
+    /// combines with reading, creating, excluding and truncating alike. The framework's
+    /// <see cref="FileMode.Append"/> is one such combination, and sets this.
+    /// </remarks>
+    public bool Appends { get; }
 
     /// <summary>Whether the handle is to be capable of overlapped operations.</summary>
     public bool IsAsynchronous => (Options & FileOptions.Asynchronous) != 0;

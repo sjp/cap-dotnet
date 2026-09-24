@@ -45,6 +45,13 @@ internal static unsafe partial class DarwinNative
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int Fcntl(int fd, int command, int argument);
 
+    /// <summary>
+    /// Writes at the descriptor's position, which on a descriptor that appends is the end of
+    /// the file, moved there by the kernel in the same step as the write.
+    /// </summary>
+    [LibraryImport("libc", EntryPoint = "write", SetLastError = true)]
+    internal static partial nint Write(int fd, byte* buffer, nuint count);
+
     /// <summary>Creates a directory relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
     internal static partial int MkdirAt(int directoryFd, byte* path, uint mode);

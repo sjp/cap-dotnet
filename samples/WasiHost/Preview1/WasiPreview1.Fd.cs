@@ -111,8 +111,11 @@ public sealed partial class WasiPreview1
     }
 
     /// <remarks>
-    /// Only the non-blocking flag can change. Appending and the synchronous-write flags are
-    /// fixed when a <see cref="CapFile"/> is opened and cannot be changed on the open file.
+    /// The non-blocking flag and appending can change. Appending on a file is changed on the
+    /// <see cref="CapFile"/>, and a file whose handle cannot write keeps the flag only as the
+    /// guest's record, since it has no writes for appending to place. The synchronous-write
+    /// flags are fixed when a <see cref="CapFile"/> is opened and cannot be changed on the
+    /// open file.
     /// </remarks>
     private Errno FdFdstatSetFlags(uint fd, FdFlags flags)
     {
@@ -121,9 +124,22 @@ public sealed partial class WasiPreview1
             return Errno.BadF;
         }
 
-        if ((flags & ~FdFlags.NonBlock) != (descriptor.Flags & ~FdFlags.NonBlock))
+        const FdFlags Changeable = FdFlags.NonBlock | FdFlags.Append;
+        if ((flags & ~Changeable) != (descriptor.Flags & ~Changeable))
         {
             return Errno.NotSup;
+        }
+
+        bool appends = (flags & FdFlags.Append) != 0;
+        if (descriptor is FileDescriptor file &&
+            (file.File.Access & FileAccess.Write) != 0 &&
+            file.File.IsAppending != appends)
+        {
+            Errno error = ErrorMapping.Run(() => file.File.IsAppending = appends);
+            if (error != Errno.Success)
+            {
+                return error;
+            }
         }
 
         descriptor.Flags = flags;

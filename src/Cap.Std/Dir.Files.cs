@@ -74,6 +74,15 @@ public sealed partial class Dir
     /// making it: a caller who reserves does so precisely so that a later write will not
     /// fail for that reason.
     /// </param>
+    /// <param name="append">
+    /// Whether every write through the handle goes to the end of the file, whatever offset it
+    /// names. It combines with any <paramref name="mode"/> and with reading, as appending
+    /// does in POSIX: a file can be created or emptied and then appended to, or read anywhere
+    /// and appended to, through one handle. It needs an <paramref name="access"/> that can
+    /// write. <see cref="FileMode.Append"/> keeps the meaning it has in <c>System.IO</c>,
+    /// which is <see cref="FileMode.OpenOrCreate"/> with this set and writing only. Appending
+    /// can be changed later through <see cref="CapFile.IsAppending"/>.
+    /// </param>
     /// <returns>An open file, owning its handle.</returns>
     /// <remarks>
     /// <para>
@@ -113,7 +122,7 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="path"/> is not a usable name, or the requested combination of mode,
-    /// access and sharing is not one that means anything.
+    /// access, sharing and appending is not one that means anything.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="preallocationSize"/> is negative, or an enumeration argument is not one
@@ -139,9 +148,10 @@ public sealed partial class Dir
         FileAccess access = FileAccess.Read,
         FileShare share = FileShare.Read,
         FileOptions options = FileOptions.None,
-        long preallocationSize = 0)
+        long preallocationSize = 0,
+        bool append = false)
     {
-        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize);
+        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize, append);
 
         CapPathError pathError = OpenFileCore(path, in request, out CapFile? file, out CapError error);
         if (pathError != CapPathError.None)
@@ -186,7 +196,7 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryOpenFile(string path, [NotNullWhen(true)] out CapFile? file) =>
-        TryOpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, out file);
+        TryOpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: false, out file);
 
     /// <summary>
     /// Opens a file beneath this handle as the arguments describe, reporting failure rather
@@ -198,6 +208,7 @@ public sealed partial class Dir
     /// <param name="share">What other openers may do while the handle is open.</param>
     /// <param name="options">Flags and hints for the open.</param>
     /// <param name="preallocationSize">How much room to claim in advance.</param>
+    /// <param name="append">Whether every write goes to the end of the file. See <see cref="OpenFile"/>.</param>
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when the file was opened.</returns>
     /// <remarks>
@@ -225,9 +236,10 @@ public sealed partial class Dir
         FileShare share,
         FileOptions options,
         long preallocationSize,
+        bool append,
         [NotNullWhen(true)] out CapFile? file)
     {
-        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize);
+        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize, append);
         return Succeeded(OpenFileCore(path, in request, out file, out CapError error), error);
     }
 
@@ -322,7 +334,7 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateFile(string path, [NotNullWhen(true)] out CapFile? file) =>
-        TryOpenFile(path, FileMode.Create, FileAccess.Write, FileShare.Read, FileOptions.None, 0, out file);
+        TryOpenFile(path, FileMode.Create, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, out file);
 
     /// <summary>
     /// Claims a name for a new file beneath this handle, reporting failure rather than
@@ -347,7 +359,7 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateNewFile(string path, [NotNullWhen(true)] out CapFile? file) =>
-        TryOpenFile(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.None, 0, out file);
+        TryOpenFile(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, out file);
 
     /// <summary>Reads a whole file beneath this handle.</summary>
     /// <param name="path">A relative path to the file.</param>
@@ -598,7 +610,8 @@ public sealed partial class Dir
         FileAccess access,
         FileShare share,
         FileOptions options,
-        long preallocationSize)
+        long preallocationSize,
+        bool append)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(preallocationSize);
 
@@ -643,11 +656,18 @@ public sealed partial class Dir
         if (mode == FileMode.Append && access != FileAccess.Write)
         {
             throw new ArgumentException(
-                "A file opened to append can only be written. Every write on such a handle " +
-                "goes to the end of the file whatever offset it is given, so a handle that " +
-                "could also read would be one whose reads and writes disagreed about where " +
-                "they were.",
+                "FileMode.Append means what it means to System.IO: open or create, and write " +
+                "only. To append through a handle that can also read, ask for appending " +
+                "separately, with FileMode.OpenOrCreate or whichever mode is wanted.",
                 nameof(access));
+        }
+
+        if (append && (access & FileAccess.Write) == 0)
+        {
+            throw new ArgumentException(
+                "Appending is a rule about where writes go, and this handle could not write. " +
+                "Ask for an access that can write, or do not ask to append.",
+                nameof(append));
         }
 
         if ((access & FileAccess.Write) == 0 &&
@@ -669,7 +689,7 @@ public sealed partial class Dir
                 nameof(preallocationSize));
         }
 
-        return new FileOpenRequest(mode, access, share, options, preallocationSize);
+        return new FileOpenRequest(mode, access, share, options, preallocationSize, append);
     }
 
     /// <summary>
@@ -734,7 +754,8 @@ public sealed partial class Dir
         file = new CapFile(
             opened.Value,
             request.Access,
-            request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles);
+            request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles,
+            request.Appends);
 
         return CapPathError.None;
     }

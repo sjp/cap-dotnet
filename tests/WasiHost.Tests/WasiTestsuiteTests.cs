@@ -26,20 +26,11 @@ namespace WasiHost.Tests;
 /// </remarks>
 public sealed class WasiTestsuiteTests
 {
-    private const string Appending =
-        "Appending is a FileMode in .NET, which creates, allows only writing and cannot truncate, " +
-        "so an open that appends and also reads or truncates cannot be expressed.";
-
     /// <summary>
     /// The programs that fail because of something the library does not offer, and what that
     /// is. A program listed here must fail; see the remarks on the class.
     /// </summary>
-    internal static readonly Dictionary<string, string> KnownGaps = new()
-    {
-        ["rust/fd_flags_set"] = Appending,
-        ["rust/path_filestat"] = Appending,
-        ["c/pwrite-with-append"] = Appending,
-    };
+    internal static readonly Dictionary<string, string> KnownGaps = [];
 
     public static TheoryData<string> Cases
     {

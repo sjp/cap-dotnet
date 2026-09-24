@@ -240,6 +240,33 @@ internal static unsafe partial class NtNative
         uint outBufferSize,
         out uint bytesReturned,
         nint overlapped);
+
+    /// <summary>
+    /// Writes to an open file at the offset the overlapped record names, or at the end of the
+    /// file when both halves of the offset are all ones.
+    /// </summary>
+    /// <remarks>
+    /// The end-of-file offset is why this is here rather than the framework's positioned
+    /// write, which cannot express it: the system finds the end and writes there in one
+    /// step, as it would for a handle opened with only the right to append.
+    /// </remarks>
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool WriteFile(
+        nint file,
+        byte* buffer,
+        uint bytesToWrite,
+        uint* bytesWritten,
+        NativeOverlapped* overlapped);
+
+    /// <summary>Waits for an overlapped operation to finish and reports how much it moved.</summary>
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetOverlappedResult(
+        nint file,
+        NativeOverlapped* overlapped,
+        uint* bytesTransferred,
+        [MarshalAs(UnmanagedType.Bool)] bool wait);
 }
 
 /// <summary>Constants for the native open and query calls.</summary>
@@ -446,6 +473,9 @@ internal static class NtConstants
     /// that the name used to reach it was not its own.
     /// </remarks>
     public const uint FileNameInformationClass = 9;
+
+    /// <summary>Asks for the access rights a handle was granted.</summary>
+    public const uint FileAccessInformationClass = 8;
 
     /// <summary>Asks for the attribute bits and the reparse tag together.</summary>
     public const uint FileAttributeTagInformationClass = 35;

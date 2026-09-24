@@ -187,10 +187,8 @@ public sealed partial class WasiPreview1
     /// guest cannot use the access it did not request.
     /// </para>
     /// <para>
-    /// Appending is a <see cref="FileMode"/> in .NET, one that also creates the file and
-    /// allows only writing. It is used for the one WASI combination that means the same
-    /// thing — append, create, write only — and any other open that asks to append is
-    /// reported as unsupported rather than approximated.
+    /// Appending is asked for separately from the mode, as WASI asks for it, so it combines
+    /// with reading, creating and truncating.
     /// </para>
     /// </remarks>
     private static Errno OpenFile(
@@ -218,16 +216,6 @@ public sealed partial class WasiPreview1
             _ when truncates => FileMode.Truncate,
             _ => FileMode.Open,
         };
-
-        if (appends)
-        {
-            if (mode != FileMode.OpenOrCreate || read)
-            {
-                return Errno.NotSup;
-            }
-
-            mode = FileMode.Append;
-        }
 
         bool write = writeRequested || mode is FileMode.CreateNew or FileMode.Create;
         FileAccess access = (read, write) switch
@@ -263,7 +251,7 @@ public sealed partial class WasiPreview1
         CapFile? file = null;
         try
         {
-            file = from.OpenFile(path, mode, access, share, options);
+            file = from.OpenFile(path, mode, access, share, options, append: appends);
             FileType type = ToFileType(file.GetMetadata().Type);
             opened = new FileDescriptor(file, type, granted, rightsInheriting) { Flags = kept };
             return Errno.Success;

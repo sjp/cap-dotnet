@@ -140,7 +140,7 @@ public sealed class CapTempFile : IDisposable
         {
             // Nothing is kept beyond the handle. There is no name to remove later and no
             // directory to remove it from, so there is nothing for this object to hold.
-            CapFile file = new(anonymous.Value, FileAccess.ReadWrite, isAsync: false);
+            CapFile file = new(anonymous.Value, FileAccess.ReadWrite, isAsync: false, appending: false);
             return new CapTempFile(parent: null, file, name: null);
         }
 
@@ -290,6 +290,7 @@ public sealed class CapTempFile : IDisposable
                 FileShare.Read,
                 FileOptions.None,
                 preallocationSize: 0,
+                append: false,
                 out CapFile? file);
 
             if (created)

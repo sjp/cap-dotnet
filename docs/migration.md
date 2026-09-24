@@ -43,6 +43,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.WriteAllText(p, s)` | **Ext** `dir.WriteAllTextAtomic(p, s)` | Readers see the old file or the new one, never half of either. Or `dir.WriteAllBytes(p, Encoding.UTF8.GetBytes(s))` to write in place. |
 | `File.WriteAllLines(p, lines)` | a `StreamWriter` over `dir.CreateFile(p).AsStream()` | |
 | `File.AppendAllText(p, s)` | a `StreamWriter` over `dir.OpenFile(p, FileMode.Append, FileAccess.Write).AsStream()` | |
+| No equivalent: an open that appends and also reads, empties the file or must create it | `dir.OpenFile(p, mode, access, append: true)` | Appending is a flag of its own here, as in POSIX, so it combines with any mode and with reading, and `CapFile.IsAppending` changes it on an open file. `FileMode.Append` keeps its framework meaning. |
 | `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. Every mode but `FileMode.Open` refuses a symbolic link at `p`. |
 | `File.OpenRead(p)` | `dir.OpenFile(p)` | Read is the default. |
 | `File.OpenWrite(p)` | `dir.OpenFile(p, FileMode.OpenOrCreate, FileAccess.Write)` | |

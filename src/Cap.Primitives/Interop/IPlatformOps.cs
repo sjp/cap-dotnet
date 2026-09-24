@@ -455,6 +455,57 @@ internal interface IPlatformOps
     CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle);
 
     /// <summary>
+    /// Produces a second handle to the same open file, one that appends by itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a handle given to code that writes through it without asking this library to,
+    /// such as a stream, while the original is appending. Where appending belongs to the open
+    /// file, as a flag the system applies to every write, this is <see cref="DuplicateFile"/>:
+    /// the copy shares the flag. Where it is applied by this library instead, the copy is
+    /// given only the right to append, so that the system itself puts that code's writes at
+    /// the end. The copy then keeps appending whatever becomes of the original's setting.
+    /// </para>
+    /// </remarks>
+    CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle);
+
+    /// <summary>
+    /// Turns appending on or off for an open file, where the system keeps that setting.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// On a system that keeps it, as a flag on the open file, the change reaches every copy
+    /// of the handle made by duplication, since they share the open file. On one that does
+    /// not, this succeeds without doing anything, and appending is applied by
+    /// <see cref="WriteAppending"/> alone.
+    /// </para>
+    /// </remarks>
+    CapError SetFileAppending(SafeFileHandle handle, bool appending);
+
+    /// <summary>
+    /// Writes the whole of <paramref name="buffer"/> at the end of an open file whose
+    /// appending is on.
+    /// </summary>
+    /// <param name="handle">An open file handle with write access.</param>
+    /// <param name="buffer">The bytes to write.</param>
+    /// <param name="fileOffset">
+    /// The offset the caller gave. It places nothing while appending is on. It is passed
+    /// down only so that a write racing a change to the setting, on a system whose
+    /// positioned write appends while the flag is set, lands where the caller asked if the
+    /// flag is cleared first.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Each call the system makes puts its bytes at the end of the file as it stands at that
+    /// moment, in one step, so writes from other handles and other processes are never
+    /// overwritten. A buffer the system accepts only part of is finished with further calls,
+    /// each of which appends too. The pieces go in order, but another writer's bytes may
+    /// land between them.
+    /// </para>
+    /// </remarks>
+    CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset);
+
+    /// <summary>
     /// Creates a directory named <paramref name="name"/> directly beneath
     /// <paramref name="parent"/>.
     /// </summary>

@@ -99,9 +99,19 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "futimens", SetLastError = true)]
     internal static partial int FUtimens(int fd, UnixTimespec* times);
 
-    /// <summary>Manipulates a descriptor. Used to duplicate one and to clear a status flag.</summary>
+    /// <summary>
+    /// Manipulates a descriptor. Used to duplicate one, to clear a status flag, and to read
+    /// and change whether a file appends.
+    /// </summary>
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
     internal static partial int Fcntl(int fd, int command, int argument);
+
+    /// <summary>
+    /// Writes at a given offset without moving the descriptor's position. On a descriptor
+    /// that appends, the kernel writes at the end of the file instead.
+    /// </summary>
+    [LibraryImport("libc", EntryPoint = "pwrite", SetLastError = true)]
+    internal static partial nint PWrite(int fd, byte* buffer, nuint count, long offset);
 
     /// <summary>Creates a directory relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true)]

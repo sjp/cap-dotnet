@@ -52,13 +52,15 @@ public sealed class CapFile : IDisposable
     private readonly SafeFileHandle _handle;
     private readonly FileAccess _access;
     private readonly bool _isAsync;
+    private volatile bool _appending;
     private bool _given;
 
-    internal CapFile(SafeFileHandle handle, FileAccess access, bool isAsync)
+    internal CapFile(SafeFileHandle handle, FileAccess access, bool isAsync, bool appending)
     {
         _handle = handle;
         _access = access;
         _isAsync = isAsync;
+        _appending = appending;
     }
 
     /// <summary>What this handle may do with the file's contents.</summary>
@@ -96,6 +98,68 @@ public sealed class CapFile : IDisposable
     /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public bool IsAsync => _isAsync;
+
+    /// <summary>
+    /// Whether every write through this handle goes to the end of the file, whatever offset
+    /// it names.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Starts as the open asked for and can be changed while the file is open, as POSIX
+    /// allows. It is not an authority: a handle that can write anywhere in the file can
+    /// already write at its end, so turning appending off hands out nothing that was not
+    /// held. It is a rule about where writes land, and what it buys is that each appended
+    /// write goes to wherever the end is at that moment, found and written in one step, so
+    /// writers sharing a file through other handles or other processes never overwrite one
+    /// another.
+    /// </para>
+    /// <para>
+    /// <see cref="Write"/> and <see cref="WriteAsync"/> follow it on every platform. Reads
+    /// are unaffected, and so is <see cref="SetLength"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Streams and the raw handle.</strong> On Linux and macOS appending is a flag
+    /// on the open file, shared with every stream taken from this handle, so a change here
+    /// reaches them too. On Windows the system keeps no such flag: appending is applied to
+    /// each write this object makes, and a stream taken while appending is on is given a
+    /// handle that can only append, which stays that way whatever is set here afterwards. A
+    /// stream taken while it is off does not start appending when it is turned on. The
+    /// handle from <see cref="UnsafeGetHandle"/> on Windows writes wherever it is told.
+    /// </para>
+    /// <para>
+    /// Safe to read from any thread. A change is not ordered against writes in progress on
+    /// other threads: each of those is made as though appending were on or as though it
+    /// were off.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="UnauthorizedAccessException">
+    /// Set on a handle that cannot write, which has nothing to append.
+    /// </exception>
+    /// <exception cref="CapIOException">The system would not change the setting.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
+    public bool IsAppending
+    {
+        get => _appending;
+        set
+        {
+            Demand();
+
+            if ((_access & FileAccess.Write) == 0)
+            {
+                throw new UnauthorizedAccessException(
+                    "This file was opened without write access, so there are no writes for " +
+                    "appending to place. Open it for writing to append to it.");
+            }
+
+            CapError error = PlatformOps.Current.SetFileAppending(_handle, value);
+            if (error.IsFailure)
+            {
+                throw FailureTranslation.ToWriteException(error);
+            }
+
+            _appending = value;
+        }
+    }
 
     /// <summary>The file's current length in bytes.</summary>
     /// <remarks>
@@ -326,10 +390,16 @@ public sealed class CapFile : IDisposable
     /// <remarks>
     /// <para>
     /// Writes all of the buffer, repeating the call underneath if the system accepts only
-    /// part of it. A file opened to append is the exception, and the exception is the
-    /// platform's rather than this library's: such a handle puts every write at the end of
-    /// the file whatever offset it is given, because appending is a property of how the file
-    /// was opened and is applied by the operating system.
+    /// part of it.
+    /// </para>
+    /// <para>
+    /// <strong>While <see cref="IsAppending"/> is on,</strong> the bytes go to the end of the
+    /// file and <paramref name="fileOffset"/> is not used, on every platform. The systems
+    /// disagree about a positioned write to a file that appends — some put it at the end,
+    /// others at the offset — so the write is made in whichever way the platform puts at the
+    /// end. Each call the system makes finds the end and writes there in one step. A buffer
+    /// accepted only in part is finished with further appends, in order, and another
+    /// writer's bytes may land between the pieces.
     /// </para>
     /// <para>
     /// Safe to call from any thread, concurrently with other reads and writes on the same
@@ -344,6 +414,13 @@ public sealed class CapFile : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(fileOffset);
         Demand();
+
+        if (AppendsWrites)
+        {
+            WriteAtEnd(buffer, fileOffset);
+            return;
+        }
+
         RandomAccess.Write(_handle, buffer, fileOffset);
     }
 
@@ -399,6 +476,12 @@ public sealed class CapFile : IDisposable
     /// handle; as with <see cref="Write"/>, writes to overlapping ranges are not ordered
     /// against each other.
     /// </para>
+    /// <para>
+    /// While <see cref="IsAppending"/> is on, the write goes to the end of the file as
+    /// <see cref="Write"/> describes, and is made on a thread-pool thread on every platform:
+    /// the system's own overlapped write cannot be told to find the end, so an appending
+    /// write occupies a thread even on a handle for which <see cref="IsAsync"/> is true.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot write.</exception>
@@ -411,6 +494,14 @@ public sealed class CapFile : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(fileOffset);
         Demand();
+
+        if (AppendsWrites)
+        {
+            return cancellationToken.IsCancellationRequested
+                ? ValueTask.FromCanceled(cancellationToken)
+                : new ValueTask(Task.Run(() => WriteAtEnd(buffer.Span, fileOffset), cancellationToken));
+        }
+
         return RandomAccess.WriteAsync(_handle, buffer, fileOffset, cancellationToken);
     }
 
@@ -440,10 +531,21 @@ public sealed class CapFile : IDisposable
     /// A borrowed stream is given a copy of the handle rather than the handle itself,
     /// because a stream constructed over a handle closes that handle when it is disposed and
     /// there is no way to ask it not to. The copy refers to the same open file, with the
-    /// same access and the same appending behaviour, so it is a second way to reach one
-    /// file rather than a second opinion about what the name meant. That matters: re-opening
-    /// by name is exactly what a capability exists to avoid, and a name can hold something
-    /// else by the time it is asked again.
+    /// same access, so it is a second way to reach one file rather than a second opinion
+    /// about what the name meant. That matters: re-opening by name is exactly what a
+    /// capability exists to avoid, and a name can hold something else by the time it is
+    /// asked again.
+    /// </para>
+    /// <para>
+    /// <strong>Appending.</strong> A stream writes at its own position, through the system's
+    /// positioned write, so while <see cref="IsAppending"/> is on it appends wherever the
+    /// system puts such a write on a file that appends. Linux puts it at the end. On Windows
+    /// the stream is given a copy of the handle that can only append, which the system also
+    /// puts at the end; handing over ownership gives it such a copy too and closes this
+    /// handle, since this one can also write at an offset. macOS does not document where it
+    /// puts such a write, so a caller there who needs every write at the end writes through
+    /// this handle. See <see cref="IsAppending"/> for how a later change reaches a stream on
+    /// each platform.
     /// </para>
     /// <para>
     /// What the copy does not share is a position. A <see cref="FileStream"/> keeps its own
@@ -472,7 +574,9 @@ public sealed class CapFile : IDisposable
         ArgumentOutOfRangeException.ThrowIfNegative(bufferSize);
         Demand();
 
-        if (!leaveOpen)
+        bool appending = AppendsWrites;
+
+        if (!leaveOpen && !appending)
         {
             // Marked spent only once the stream exists. A constructor that refuses the
             // handle has taken nothing, and recording the transfer before knowing it
@@ -482,7 +586,9 @@ public sealed class CapFile : IDisposable
             return owned;
         }
 
-        CapResult<SafeFileHandle> copy = PlatformOps.Current.DuplicateFile(_handle);
+        CapResult<SafeFileHandle> copy = appending
+            ? PlatformOps.Current.DuplicateAppendingFile(_handle)
+            : PlatformOps.Current.DuplicateFile(_handle);
         if (!copy.IsSuccess)
         {
             FailureTranslation.ThrowIfClosed(copy.Error);
@@ -492,15 +598,26 @@ public sealed class CapFile : IDisposable
                 $"own. ({copy.Error})");
         }
 
+        FileStream stream;
         try
         {
-            return new FileStream(copy.Value, _access, bufferSize, _isAsync);
+            stream = new FileStream(copy.Value, _access, bufferSize, _isAsync);
         }
         catch
         {
             copy.Value.Dispose();
             throw;
         }
+
+        if (!leaveOpen)
+        {
+            // Ownership of an appending file is handed over as a copy that appends by itself,
+            // so this handle, which the stream never saw, is closed here instead of by it.
+            _given = true;
+            _handle.Dispose();
+        }
+
+        return stream;
     }
 
     /// <summary>
@@ -514,6 +631,12 @@ public sealed class CapFile : IDisposable
     /// anything, including something that will keep it, and nothing here can tell that it
     /// happened. A search for this name finds every place authority leaves the library, which
     /// is the whole reason for the name.
+    /// </para>
+    /// <para>
+    /// A write made through it directly follows the system's rules, not
+    /// <see cref="IsAppending"/>. On Linux and macOS the two agree, since appending is a flag
+    /// the system applies to the handle. On Windows the handle writes at whatever offset it is
+    /// given, because appending there is applied by this object to its own writes.
     /// </para>
     /// <para>
     /// It is not a transfer. This object still closes the handle when it is disposed, so a
@@ -555,6 +678,23 @@ public sealed class CapFile : IDisposable
         if (!_given)
         {
             _handle.Dispose();
+        }
+    }
+
+    /// <summary>Whether a write made now is to be put at the end of the file.</summary>
+    /// <remarks>
+    /// Only for a handle that can write. One that cannot is left to the framework's write,
+    /// which refuses it in the framework's own words.
+    /// </remarks>
+    private bool AppendsWrites => _appending && (_access & FileAccess.Write) != 0;
+
+    /// <summary>Writes the whole of a buffer at the end of the file.</summary>
+    private void WriteAtEnd(ReadOnlySpan<byte> buffer, long fileOffset)
+    {
+        CapError error = PlatformOps.Current.WriteAppending(_handle, buffer, fileOffset);
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToWriteException(error);
         }
     }
 

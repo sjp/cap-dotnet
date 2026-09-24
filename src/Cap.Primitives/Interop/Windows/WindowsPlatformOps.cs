@@ -866,6 +866,126 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     /// <remarks>
+    /// <para>
+    /// The copy is given every right the original holds except the right to write at an
+    /// offset. A handle that may append but not write elsewhere has every write put at the
+    /// end by the system, whatever offset it names, which is how appending is expressed on a
+    /// handle here. A duplicate may always be given less than its original holds, so this
+    /// narrows without asking the filesystem again.
+    /// </para>
+    /// <para>
+    /// Appending cannot be turned off on the copy, since the right it would need is the one
+    /// withheld.
+    /// </para>
+    /// </remarks>
+    public unsafe CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
+        }
+
+        IoStatusBlock status = default;
+        uint granted = 0;
+        int nt = NtNative.NtQueryInformationFile(
+            lease.Raw, &status, &granted, sizeof(uint), NtConstants.FileAccessInformationClass);
+
+        if (NtStatusCodes.IsFailure(nt))
+        {
+            return CapResult<SafeFileHandle>.Fail(NtStatusCodes.ToError(nt));
+        }
+
+        nint copy = 0;
+        nint process = NtNative.GetCurrentProcess();
+        bool duplicated = NtNative.DuplicateHandle(
+            process,
+            lease.Raw,
+            process,
+            &copy,
+            granted & ~NtConstants.FILE_WRITE_DATA,
+            inheritHandle: false,
+            options: 0);
+
+        return duplicated
+            ? CapResult<SafeFileHandle>.Ok(new SafeFileHandle(copy, ownsHandle: true))
+            : CapResult<SafeFileHandle>.Fail(Win32Errors.ToError(Marshal.GetLastPInvokeError()));
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Nothing to change. The system keeps no appending setting on an open file here, only
+    /// which rights a handle holds, and those are fixed when it is opened. Appending is
+    /// applied by <see cref="WriteAppending"/> instead.
+    /// </remarks>
+    public CapError SetFileAppending(SafeFileHandle handle, bool appending) =>
+        handle.IsClosed ? HandleLease.ClosedError : CapError.Success;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// A write at the offset whose halves are both all ones, which the system defines as the
+    /// end of the file and finds in the same step as the write. The offset given is not
+    /// used.
+    /// </para>
+    /// <para>
+    /// On a handle opened for overlapped operations the write is waited for here. The event
+    /// it signals is marked so that its completion is not also delivered to the thread pool
+    /// the handle may be bound to, which would receive a completion for an operation it never
+    /// started.
+    /// </para>
+    /// </remarks>
+    public unsafe CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        using ManualResetEvent? signal = handle.IsAsync ? new ManualResetEvent(initialState: false) : null;
+
+        fixed (byte* start = buffer)
+        {
+            int done = 0;
+            while (done < buffer.Length)
+            {
+                NativeOverlapped overlapped = default;
+                overlapped.OffsetLow = unchecked((int)uint.MaxValue);
+                overlapped.OffsetHigh = unchecked((int)uint.MaxValue);
+                if (signal is not null)
+                {
+                    overlapped.EventHandle = signal.SafeWaitHandle.DangerousGetHandle() | 1;
+                }
+
+                uint written = 0;
+                if (!NtNative.WriteFile(lease.Raw, start + done, (uint)(buffer.Length - done), &written, &overlapped))
+                {
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error != Win32Errors.ERROR_IO_PENDING ||
+                        !NtNative.GetOverlappedResult(lease.Raw, &overlapped, &written, wait: true))
+                    {
+                        return Win32Errors.ToError(
+                            error == Win32Errors.ERROR_IO_PENDING ? Marshal.GetLastPInvokeError() : error);
+                    }
+                }
+                else if (signal is not null)
+                {
+                    // Finished at once; the count the call wrote is not reliable for an
+                    // overlapped handle, so it is read from the record.
+                    NtNative.GetOverlappedResult(lease.Raw, &overlapped, &written, wait: false);
+                }
+
+                signal?.Reset();
+                done += (int)written;
+            }
+        }
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
     /// The visibility asked for is not expressible in a create on this system. Access here
     /// is decided by a security descriptor, the new directory inherits the one belonging to
     /// the directory it is made in, and building a descriptor of our own would mean deciding
@@ -1734,10 +1854,13 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A handle opened to append is granted the appending right instead of the ordinary write
-    /// right and not alongside it. Holding both would let a write land at an explicit offset,
-    /// and a handle that can write anywhere is not a handle that appends — it is a handle
-    /// that happens to be pointed at the end.
+    /// A handle that can write is granted both the right to write at an offset and the right
+    /// to append, whether or not it was opened to append. Appending can be turned on and off
+    /// for as long as the file is open, and the system cannot add a right to a handle after
+    /// the open, so the handle holds both and appending is applied to each write instead:
+    /// see <see cref="WriteAppending"/>. The appending right alone is what
+    /// <see cref="DuplicateAppendingFile"/> hands to a stream, so a handle without it could
+    /// not give a stream one that appends.
     /// </para>
     /// <para>
     /// The right to wait on the handle goes with the synchronous form and only with it: it is
@@ -1761,10 +1884,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         if ((request.Access & FileAccess.Write) != 0)
         {
-            mask |= NtConstants.FILE_WRITE_ATTRIBUTES;
-            mask |= request.Mode == FileMode.Append
-                ? NtConstants.FILE_APPEND_DATA
-                : NtConstants.FILE_WRITE_DATA;
+            mask |= NtConstants.FILE_WRITE_ATTRIBUTES | NtConstants.FILE_WRITE_DATA | NtConstants.FILE_APPEND_DATA;
         }
 
         if ((request.Options & FileOptions.DeleteOnClose) != 0)

@@ -334,6 +334,25 @@ internal static class FailureTranslation
     };
 
     /// <summary>
+    /// Builds the exception for a failure to write to, or to change the appending of, an
+    /// open file.
+    /// </summary>
+    /// <remarks>
+    /// Most writes go through the framework, which reports its own failures. This covers the
+    /// ones this library makes itself, which are the writes of a handle that appends, so
+    /// that a caller's handler for a failed write does not depend on whether appending was on.
+    /// </remarks>
+    public static Exception ToWriteException(CapError error) => error.Category switch
+    {
+        CapErrorCategory.Closed => DisposedDuringCall(),
+
+        CapErrorCategory.PermissionDenied =>
+            new UnauthorizedAccessException($"The filesystem would not let this handle write. ({error})"),
+
+        _ => new CapIOException(KindOf(error.Category), $"The write to this file could not be made. ({error})"),
+    };
+
+    /// <summary>
     /// Builds the exception for an instant the platform refused to record.
     /// </summary>
     /// <remarks>
