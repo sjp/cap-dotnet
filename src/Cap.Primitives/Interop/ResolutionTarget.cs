@@ -17,8 +17,10 @@ namespace Cap.Primitives.Interop;
 /// There is deliberately no value for "follow the last component or not". Following is a
 /// property of the operation, not a separate axis: <see cref="Parent"/> never follows,
 /// because an operation that acts on a name must act on the name it was given, and the
-/// other two always follow within whatever the resolution options permit, because an open
-/// of a link is an open of its target.
+/// other two follow within whatever the resolution options permit, because an open of a
+/// link is an open of its target. The one exception belongs to the file open's request
+/// rather than to the walk: an open that may create or empty a file refuses a link at the
+/// last component (see <see cref="FileOpenRequest.FollowsFinalLink"/>).
 /// </para>
 /// </remarks>
 internal enum ResolutionTarget
@@ -31,7 +33,8 @@ internal enum ResolutionTarget
 
     /// <summary>
     /// Open the last component as a file. A link there is followed, subject to the
-    /// resolution options.
+    /// resolution options, unless the open may create or empty the file, in which case it
+    /// is refused.
     /// </summary>
     File,
 

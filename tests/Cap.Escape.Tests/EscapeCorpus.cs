@@ -284,10 +284,13 @@ internal static class EscapeCorpus
 
         // Links that stay inside, which are followed: the control every refusal above is read
         // against. A climb that stops at the root and descends again is inside.
-        cases.Add(Link("link-to-a-file-inside", ["S3"], "in",
-            FinalLink(Outcome.Success, Outcome.Refused, Outcome.Success),
+        cases.Add(Link("link-to-a-file-inside", ["S3", "S15"], "in",
+            FinalLink(Outcome.Success, Outcome.Refused),
             File("in", "plain/marker")));
         cases.Add(Link("link-to-a-directory-inside", ["S3", "S5"], $"indir/{PlainFile}", Through(ExistingFile()),
+            Directory("indir", "plain")));
+        cases.Add(Link("link-to-a-directory-inside-as-the-name", ["S3", "S15"], "indir",
+            FinalLink(Outcome.Refused, Outcome.Success),
             Directory("indir", "plain")));
         cases.Add(Link("link-climbing-to-the-root-and-back", ["S3", "S5"], $"plain/root/plain/{PlainFile}",
             Through(ExistingFile()),
@@ -332,10 +335,10 @@ internal static class EscapeCorpus
         cases.Add(Link("dangling-link-outside-absolute", ["S6"], "gone", escapeAtEnd,
             File("gone", "{outside}/absent")));
 
-        // Dangling inside is an ordinary miss -- except that creating a file through it
-        // creates what it names, which is inside.
-        cases.Add(Link("dangling-link-inside", ["S6"], "dangling",
-            FinalLink(Outcome.NotFound, Outcome.NotFound, Outcome.Success),
+        // Dangling inside is an ordinary miss. Creating a file there is refused like any
+        // other link at the name, rather than creating the file the link names.
+        cases.Add(Link("dangling-link-inside", ["S6", "S15"], "dangling",
+            FinalLink(Outcome.NotFound, Outcome.NotFound),
             File("dangling", "no-such-entry")));
     }
 

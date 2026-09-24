@@ -65,6 +65,12 @@ and there is no other way for it to reach the filesystem through this library. T
 point. The question "could this component be tricked into writing somewhere else?" is
 answered by its signature rather than by auditing every string it builds.
 
+Nor can it be tricked into writing somewhere else *inside* `uploads`. If `fileName` already
+holds a symbolic link, say one planted by something else that can write there, the write is
+refused rather than following the link to overwrite whatever file it leads to. Every open that
+creates or empties a file refuses a link at the name like this. Only opening an existing file
+follows one.
+
 `Restrict` hands on a stricter [symbolic-link policy](threat-model.md#421-the-callers-knob-and-what-it-does-not-reach):
 by default a link is followed if it stays inside the tree and refused if it leaves;
 `SymlinkPolicy.Deny` refuses every link. A handle can be restricted but never loosened, and

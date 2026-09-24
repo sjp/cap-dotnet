@@ -136,6 +136,7 @@ public sealed partial class CorpusIntegrityTests
         Declared(typeof(TopologyTests), defended);
         Declared(typeof(WindowsTopologyTests), defended);
         Declared(typeof(TreeOperationTests), defended);
+        Declared(typeof(FinalLinkWriteTests), defended);
 
         return defended;
     }

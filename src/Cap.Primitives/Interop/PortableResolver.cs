@@ -351,6 +351,11 @@ internal static class PortableResolver
         // come from a followed link's stored target as well as from the caller's path.
         bool asDirectory = target == ResolutionTarget.Directory || pending.RequiresDirectory;
 
+        // A file open that may create or empty the file refuses a link here, wherever it
+        // points: the write must land on the name the caller gave, not on whatever a link
+        // planted under that name leads to.
+        bool followFinal = target != ResolutionTarget.File || request.FollowsFinalLink;
+
         if (asDirectory)
         {
             CapAccess directoryAccess = target == ResolutionTarget.Directory ? access : CapAccess.None;
@@ -358,7 +363,9 @@ internal static class PortableResolver
             if (!opened.IsSuccess)
             {
                 return opened.Error.Category == CapErrorCategory.SymbolicLink
-                    ? FollowLast(ops, in stack, ref pending, name, path.Syntax, options, ref linkBudget, out followedLink)
+                    ? FollowLast(
+                        ops, in stack, ref pending, name, path.Syntax, options, followFinal, ref linkBudget,
+                        out followedLink)
                     : opened.Error;
             }
 
@@ -404,7 +411,9 @@ internal static class PortableResolver
         if (!file.IsSuccess)
         {
             return file.Error.Category == CapErrorCategory.SymbolicLink
-                ? FollowLast(ops, in stack, ref pending, name, path.Syntax, options, ref linkBudget, out followedLink)
+                ? FollowLast(
+                    ops, in stack, ref pending, name, path.Syntax, options, followFinal, ref linkBudget,
+                    out followedLink)
                 : file.Error;
         }
 
@@ -448,6 +457,12 @@ internal static class PortableResolver
     }
 
     /// <summary>Follows the last component, which turned out to be a link.</summary>
+    /// <remarks>
+    /// Refused without being read when the operation does not follow a final link, and
+    /// reported as the same refusal the stricter policy gives: the link is not looked at, so
+    /// where it points is never learned, and nothing was attempted that could be called an
+    /// escape. The confined open refuses the same link in the same terms.
+    /// </remarks>
     private static CapError FollowLast(
         IPlatformOps ops,
         in DirectoryStack stack,
@@ -455,9 +470,16 @@ internal static class PortableResolver
         scoped ReadOnlySpan<char> name,
         CapPathSyntax syntax,
         ConfinedResolveOptions options,
+        bool followFinal,
         ref int linkBudget,
         out bool followedLink)
     {
+        if (!followFinal)
+        {
+            followedLink = false;
+            return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
+        }
+
         CapError error = Follow(ops, in stack, ref pending, name, syntax, options, ref linkBudget);
         followedLink = error.IsSuccess;
         return error;

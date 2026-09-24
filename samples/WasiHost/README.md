@@ -125,7 +125,9 @@ either could not reach alone. Those cases are listed too, with what they cost.
   twice: once through the strict view, and once through the ordinary handle, which is kept if
   it is the same directory. Describing what a final link leads to is done by opening the
   target, which needs permission to open it. A hard link to what a final link leads to is not
-  possible at all.
+  possible at all. An open that creates or truncates never follows a final link, whatever the
+  lookup asks: `Dir` refuses a link at the name for every mode but `FileMode.Open`, so the
+  adapter reports that refusal where WASI would create or empty the file the link leads to.
 - **There is no open for "whatever the name holds".** A WASI open may name a file or a
   directory without saying which. The adapter tries a file open, then a directory open: a
   second resolution, and a window in which a rename can change which object is described.

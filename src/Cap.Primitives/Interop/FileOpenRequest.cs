@@ -84,6 +84,33 @@ internal readonly struct FileOpenRequest
     public bool Truncates => Mode is FileMode.Create or FileMode.Truncate;
 
     /// <summary>
+    /// Whether a symbolic link at the last component is followed to what it points at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Only for an open of a file that must already exist. Every mode that may create the
+    /// file or empty it refuses a link at the last component, whatever it points at and
+    /// whether or not it dangles, and under every symbolic-link policy. Links before the last
+    /// component are unaffected and are followed or refused as the policy says.
+    /// </para>
+    /// <para>
+    /// A write names a file by the name it is given, and the name is often chosen by
+    /// somebody else — a client's upload name, an entry in an archive. In a directory that
+    /// untrusted code can also write into, a link planted under that name would otherwise
+    /// turn the write into a truncation of some other file in the same tree, or the creation
+    /// of a file at a name the link chose. Containment still holds when that happens, since
+    /// the link cannot lead outside, but the file damaged is not the one the caller named.
+    /// Refusing the link closes that for every caller rather than only for the ones who knew
+    /// to refuse every link.
+    /// </para>
+    /// <para>
+    /// An open of an existing file still follows. It creates and destroys nothing, and a
+    /// link to a file elsewhere in the tree is an ordinary thing for a tree to contain.
+    /// </para>
+    /// </remarks>
+    public bool FollowsFinalLink => Mode == FileMode.Open;
+
+    /// <summary>
     /// An open of a file that must already exist, sharing as widely as the platform allows.
     /// </summary>
     /// <remarks>

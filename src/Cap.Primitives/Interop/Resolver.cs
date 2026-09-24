@@ -63,10 +63,11 @@ internal static class Resolver
     /// it to the last component and to no other.
     /// </para>
     /// <para>
-    /// The last component is followed if it is a symbolic link, subject to the same policy as
-    /// any other component, because an open of a link is an open of its target. What that
-    /// means for a create is that the file appears where the link points, and it appears
-    /// there only if the link stays inside the subtree.
+    /// An open of an existing file follows a symbolic link at the last component, subject to
+    /// the same policy as any other component, because an open of a link is an open of its
+    /// target. An open that may create or empty the file refuses one instead, on every
+    /// backend, so a write cannot be steered onto another file by a link planted under the
+    /// name it was given (see <see cref="FileOpenRequest.FollowsFinalLink"/>).
     /// </para>
     /// </remarks>
     public static CapResult<SafeFileHandle> OpenFile(

@@ -132,7 +132,10 @@ carried by every handle derived from it; it can be tightened when a handle is ha
 never loosened. It does not reach containment — the refusals above hold under both settings —
 and it does not reach the last component of a path, because whether an operation acts on a
 link or on what the link points at is a property of the operation. Removing a name removes
-the name, and reading a link reads it, however links met on the way are treated.
+the name, reading a link reads it, and an open that creates or truncates a file refuses a
+link at the name, however links met on the way are treated. The walk refuses that link
+without reading it; the kernel-atomic backend adds `O_NOFOLLOW` to the open, so the kernel
+refuses it the same way.
 
 An absolute target is refused rather than re-read as though the sandbox root were the
 filesystem root. The re-reading is defensible — it is what `chroot` does — but it silently

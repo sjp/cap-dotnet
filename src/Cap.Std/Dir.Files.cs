@@ -75,24 +75,28 @@ public sealed partial class Dir
     /// <para>
     /// Resolution is confined to the subtree this handle was opened on, by whichever backend
     /// the platform provides, and a symbolic link met on the way is followed only if this
-    /// handle's policy allows it and only while it stays inside. That applies to the last
-    /// component as well: opening a link is opening its target, so a file created through a
-    /// link appears where the link points — and only if the link points inside.
+    /// handle's policy allows it and only while it stays inside.
     /// </para>
     /// <para>
     /// <strong>Symbolic links, precisely.</strong> Under
-    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> a link anywhere in the
-    /// path, the last component included, is followed while its target stays beneath this
-    /// handle, and one whose target leaves — an absolute target, or one that climbs above
-    /// this directory — is refused with <see cref="SandboxEscapeException"/>. Under
-    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> every link is refused with
-    /// <see cref="CapIOException"/>, the last component's included, wherever it points. The
-    /// one exception is <see cref="FileMode.CreateNew"/>, which never follows the last
-    /// component under either policy: a link holding the name, dangling or not, makes the
-    /// name taken, so the exclusive create cannot be steered into making a file somewhere
-    /// else. Every other mode that creates follows a dangling link that stays inside, and
-    /// creates the file it names; <see cref="FileMode.Create"/> and
-    /// <see cref="FileMode.Truncate"/> empty whatever file an existing link leads to.
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> a link before the last
+    /// component is followed while its target stays beneath this handle, and one whose target
+    /// leaves — an absolute target, or one that climbs above this directory — is refused with
+    /// <see cref="SandboxEscapeException"/>. Under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>
+    /// every link is refused with <see cref="CapIOException"/>, wherever it points.
+    /// </para>
+    /// <para>
+    /// A link <em>at</em> the last component depends on the mode. <see cref="FileMode.Open"/>
+    /// follows it under the rules above, because opening a link is opening its target. Every
+    /// other mode — <see cref="FileMode.Create"/>, <see cref="FileMode.CreateNew"/>,
+    /// <see cref="FileMode.Truncate"/>, <see cref="FileMode.OpenOrCreate"/> and
+    /// <see cref="FileMode.Append"/> — refuses it with <see cref="CapIOException"/> under
+    /// either policy, whatever it points at, whether it leads to a file or a directory and
+    /// whether or not it dangles, and leaves both the link and its target as they were. This
+    /// is where the library parts from <c>System.IO</c>, which follows the link. A write
+    /// usually names its file by a name somebody else chose, and in a directory untrusted code
+    /// can write into, following a link planted under that name would empty or create a
+    /// different file from the one named. Remove the link first to write at its name.
     /// </para>
     /// <para>
     /// Nothing about the file's permissions is decided here. A created file is asked for with
@@ -118,9 +122,10 @@ public sealed partial class Dir
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">
-    /// The name is taken and the mode refuses to take it, the name holds a directory, a
-    /// symbolic link the policy will not follow is in the way, or the platform cannot honour
-    /// part of the request.
+    /// The name is taken and the mode refuses to take it, the name holds a directory, the
+    /// name holds a symbolic link and the mode may create or empty the file, a symbolic link
+    /// the policy will not follow is in the way, or the platform cannot honour part of the
+    /// request.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public CapFile OpenFile(
@@ -234,13 +239,13 @@ public sealed partial class Dir
     /// </para>
     /// <para>
     /// <strong>Symbolic links.</strong> The same as <see cref="OpenFile"/> with
-    /// <see cref="FileMode.Create"/>: under the default policy a link at the last component
-    /// is followed, so the file it leads to is emptied — or, if the link dangles, created
-    /// where it points — provided the target stays beneath this handle; one that leaves is
-    /// refused with <see cref="SandboxEscapeException"/>. Under
-    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> a link anywhere in the path is refused
-    /// with <see cref="CapIOException"/>. A link before the last component is followed or
-    /// refused on the same terms.
+    /// <see cref="FileMode.Create"/>: a link at the last component is refused with
+    /// <see cref="CapIOException"/> under either policy, wherever it points and whether or not
+    /// it dangles, so what it leads to is neither emptied nor created. A link before the last
+    /// component is followed while it stays beneath this handle and refused with
+    /// <see cref="SandboxEscapeException"/> if it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
+    /// <see cref="CapIOException"/>.
     /// </para>
     /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
@@ -251,7 +256,10 @@ public sealed partial class Dir
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
-    /// <exception cref="CapIOException">The name is held by a directory, or the open failed otherwise.</exception>
+    /// <exception cref="CapIOException">
+    /// The name is held by a directory or a symbolic link, a link the policy will not follow
+    /// is in the way, or the open failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public CapFile CreateFile(string path) => OpenFile(path, FileMode.Create, FileAccess.Write);
 
@@ -414,13 +422,12 @@ public sealed partial class Dir
     /// <remarks>
     /// <para>
     /// <strong>Symbolic links.</strong> Opened as <see cref="CreateFile"/> opens, so a link at
-    /// the last component is followed under the default policy and the file it leads to is
-    /// the one replaced — or created, if the link dangles — provided the target stays beneath
-    /// this handle; one that leaves is refused with <see cref="SandboxEscapeException"/>.
-    /// Under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> any link in the path is refused
-    /// with <see cref="CapIOException"/>. A link before the last component is followed or
-    /// refused on the same terms. A caller that must not write through a link it did not
-    /// make claims the name with <see cref="CreateNewFile"/> instead.
+    /// the last component is refused with <see cref="CapIOException"/> under either policy,
+    /// and the file it leads to, if any, is left as it was. A link before the last component
+    /// is followed while it stays beneath this handle and refused with
+    /// <see cref="SandboxEscapeException"/> if it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
+    /// <see cref="CapIOException"/>.
     /// </para>
     /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
@@ -528,9 +535,8 @@ public sealed partial class Dir
     /// </para>
     /// <para>
     /// Symbolic links are followed or refused exactly as <see cref="WriteAllBytes"/>
-    /// describes, so under the default policy a link at the last component that stays inside
-    /// has the file it leads to replaced. Safe to call concurrently with any other member of
-    /// this handle, from any thread.
+    /// describes, so a link at the last component is refused and what it leads to is left
+    /// alone. Safe to call concurrently with any other member of this handle, from any thread.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>

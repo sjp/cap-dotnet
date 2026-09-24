@@ -166,7 +166,10 @@ public sealed partial class WasiPreview1
     /// <remarks>
     /// <para>
     /// A file open that is not to follow a final link goes through the descriptor's no-links
-    /// view. An open file resolves nothing further, so the stricter policy ends with it.
+    /// view. An open file resolves nothing further, so the stricter policy ends with it. An
+    /// open that creates or truncates refuses a final link even when the guest asked to follow
+    /// one, because <see cref="Dir"/> never writes a new or emptied file through a link at the
+    /// name; that refusal is passed on to the guest.
     /// </para>
     /// <para>
     /// A WASI open that neither requires a directory nor creates anything may name a directory,

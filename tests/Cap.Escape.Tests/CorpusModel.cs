@@ -54,9 +54,10 @@ internal enum Outcome
 /// </para>
 /// <para>
 /// Grouped by what each does with the last component, because that is what decides the
-/// expected outcome. Opening and creating a file follow a link that holds the name; every
-/// other operation acts on the name itself, so a link there is removed, moved, described or
-/// read as a link and what it points at is never reached.
+/// expected outcome. Opening a file or a directory follows a link that holds the name.
+/// Creating a file refuses one, so that a write cannot be steered onto whatever a planted
+/// link leads to. Every other operation acts on the name itself, so a link there is removed,
+/// moved, described or read as a link and what it points at is never reached.
 /// </para>
 /// </remarks>
 internal enum Operation
@@ -125,7 +126,8 @@ internal enum LinkRole
 
     /// <summary>
     /// The last component is a link. The operations that follow one refuse it under the
-    /// stricter policy; the ones that act on the name are unaffected.
+    /// stricter policy; the ones that act on the name, or refuse a link there under every
+    /// policy, are unaffected.
     /// </summary>
     Final,
 
@@ -225,7 +227,7 @@ internal sealed record KnownDifference(string[] Backends, Expectation Expected, 
 internal sealed class Expectation
 {
     private static readonly Operation[] FollowingOperations =
-        [Operation.OpenFile, Operation.OpenDir, Operation.CreateFile];
+        [Operation.OpenFile, Operation.OpenDir];
 
     private readonly Dictionary<Operation, Outcome> _outcomes;
 
@@ -336,17 +338,17 @@ internal sealed class Expectation
 
     /// <summary>
     /// The last component is a symbolic link. Following it comes to the outcomes given; every
-    /// operation that acts on the name acts on the link itself.
+    /// operation that acts on the name acts on the link itself, and creating a file there is
+    /// refused without the link being read, wherever it points.
     /// </summary>
     /// <param name="asFile">Opening what the link leads to as a file, and following a chain to it.</param>
     /// <param name="asDirectory">Opening what it leads to as a directory.</param>
-    /// <param name="create">Creating or truncating a file through it.</param>
-    public static Expectation FinalLink(Outcome asFile, Outcome asDirectory, Outcome create) => new(
+    public static Expectation FinalLink(Outcome asFile, Outcome asDirectory) => new(
         new()
         {
             [Operation.OpenFile] = asFile,
             [Operation.OpenDir] = asDirectory,
-            [Operation.CreateFile] = create,
+            [Operation.CreateFile] = Outcome.Refused,
             [Operation.CreateDir] = Outcome.Refused,
             [Operation.GetMetadata] = Outcome.Success,
             [Operation.Exists] = Outcome.Success,
@@ -365,7 +367,7 @@ internal sealed class Expectation
         $"a link whose target opens as {asFile}");
 
     /// <summary>A final link whose following is refused the same way whatever is asked.</summary>
-    public static Expectation FinalLink(Outcome followed) => FinalLink(followed, followed, followed);
+    public static Expectation FinalLink(Outcome followed) => FinalLink(followed, followed);
 
     /// <summary>
     /// A link sits before the last component, and following it leads to a place where the

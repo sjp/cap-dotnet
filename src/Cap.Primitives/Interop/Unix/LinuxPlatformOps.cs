@@ -330,6 +330,14 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         flags |= LinuxConstants.O_CLOEXEC | LinuxConstants.O_NONBLOCK;
 
+        // An open that may create or empty the file refuses a link at the last component,
+        // as the walk does. The kernel reports it as the same error it gives a link the
+        // policy refuses, so both backends come to the same refusal.
+        if (!request.FollowsFinalLink)
+        {
+            flags |= LinuxConstants.O_NOFOLLOW;
+        }
+
         // The creation mode is read by the kernel only when the flags ask for creation, and
         // passing a non-zero one when they do not is rejected outright rather than ignored.
         uint mode = request.Creates ? LinuxConstants.FileCreateMode : 0;

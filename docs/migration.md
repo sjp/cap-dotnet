@@ -17,6 +17,14 @@ resolved. Where a `System.IO` method would have created or found a path by joini
 the replacement usually opens a `Dir` on the directory and works inside that, which is also
 what the [analyzer's `CAP0005`](analyzers.md#cap0005-paths-built-by-joining-strings) asks for.
 
+One behaviour differs on purpose. An open that creates or empties a file refuses a symbolic
+link at the name it is given. That covers `CreateFile`, `WriteAllBytes`, `WriteAllBytesAsync`
+and `OpenFile` with any `FileMode` but `Open`. It holds under every symbolic-link policy, even
+for a link to another file in the same tree, and even for a dangling one. `System.IO` follows
+the link and writes to what it leads to. To write at a name that holds a link, remove the link
+first with `DeleteFile`, or publish the new file over it with **Ext** `WriteAllTextAtomic`,
+which replaces the link. Opening an existing file with `FileMode.Open` still follows a link.
+
 `Dir` members are in `Cap.Std`. Members marked **Ext** are extension methods in `Cap.Fs.Ext`.
 
 ## `File`
@@ -29,15 +37,15 @@ what the [analyzer's `CAP0005`](analyzers.md#cap0005-paths-built-by-joining-stri
 | `File.ReadAllBytes(p)` | `dir.ReadAllBytes(p)` | |
 | `File.ReadAllBytesAsync(p)` | `dir.ReadAllBytesAsync(p)` | |
 | `File.ReadAllLines(p)`, `File.ReadLines(p)` | `dir.OpenFile(p).AsStream()` in a `StreamReader` | See [Streams](#streams). |
-| `File.WriteAllBytes(p, b)` | `dir.WriteAllBytes(p, b)` | Truncates and writes in place. |
+| `File.WriteAllBytes(p, b)` | `dir.WriteAllBytes(p, b)` | Truncates and writes in place. Refuses a symbolic link at `p`, which `File.WriteAllBytes` writes through. |
 | `File.WriteAllBytesAsync(p, b)` | `dir.WriteAllBytesAsync(p, b)` | |
 | `File.WriteAllText(p, s)` | **Ext** `dir.WriteAllTextAtomic(p, s)` | Readers see the old file or the new one, never half of either. Or `dir.WriteAllBytes(p, Encoding.UTF8.GetBytes(s))` to write in place. |
 | `File.WriteAllLines(p, lines)` | a `StreamWriter` over `dir.CreateFile(p).AsStream()` | |
 | `File.AppendAllText(p, s)` | a `StreamWriter` over `dir.OpenFile(p, FileMode.Append, FileAccess.Write).AsStream()` | |
-| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. |
+| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. Every mode but `FileMode.Open` refuses a symbolic link at `p`. |
 | `File.OpenRead(p)` | `dir.OpenFile(p)` | Read is the default. |
 | `File.OpenWrite(p)` | `dir.OpenFile(p, FileMode.OpenOrCreate, FileAccess.Write)` | |
-| `File.Create(p)` | `dir.CreateFile(p)` | |
+| `File.Create(p)` | `dir.CreateFile(p)` | Refuses a symbolic link at `p`. |
 | `new FileStream(p, …)` | `dir.OpenFile(p, …).AsStream()` | |
 | `File.OpenHandle(p, …)` | `dir.OpenFile(p, …)` | `CapFile` has positional `Read`/`Write` and their `Async` forms, like `RandomAccess`. |
 | `File.Delete(p)` | `dir.DeleteFile(p)` | A link is removed, not its target. Throws if nothing is there; `File.Delete` does not. `dir.TryDeleteFile(p)` returns false instead. |

@@ -203,11 +203,19 @@ internal interface IPlatformOps
     /// the same reporting and the same internal retry.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Carries the whole of <paramref name="request"/>, creation included. Doing the creation
     /// in the same operation as the resolution is the point: dividing the path so that the
     /// last component could be created separately would resolve the prefix in one backend and
     /// the name in another, and the instant between them is exactly the window this backend
     /// exists to close.
+    /// </para>
+    /// <para>
+    /// A link at the last component is followed only when the request says so
+    /// (<see cref="FileOpenRequest.FollowsFinalLink"/>); otherwise it is refused as
+    /// <see cref="CapErrorCategory.SymbolicLinkLoop"/>, which is what the walk reports for the
+    /// same link.
+    /// </para>
     /// </remarks>
     CapResult<SafeFileHandle> OpenConfinedFile(
         SafeDirHandle root,

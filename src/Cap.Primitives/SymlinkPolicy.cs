@@ -31,7 +31,10 @@ namespace Cap.Primitives;
 /// fixed by the operation and is a separate axis entirely. Reading a link, removing a name,
 /// asking what a name refers to without following it, and creating something exclusively
 /// all act on the name they were given rather than on whatever it points at, whichever
-/// value is in force here — otherwise removing a link would delete its target. Conflating
+/// value is in force here — otherwise removing a link would delete its target. An open that
+/// may create or empty a file refuses a link at the last component under either value, even
+/// one that stays inside, so that a write lands on the name it was given and not on another
+/// file a planted link leads to; only an open of an existing file follows one. Conflating
 /// the two axes is a well-worn source of bugs in this kind of library, so they are kept
 /// apart: this one governs links met *on the way* to the thing named, and the operation
 /// governs the thing named.

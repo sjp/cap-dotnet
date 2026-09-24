@@ -258,6 +258,12 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
     /// through the handle it got — so an escape here is not only seen in the identity reached but
     /// in the file outside being changed, which the race checks afterwards byte for byte.
     /// </para>
+    /// <para>
+    /// The two modes that may create or empty the file refuse a link at the name without reading
+    /// it, so an attempt that meets the link in place answers with that refusal rather than as an
+    /// escape. Only the open of an existing file follows the link and is refused for where it
+    /// leads.
+    /// </para>
     /// </remarks>
     [Theory]
     [MemberData(nameof(OnThisHost))]
@@ -306,8 +312,13 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
                 : Outcome.Unidentified,
             StressSettings.Iterations);
 
-        AssertAnswersForASwap(tally, "last component swapped for a link out on " + backend);
-        tally.RequireContest("last component swapped for a link out on " + backend, Outcome.RefusedAsEscape);
+        string context = "last component swapped for a link out on " + backend;
+        if (HostOps.ExchangesAtomically)
+        {
+            tally.AssertOnly(context, Outcome.Consistent, Outcome.RefusedAsEscape, Outcome.OtherRefusal);
+        }
+
+        tally.RequireContest(context, Outcome.RefusedAsEscape, Outcome.OtherRefusal);
     }
 
     /// <summary>
