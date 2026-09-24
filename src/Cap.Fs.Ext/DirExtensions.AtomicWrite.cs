@@ -61,8 +61,12 @@ public static partial class DirExtensions
     /// handle's own policy, so a link among them is followed while it stays inside the subtree
     /// or refused as for any other operation. The last component is never followed: the move
     /// replaces the name, so a link already holding it is replaced by the new file and what it
-    /// pointed at is neither written nor removed. The scratch file is created exclusively, so
-    /// a link planted at its name makes the creation fail rather than redirecting it.
+    /// pointed at is neither written nor removed, wherever it points and whether or not its
+    /// target exists. The exception is a link to a directory on Windows — a directory symbolic
+    /// link or a junction — which is a directory entry there and cannot be moved over: the
+    /// publish fails, and the link and what it points at are left as they were. The scratch
+    /// file is created exclusively, so a link planted at its name makes the creation fail
+    /// rather than redirecting it.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
@@ -119,7 +123,8 @@ public static partial class DirExtensions
     /// <para>
     /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic"/>
     /// treats them: followed ahead of the last component as the policy allows, and replaced,
-    /// never followed, as the last.
+    /// never followed, as the last — except that on Windows a link to a directory there makes
+    /// the publish fail instead.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
@@ -175,8 +180,12 @@ public static partial class DirExtensions
     /// handle's own policy, so a link among them is followed while it stays inside the subtree
     /// or refused as for any other operation. The last component is never followed: the move
     /// replaces the name, so a link already holding it is replaced by the new file and what it
-    /// pointed at is neither written nor removed. The scratch file is created exclusively, so
-    /// a link planted at its name makes the creation fail rather than redirecting it.
+    /// pointed at is neither written nor removed, wherever it points and whether or not its
+    /// target exists. The exception is a link to a directory on Windows — a directory symbolic
+    /// link or a junction — which is a directory entry there and cannot be moved over: the
+    /// publish fails, and the link and what it points at are left as they were. The scratch
+    /// file is created exclusively, so a link planted at its name makes the creation fail
+    /// rather than redirecting it.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
@@ -233,7 +242,8 @@ public static partial class DirExtensions
     /// <para>
     /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic"/>
     /// treats them: followed ahead of the last component as the policy allows, and replaced,
-    /// never followed, as the last.
+    /// never followed, as the last — except that on Windows a link to a directory there makes
+    /// the publish fail instead.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>

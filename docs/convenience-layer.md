@@ -56,6 +56,14 @@ system's temporary location instead is the usual mistake: the two can be on diff
 filesystems, the move then fails, and the repair everybody reaches for is a copy — which is
 not atomic, and was the point.
 
+A symbolic link at the target name is replaced, not followed: the move acts on the name, so
+the link is swapped for the new file and whatever it pointed at — another file in the tree,
+something outside it, or nothing — is neither written nor removed. On Windows a link to a
+directory, whether a directory symbolic link or a junction, is a directory entry, and the
+filesystem will not move a file over one. There the publish fails and leaves the link and
+its target as they were. Removing the link first would leave a moment when the name holds
+nothing, which the operation promises never to do.
+
 ### Durability
 
 `Durability` decides how far the write is pushed before the call returns. None of the three

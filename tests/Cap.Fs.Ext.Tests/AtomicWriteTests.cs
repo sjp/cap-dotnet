@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using Cap.Std;
 
@@ -213,6 +214,180 @@ public sealed class AtomicWriteTests : IDisposable
 
         Assert.Equal("old", File.ReadAllText(Path.Combine(_tree.HostPath, "report")));
         Assert.Equal(["report"], Names());
+    }
+
+    /// <summary>
+    /// A link at the name, to another file in the tree, is replaced by the published file and
+    /// the file it pointed at is left alone.
+    /// </summary>
+    /// <remarks>
+    /// The case that matters: a publish that opened the name for writing would follow the link
+    /// and rewrite the other file, so whoever placed the link would choose which file in the
+    /// tree the publish overwrites. The move acts on the name, so the link is what goes.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_link_to_a_file_in_the_tree_is_replaced_and_its_target_left_alone(bool asynchronous)
+    {
+        File.WriteAllText(Path.Combine(_tree.HostPath, "keep"), "untouched");
+        File.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "keep");
+
+        await Publish(_tree.Directory, "report", "new", asynchronous);
+
+        FileInfo published = new(Path.Combine(_tree.HostPath, "report"));
+        Assert.Null(published.LinkTarget);
+        Assert.Equal("new", File.ReadAllText(published.FullName));
+        Assert.Equal("untouched", File.ReadAllText(Path.Combine(_tree.HostPath, "keep")));
+        Assert.Equal(["keep", "report"], Names());
+    }
+
+    /// <summary>
+    /// A link at the name is replaced the same way wherever it points, including outside the
+    /// handle's subtree and at nothing.
+    /// </summary>
+    /// <remarks>
+    /// Published through a handle on a subdirectory, so that the link's target is genuinely
+    /// outside what that handle grants. Following it would be refused as an escape; replacing
+    /// it is not an escape, because the name being replaced is inside.
+    /// </remarks>
+    [Theory]
+    [InlineData("outside")]
+    [InlineData("dangling")]
+    public void A_link_at_the_name_is_replaced_wherever_it_points(string kind)
+    {
+        string inside = Path.Combine(_tree.HostPath, "inside");
+        Directory.CreateDirectory(inside);
+        File.WriteAllText(Path.Combine(_tree.HostPath, "secret"), "untouched");
+        string target = kind == "outside" ? Path.Combine("..", "secret") : "missing";
+        File.CreateSymbolicLink(Path.Combine(inside, "report"), target);
+
+        using (Dir handle = _tree.Directory.OpenDir("inside"))
+        {
+            handle.WriteAllTextAtomic("report", "new");
+        }
+
+        FileInfo published = new(Path.Combine(inside, "report"));
+        Assert.Null(published.LinkTarget);
+        Assert.Equal("new", File.ReadAllText(published.FullName));
+        Assert.Equal("untouched", File.ReadAllText(Path.Combine(_tree.HostPath, "secret")));
+        Assert.Equal(["report"], Directory.GetFileSystemEntries(inside).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// Outside Windows, a link to a directory at the name is replaced like any other link, and
+    /// the directory it pointed at is left as it was.
+    /// </summary>
+    /// <remarks>
+    /// A link is not a directory, whatever it points at, so moving a file onto its name is an
+    /// ordinary replacement of one name by another.
+    /// </remarks>
+    [Fact]
+    public void A_directory_link_at_the_name_is_replaced_outside_windows()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("A directory link on this platform is a directory entry, and is covered by its own test.");
+        }
+
+        string elsewhere = Path.Combine(_tree.HostPath, "elsewhere");
+        Directory.CreateDirectory(elsewhere);
+        File.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
+        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "elsewhere");
+
+        _tree.Directory.WriteAllTextAtomic("report", "new");
+
+        FileInfo published = new(Path.Combine(_tree.HostPath, "report"));
+        Assert.Null(published.LinkTarget);
+        Assert.Equal("new", File.ReadAllText(published.FullName));
+        Assert.Equal(["inner"], Directory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
+        Assert.Equal("untouched", File.ReadAllText(Path.Combine(elsewhere, "inner")));
+        Assert.Equal(["elsewhere", "report"], Names());
+    }
+
+    /// <summary>
+    /// On Windows, a directory symbolic link or a junction at the name makes the publish fail,
+    /// and leaves the link, the directory it points at and the rest of the tree as they were.
+    /// </summary>
+    /// <remarks>
+    /// Both kinds of link are directory entries there, and the filesystem refuses to move a
+    /// file over a directory. Removing the link first and then moving the file would leave a
+    /// moment in which the name holds nothing, which is the one thing the operation promises
+    /// never to do, so the refusal is reported rather than worked around.
+    /// </remarks>
+    [Theory]
+    [InlineData("symlink")]
+    [InlineData("junction")]
+    public void On_windows_a_directory_link_at_the_name_refuses_the_publish(string kind)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows records a link to a directory as a directory entry.");
+        }
+
+        string elsewhere = Path.Combine(_tree.HostPath, "elsewhere");
+        string link = Path.Combine(_tree.HostPath, "report");
+        Directory.CreateDirectory(elsewhere);
+        File.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
+        if (kind == "junction")
+        {
+            CreateJunction(link, elsewhere);
+        }
+        else
+        {
+            Directory.CreateSymbolicLink(link, "elsewhere");
+        }
+
+        Exception thrown = Assert.ThrowsAny<Exception>(
+            () => _tree.Directory.WriteAllTextAtomic("report", "new"));
+
+        Assert.True(
+            thrown is UnauthorizedAccessException or IOException,
+            $"The refusal was reported as {thrown.GetType().Name}: {thrown.Message}");
+        Assert.NotNull(new DirectoryInfo(link).LinkTarget);
+        Assert.Equal(["inner"], Directory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
+        Assert.Equal("untouched", File.ReadAllText(Path.Combine(elsewhere, "inner")));
+        Assert.Equal(["elsewhere", "report"], Names());
+    }
+
+    /// <summary>Publishes text through either form of the operation.</summary>
+    private static Task Publish(Dir directory, string path, string contents, bool asynchronous)
+    {
+        if (asynchronous)
+        {
+            return directory.WriteAllTextAtomicAsync(
+                path, contents, Durability.FileAndDirectory, TestContext.Current.CancellationToken);
+        }
+
+        directory.WriteAllTextAtomic(path, contents);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Creates a junction, which unlike a symbolic link needs no privilege.</summary>
+    /// <remarks>
+    /// Through the shell because the framework has no API for one. The paths are quoted rather
+    /// than passed as separate arguments: the shell re-parses its own command line, and a
+    /// temporary directory can contain a space.
+    /// </remarks>
+    private static void CreateJunction(string link, string target)
+    {
+        using Process? process = Process.Start(new ProcessStartInfo("cmd.exe")
+        {
+            Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        });
+
+        Assert.NotNull(process);
+
+        // Both streams drained before waiting: a process whose output fills the pipe while
+        // nobody is reading it never exits.
+        string output = process.StandardOutput.ReadToEnd();
+        string errors = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+
+        Assert.True(Directory.Exists(link), $"Could not create a junction at '{link}': {errors}{output}");
     }
 
     /// <summary>Everything currently in the scratch tree, by name.</summary>
