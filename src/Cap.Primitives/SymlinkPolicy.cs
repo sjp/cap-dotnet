@@ -28,13 +28,16 @@ namespace Cap.Primitives;
 /// </para>
 /// <para>
 /// <strong>Nor does it decide whether the last component is followed.</strong> That is
-/// fixed by the operation and is a separate axis entirely. Reading a link, removing a name,
+/// decided by the operation, or by the call where the operation takes a flag for it, and is
+/// a separate axis entirely. Reading a link, removing a name,
 /// asking what a name refers to without following it, and creating something exclusively
 /// all act on the name they were given rather than on whatever it points at, whichever
 /// value is in force here — otherwise removing a link would delete its target. An open that
 /// may create or empty a file refuses a link at the last component under either value, even
 /// one that stays inside, so that a write lands on the name it was given and not on another
-/// file a planted link leads to; only an open of an existing file follows one. Conflating
+/// file a planted link leads to; only an open of an existing file follows one. A call that
+/// asks to follow a final link can follow it only as far as this value lets a link on the
+/// way be followed, so under <see cref="Deny"/> it is refused. Conflating
 /// the two axes is a well-worn source of bugs in this kind of library, so they are kept
 /// apart: this one governs links met *on the way* to the thing named, and the operation
 /// governs the thing named.

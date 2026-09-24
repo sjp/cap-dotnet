@@ -81,15 +81,7 @@ internal static class OperationRunner
                 break;
 
             case Operation.OpenDir:
-                using (Dir opened = root.OpenDir(path))
-                {
-                    observation.Objects.Add(opened.GetMetadata().FileId);
-                    foreach (DirEntry entry in opened.EnumerateEntries())
-                    {
-                        observation.Names.Add(entry.Name);
-                    }
-                }
-
+                List(root, path, noFollow: false, observation);
                 break;
 
             case Operation.CreateFile:
@@ -166,6 +158,28 @@ internal static class OperationRunner
                 root.CreateHardLink(EscapeCorpus.SourceFile, root, path);
                 break;
 
+            case Operation.OpenFileNoFollow:
+                Read(root, path, observation, noFollow: true);
+                break;
+
+            case Operation.OpenDirNoFollow:
+                List(root, path, noFollow: true, observation);
+                break;
+
+            case Operation.GetMetadataFollowing:
+                observation.Objects.Add(root.GetMetadata(path, followLink: true).FileId);
+                break;
+
+            case Operation.SetTimesFollowing:
+                root.SetTimes(path, lastWrite: CapFileTime.At(EscapeCorpus.PlantedTime), followLink: true);
+                observation.Objects.Add(root.GetMetadata(path, followLink: true).FileId);
+                break;
+
+            case Operation.HardLinkFromFollowing:
+                root.CreateHardLink(path, root, EscapeCorpus.LandingName, followLink: true);
+                observation.Objects.Add(root.GetMetadata(EscapeCorpus.LandingName).FileId);
+                break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unknown operation.");
         }
@@ -173,9 +187,19 @@ internal static class OperationRunner
         return true;
     }
 
-    private static void Read(Dir root, string path, Observation observation)
+    private static void List(Dir root, string path, bool noFollow, Observation observation)
     {
-        using CapFile file = root.OpenFile(path);
+        using Dir opened = root.OpenDir(path, noFollow);
+        observation.Objects.Add(opened.GetMetadata().FileId);
+        foreach (DirEntry entry in opened.EnumerateEntries())
+        {
+            observation.Names.Add(entry.Name);
+        }
+    }
+
+    private static void Read(Dir root, string path, Observation observation, bool noFollow = false)
+    {
+        using CapFile file = root.OpenFile(path, noFollow: noFollow);
         observation.Objects.Add(file.GetMetadata().FileId);
 
         byte[] buffer = new byte[ReadLimit];

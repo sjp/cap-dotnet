@@ -291,6 +291,7 @@ public sealed class CapTempFile : IDisposable
                 FileOptions.None,
                 preallocationSize: 0,
                 append: false,
+                noFollow: false,
                 out CapFile? file);
 
             if (created)

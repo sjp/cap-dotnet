@@ -172,6 +172,11 @@ internal interface IPlatformOps
     /// </param>
     /// <param name="access">The authority the resulting handle carries.</param>
     /// <param name="options">Policy applied on top of confinement.</param>
+    /// <param name="followFinalLink">
+    /// Whether a link at the last component is followed. When false it is refused as
+    /// <see cref="CapErrorCategory.SymbolicLinkLoop"/>, as the walk refuses it — unless the
+    /// path ends in a separator, which asks for what the link leads to and is followed.
+    /// </param>
     /// <remarks>
     /// <para>
     /// Callable only when <see cref="PlatformCapabilities.SupportsConfinedOpen"/> is true;
@@ -196,7 +201,8 @@ internal interface IPlatformOps
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         CapAccess access,
-        ConfinedResolveOptions options);
+        ConfinedResolveOptions options,
+        bool followFinalLink = true);
 
     /// <summary>
     /// The file counterpart of <see cref="OpenConfinedDirectory"/>, with the same confinement,

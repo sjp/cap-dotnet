@@ -199,7 +199,8 @@ internal sealed class FakePlatformOps : IPlatformOps
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         CapAccess access,
-        ConfinedResolveOptions options)
+        ConfinedResolveOptions options,
+        bool followFinalLink = true)
     {
         if (!IsDirectoryAccess(access))
         {

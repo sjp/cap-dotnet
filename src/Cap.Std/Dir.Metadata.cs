@@ -85,17 +85,31 @@ public sealed partial class Dir
     /// Describes what a name beneath this handle holds.
     /// </summary>
     /// <param name="path">A relative path to the name to describe.</param>
+    /// <param name="followLink">
+    /// Whether a symbolic link at the last component is followed, so that what it leads to is
+    /// described instead of the link, as <c>stat</c> does where the default is
+    /// <c>lstat</c>.
+    /// </param>
     /// <returns>A snapshot of the entry, taken at the moment of the call.</returns>
     /// <remarks>
     /// <para>
-    /// <strong>It describes the name, and does not follow a link that holds it.</strong> A
-    /// symbolic link is reported as a symbolic link, with its own length and its own times,
-    /// whether its target exists, does not exist, or lies outside the subtree entirely. That
-    /// is the same rule every other member taking a name follows, and it is what keeps the
-    /// answer from depending on the handle's symbolic-link policy — the same name would
-    /// otherwise describe one thing through a permissive handle and something else through a
-    /// strict one. A caller that wants the target described opens the target and asks the
-    /// handle it gets back.
+    /// <strong>By default it describes the name, and does not follow a link that holds
+    /// it.</strong> A symbolic link is reported as a symbolic link, with its own length and
+    /// its own times, whether its target exists, does not exist, or lies outside the subtree
+    /// entirely. That is the same rule every other member taking a name follows, and it is
+    /// what keeps the answer from depending on the handle's symbolic-link policy — the same
+    /// name would otherwise describe one thing through a permissive handle and something else
+    /// through a strict one.
+    /// </para>
+    /// <para>
+    /// <strong>With <paramref name="followLink"/> set, a final link is followed</strong> as
+    /// a link on the way would be: while its target stays beneath this handle, through any
+    /// further links the target reaches, and refused with
+    /// <see cref="SandboxEscapeException"/> once it leaves. Under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> the link is refused with
+    /// <see cref="CapIOException"/> instead, since this handle follows no links at all. A link
+    /// that dangles is reported as missing. Nothing is opened to answer: the entry the chain
+    /// ends at is described by name, so the answer needs no permission to open it.
     /// </para>
     /// <para>
     /// Path resolution up to the last component is confined exactly as it is for an open,
@@ -107,9 +121,10 @@ public sealed partial class Dir
     /// described only if a directory is what holds the name.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links, in short.</strong> The last component is never followed,
-    /// under either policy. A link before it is followed while its target stays beneath this
-    /// handle and refused with <see cref="SandboxEscapeException"/> when it leaves, and under
+    /// <strong>Symbolic links, in short.</strong> The last component is followed only when
+    /// <paramref name="followLink"/> asks for it, and then only as far as a link on the way
+    /// would be. A link before it is followed while its target stays beneath this handle and
+    /// refused with <see cref="SandboxEscapeException"/> when it leaves, and under
     /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> is refused with
     /// <see cref="CapIOException"/> wherever it points.
     /// </para>
@@ -118,16 +133,20 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
     /// <exception cref="SandboxEscapeException">
-    /// <paramref name="path"/> named something outside this handle's authority.
+    /// <paramref name="path"/> named something outside this handle's authority, or a final
+    /// link being followed led outside it.
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such name.</exception>
     /// <exception cref="DirectoryNotFoundException">A directory above it is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the question.</exception>
-    /// <exception cref="CapIOException">The question could not be answered.</exception>
+    /// <exception cref="CapIOException">
+    /// A symbolic link the policy will not follow is in the way, or the question could not be
+    /// answered.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public CapMetadata GetMetadata(string path)
+    public CapMetadata GetMetadata(string path, bool followLink = false)
     {
-        CapPathError pathError = MetadataCore(path, out CapMetadata metadata, out CapError error);
+        CapPathError pathError = MetadataCore(path, followLink, out CapMetadata metadata, out CapError error);
         if (pathError != CapPathError.None)
         {
             throw FailureTranslation.ToException(pathError, path, nameof(path));
@@ -142,7 +161,7 @@ public sealed partial class Dir
     /// Describes what a name beneath this handle holds, reporting failure rather than
     /// throwing.
     /// </summary>
-    /// <param name="path">A relative path to the name. See <see cref="GetMetadata(string)"/>.</param>
+    /// <param name="path">A relative path to the name. See <see cref="GetMetadata(string, bool)"/>.</param>
     /// <param name="metadata">The snapshot, when this returns true.</param>
     /// <returns>True when the name was described.</returns>
     /// <remarks>
@@ -153,18 +172,40 @@ public sealed partial class Dir
     /// rather than unlucky still throw.
     /// </para>
     /// <para>
-    /// Symbolic links are treated exactly as <see cref="GetMetadata(string)"/> describes: a
-    /// link at the last component is described as itself under either policy, one on the way
-    /// is followed or refused by this handle's policy, and a refusal — containment included —
-    /// is reported as false. Safe to call concurrently with any other member of this handle,
-    /// from any thread.
+    /// Symbolic links are treated exactly as <see cref="GetMetadata(string, bool)"/> describes:
+    /// a link at the last component is described as itself under either policy, one on the
+    /// way is followed or refused by this handle's policy, and a refusal — containment
+    /// included — is reported as false. Safe to call concurrently with any other member of
+    /// this handle, from any thread.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public bool TryGetMetadata(string path, out CapMetadata metadata)
+    public bool TryGetMetadata(string path, out CapMetadata metadata) =>
+        TryGetMetadata(path, followLink: false, out metadata);
+
+    /// <summary>
+    /// Describes what a name beneath this handle holds, or what a symbolic link holding it
+    /// leads to, reporting failure rather than throwing.
+    /// </summary>
+    /// <param name="path">A relative path to the name. See <see cref="GetMetadata(string, bool)"/>.</param>
+    /// <param name="followLink">
+    /// Whether a symbolic link at the last component is followed. See
+    /// <see cref="GetMetadata(string, bool)"/>.
+    /// </param>
+    /// <param name="metadata">The snapshot, when this returns true.</param>
+    /// <returns>True when the name, or what it leads to, was described.</returns>
+    /// <remarks>
+    /// Symbolic links are followed or refused exactly as
+    /// <see cref="GetMetadata(string, bool)"/> describes for the same
+    /// <paramref name="followLink"/>, and every refusal, containment included, is reported as
+    /// false. Safe to call concurrently with any other member of this handle, from any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TryGetMetadata(string path, bool followLink, out CapMetadata metadata)
     {
-        CapPathError pathError = MetadataCore(path, out metadata, out CapError error);
+        CapPathError pathError = MetadataCore(path, followLink, out metadata, out CapError error);
         return pathError == CapPathError.None && error.IsSuccess;
     }
 
@@ -220,14 +261,25 @@ public sealed partial class Dir
     /// <param name="lastWrite">
     /// What to do with the last-write time. Left as it is unless given.
     /// </param>
+    /// <param name="followLink">
+    /// Whether a symbolic link at the last component is followed, so that what it leads to
+    /// has its times set instead of the link.
+    /// </param>
     /// <remarks>
     /// <para>
-    /// <strong>It sets the name's times, and does not follow a link that holds it.</strong>
-    /// A symbolic link has its own times changed, and whatever it points at is not reached,
-    /// whether that is inside this handle, outside it or nowhere. This is the same rule
-    /// <see cref="GetMetadata(string)"/> follows, so what this sets is what that reports. To
-    /// change the times of what a link leads to, open the target and set them through the
-    /// handle you get back.
+    /// <strong>By default it sets the name's times, and does not follow a link that holds
+    /// it.</strong> A symbolic link has its own times changed, and whatever it points at is
+    /// not reached, whether that is inside this handle, outside it or nowhere. This is the
+    /// same rule <see cref="GetMetadata(string, bool)"/> follows, so what this sets is what
+    /// that reports for the same <paramref name="followLink"/>.
+    /// </para>
+    /// <para>
+    /// With <paramref name="followLink"/> set, a final link is followed exactly as
+    /// <see cref="GetMetadata(string, bool)"/> follows one — refused with
+    /// <see cref="SandboxEscapeException"/> if it leads out of this handle's subtree, and with
+    /// <see cref="CapIOException"/> under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> —
+    /// and the entry the chain ends at has its times set by name. Nothing is opened, so no
+    /// permission to open that entry is needed beyond what setting its times asks for.
     /// </para>
     /// <para>
     /// Path resolution up to the last component is confined exactly as it is for an open. A
@@ -241,10 +293,10 @@ public sealed partial class Dir
     /// allows. The creation time is not settable: some systems cannot change it at all.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links, in short.</strong> The last component is never followed,
-    /// under either policy. A link before it is followed while its target stays beneath this
-    /// handle and refused with <see cref="SandboxEscapeException"/> when it leaves, and under
-    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> is refused with
+    /// <strong>Symbolic links, in short.</strong> The last component is followed only when
+    /// <paramref name="followLink"/> asks for it. A link before it is followed while its target
+    /// stays beneath this handle and refused with <see cref="SandboxEscapeException"/> when it
+    /// leaves, and under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> is refused with
     /// <see cref="CapIOException"/> wherever it points.
     /// </para>
     /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
@@ -262,9 +314,14 @@ public sealed partial class Dir
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the change.</exception>
     /// <exception cref="CapIOException">The change could not be made.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public void SetTimes(string path, CapFileTime lastAccess = default, CapFileTime lastWrite = default)
+    public void SetTimes(
+        string path,
+        CapFileTime lastAccess = default,
+        CapFileTime lastWrite = default,
+        bool followLink = false)
     {
-        CapPathError pathError = SetTimesCore(path, lastAccess, lastWrite, out CapError error, out bool refusedTime);
+        CapPathError pathError = SetTimesCore(
+            path, lastAccess, lastWrite, followLink, out CapError error, out bool refusedTime);
         if (pathError != CapPathError.None)
         {
             throw FailureTranslation.ToException(pathError, path, nameof(path));
@@ -286,9 +343,13 @@ public sealed partial class Dir
     /// reporting failure rather than throwing.
     /// </summary>
     /// <param name="path">A relative path to the name. See
-    /// <see cref="SetTimes(string, CapFileTime, CapFileTime)"/>.</param>
+    /// <see cref="SetTimes(string, CapFileTime, CapFileTime, bool)"/>.</param>
     /// <param name="lastAccess">What to do with the last-access time.</param>
     /// <param name="lastWrite">What to do with the last-write time.</param>
+    /// <param name="followLink">
+    /// Whether a symbolic link at the last component is followed. See
+    /// <see cref="SetTimes(string, CapFileTime, CapFileTime, bool)"/>.
+    /// </param>
     /// <returns>True when the times were set.</returns>
     /// <remarks>
     /// <para>
@@ -298,9 +359,10 @@ public sealed partial class Dir
     /// </para>
     /// <para>
     /// Symbolic links are treated exactly as
-    /// <see cref="SetTimes(string, CapFileTime, CapFileTime)"/> describes: a link at the last
-    /// component has its own times set under either policy. Safe to call concurrently with any
-    /// other member of this handle, from any thread.
+    /// <see cref="SetTimes(string, CapFileTime, CapFileTime, bool)"/> describes: a link at the
+    /// last component has its own times set under either policy unless
+    /// <paramref name="followLink"/> asks for it to be followed, and a refusal is reported as
+    /// false. Safe to call concurrently with any other member of this handle, from any thread.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
@@ -308,9 +370,14 @@ public sealed partial class Dir
     /// An instant was given that this platform cannot record at all.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public bool TrySetTimes(string path, CapFileTime lastAccess = default, CapFileTime lastWrite = default)
+    public bool TrySetTimes(
+        string path,
+        CapFileTime lastAccess = default,
+        CapFileTime lastWrite = default,
+        bool followLink = false)
     {
-        CapPathError pathError = SetTimesCore(path, lastAccess, lastWrite, out CapError error, out bool refusedTime);
+        CapPathError pathError = SetTimesCore(
+            path, lastAccess, lastWrite, followLink, out CapError error, out bool refusedTime);
         if (refusedTime)
         {
             throw FailureTranslation.UnrecordableTime(error);
@@ -321,11 +388,12 @@ public sealed partial class Dir
 
     /// <summary>
     /// Resolves the path to a directory and a name, and sets the times of what holds the
-    /// name without following it.
+    /// name without following it — after following a final link to its end, when asked to.
     /// </summary>
     /// <param name="path">The path the caller gave.</param>
     /// <param name="lastAccess">What to do with the last-access time.</param>
     /// <param name="lastWrite">What to do with the last-write time.</param>
+    /// <param name="followLink">Whether a final link is followed first.</param>
     /// <param name="error">Why the change was not made, when it was not.</param>
     /// <param name="refusedTime">
     /// Whether the failure was the platform refusing one of the times, rather than anything
@@ -341,12 +409,14 @@ public sealed partial class Dir
         string path,
         CapFileTime lastAccess,
         CapFileTime lastWrite,
+        bool followLink,
         out CapError error,
         out bool refusedTime)
     {
         refusedTime = false;
 
-        CapPathError pathError = Locate(path, out NameLookup lookup, out error, describing: true);
+        CapPathError pathError = Locate(
+            path, out NameLookup lookup, out error, describing: true, followLastLink: followLink);
         using (lookup)
         {
             if (pathError != CapPathError.None || error.IsFailure)
@@ -393,11 +463,12 @@ public sealed partial class Dir
     /// hold something else, which is a fact about the request. Nothing is re-opened to
     /// decide it: the snapshot already says what the entry is.
     /// </remarks>
-    private CapPathError MetadataCore(string path, out CapMetadata metadata, out CapError error)
+    private CapPathError MetadataCore(string path, bool followLink, out CapMetadata metadata, out CapError error)
     {
         metadata = default;
 
-        CapPathError pathError = Locate(path, out NameLookup lookup, out error, describing: true);
+        CapPathError pathError = Locate(
+            path, out NameLookup lookup, out error, describing: true, followLastLink: followLink);
         using (lookup)
         {
             if (pathError != CapPathError.None || error.IsFailure)

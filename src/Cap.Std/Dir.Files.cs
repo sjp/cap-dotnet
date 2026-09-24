@@ -83,6 +83,12 @@ public sealed partial class Dir
     /// which is <see cref="FileMode.OpenOrCreate"/> with this set and writing only. Appending
     /// can be changed later through <see cref="CapFile.IsAppending"/>.
     /// </param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link at the last component is refused rather than followed, as
+    /// <c>O_NOFOLLOW</c> asks of a POSIX open. It changes only what <see cref="FileMode.Open"/>
+    /// does, since every other mode refuses such a link already, and it changes nothing about
+    /// links before the last component or about this handle's policy.
+    /// </param>
     /// <returns>An open file, owning its handle.</returns>
     /// <remarks>
     /// <para>
@@ -100,7 +106,12 @@ public sealed partial class Dir
     /// </para>
     /// <para>
     /// A link <em>at</em> the last component depends on the mode. <see cref="FileMode.Open"/>
-    /// follows it under the rules above, because opening a link is opening its target. Every
+    /// follows it under the rules above, because opening a link is opening its target, unless
+    /// <paramref name="noFollow"/> is set, in which case it is refused with
+    /// <see cref="CapIOException"/> under either policy, wherever it points. A path ending in
+    /// a separator is the exception: it asks for what a final link leads to, and follows it
+    /// even then, as POSIX resolution does, to be refused because a file open cannot name a
+    /// directory. Every
     /// other mode — <see cref="FileMode.Create"/>, <see cref="FileMode.CreateNew"/>,
     /// <see cref="FileMode.Truncate"/>, <see cref="FileMode.OpenOrCreate"/> and
     /// <see cref="FileMode.Append"/> — refuses it with <see cref="CapIOException"/> under
@@ -137,7 +148,8 @@ public sealed partial class Dir
     /// <exception cref="CapIOException">
     /// The name is taken and the mode refuses to take it, the name holds a directory or is
     /// spelled as one, the path passes through something that is not a directory, the
-    /// name holds a symbolic link and the mode may create or empty the file, a symbolic link
+    /// name holds a symbolic link and the mode may create or empty the file or
+    /// <paramref name="noFollow"/> is set, a symbolic link
     /// the policy will not follow is in the way, or the platform cannot honour part of the
     /// request.
     /// </exception>
@@ -149,9 +161,10 @@ public sealed partial class Dir
         FileShare share = FileShare.Read,
         FileOptions options = FileOptions.None,
         long preallocationSize = 0,
-        bool append = false)
+        bool append = false,
+        bool noFollow = false)
     {
-        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize, append);
+        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize, append, noFollow);
 
         CapPathError pathError = OpenFileCore(path, in request, out CapFile? file, out CapError error);
         if (pathError != CapPathError.None)
@@ -196,7 +209,9 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryOpenFile(string path, [NotNullWhen(true)] out CapFile? file) =>
-        TryOpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: false, out file);
+        TryOpenFile(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0,
+            append: false, noFollow: false, out file);
 
     /// <summary>
     /// Opens a file beneath this handle as the arguments describe, reporting failure rather
@@ -209,6 +224,9 @@ public sealed partial class Dir
     /// <param name="options">Flags and hints for the open.</param>
     /// <param name="preallocationSize">How much room to claim in advance.</param>
     /// <param name="append">Whether every write goes to the end of the file. See <see cref="OpenFile"/>.</param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link at the last component is refused. See <see cref="OpenFile"/>.
+    /// </param>
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when the file was opened.</returns>
     /// <remarks>
@@ -221,7 +239,8 @@ public sealed partial class Dir
     /// </para>
     /// <para>
     /// Symbolic links are followed or refused exactly as <see cref="OpenFile"/> describes for
-    /// the same <paramref name="mode"/>; a refusal is reported as false. Safe to call
+    /// the same <paramref name="mode"/> and <paramref name="noFollow"/>; a refusal is reported
+    /// as false. Safe to call
     /// concurrently with any other member of this handle, from any thread.
     /// </para>
     /// </remarks>
@@ -237,9 +256,10 @@ public sealed partial class Dir
         FileOptions options,
         long preallocationSize,
         bool append,
+        bool noFollow,
         [NotNullWhen(true)] out CapFile? file)
     {
-        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize, append);
+        FileOpenRequest request = Demand(mode, access, share, options, preallocationSize, append, noFollow);
         return Succeeded(OpenFileCore(path, in request, out file, out CapError error), error);
     }
 
@@ -334,7 +354,7 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateFile(string path, [NotNullWhen(true)] out CapFile? file) =>
-        TryOpenFile(path, FileMode.Create, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, out file);
+        TryOpenFile(path, FileMode.Create, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, noFollow: false, out file);
 
     /// <summary>
     /// Claims a name for a new file beneath this handle, reporting failure rather than
@@ -359,7 +379,7 @@ public sealed partial class Dir
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryCreateNewFile(string path, [NotNullWhen(true)] out CapFile? file) =>
-        TryOpenFile(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, out file);
+        TryOpenFile(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, noFollow: false, out file);
 
     /// <summary>Reads a whole file beneath this handle.</summary>
     /// <param name="path">A relative path to the file.</param>
@@ -611,7 +631,8 @@ public sealed partial class Dir
         FileShare share,
         FileOptions options,
         long preallocationSize,
-        bool append)
+        bool append,
+        bool noFollow)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(preallocationSize);
 
@@ -689,7 +710,7 @@ public sealed partial class Dir
                 nameof(preallocationSize));
         }
 
-        return new FileOpenRequest(mode, access, share, options, preallocationSize, append);
+        return new FileOpenRequest(mode, access, share, options, preallocationSize, append, noFollow);
     }
 
     /// <summary>

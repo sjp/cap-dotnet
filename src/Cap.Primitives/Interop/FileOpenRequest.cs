@@ -39,7 +39,8 @@ internal readonly struct FileOpenRequest
         FileShare share,
         FileOptions options,
         long preallocationSize,
-        bool append = false)
+        bool append = false,
+        bool noFollow = false)
     {
         Mode = mode;
         Access = access;
@@ -47,6 +48,7 @@ internal readonly struct FileOpenRequest
         Options = options;
         PreallocationSize = preallocationSize;
         Appends = append || mode == FileMode.Append;
+        NoFollow = noFollow;
     }
 
     /// <summary>Whether the name may be created, and what happens to what is already there.</summary>
@@ -83,6 +85,18 @@ internal readonly struct FileOpenRequest
     /// </remarks>
     public bool Appends { get; }
 
+    /// <summary>
+    /// Whether the caller asked for a symbolic link at the last component to be refused.
+    /// </summary>
+    /// <remarks>
+    /// What <c>O_NOFOLLOW</c> asks of a POSIX open, and no more: links before the last
+    /// component are still followed or refused by the policy in force. It can only narrow
+    /// what an open reaches, which is why a caller may ask for it on any open — an open that
+    /// may create or empty the file refuses a final link already, and asking again changes
+    /// nothing for it.
+    /// </remarks>
+    public bool NoFollow { get; }
+
     /// <summary>Whether the handle is to be capable of overlapped operations.</summary>
     public bool IsAsynchronous => (Options & FileOptions.Asynchronous) != 0;
 
@@ -116,11 +130,12 @@ internal readonly struct FileOpenRequest
     /// to refuse every link.
     /// </para>
     /// <para>
-    /// An open of an existing file still follows. It creates and destroys nothing, and a
-    /// link to a file elsewhere in the tree is an ordinary thing for a tree to contain.
+    /// An open of an existing file still follows unless <see cref="NoFollow"/> asks it not
+    /// to. It creates and destroys nothing, and a link to a file elsewhere in the tree is an
+    /// ordinary thing for a tree to contain.
     /// </para>
     /// </remarks>
-    public bool FollowsFinalLink => Mode == FileMode.Open;
+    public bool FollowsFinalLink => Mode == FileMode.Open && !NoFollow;
 
     /// <summary>
     /// An open of a file that must already exist, sharing as widely as the platform allows.

@@ -212,6 +212,11 @@ public sealed partial class Dir : IDisposable
     /// <c>..</c> component is resolved beneath this handle, as a step back to the directory
     /// the walk came from, and refused if it would climb above this directory.
     /// </param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link at the last component is refused rather than followed, as
+    /// <c>O_NOFOLLOW</c> asks of a POSIX open. It changes nothing about links before the last
+    /// component, and nothing about this handle's policy or the policy of the handle returned.
+    /// </param>
     /// <returns>A handle on the directory, owning its own open object.</returns>
     /// <remarks>
     /// <para>
@@ -241,6 +246,15 @@ public sealed partial class Dir : IDisposable
     /// directory inside the subtree opens that directory under the default policy and is
     /// refused under the stricter one.
     /// </para>
+    /// <para>
+    /// With <paramref name="noFollow"/> set, a link at the last component is refused with
+    /// <see cref="CapIOException"/> under either policy, wherever it points, while links
+    /// before it are treated as above. That is the question "is this name a directory, rather
+    /// than something that leads to one", asked without having to restrict the handle, which
+    /// would also refuse every link on the way and would pass the restriction on to every
+    /// handle derived from the result. A path ending in a separator asks for what a final link
+    /// leads to, and follows it even then, as POSIX resolution does.
+    /// </para>
     /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
@@ -255,9 +269,9 @@ public sealed partial class Dir : IDisposable
     /// directory, or the open failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public Dir OpenDir(string path)
+    public Dir OpenDir(string path, bool noFollow = false)
     {
-        CapPathError pathError = OpenDirCore(path, out Dir? dir, out CapError error);
+        CapPathError pathError = OpenDirCore(path, out Dir? dir, out CapError error, followFinalLink: !noFollow);
         if (pathError != CapPathError.None)
         {
             throw FailureTranslation.ToException(pathError, path, nameof(path));
@@ -288,7 +302,29 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryOpenDir(string path, [NotNullWhen(true)] out Dir? dir) =>
-        OpenDirCore(path, out dir, out CapError error) == CapPathError.None && error.IsSuccess;
+        TryOpenDir(path, noFollow: false, out dir);
+
+    /// <summary>
+    /// Opens a directory beneath this one, choosing whether a final symbolic link is
+    /// followed, and reports failure rather than throwing.
+    /// </summary>
+    /// <param name="path">A relative path. See <see cref="OpenDir"/>.</param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link at the last component is refused. See <see cref="OpenDir"/>.
+    /// </param>
+    /// <param name="dir">The handle, when this returns true.</param>
+    /// <returns>True when the directory was opened.</returns>
+    /// <remarks>
+    /// Symbolic links are followed or refused exactly as <see cref="OpenDir"/> describes for
+    /// the same <paramref name="noFollow"/>, and every refusal, containment included, is
+    /// reported as false. Safe to call concurrently with any other member of this handle, from
+    /// any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TryOpenDir(string path, bool noFollow, [NotNullWhen(true)] out Dir? dir) =>
+        OpenDirCore(path, out dir, out CapError error, followFinalLink: !noFollow) == CapPathError.None &&
+        error.IsSuccess;
 
     /// <summary>
     /// Creates a directory beneath this one, and opens it.
@@ -678,7 +714,7 @@ public sealed partial class Dir : IDisposable
     public void Rename(string from, Dir toDir, string to, bool replaceExisting = false)
     {
         CapError error = LinkCore(
-            from, toDir, to, rename: true, replaceExisting,
+            from, toDir, to, rename: true, replaceExisting, followLink: false,
             out CapPathError fromError, out CapPathError toError, out ExpectedTarget expected);
 
         ThrowForPaths(fromError, from, nameof(from), toError, to, nameof(to));
@@ -708,7 +744,7 @@ public sealed partial class Dir : IDisposable
     public bool TryRename(string from, Dir toDir, string to, bool replaceExisting = false)
     {
         CapError error = LinkCore(
-            from, toDir, to, rename: true, replaceExisting,
+            from, toDir, to, rename: true, replaceExisting, followLink: false,
             out CapPathError fromError, out CapPathError toError, out _);
 
         return fromError == CapPathError.None && toError == CapPathError.None && error.IsSuccess;
@@ -893,6 +929,11 @@ public sealed partial class Dir : IDisposable
     /// <param name="path">A relative path, beneath this handle, to the entry to name again.</param>
     /// <param name="toDir">The handle the new name is beneath. May be this one.</param>
     /// <param name="to">A relative path, beneath <paramref name="toDir"/>, for the new name.</param>
+    /// <param name="followLink">
+    /// Whether a symbolic link at <paramref name="path"/> is followed, so that the second
+    /// name is for what the link leads to rather than for the link, as <c>linkat</c> does
+    /// when asked to follow.
+    /// </param>
     /// <remarks>
     /// <para>
     /// Both ends are capabilities, for the reason a move's are: one object reachable by two
@@ -902,8 +943,15 @@ public sealed partial class Dir : IDisposable
     /// of reach and not merely a convenience.
     /// </para>
     /// <para>
-    /// The name is taken as written. A hard link to a symbolic link is a second name for the
-    /// link, not for whatever it points at.
+    /// By default the name is taken as written. A hard link to a symbolic link is a second
+    /// name for the link, not for whatever it points at. With <paramref name="followLink"/>
+    /// set, a link at <paramref name="path"/> is followed as a link on the way would be —
+    /// while it stays beneath this handle, through any further links, refused with
+    /// <see cref="SandboxEscapeException"/> once it leaves and with
+    /// <see cref="CapIOException"/> under <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> —
+    /// and the second name is given to the entry the chain ends at. That entry is linked by
+    /// name, in the directory confined resolution found it in, so the link is made without
+    /// opening it.
     /// </para>
     /// <para>
     /// This never replaces anything: a second name for an object is always a new name, so
@@ -912,9 +960,10 @@ public sealed partial class Dir : IDisposable
     /// not support hard links at all report so.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links.</strong> Neither last component is followed, under either
-    /// policy: a link at <paramref name="path"/> gets the second name itself, as above, and a
-    /// link already holding <paramref name="to"/> makes the new name taken. A link met before
+    /// <strong>Symbolic links.</strong> Neither last component is followed unless
+    /// <paramref name="followLink"/> asks for the one at <paramref name="path"/> to be: a link
+    /// there gets the second name itself, as above, and a link already holding
+    /// <paramref name="to"/> makes the new name taken, whatever is asked. A link met before
     /// the last component of either path is followed or refused under the policy of the
     /// handle that path is resolved against, exactly as <see cref="OpenDir"/> describes —
     /// refused with <see cref="SandboxEscapeException"/> if its target leaves that handle's
@@ -939,10 +988,10 @@ public sealed partial class Dir : IDisposable
     /// directory, the filesystem has no hard links, or the operation failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public void CreateHardLink(string path, Dir toDir, string to)
+    public void CreateHardLink(string path, Dir toDir, string to, bool followLink = false)
     {
         CapError error = LinkCore(
-            path, toDir, to, rename: false, replaceExisting: false,
+            path, toDir, to, rename: false, replaceExisting: false, followLink,
             out CapPathError fromError, out CapPathError toError, out ExpectedTarget expected);
 
         ThrowForPaths(fromError, path, nameof(path), toError, to, nameof(to));
@@ -958,20 +1007,25 @@ public sealed partial class Dir : IDisposable
     /// <param name="path">A relative path to the entry. See <see cref="CreateHardLink"/>.</param>
     /// <param name="toDir">The handle the new name is beneath.</param>
     /// <param name="to">The new name beneath that handle.</param>
+    /// <param name="followLink">
+    /// Whether a symbolic link at <paramref name="path"/> is followed. See
+    /// <see cref="CreateHardLink"/>.
+    /// </param>
     /// <returns>True when the second name was created.</returns>
     /// <remarks>
     /// Symbolic links are treated exactly as <see cref="CreateHardLink"/> describes: neither
-    /// last component is followed, a link on the way is followed or refused by the policy of
-    /// the handle that path is resolved against, and a refusal is reported as false. Safe to
+    /// last component is followed unless <paramref name="followLink"/> asks for the source's
+    /// to be, a link on the way is followed or refused by the policy of the handle that path
+    /// is resolved against, and a refusal is reported as false. Safe to
     /// call concurrently with any other member of this handle or of <paramref name="toDir"/>,
     /// from any thread.
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public bool TryCreateHardLink(string path, Dir toDir, string to)
+    public bool TryCreateHardLink(string path, Dir toDir, string to, bool followLink = false)
     {
         CapError error = LinkCore(
-            path, toDir, to, rename: false, replaceExisting: false,
+            path, toDir, to, rename: false, replaceExisting: false, followLink,
             out CapPathError fromError, out CapPathError toError, out _);
 
         return fromError == CapPathError.None && toError == CapPathError.None && error.IsSuccess;
@@ -1698,7 +1752,8 @@ public sealed partial class Dir : IDisposable
         string path,
         out NameLookup lookup,
         out CapError error,
-        bool describing = false)
+        bool describing = false,
+        bool followLastLink = false)
     {
         ArgumentNullException.ThrowIfNull(path);
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
@@ -1711,9 +1766,31 @@ public sealed partial class Dir : IDisposable
             return pathError;
         }
 
-        if (!parsed.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
+        if (!parsed.TrySplitLastComponent(out _, out _))
         {
             return CapPathError.Empty;
+        }
+
+        error = LocateParsed(in parsed, out lookup, describing);
+        if (followLastLink && error.IsSuccess)
+        {
+            error = FollowLastLink(parsed, ref lookup);
+        }
+
+        return CapPathError.None;
+    }
+
+    /// <summary>
+    /// The resolution half of <see cref="Locate"/>, for a path that has already been parsed
+    /// and has at least one component.
+    /// </summary>
+    private CapError LocateParsed(scoped in CapPath parsed, out NameLookup lookup, bool describing)
+    {
+        lookup = default;
+
+        if (!parsed.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
 
         // A path ending in `..` names a directory by where it sits rather than by a name in
@@ -1726,38 +1803,195 @@ public sealed partial class Dir : IDisposable
             CapResult<SafeDirHandle> reached = Resolver.OpenDirectory(_handle, in parsed, CapAccess.None, _options);
             if (!reached.IsSuccess)
             {
-                error = reached.Error;
-                return CapPathError.None;
+                return reached.Error;
             }
 
             if (!describing)
             {
                 reached.Value.Dispose();
-                error = CapError.FromCategory(CapErrorCategory.InvalidArgument);
-                return CapPathError.None;
+                return CapError.FromCategory(CapErrorCategory.InvalidArgument);
             }
 
             lookup = NameLookup.ForDirectoryItself(reached.Value);
-            return CapPathError.None;
+            return CapError.Success;
         }
 
         if (prefix.IsEmpty)
         {
             lookup = new NameLookup(null, _handle, name, parsed.RequiresDirectory);
-            return CapPathError.None;
+            return CapError.Success;
         }
 
         CapResult<ResolvedParent> parent = Resolver.ResolveParent(_handle, in parsed, _options);
         if (!parent.IsSuccess)
         {
-            error = parent.Error;
-            return CapPathError.None;
+            return parent.Error;
         }
 
         lookup = new NameLookup(
             parent.Value, parent.Value.Directory, parent.Value.Name, parsed.RequiresDirectory);
 
-        return CapPathError.None;
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// Turns a lookup whose name holds a symbolic link into one for whatever the link leads
+    /// to, for a member asked to act on a final link's target rather than on the link.
+    /// </summary>
+    /// <param name="path">The path <paramref name="lookup"/> was resolved from.</param>
+    /// <param name="lookup">
+    /// The lookup to replace. On success it names something that is not a link — or nothing,
+    /// when the chain ends at a name that is free — or is the directory a chain ended on.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The operations that act on a name — describing it, setting its times, giving it a
+    /// second name — do so with one call that never follows a link, and that call is where
+    /// they get their safety from. So a final link is not handed to the platform to follow.
+    /// It is read here, its target is put in place of the last component, and the result is
+    /// resolved from this handle again, by the same confined resolution as the caller's own
+    /// path: a link's target cannot reach anywhere a written-out path could not, and a rooted
+    /// target is refused as the escape it is. The chain is followed until a name holds
+    /// something other than a link, under the same bound on the number of links the walk
+    /// applies, and every link on it is subject to this handle's policy, so under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> a final link is refused rather than
+    /// followed.
+    /// </para>
+    /// <para>
+    /// Re-resolving from this handle rather than from the directory holding the link is what
+    /// lets a target climb with <c>..</c> as far as this handle and no further, which is the
+    /// same bound it would have had inside a longer path. It also means the steps are not one
+    /// instant: something that can write in the tree can replace a name between the look at
+    /// it and the operation on it. What the operation then meets is a name in a directory
+    /// resolution confined, acted on without following, so the replacement can change which
+    /// entry is acted on and never lead it out of the subtree.
+    /// </para>
+    /// </remarks>
+    private CapError FollowLastLink(CapPath path, ref NameLookup lookup)
+    {
+        IPlatformOps ops = PlatformOps.Current;
+        int budget = PortableResolver.MaxSymbolicLinks;
+
+        while (!lookup.NamesDirectoryItself)
+        {
+            // A name that is free, or that cannot be looked at, is left for the operation to
+            // meet: it reports what it finds, in the terms it would use without following.
+            if (ops.StatChild(lookup.Directory, lookup.Name, out CapNodeInfo info).IsFailure)
+            {
+                return CapError.Success;
+            }
+
+            // A reparse point whose tag is not a filesystem link has nothing to follow that
+            // means a place, and resolution refuses one it meets on the way; following one on
+            // request is refused the same way rather than quietly acting on it as a name.
+            if (info.Type == CapNodeType.UnknownReparsePoint)
+            {
+                return CapError.FromCategory(CapErrorCategory.Reparse);
+            }
+
+            if (info.Type != CapNodeType.SymbolicLink)
+            {
+                return CapError.Success;
+            }
+
+            if ((_options & ConfinedResolveOptions.RefuseSymlinks) != 0 || --budget < 0)
+            {
+                return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
+            }
+
+            CapResult<string> target = ops.ReadChildLink(lookup.Directory, lookup.Name);
+            if (!target.IsSuccess)
+            {
+                // No longer a link by the time it was read: replaced in between, so the name
+                // is looked at again. The budget bounds how often that can happen.
+                if (target.Error.Category == CapErrorCategory.NotALink)
+                {
+                    continue;
+                }
+
+                return target.Error;
+            }
+
+            CapError joined = JoinLinkTarget(path, target.Value, out CapPath next);
+            if (joined.IsFailure)
+            {
+                return joined;
+            }
+
+            lookup.Dispose();
+            lookup = default;
+
+            if (next.ComponentCount == 0)
+            {
+                // The target led back to this handle's own directory, which has no name
+                // beneath it to act on.
+                CapResult<SafeDirHandle> self = ops.DuplicateDirectory(_handle);
+                if (!self.IsSuccess)
+                {
+                    return self.Error;
+                }
+
+                lookup = NameLookup.ForDirectoryItself(self.Value);
+                return CapError.Success;
+            }
+
+            CapError located = LocateParsed(in next, out lookup, describing: true);
+            if (located.IsFailure)
+            {
+                return located;
+            }
+
+            path = next;
+        }
+
+        return CapError.Success;
+    }
+
+    /// <summary>
+    /// Puts a link's stored target in place of the last component of the path that reached
+    /// the link.
+    /// </summary>
+    /// <remarks>
+    /// The target is data written by whoever could write in the directory holding the link,
+    /// so it is parsed by the same rules as a caller's path, and refused on the same grounds a
+    /// link met by the walk is refused. A target of <c>.</c> names the directory holding the
+    /// link, which is what the path is left naming once its last component is dropped.
+    /// </remarks>
+    private static CapError JoinLinkTarget(scoped in CapPath path, string target, out CapPath joined)
+    {
+        joined = default;
+        path.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out _);
+
+        if (!CapPath.TryParse(target, path.Syntax, ParentLinkPolicy.Preserve, out _, out CapPathError error))
+        {
+            if (error != CapPathError.Empty || target.Length == 0)
+            {
+                return PortableResolver.TranslateLinkTarget(error);
+            }
+
+            target = string.Empty;
+        }
+
+        string combined = string.Concat(prefix, target);
+        if (combined.Length == 0)
+        {
+            return CapError.Success;
+        }
+
+        if (!CapPath.TryParse(combined, path.Syntax, ParentLinkPolicy.Preserve, out joined, out error))
+        {
+            // Everything in the combination was accepted on its own, so what is left to refuse
+            // is its length, or a prefix of nothing but `.` components.
+            if (error == CapPathError.Empty)
+            {
+                joined = default;
+                return CapError.Success;
+            }
+
+            return PortableResolver.TranslateLinkTarget(error);
+        }
+
+        return CapError.Success;
     }
 
     /// <summary>
@@ -2066,6 +2300,7 @@ public sealed partial class Dir : IDisposable
         string to,
         bool rename,
         bool replaceExisting,
+        bool followLink,
         out CapPathError fromError,
         out CapPathError toError,
         out ExpectedTarget expected)
@@ -2075,13 +2310,21 @@ public sealed partial class Dir : IDisposable
         toError = CapPathError.None;
         expected = ExpectedTarget.Name;
 
-        fromError = Locate(from, out NameLookup source, out CapError error);
+        fromError = Locate(from, out NameLookup source, out CapError error, followLastLink: followLink);
         using (source)
         {
             if (fromError != CapPathError.None || error.IsFailure)
             {
                 expected = ExpectedTarget.Directory;
                 return error;
+            }
+
+            // A followed link can end at a directory reached by `..` or `.`, which is not a
+            // name but a directory, and no filesystem this runs on gives a directory a second
+            // name.
+            if (source.NamesDirectoryItself)
+            {
+                return CapError.FromCategory(CapErrorCategory.IsADirectory);
             }
 
             toError = toDir.Locate(to, out NameLookup destination, out error);
@@ -2190,7 +2433,8 @@ public sealed partial class Dir : IDisposable
         string path,
         out Dir? dir,
         out CapError error,
-        ConfinedResolveOptions stricter = ConfinedResolveOptions.None)
+        ConfinedResolveOptions stricter = ConfinedResolveOptions.None,
+        bool followFinalLink = true)
     {
         ArgumentNullException.ThrowIfNull(path);
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
@@ -2207,7 +2451,8 @@ public sealed partial class Dir : IDisposable
             _handle,
             in parsed,
             CapAccess.Read,
-            _options | stricter);
+            _options | stricter,
+            followFinalLink);
         if (!opened.IsSuccess)
         {
             error = opened.Error;

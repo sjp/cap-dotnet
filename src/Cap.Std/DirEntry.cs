@@ -251,7 +251,7 @@ public readonly struct DirEntry
         long preallocationSize,
         bool append,
         [NotNullWhen(true)] out CapFile? file) =>
-        Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, append, out file);
+        Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, append, noFollow: false, out file);
 
     /// <summary>
     /// Describes what the entry's name holds now.

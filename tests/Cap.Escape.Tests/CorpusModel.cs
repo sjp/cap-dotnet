@@ -59,6 +59,12 @@ internal enum Outcome
 /// link leads to. Every other operation acts on the name itself, so a link there is removed,
 /// moved, described or read as a link and what it points at is never reached.
 /// </para>
+/// <para>
+/// The last five ask the other way about a final link, per call: opening without following
+/// it, and describing, setting times on and hard-linking what it leads to. Following one
+/// there is held to the same containment as following one on the way, which is why they are
+/// driven through every case like the rest.
+/// </para>
 /// </remarks>
 internal enum Operation
 {
@@ -116,6 +122,24 @@ internal enum Operation
 
     /// <summary>Gives a fixed file beneath the root a second name, at the name.</summary>
     HardLinkTo,
+
+    /// <summary>Opens an existing file for reading, refusing a link at the name, and reads it.</summary>
+    OpenFileNoFollow,
+
+    /// <summary>Opens a directory, refusing a link at the name, and lists it.</summary>
+    OpenDirNoFollow,
+
+    /// <summary>Describes what the name holds, following a link there.</summary>
+    GetMetadataFollowing,
+
+    /// <summary>Sets the times of what the name holds, following a link there.</summary>
+    SetTimesFollowing,
+
+    /// <summary>
+    /// Gives what the name holds a second name, at a fixed name beneath the root, following a
+    /// link there.
+    /// </summary>
+    HardLinkFromFollowing,
 }
 
 /// <summary>
@@ -230,7 +254,10 @@ internal sealed record KnownDifference(string[] Backends, Expectation Expected, 
 internal sealed class Expectation
 {
     private static readonly Operation[] FollowingOperations =
-        [Operation.OpenFile, Operation.OpenDir];
+        [
+            Operation.OpenFile, Operation.OpenDir, Operation.GetMetadataFollowing,
+            Operation.SetTimesFollowing, Operation.HardLinkFromFollowing,
+        ];
 
     private readonly Dictionary<Operation, Outcome> _outcomes;
 
@@ -239,6 +266,35 @@ internal sealed class Expectation
         _outcomes = outcomes;
         Role = role;
         Shape = shape;
+        DerivePerCallFollowing();
+    }
+
+    /// <summary>
+    /// Fills in what the per-call forms come to from what the ordinary forms do, for any the
+    /// expectation did not state.
+    /// </summary>
+    /// <remarks>
+    /// Where no link holds the name, asking to follow one or not changes nothing, so each form
+    /// comes to what its ordinary counterpart does. Where one does, refusing to follow it is
+    /// refused, and following it reaches what opening it reaches: described and timed
+    /// wherever it leads to a file or a directory, given a second name only for a file, and
+    /// otherwise refused, missing or an escape exactly as opening it is.
+    /// </remarks>
+    private void DerivePerCallFollowing()
+    {
+        bool final = Role == LinkRole.Final;
+        Outcome asFile = _outcomes[Operation.OpenFile];
+        Outcome asDirectory = _outcomes[Operation.OpenDir];
+        Outcome reached = asFile == Outcome.Success || asDirectory == Outcome.Success ? Outcome.Success : asFile;
+        Outcome linked = asFile == Outcome.Success ? Outcome.Success
+            : asDirectory == Outcome.Success ? Outcome.Refused
+            : asFile;
+
+        _outcomes.TryAdd(Operation.OpenFileNoFollow, final ? Outcome.Refused : asFile);
+        _outcomes.TryAdd(Operation.OpenDirNoFollow, final ? Outcome.Refused : asDirectory);
+        _outcomes.TryAdd(Operation.GetMetadataFollowing, final ? reached : _outcomes[Operation.GetMetadata]);
+        _outcomes.TryAdd(Operation.SetTimesFollowing, final ? reached : _outcomes[Operation.SetTimes]);
+        _outcomes.TryAdd(Operation.HardLinkFromFollowing, final ? linked : _outcomes[Operation.HardLinkFrom]);
     }
 
     /// <summary>Where the link that decides the outcome sits.</summary>
@@ -440,7 +496,7 @@ internal sealed class Expectation
             }
 
             if ((features & HostFeature.HardLinks) == 0 &&
-                operation is Operation.HardLinkFrom or Operation.HardLinkTo)
+                operation is Operation.HardLinkFrom or Operation.HardLinkTo or Operation.HardLinkFromFollowing)
             {
                 outcome = Outcome.Refused;
             }

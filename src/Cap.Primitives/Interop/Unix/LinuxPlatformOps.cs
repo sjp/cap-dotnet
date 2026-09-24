@@ -302,7 +302,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         CapAccess access,
-        ConfinedResolveOptions options)
+        ConfinedResolveOptions options,
+        bool followFinalLink = true)
     {
         if (!TryDirectoryAccessFlag(access, out int accessFlag))
         {
@@ -310,10 +311,58 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         int flags = accessFlag | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC;
+        if (!followFinalLink)
+        {
+            flags |= LinuxConstants.O_NOFOLLOW;
+        }
+
         CapError error = OpenConfinedDescriptor(root, path, flags, mode: 0, options, out int fd);
-        return error.IsFailure
-            ? CapResult<SafeDirHandle>.Fail(error)
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
+        if (error.IsFailure)
+        {
+            return CapResult<SafeDirHandle>.Fail(
+                !followFinalLink && error.Category == CapErrorCategory.NotADirectory
+                    ? ClassifyRefusedDirectory(root, path, options, error)
+                    : error);
+        }
+
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
+    }
+
+    /// <summary>
+    /// Reads a directory open that refused a final link and said "not a directory".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The kernel checks that the last component is a directory before it checks whether it
+    /// is a link it was told not to follow, so a refused link comes back as "not a
+    /// directory" — true of the link, and not what the walk reports for the same refusal.
+    /// The name is looked at again, confined as before and without following it, and a link
+    /// found there is reported as the refused link it was.
+    /// </para>
+    /// <para>
+    /// A second call on the failure path only, so it can disagree with the first if the name
+    /// was replaced between them. Either way the open has already failed: the answer decides
+    /// which failure is reported and never what may be reached.
+    /// </para>
+    /// </remarks>
+    private CapError ClassifyRefusedDirectory(
+        SafeDirHandle root,
+        ReadOnlySpan<char> path,
+        ConfinedResolveOptions options,
+        CapError notADirectory)
+    {
+        int flags = LinuxConstants.O_PATH | LinuxConstants.O_NOFOLLOW | LinuxConstants.O_CLOEXEC;
+        if (OpenConfinedDescriptor(root, path, flags, mode: 0, options, out int fd).IsFailure)
+        {
+            return notADirectory;
+        }
+
+        using SafeFileHandle found = new(fd, ownsHandle: true);
+        ReadOnlySpan<byte> self = [0];
+        return StatInto(fd, self, LinuxConstants.AT_EMPTY_PATH, out CapNodeInfo info).IsSuccess &&
+               info.Type == CapNodeType.SymbolicLink
+            ? CapError.Create(CapErrorCategory.SymbolicLinkLoop, CapErrorSource.Errno, LinuxErrno.ELOOP)
+            : notADirectory;
     }
 
     /// <inheritdoc/>

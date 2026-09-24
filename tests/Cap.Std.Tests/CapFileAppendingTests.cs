@@ -130,7 +130,7 @@ public sealed class CapFileAppendingTests : IDisposable
 
         Assert.Throws<ArgumentException>(() => root.OpenFile("log", FileMode.Open, FileAccess.Read, append: true));
         Assert.Throws<ArgumentException>(() => root.TryOpenFile(
-            "log", FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: true, out _));
+            "log", FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: true, noFollow: false, out _));
     }
 
     /// <summary>The reporting form opens to append as the throwing form does.</summary>
@@ -141,7 +141,7 @@ public sealed class CapFileAppendingTests : IDisposable
 
         using Dir root = OpenRoot();
         Assert.True(root.TryOpenFile(
-            "log", FileMode.Open, FileAccess.ReadWrite, FileShare.Read, FileOptions.None, 0, append: true,
+            "log", FileMode.Open, FileAccess.ReadWrite, FileShare.Read, FileOptions.None, 0, append: true, noFollow: false,
             out CapFile? file));
 
         using (file)

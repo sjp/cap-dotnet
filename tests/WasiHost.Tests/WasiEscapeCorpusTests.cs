@@ -152,10 +152,13 @@ public sealed class WasiEscapeCorpusTests
         // refused because it is a directory, and everything else — removing it, renaming it,
         // linking it — is refused as before.
         if (NamesItself(entry.Path) && operation is
-                Operation.OpenDir or Operation.GetMetadata or Operation.SetTimes or Operation.Exists or
-                Operation.OpenFile or Operation.CreateFile)
+                Operation.OpenDir or Operation.OpenDirNoFollow or Operation.GetMetadata or
+                Operation.GetMetadataFollowing or Operation.SetTimes or Operation.SetTimesFollowing or
+                Operation.Exists or Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile)
         {
-            Outcome itself = operation is Operation.OpenFile or Operation.CreateFile ? Outcome.Refused : Outcome.Success;
+            Outcome itself = operation is Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile
+                ? Outcome.Refused
+                : Outcome.Success;
             return ([itself], "a WASI path of only '.' names the preopened directory itself");
         }
 
@@ -165,7 +168,7 @@ public sealed class WasiEscapeCorpusTests
         // with a different code per call -- EEXIST, EISDIR, ENOTEMPTY, EBUSY -- so no single
         // code would be more faithful, and each is a refusal.
         if (EndsInParentStep(entry.Path) && direct == Outcome.Refused && operation is not
-                (Operation.OpenFile or Operation.CreateFile or Operation.CreateSymlinkTo))
+                (Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile or Operation.CreateSymlinkTo))
         {
             return ([Outcome.Refused, Outcome.Malformed], "a path ending in '..' leaves no name to act on, which the adapter reports as EINVAL");
         }
@@ -181,7 +184,7 @@ public sealed class WasiEscapeCorpusTests
 
         // link(2) reports a directory given a second name as EPERM, and the adapter answers
         // as it does, where the library refuses the request as naming a directory.
-        if (operation == Operation.HardLinkFrom && direct == Outcome.Refused)
+        if (operation is Operation.HardLinkFrom or Operation.HardLinkFromFollowing && direct == Outcome.Refused)
         {
             return ([Outcome.Refused, Outcome.Denied], "link reports a directory given a second name as EPERM");
         }

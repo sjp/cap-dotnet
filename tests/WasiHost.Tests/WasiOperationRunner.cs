@@ -26,7 +26,10 @@ internal sealed record WasiObservation(Observation Observation, List<(ulong Devi
 /// <para>
 /// An open follows a final link, as a guest's <c>open()</c> asks by default, and a
 /// description does not, as <c>lstat()</c>. That is the same choice the library's own calls
-/// make, so the corpus's expectations apply unchanged.
+/// make, so the corpus's expectations apply unchanged. The per-call forms flip the lookup
+/// flag each call takes: an open without <c>LOOKUPFLAGS_SYMLINK_FOLLOW</c>, as
+/// <c>O_NOFOLLOW</c>, and a description, a change of times and a hard link with it, as
+/// <c>stat()</c>, <c>utimensat()</c> and <c>linkat(AT_SYMLINK_FOLLOW)</c>.
 /// </para>
 /// </remarks>
 internal static class WasiOperationRunner
@@ -66,11 +69,15 @@ internal static class WasiOperationRunner
         operation switch
         {
             Operation.OpenFile => Read(guest, path, observation, reached),
+            Operation.OpenFileNoFollow => Read(guest, path, observation, reached, follow: false),
             Operation.OpenDir => ListDirectory(guest, path, observation, reached),
+            Operation.OpenDirNoFollow => ListDirectory(guest, path, observation, reached, follow: false),
             Operation.CreateFile => CreateAndWrite(guest, path, reached),
             Operation.CreateDir => WithPath(guest, "path_create_directory", path),
             Operation.GetMetadata or Operation.Exists => DescribePath(guest, path, reached),
+            Operation.GetMetadataFollowing => DescribePath(guest, path, reached, follow: true),
             Operation.SetTimes => SetTimes(guest, path, reached),
+            Operation.SetTimesFollowing => SetTimes(guest, path, reached, follow: true),
             Operation.ReadLink => ReadLink(guest, path),
             Operation.DeleteFile => WithPath(guest, "path_unlink_file", path),
             Operation.DeleteDir => WithPath(guest, "path_remove_directory", path),
@@ -79,13 +86,15 @@ internal static class WasiOperationRunner
             Operation.CreateSymlinkAt => Symlink(guest, EscapeCorpus.CreatedLinkTarget, path),
             Operation.CreateSymlinkTo => SymlinkAndFollow(guest, path, observation, reached),
             Operation.HardLinkFrom => LinkAndDescribe(guest, path, reached),
+            Operation.HardLinkFromFollowing => LinkAndDescribe(guest, path, reached, follow: true),
             Operation.HardLinkTo => Link(guest, EscapeCorpus.SourceFile, path),
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation, "No WASI call does this."),
         };
 
-    private static Errno ListDirectory(TrampolineGuest guest, string path, Observation observation, List<(ulong, ulong)> reached)
+    private static Errno ListDirectory(
+        TrampolineGuest guest, string path, Observation observation, List<(ulong, ulong)> reached, bool follow = true)
     {
-        Errno errno = Open(guest, path, OFlags.Directory, Rights.FdReaddir | Rights.FdFilestatGet, out uint fd);
+        Errno errno = Open(guest, path, OFlags.Directory, Rights.FdReaddir | Rights.FdFilestatGet, out uint fd, follow);
         if (errno != Errno.Success)
         {
             return errno;
@@ -122,12 +131,16 @@ internal static class WasiOperationRunner
         return errno;
     }
 
-    /// <summary>Describes a name without following a final link, as <c>lstat()</c> does.</summary>
-    private static Errno DescribePath(TrampolineGuest guest, string path, List<(ulong, ulong)> reached)
+    /// <summary>
+    /// Describes a name without following a final link, as <c>lstat()</c> does, or following
+    /// one, as <c>stat()</c> does.
+    /// </summary>
+    private static Errno DescribePath(TrampolineGuest guest, string path, List<(ulong, ulong)> reached, bool follow = false)
     {
         int length = guest.WritePath(TrampolineGuest.PathSlot, path);
         Errno errno = guest.Call(
-            "path_filestat_get", TrampolineGuest.Root, 0, TrampolineGuest.PathSlot, length, TrampolineGuest.ResultSlot);
+            "path_filestat_get", TrampolineGuest.Root, Lookup(follow), TrampolineGuest.PathSlot, length,
+            TrampolineGuest.ResultSlot);
         if (errno == Errno.Success)
         {
             reached.Add(Identity(guest));
@@ -137,18 +150,18 @@ internal static class WasiOperationRunner
     }
 
     /// <summary>
-    /// Sets a name's last-write time without following a final link, then describes it the
+    /// Sets a name's last-write time, following a final link or not, then describes it the
     /// same way to learn what was reached.
     /// </summary>
-    private static Errno SetTimes(TrampolineGuest guest, string path, List<(ulong, ulong)> reached)
+    private static Errno SetTimes(TrampolineGuest guest, string path, List<(ulong, ulong)> reached, bool follow = false)
     {
         int length = guest.WritePath(TrampolineGuest.PathSlot, path);
         long written = (EscapeCorpus.PlantedTime - DateTimeOffset.UnixEpoch).Ticks * 100;
         Errno errno = guest.Call(
-            "path_filestat_set_times", TrampolineGuest.Root, 0, TrampolineGuest.PathSlot, length,
+            "path_filestat_set_times", TrampolineGuest.Root, Lookup(follow), TrampolineGuest.PathSlot, length,
             0L, written, (int)FstFlags.Mtim);
 
-        return errno == Errno.Success ? DescribePath(guest, path, reached) : errno;
+        return errno == Errno.Success ? DescribePath(guest, path, reached, follow) : errno;
     }
 
     private static Errno ReadLink(TrampolineGuest guest, string path)
@@ -171,16 +184,17 @@ internal static class WasiOperationRunner
         return Read(guest, EscapeCorpus.CreatedLinkName, observation, reached);
     }
 
-    private static Errno LinkAndDescribe(TrampolineGuest guest, string path, List<(ulong, ulong)> reached)
+    private static Errno LinkAndDescribe(TrampolineGuest guest, string path, List<(ulong, ulong)> reached, bool follow = false)
     {
-        Errno errno = Link(guest, path, EscapeCorpus.LandingName);
+        Errno errno = Link(guest, path, EscapeCorpus.LandingName, follow);
         return errno != Errno.Success ? errno : DescribePath(guest, EscapeCorpus.LandingName, reached);
     }
 
     /// <summary>Opens a name and reads from it, as a guest's <c>open()</c> and <c>read()</c> would.</summary>
-    private static Errno Read(TrampolineGuest guest, string path, Observation observation, List<(ulong, ulong)> reached)
+    private static Errno Read(
+        TrampolineGuest guest, string path, Observation observation, List<(ulong, ulong)> reached, bool follow = true)
     {
-        Errno errno = Open(guest, path, OFlags.None, Rights.FdRead | Rights.FdFilestatGet, out uint fd);
+        Errno errno = Open(guest, path, OFlags.None, Rights.FdRead | Rights.FdFilestatGet, out uint fd, follow);
         if (errno != Errno.Success)
         {
             return errno;
@@ -202,14 +216,14 @@ internal static class WasiOperationRunner
         return errno;
     }
 
-    private static Errno Open(TrampolineGuest guest, string path, OFlags oflags, Rights rights, out uint fd)
+    private static Errno Open(TrampolineGuest guest, string path, OFlags oflags, Rights rights, out uint fd, bool follow = true)
     {
         fd = 0;
         int length = guest.WritePath(TrampolineGuest.PathSlot, path);
         Errno errno = guest.Call(
             "path_open",
             TrampolineGuest.Root,
-            (int)LookupFlags.SymlinkFollow,
+            Lookup(follow),
             TrampolineGuest.PathSlot,
             length,
             (int)oflags,
@@ -311,12 +325,14 @@ internal static class WasiOperationRunner
             TrampolineGuest.SecondPathSlot, atLength);
     }
 
-    private static Errno Link(TrampolineGuest guest, string from, string to)
+    private static Errno Link(TrampolineGuest guest, string from, string to, bool follow = false)
     {
         int fromLength = guest.WritePath(TrampolineGuest.PathSlot, from);
         int toLength = guest.WritePath(TrampolineGuest.SecondPathSlot, to);
         return guest.Call(
-            "path_link", TrampolineGuest.Root, 0, TrampolineGuest.PathSlot, fromLength,
+            "path_link", TrampolineGuest.Root, Lookup(follow), TrampolineGuest.PathSlot, fromLength,
             TrampolineGuest.Root, TrampolineGuest.SecondPathSlot, toLength);
     }
+
+    private static int Lookup(bool follow) => follow ? (int)LookupFlags.SymlinkFollow : 0;
 }

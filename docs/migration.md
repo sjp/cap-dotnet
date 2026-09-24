@@ -44,7 +44,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.WriteAllLines(p, lines)` | a `StreamWriter` over `dir.CreateFile(p).AsStream()` | |
 | `File.AppendAllText(p, s)` | a `StreamWriter` over `dir.OpenFile(p, FileMode.Append, FileAccess.Write).AsStream()` | |
 | No equivalent: an open that appends and also reads, empties the file or must create it | `dir.OpenFile(p, mode, access, append: true)` | Appending is a flag of its own here, as in POSIX, so it combines with any mode and with reading, and `CapFile.IsAppending` changes it on an open file. `FileMode.Append` keeps its framework meaning. |
-| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. Every mode but `FileMode.Open` refuses a symbolic link at `p`. |
+| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. Every mode but `FileMode.Open` refuses a symbolic link at `p`, and `noFollow: true` makes `FileMode.Open` refuse one too. |
 | `File.OpenRead(p)` | `dir.OpenFile(p)` | Read is the default. |
 | `File.OpenWrite(p)` | `dir.OpenFile(p, FileMode.OpenOrCreate, FileAccess.Write)` | |
 | `File.Create(p)` | `dir.CreateFile(p)` | Refuses a symbolic link at `p`. |
@@ -58,14 +58,14 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.CreateSymbolicLink(p, target)` | `dir.CreateSymlink(p, target)` | `dir.CreateDirSymlink` for a link to a directory, which Windows records differently. A relative target is stored as written; whether it can be followed is decided when it is used. A rooted target (`/etc`, `C:\dir`) is refused with `SandboxEscapeException`, where `File.CreateSymbolicLink` accepts one. |
 | `File.ResolveLinkTarget(p, false)`, `FileInfo.LinkTarget` | `dir.ReadLink(p)` | |
 | `File.ResolveLinkTarget(p, true)` | open through the link instead | Resolution follows a link only while it stays inside the tree; there is no call that hands back where it leads as a path. |
-| Creating a hard link | `dir.CreateHardLink(p, toDir, to)` | Both ends need a `Dir`. |
+| Creating a hard link | `dir.CreateHardLink(p, toDir, to)` | Both ends need a `Dir`. A symbolic link at `p` gets the second name itself; `followLink: true` gives it to what the link leads to. |
 | `File.GetAttributes(p)` | `dir.GetMetadata(p).Permissions.TryGetWindowsAttributes(out var a)` | |
 | `File.GetUnixFileMode(p)` | `dir.GetMetadata(p).Permissions.TryGetUnixMode(out var m)` | |
-| `File.GetLastWriteTimeUtc(p)` | `dir.GetMetadata(p).LastWriteTime` | A `DateTimeOffset`. |
+| `File.GetLastWriteTimeUtc(p)` | `dir.GetMetadata(p).LastWriteTime` | A `DateTimeOffset`. A symbolic link at `p` is described as itself; `dir.GetMetadata(p, followLink: true)` describes what it leads to. |
 | `File.GetLastAccessTimeUtc(p)` | `dir.GetMetadata(p).LastAccessTime` | |
 | `File.GetCreationTimeUtc(p)` | `dir.GetMetadata(p).CreationTime` | Null where the filesystem records none, rather than a made-up date. |
 | `new FileInfo(p).Length` | `dir.GetMetadata(p).Length` | |
-| `File.SetLastWriteTimeUtc(p, t)`, `File.SetLastAccessTimeUtc(p, t)` | `dir.SetTimes(p, lastWrite: CapFileTime.At(t))`, and `lastAccess:` | Does not follow a symbolic link at `p`: the link's own times are set, where `File.SetLastWriteTime` sets its target's. `CapFileTime.Now` asks the system to stamp the time of the change. On an open file, `file.SetTimes(...)`, which needs a handle opened for writing. |
+| `File.SetLastWriteTimeUtc(p, t)`, `File.SetLastAccessTimeUtc(p, t)` | `dir.SetTimes(p, lastWrite: CapFileTime.At(t))`, and `lastAccess:` | Does not follow a symbolic link at `p` unless given `followLink: true`: the link's own times are set, where `File.SetLastWriteTime` sets its target's. `CapFileTime.Now` asks the system to stamp the time of the change. On an open file, `file.SetTimes(...)`, which needs a handle opened for writing. |
 | `File.SetCreationTime` | none | Not every platform can set one. |
 | `File.SetAttributes`, `File.SetUnixFileMode` | none | Not provided. **Ext** `CopyTo` carries permissions across a copy when asked. |
 | `File.Encrypt`, `File.Decrypt` | none | |

@@ -282,7 +282,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         CapAccess access,
-        ConfinedResolveOptions options) =>
+        ConfinedResolveOptions options,
+        bool followFinalLink = true) =>
         CapResult<SafeDirHandle>.Fail(ConfinedOpenUnavailable);
 
     /// <inheritdoc/>

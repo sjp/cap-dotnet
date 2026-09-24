@@ -135,7 +135,20 @@ link or on what the link points at is a property of the operation. Removing a na
 the name, reading a link reads it, and an open that creates or truncates a file refuses a
 link at the name, however links met on the way are treated. The walk refuses that link
 without reading it; the kernel-atomic backend adds `O_NOFOLLOW` to the open, so the kernel
-refuses it the same way.
+refuses it the same way. An open asked per call not to follow a final link is refused the
+same way on both. For a directory the kernel reports that refusal as "not a directory", so
+the kernel-atomic backend looks at the name again, confined and without following it, and
+reports a link it finds there as the refused link it was. A path ending in a separator asks
+for what a final link leads to, and the kernel follows it even when told not to; the walk
+does the same, so the two agree.
+
+Describing, setting times and hard-linking act on a name with one call that never follows a
+link, on both backends. Asked per call to follow a final link, they read it, put its target
+in place of the last component, and resolve the result from the handle again — through the
+kernel-atomic open where there is one — until a name holds something other than a link. The
+chain is followed under the same policy and the same bound on links as any resolution, and
+it is not one instant: a name replaced between the look and the call changes which entry
+beneath the handle is acted on, never whether one outside is.
 
 An absolute target is refused rather than re-read as though the sandbox root were the
 filesystem root. The re-reading is defensible — it is what `chroot` does — but it silently

@@ -34,8 +34,6 @@ internal abstract class Descriptor : IDisposable
 /// <summary>A directory: a <see cref="Dir"/>, which is all a directory descriptor needs to be.</summary>
 internal sealed class DirectoryDescriptor : Descriptor
 {
-    private Dir? _nofollow;
-
     public DirectoryDescriptor(Dir dir, Rights rightsBase, Rights rightsInheriting, string? preopenName = null)
         : base(rightsBase, rightsInheriting)
     {
@@ -50,25 +48,7 @@ internal sealed class DirectoryDescriptor : Descriptor
 
     public override FileType Type => FileType.Directory;
 
-    /// <summary>
-    /// The same directory, refusing every symbolic link, for a lookup the guest asked not to
-    /// follow one.
-    /// </summary>
-    /// <remarks>
-    /// WASI's no-follow asks only that a link at the last component not be followed.
-    /// <see cref="SymlinkPolicy.Deny"/> is the nearest thing the library offers, and it is
-    /// stricter: a link before the last component is refused as well. Stricter is the safe
-    /// direction to be wrong in, since it can refuse something the guest was entitled to but
-    /// cannot reach something it was not. Made on first use and kept, since a restricted
-    /// handle is a second open of the same directory.
-    /// </remarks>
-    public Dir NoFollow => _nofollow ??= Dir.Restrict(SymlinkPolicy.Deny);
-
-    public override void Dispose()
-    {
-        _nofollow?.Dispose();
-        Dir.Dispose();
-    }
+    public override void Dispose() => Dir.Dispose();
 }
 
 /// <summary>An open file, and the position the guest's unpositioned reads and writes use.</summary>

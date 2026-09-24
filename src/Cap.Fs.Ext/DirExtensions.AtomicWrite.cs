@@ -302,7 +302,7 @@ public static partial class DirExtensions
             string candidate = TemporaryNames.Next();
             if (directory.TryOpenFile(
                     candidate, FileMode.CreateNew, FileAccess.Write, FileShare.Read, options, 0,
-                    append: false, out CapFile? created))
+                    append: false, noFollow: false, out CapFile? created))
             {
                 file = created;
                 return candidate;

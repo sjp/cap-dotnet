@@ -83,15 +83,27 @@ internal static class PortableResolver
     /// Opens the directory that <paramref name="path"/> names beneath
     /// <paramref name="root"/>.
     /// </summary>
+    /// <remarks>
+    /// A directory open carries no file request of its own, so whether a link at the last
+    /// component is followed travels in the one the walk is handed, as it does for a file.
+    /// </remarks>
     public static CapResult<SafeDirHandle> OpenDirectory(
         SafeDirHandle root,
         scoped in CapPath path,
         CapAccess access,
-        ConfinedResolveOptions options)
+        ConfinedResolveOptions options,
+        bool followFinalLink = true)
     {
+        FileOpenRequest request = new(
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            FileOptions.None,
+            preallocationSize: 0,
+            noFollow: !followFinalLink);
+
         CapError error = Walk(
-            root, path, ResolutionTarget.Directory, access, FileOpenRequest.Existing(FileAccess.Read),
-            options, out Outcome outcome);
+            root, path, ResolutionTarget.Directory, access, in request, options, out Outcome outcome);
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
             : CapResult<SafeDirHandle>.Ok(outcome.Directory!);
@@ -353,8 +365,15 @@ internal static class PortableResolver
 
         // A file open that may create or empty the file refuses a link here, wherever it
         // points: the write must land on the name the caller gave, not on whatever a link
-        // planted under that name leads to.
-        bool followFinal = target != ResolutionTarget.File || request.FollowsFinalLink;
+        // planted under that name leads to. So does an open whose caller asked for a final
+        // link not to be followed, which a directory open carries in its request too.
+        //
+        // A path spelled as a directory is the exception for an open of something that
+        // already exists: `link/` names what the link leads to, not the link, and the kernel's
+        // own resolution follows it even when asked not to follow a final link. Refusing it
+        // here would make the same path open on one backend and fail on another.
+        bool followFinal = request.FollowsFinalLink ||
+                           (pending.RequiresDirectory && request.Mode == FileMode.Open);
 
         if (asDirectory)
         {
@@ -612,7 +631,7 @@ internal static class PortableResolver
     /// sandbox. That is the containment refusal, reported as one, whichever spelling of
     /// "rooted" the target used.
     /// </remarks>
-    private static CapError TranslateLinkTarget(CapPathError error) => error switch
+    internal static CapError TranslateLinkTarget(CapPathError error) => error switch
     {
         CapPathError.Absolute or
         CapPathError.RootRelative or

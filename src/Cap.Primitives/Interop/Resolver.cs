@@ -36,17 +36,24 @@ internal static class Resolver
     /// Opens the directory that <paramref name="path"/> names beneath
     /// <paramref name="root"/>, by whichever strategy this platform provides.
     /// </summary>
+    /// <remarks>
+    /// A link at the last component is followed, subject to the same policy as any other
+    /// component, unless <paramref name="followFinalLink"/> is false, in which case it is
+    /// refused as the stricter policy refuses a link — except in a path spelled as a
+    /// directory, whose final link every backend follows, as the kernel does.
+    /// </remarks>
     public static CapResult<SafeDirHandle> OpenDirectory(
         SafeDirHandle root,
         scoped in CapPath path,
         CapAccess access,
-        ConfinedResolveOptions options)
+        ConfinedResolveOptions options,
+        bool followFinalLink = true)
     {
         IPlatformOps ops = PlatformOps.Current;
 
         return ops.Capabilities.SupportsConfinedOpen
-            ? ops.OpenConfinedDirectory(root, path.Raw, access, options)
-            : PortableResolver.OpenDirectory(root, in path, access, options);
+            ? ops.OpenConfinedDirectory(root, path.Raw, access, options, followFinalLink)
+            : PortableResolver.OpenDirectory(root, in path, access, options, followFinalLink);
     }
 
     /// <summary>

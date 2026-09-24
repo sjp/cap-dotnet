@@ -58,6 +58,7 @@ guest's path passed through as it arrived:
 | `path_filestat_get` | `GetMetadata(path)` |
 | `path_filestat_set_times`, `fd_filestat_set_times` | `SetTimes(path, ...)`, and `SetTimes` on the `CapFile` or `Dir` |
 | `fd_readdir` | `EnumerateEntries` |
+| `LOOKUPFLAGS_SYMLINK_FOLLOW` | `noFollow: false` on `OpenFile` and `OpenDir`; `followLink: true` on `GetMetadata`, `SetTimes` and `CreateHardLink` |
 | `ENOTCAPABLE` | `SandboxEscapeException` |
 | every other error code | `CapIOException.KindOf(exception)` |
 
@@ -113,19 +114,6 @@ either could not reach alone. Those cases are listed too, with what they cost.
 
 **Composed from two calls:**
 
-- **Whether to follow a final link is decided per handle, not per call.** WASI asks per
-  lookup. The adapter serves a no-follow lookup through the descriptor's
-  `Restrict(SymlinkPolicy.Deny)` view, which also refuses links before the last component.
-  WASI would follow those. A directory opened that way would keep the stricter policy
-  forever, and so would everything opened beneath it. So a no-follow directory open is made
-  twice: once through the strict view, and once through the ordinary handle, which is kept if
-  it is the same directory. Describing what a final link leads to is done by opening the
-  target, which needs permission to open it. Setting the times of what a final link leads to
-  is done the same way: the target is opened for writing, or failing that as a directory, and
-  set through the handle. That needs permission to write the file. A hard link to what a final link leads to is not
-  possible at all. An open that creates or truncates never follows a final link, whatever the
-  lookup asks: `Dir` refuses a link at the name for every mode but `FileMode.Open`, so the
-  adapter reports that refusal where WASI would create or empty the file the link leads to.
 - **There is no open for "whatever the name holds".** A WASI open may name a file or a
   directory without saying which. The adapter tries a file open, then a directory open: a
   second resolution, and a window in which a rename can change which object is described.
@@ -140,6 +128,12 @@ either could not reach alone. Those cases are listed too, with what they cost.
   may be of the other kind. On other platforms the two kinds are the same link.
 - **A directory's own entries cannot be committed.** `fd_sync` on a directory answers
   `ENOTSUP`.
+
+**Refused where WASI would act:**
+
+- **An open that creates or truncates never follows a final link**, whatever the lookup
+  asks. `Dir` refuses a link at the name for every mode but `FileMode.Open`, so the adapter
+  reports that refusal where WASI would create or empty the file the link leads to.
 
 ## What this is not
 

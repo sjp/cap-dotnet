@@ -111,21 +111,10 @@ public sealed partial class WasiPreview1
     /// Opens a directory, following a final symbolic link only when the guest asked for that.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// The library decides whether links are followed per handle rather than per call, and a
-    /// handle passes its policy on to every directory opened from it, with no way to loosen
-    /// it again. So a directory opened through the descriptor's no-links view would refuse
-    /// links for the rest of its life, and so would everything the guest opened beneath it —
-    /// which is not what a single no-follow lookup asks for.
-    /// </para>
-    /// <para>
-    /// Instead the name is opened twice: once through the no-links view, which refuses a link
-    /// at the last component as WASI requires, and once through the descriptor's own handle,
-    /// which is the one kept. The second is kept only if it is the same directory as the
-    /// first; if the name changed hands in between, the open fails rather than return
-    /// whatever was put there. Like the no-links view itself, this also refuses a link before
-    /// the last component, which WASI would have followed.
-    /// </para>
+    /// WASI decides per lookup whether a final link is followed, and so does
+    /// <see cref="Dir.OpenDir"/>: a link before the last component is followed or refused by
+    /// the descriptor's policy either way, and the directory opened carries that policy on
+    /// unchanged.
     /// </remarks>
     private static Errno OpenDirectory(
         DirectoryDescriptor parent,
@@ -138,23 +127,7 @@ public sealed partial class WasiPreview1
     {
         Descriptor? result = null;
         Errno error = ErrorMapping.Run(() =>
-        {
-            if (follow)
-            {
-                result = DirectoryFor(parent.Dir.OpenDir(path), rightsBase, rightsInheriting, fdflags);
-                return;
-            }
-
-            using Dir unfollowed = parent.NoFollow.OpenDir(path);
-            Dir kept = parent.Dir.OpenDir(path);
-            if (!kept.GetMetadata().IsSameFileAs(unfollowed.GetMetadata()))
-            {
-                kept.Dispose();
-                throw new IOException($"'{path}' changed between the two opens that check it is not a link.");
-            }
-
-            result = DirectoryFor(kept, rightsBase, rightsInheriting, fdflags);
-        });
+            result = DirectoryFor(parent.Dir.OpenDir(path, noFollow: !follow), rightsBase, rightsInheriting, fdflags));
 
         opened = result;
         return error;
@@ -166,11 +139,10 @@ public sealed partial class WasiPreview1
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A file open that is not to follow a final link goes through the descriptor's no-links
-    /// view. An open file resolves nothing further, so the stricter policy ends with it. An
-    /// open that creates or truncates refuses a final link even when the guest asked to follow
-    /// one, because <see cref="Dir"/> never writes a new or emptied file through a link at the
-    /// name; that refusal is passed on to the guest.
+    /// Whether a final link is followed is asked of the open itself, as WASI asks it. An open
+    /// that creates or truncates refuses a final link even when the guest asked to follow one,
+    /// because <see cref="Dir"/> never writes a new or emptied file through a link at the name;
+    /// that refusal is passed on to the guest.
     /// </para>
     /// <para>
     /// A WASI open that neither requires a directory nor creates anything may name a directory,
@@ -246,12 +218,11 @@ public sealed partial class WasiPreview1
         }
 
         FdFlags kept = fdflags & (FdFlags.Append | FdFlags.NonBlock | FdFlags.Sync | FdFlags.DSync | FdFlags.RSync);
-        Dir from = follow ? parent.Dir : parent.NoFollow;
 
         CapFile? file = null;
         try
         {
-            file = from.OpenFile(path, mode, access, share, options, append: appends);
+            file = parent.Dir.OpenFile(path, mode, access, share, options, append: appends, noFollow: !follow);
             FileType type = ToFileType(file.GetMetadata().Type);
             opened = new FileDescriptor(file, type, granted, rightsInheriting) { Flags = kept };
             return Errno.Success;
@@ -286,11 +257,10 @@ public sealed partial class WasiPreview1
     /// Describes what a path names.
     /// </summary>
     /// <remarks>
-    /// Without <see cref="LookupFlags.SymlinkFollow"/>, this is <see cref="Dir.GetMetadata(string)"/>,
-    /// which describes a link as a link. With it, the guest wants what a final link leads to,
-    /// and the library describes a target only through a handle on it — so the target is
-    /// opened, as a file and failing that as a directory, and the open handle is described.
-    /// That needs permission to open the target, which a plain description would not.
+    /// <see cref="LookupFlags.SymlinkFollow"/> is passed on as
+    /// <see cref="Dir.GetMetadata(string, bool)"/>'s own choice: without it a link is described
+    /// as a link, and with it what the link leads to is described, by name and without being
+    /// opened.
     /// </remarks>
     private Errno PathFilestatGet(
         GuestMemory memory, uint fd, LookupFlags lookup, uint pathAddress, uint pathLength, uint resultAddress)
@@ -312,27 +282,10 @@ public sealed partial class WasiPreview1
         {
             error = ErrorMapping.Run(() => metadata = directory.Dir.GetMetadata());
         }
-        else if ((lookup & LookupFlags.SymlinkFollow) == 0)
-        {
-            error = ErrorMapping.Run(() => metadata = directory.Dir.GetMetadata(path));
-        }
         else
         {
-            error = ErrorMapping.Run(() =>
-            {
-                try
-                {
-                    using CapFile file = directory.Dir.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-                    metadata = file.GetMetadata();
-                }
-                catch (IOException) when (directory.Dir.TryOpenDir(path, out Dir? target))
-                {
-                    using (target)
-                    {
-                        metadata = target.GetMetadata();
-                    }
-                }
-            });
+            bool follow = (lookup & LookupFlags.SymlinkFollow) != 0;
+            error = ErrorMapping.Run(() => metadata = directory.Dir.GetMetadata(path, followLink: follow));
         }
 
         return error != Errno.Success
@@ -344,12 +297,10 @@ public sealed partial class WasiPreview1
     /// Sets the times of what a path names.
     /// </summary>
     /// <remarks>
-    /// Without <see cref="LookupFlags.SymlinkFollow"/>, this is <see cref="Dir.SetTimes(string, CapFileTime, CapFileTime)"/>,
-    /// which sets a link's own times. With it, the guest wants the times of what a final link
-    /// leads to, and the library sets those only through a handle on the target. So the target
-    /// is opened, as a file for writing and failing that as a directory, and its times are set
-    /// through the handle. That needs permission to write the file, which setting its times by
-    /// name would not.
+    /// <see cref="LookupFlags.SymlinkFollow"/> is passed on as
+    /// <see cref="Dir.SetTimes(string, CapFileTime, CapFileTime, bool)"/>'s own choice: without
+    /// it a link's own times are set, and with it the times of what the link leads to, by name
+    /// and without opening it.
     /// </remarks>
     private Errno PathFilestatSetTimes(
         GuestMemory memory,
@@ -385,35 +336,16 @@ public sealed partial class WasiPreview1
             return ErrorMapping.Run(() => directory.Dir.SetTimes(lastAccess, lastWrite));
         }
 
-        if ((lookup & LookupFlags.SymlinkFollow) == 0)
-        {
-            return ErrorMapping.Run(() => directory.Dir.SetTimes(path, lastAccess, lastWrite));
-        }
-
-        return ErrorMapping.Run(() =>
-        {
-            try
-            {
-                using CapFile file = directory.Dir.OpenFile(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-                file.SetTimes(lastAccess, lastWrite);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException &&
-                                      directory.Dir.TryOpenDir(path, out Dir? target))
-            {
-                using (target)
-                {
-                    target!.SetTimes(lastAccess, lastWrite);
-                }
-            }
-        });
+        bool follow = (lookup & LookupFlags.SymlinkFollow) != 0;
+        return ErrorMapping.Run(() => directory.Dir.SetTimes(path, lastAccess, lastWrite, followLink: follow));
     }
 
     /// <remarks>
     /// <para>
-    /// A hard link to what a final symbolic link points at is not something the library can
-    /// make: <see cref="Dir.CreateHardLink"/> links the name it is given. Asking to follow is
-    /// therefore refused as an invalid argument, which is also how Wasmtime's own host answers
-    /// it.
+    /// <see cref="LookupFlags.SymlinkFollow"/> is passed on as
+    /// <see cref="Dir.CreateHardLink"/>'s own choice: without it a final link gets the second
+    /// name itself, and with it what the link leads to does, as <c>linkat</c> with
+    /// <c>AT_SYMLINK_FOLLOW</c> does.
     /// </para>
     /// <para>
     /// The library reports a directory given a second name as
@@ -443,13 +375,12 @@ public sealed partial class WasiPreview1
                     error = memory.ReadPath(newAddress, newLength, out string newPath);
                     if (error == Errno.Success)
                     {
-                        return (lookup & LookupFlags.SymlinkFollow) != 0
-                            ? Errno.Inval
-                            : ErrorMapping.Run(() => source.Dir.CreateHardLink(oldPath, target.Dir, newPath)) switch
-                            {
-                                Errno.IsDir => Errno.Perm,
-                                Errno other => other,
-                            };
+                        bool follow = (lookup & LookupFlags.SymlinkFollow) != 0;
+                        return ErrorMapping.Run(() => source.Dir.CreateHardLink(oldPath, target.Dir, newPath, follow)) switch
+                        {
+                            Errno.IsDir => Errno.Perm,
+                            Errno other => other,
+                        };
                     }
                 }
             }

@@ -18,9 +18,12 @@ namespace Cap.Primitives.Interop;
 /// property of the operation, not a separate axis: <see cref="Parent"/> never follows,
 /// because an operation that acts on a name must act on the name it was given, and the
 /// other two follow within whatever the resolution options permit, because an open of a
-/// link is an open of its target. The one exception belongs to the file open's request
-/// rather than to the walk: an open that may create or empty a file refuses a link at the
-/// last component (see <see cref="FileOpenRequest.FollowsFinalLink"/>).
+/// link is an open of its target. The exceptions belong to the open's request rather than
+/// to the walk: an open that may create or empty a file refuses a link at the last
+/// component, and so does one whose caller asked it not to follow one (see
+/// <see cref="FileOpenRequest.FollowsFinalLink"/>). An operation on a name asked to follow a
+/// final link reads the link and resolves its target as a new <see cref="Parent"/>
+/// resolution, so the one call that touches the name still never follows.
 /// </para>
 /// </remarks>
 internal enum ResolutionTarget
