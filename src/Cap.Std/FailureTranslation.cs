@@ -71,18 +71,18 @@ internal static class FailureTranslation
                 new CapIOException(KindOf(error.Category), $"'{path}' names something that already exists. ({error})"),
 
             CapErrorCategory.IsADirectory =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' names a directory, or is spelled so that it has to be one, and " +
                     $"this operation does not act on a directory. ({error})"),
 
             CapErrorCategory.NotEmpty =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' names a directory that still has entries in it. Removing what is " +
                     $"inside is a walk over handles, which the caller performs rather than this " +
                     $"call. ({error})"),
 
             CapErrorCategory.CrossDevice =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' and the destination are on different filesystems, so the entry " +
                     $"cannot be moved between them. It is not copied instead: a copy has " +
                     $"different timing, different failure modes and a different result for a " +
@@ -95,7 +95,7 @@ internal static class FailureTranslation
             // `..`, which names a directory by where it sits and leaves no name in its parent to
             // create, remove or rename, is the other.
             CapErrorCategory.InvalidArgument =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' was not a request the filesystem could carry out as asked. " +
                     $"Moving a directory to a name beneath itself is the usual cause, and a " +
                     $"path ending in '..' is another: it leaves no name for the operation to act " +
@@ -110,7 +110,7 @@ internal static class FailureTranslation
             // acting if the answer was favourable -- has a window in which the answer changes,
             // which is the whole class of bug this library exists to remove.
             CapErrorCategory.NotSupported =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' could not be operated on: the filesystem does not implement what " +
                     $"the operation needs, such as a kind of entry it cannot hold or a way of " +
                     $"performing the operation as one step. ({error})"),
@@ -119,7 +119,7 @@ internal static class FailureTranslation
             // itself. Inside the subtree, so not an escape -- only a step the operation will not
             // take on the caller's behalf.
             CapErrorCategory.SymbolicLink =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' is a symbolic link, and this operation acts on what a name holds " +
                     $"rather than on what it points at. ({error})"),
 
@@ -146,14 +146,14 @@ internal static class FailureTranslation
             // inside. Reporting these alongside the refusals that were attempts to leave would
             // put noise into the one log that is worth reading closely.
             CapErrorCategory.SymbolicLinkLoop =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' passes through a symbolic link that resolution would not follow. ({error})"),
 
             // Nor is this one: the alias reaches the same object beneath the same handle. It is
             // refused because a rule stated about one spelling of a name can be walked past
             // using the other, which is a problem about names and not about containment.
             CapErrorCategory.AliasedName =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' reached its target through an alias rather than by the name the " +
                     $"filesystem stores. ({error})"),
 
@@ -167,16 +167,16 @@ internal static class FailureTranslation
                 new PathTooLongException($"'{path}' is longer than the filesystem accepts. ({error})"),
 
             CapErrorCategory.PathTooDeep =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' descends further than resolution will follow. Each level costs a " +
                     $"handle that is held until the walk finishes, so the depth is bounded. ({error})"),
 
             CapErrorCategory.OutOfHandles =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' could not be opened: the process or the system is out of handles. ({error})"),
 
             CapErrorCategory.Raced =>
-                new CapIOException(KindOf(error.Category), 
+                new CapIOException(KindOf(error.Category),
                     $"'{path}' could not be resolved atomically because the tree kept changing " +
                     $"underneath it. ({error})"),
 
@@ -276,7 +276,7 @@ internal static class FailureTranslation
             new CapIOException(KindOf(error.Category), $"This handle does not refer to a directory. ({error})"),
 
         CapErrorCategory.OutOfHandles =>
-            new CapIOException(KindOf(error.Category), 
+            new CapIOException(KindOf(error.Category),
                 $"The directory could not be opened for reading: the process or the system " +
                 $"is out of handles. ({error})"),
 
@@ -304,7 +304,7 @@ internal static class FailureTranslation
         // rather than papered over with whatever partial answer could be assembled, because
         // a snapshot with some fields quietly left at zero is worse than none.
         CapErrorCategory.NotSupported =>
-            new CapIOException(KindOf(error.Category), 
+            new CapIOException(KindOf(error.Category),
                 $"The filesystem does not report what this handle refers to in the form this " +
                 $"library reads. ({error})"),
 
