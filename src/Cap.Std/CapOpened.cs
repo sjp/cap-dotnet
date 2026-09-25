@@ -26,7 +26,7 @@ namespace Cap.Std;
 /// most, to whichever call gets there first.
 /// </para>
 /// </remarks>
-public sealed class CapOpened : IDisposable
+public sealed class CapOpened : ICapOpened
 {
     private readonly bool _isDirectory;
     private IDisposable? _held;
@@ -91,6 +91,12 @@ public sealed class CapOpened : IDisposable
 
         return (CapFile)Take();
     }
+
+    /// <inheritdoc/>
+    IDir ICapOpened.TakeDir() => TakeDir();
+
+    /// <inheritdoc/>
+    ICapFile ICapOpened.TakeFile() => TakeFile();
 
     /// <summary>
     /// Closes the handle, unless it has been taken.

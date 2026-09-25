@@ -76,6 +76,24 @@ by default a link is followed if it stays inside the tree and refused if it leav
 `SymlinkPolicy.Deny` refuses every link. A handle can be restricted but never loosened, and
 every handle derived from it inherits the policy.
 
+### Taking an interface instead
+
+`IDir` and `ICapFile` have the same members as `Dir` and `CapFile`, so that a unit test can hand
+a component a stub from a mocking library:
+
+```csharp
+public sealed class UploadService(IDir uploads) { /* as above */ }
+```
+
+This changes what the constructor tells you. A `Dir` parameter says the component is confined,
+because only this library can make a `Dir`. An `IDir` parameter says only that the component
+calls these members. It is confined if the code that constructed it passed a `Dir`, and not
+otherwise, because anything can implement the interface. Keep taking `Dir` wherever
+containment is the point, such as the code that stops a client's filename from leaving
+`uploads`. For most tests, a real `Dir` on the in-memory filesystem from
+[`Cap.Std.Testing`](testing.md) is the better double anyway: it runs the same resolution as the
+disk, and a stub runs none. See the [threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee).
+
 ## What refusals look like
 
 Operations throw the same exceptions `System.IO` does where the meaning is the same —
@@ -130,6 +148,7 @@ stream's usual single-caller rules.
 | List a directory | `dir.EnumerateEntries()` → `DirEntry`, which opens what it names without a path |
 | Walk a tree, or match a pattern | `dir.Walk()`, `dir.Glob("**/*.json")` (`Cap.Fs.Ext`) |
 | Scratch space | `CapTempDir.NewIn(dir)`, `CapTempFile.NewAnonymous(dir)` |
+| Stand in for a handle in a unit test | `IDir`, `ICapFile`, `IDirEntry` and `ICapOpened`, which the handle types implement; see above for what they do not promise |
 | Know where a handle is, for a log line | `dir.TryGetPath(AmbientAuthority.Acquire(), out string? path)` — see [no-full-name.md](no-full-name.md) |
 
 [migration.md](migration.md) maps each common `File`, `Directory` and `Path` member to its

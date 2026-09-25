@@ -103,6 +103,9 @@ from. Code holding it can pass it anywhere, and it can outlive the capability's 
 rule reports at `info`, as a list for a reviewer rather than a build failure. Setting it to
 `none` is a reasonable choice for a project that has audited its uses.
 
+`IDir` and `ICapFile` have no `UnsafeGetHandle`, so a raw handle is only ever taken through the
+concrete types, where this rule sees it.
+
 ## `CAP0005`: paths built by joining strings
 
 ```csharp

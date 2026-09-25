@@ -39,7 +39,7 @@ namespace Cap.Std;
 /// round, because such a name cannot be opened safely by any spelling.
 /// </para>
 /// </remarks>
-public readonly struct DirEntry
+public readonly struct DirEntry : IDirEntry
 {
     private readonly Dir? _directory;
     private readonly string? _name;
@@ -347,6 +347,50 @@ public readonly struct DirEntry
     /// <exception cref="InvalidOperationException">This entry came from no enumeration.</exception>
     /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
     public bool TryGetMetadata(out CapMetadata metadata) => Owner.TryGetMetadata(Name, out metadata);
+
+    /// <inheritdoc/>
+    IDir IDirEntry.OpenDir() => OpenDir();
+
+    /// <inheritdoc/>
+    bool IDirEntry.TryOpenDir([NotNullWhen(true)] out IDir? dir)
+    {
+        bool opened = TryOpenDir(out Dir? concrete);
+        dir = concrete;
+        return opened;
+    }
+
+    /// <inheritdoc/>
+    ICapFile IDirEntry.OpenFile(
+        FileMode mode,
+        FileAccess access,
+        FileShare share,
+        FileOptions options,
+        long preallocationSize,
+        bool append) =>
+        OpenFile(mode, access, share, options, preallocationSize, append);
+
+    /// <inheritdoc/>
+    bool IDirEntry.TryOpenFile([NotNullWhen(true)] out ICapFile? file)
+    {
+        bool opened = TryOpenFile(out CapFile? concrete);
+        file = concrete;
+        return opened;
+    }
+
+    /// <inheritdoc/>
+    bool IDirEntry.TryOpenFile(
+        FileMode mode,
+        FileAccess access,
+        FileShare share,
+        FileOptions options,
+        long preallocationSize,
+        bool append,
+        [NotNullWhen(true)] out ICapFile? file)
+    {
+        bool opened = TryOpenFile(mode, access, share, options, preallocationSize, append, out CapFile? concrete);
+        file = concrete;
+        return opened;
+    }
 
     /// <summary>
     /// The handle this entry was read through, which is where its authority comes from.

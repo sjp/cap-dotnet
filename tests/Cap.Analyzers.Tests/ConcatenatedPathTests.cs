@@ -28,6 +28,23 @@ public sealed class ConcatenatedPathTests
         Assert.Equal(("CAP0005", DiagnosticSeverity.Warning), (diagnostic.Id, diagnostic.Severity));
     }
 
+    /// <summary>
+    /// The interface a component takes in place of the handle is held to the same rule, since
+    /// a path joined for it is joined for whatever handle is behind it.
+    /// </summary>
+    [Theory]
+    [InlineData("dir.ReadAllText(\"users/\" + name)")]
+    [InlineData("dir.OpenFile(Path.Combine(prefix, name))")]
+    [InlineData("dir.Rename(\"a\", dir, $\"b/{name}\")")]
+    [InlineData("entry.OpenDir().DeleteFile(prefix + \"/\" + name)")]
+    public async Task A_path_joined_for_the_interface_is_reported(string call)
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(Wrap(call, "IDir dir, IDirEntry entry"));
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(("CAP0005", DiagnosticSeverity.Warning), (diagnostic.Id, diagnostic.Severity));
+    }
+
     [Theory]
     [InlineData("dir.ReadAllText(name)")]
     [InlineData("dir.ReadAllText(name + \".txt\")")]
@@ -47,7 +64,7 @@ public sealed class ConcatenatedPathTests
         Assert.DoesNotContain(diagnostics, d => d.Id == "CAP0005");
     }
 
-    private static string Wrap(string call) => $$"""
+    private static string Wrap(string call, string parameters = "Dir dir") => $$"""
         using System.IO;
         using Cap.Primitives;
         using Cap.Std;
@@ -56,7 +73,7 @@ public sealed class ConcatenatedPathTests
         {
             private const string Fixed = "users";
 
-            public static void Call(Dir dir, string prefix, string name)
+            public static void Call({{parameters}}, string prefix, string name)
             {
                 {{call}};
             }

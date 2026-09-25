@@ -26,6 +26,30 @@ Assert.Equal("""{ "x": 2 }""", fs.ReadAllText("config/app.json"));
 Reference it from test projects only. It lives in its own package so that production code
 cannot pick up an in-memory backend without depending on a test package.
 
+## Stubbing the interfaces
+
+Some tests want a stub rather than a filesystem: one that fails the third write, or checks that
+a file was read exactly once. `Dir`, `CapFile`, `DirEntry` and `CapOpened` implement `IDir`,
+`ICapFile`, `IDirEntry` and `ICapOpened`, which have the same members. A component that takes
+the interface can be handed a stub from any mocking library:
+
+```csharp
+IDirEntry report = Mock.Of<IDirEntry>(entry => entry.Name == "a.json" && entry.Type == CapFileType.File);
+
+Mock<IDir> reports = new();
+reports.Setup(dir => dir.EnumerateEntries()).Returns([report]);
+reports.Setup(dir => dir.ReadAllText("a.json")).Returns("""{ "total": 3 }""");
+
+new ReportIndex(reports.Object).Load();
+reports.Verify(dir => dir.ReadAllText("a.json"), Times.Once);
+```
+
+A stub runs none of this library's resolution, so it cannot show that the component stays
+inside its directory. The in-memory filesystem can, so prefer it unless the test is about the
+calls themselves. The interfaces do not carry the containment guarantee, which belongs to
+`Dir`. A component that takes `IDir` in production is confined only if it is handed a `Dir`. The
+[threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee) has the detail.
+
 ## What is real and what is simulated
 
 A handle from `OpenRoot` is the same `Dir` type that `Dir.Open` returns, and every call through

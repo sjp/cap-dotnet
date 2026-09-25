@@ -37,7 +37,7 @@ namespace Cap.Std;
 /// resolution arrived at, and no member here consults a name again.
 /// </para>
 /// </remarks>
-public sealed class CapFile : IDisposable
+public sealed class CapFile : ICapFile
 {
     /// <summary>
     /// The buffer a stream taken from this handle is given, when the caller names no size.
@@ -47,7 +47,7 @@ public sealed class CapFile : IDisposable
     /// from a path-based API onto this one gets the performance they had rather than a
     /// number chosen here.
     /// </remarks>
-    private const int DefaultStreamBufferSize = 4096;
+    internal const int DefaultStreamBufferSize = 4096;
 
     private readonly SafeFileHandle _handle;
 

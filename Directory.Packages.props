@@ -16,6 +16,7 @@
     <PackageVersion Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.11.2" />
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageVersion Include="CsCheck" Version="4.9.1" />
+    <PackageVersion Include="Moq" Version="4.21.0" />
   </ItemGroup>
 
   <ItemGroup Label="Fuzzing">
@@ -23,10 +24,6 @@
   </ItemGroup>
 
   <ItemGroup Label="Samples">
-    <!--
-      The WebAssembly engine the WASI host sample runs guests on. Only the sample and its tests
-      reference it; nothing that ships depends on it.
-    -->
     <PackageVersion Include="Wasmtime" Version="48.0.2" />
   </ItemGroup>
 

@@ -60,7 +60,7 @@ namespace Cap.Std;
 /// authority rather than a loan.
 /// </para>
 /// </remarks>
-public sealed partial class Dir : IDisposable
+public sealed partial class Dir : IDir
 {
     private readonly SafeDirHandle _handle;
     private readonly ConfinedResolveOptions _options;
@@ -694,7 +694,11 @@ public sealed partial class Dir : IDisposable
     /// Moves an entry to a name beneath another handle, or beneath this one.
     /// </summary>
     /// <param name="from">A relative path, beneath this handle, to the entry to move.</param>
-    /// <param name="toDir">The handle the destination name is beneath. May be this one.</param>
+    /// <param name="toDir">
+    /// The handle the destination name is beneath. May be this one. Must be a <see cref="Dir"/>
+    /// on the same filesystem as this one; any other <see cref="IDir"/> is refused as a move
+    /// across devices.
+    /// </param>
     /// <param name="to">A relative path, beneath <paramref name="toDir"/>, to give it.</param>
     /// <param name="replaceExisting">
     /// Whether an entry already holding the destination name is replaced. False by default,
@@ -763,11 +767,12 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the move.</exception>
     /// <exception cref="CapIOException">
     /// The destination is taken and replacement was not asked for, the two names are on
-    /// different filesystems, on Windows a link to a directory holds the destination, or the
+    /// different filesystems or <paramref name="toDir"/> is not a <see cref="Dir"/>, on
+    /// Windows a link to a directory holds the destination, or the
     /// move failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public void Rename(string from, Dir toDir, string to, bool replaceExisting = false)
+    public void Rename(string from, IDir toDir, string to, bool replaceExisting = false)
     {
         CapError error = LinkCore(
             from, toDir, to, rename: true, replaceExisting, followLink: false,
@@ -797,7 +802,7 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public bool TryRename(string from, Dir toDir, string to, bool replaceExisting = false)
+    public bool TryRename(string from, IDir toDir, string to, bool replaceExisting = false)
     {
         CapError error = LinkCore(
             from, toDir, to, rename: true, replaceExisting, followLink: false,
@@ -983,7 +988,11 @@ public sealed partial class Dir : IDisposable
     /// Gives an existing entry a second name, beneath another handle or beneath this one.
     /// </summary>
     /// <param name="path">A relative path, beneath this handle, to the entry to name again.</param>
-    /// <param name="toDir">The handle the new name is beneath. May be this one.</param>
+    /// <param name="toDir">
+    /// The handle the new name is beneath. May be this one. Must be a <see cref="Dir"/> on the
+    /// same filesystem as this one; any other <see cref="IDir"/> is refused as a link across
+    /// devices.
+    /// </param>
     /// <param name="to">A relative path, beneath <paramref name="toDir"/>, for the new name.</param>
     /// <param name="followLink">
     /// Whether a symbolic link at <paramref name="path"/> is followed, so that the second
@@ -1040,11 +1049,12 @@ public sealed partial class Dir : IDisposable
     /// <exception cref="DirectoryNotFoundException">A directory above either name is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the operation.</exception>
     /// <exception cref="CapIOException">
-    /// The new name is taken, the two names are on different filesystems, the entry is a
+    /// The new name is taken, the two names are on different filesystems or
+    /// <paramref name="toDir"/> is not a <see cref="Dir"/>, the entry is a
     /// directory, the filesystem has no hard links, or the operation failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public void CreateHardLink(string path, Dir toDir, string to, bool followLink = false)
+    public void CreateHardLink(string path, IDir toDir, string to, bool followLink = false)
     {
         CapError error = LinkCore(
             path, toDir, to, rename: false, replaceExisting: false, followLink,
@@ -1078,7 +1088,7 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException">A path, or <paramref name="toDir"/>, is null.</exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public bool TryCreateHardLink(string path, Dir toDir, string to, bool followLink = false)
+    public bool TryCreateHardLink(string path, IDir toDir, string to, bool followLink = false)
     {
         CapError error = LinkCore(
             path, toDir, to, rename: false, replaceExisting: false, followLink,
@@ -2429,7 +2439,7 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     private CapError LinkCore(
         string from,
-        Dir toDir,
+        IDir toDir,
         string to,
         bool rename,
         bool replaceExisting,
@@ -2452,7 +2462,11 @@ public sealed partial class Dir : IDisposable
         // backend sees anything: a handle is meaningful only to the backend that issued it,
         // and handing one backend the other's handle as a destination would have it act on
         // whatever its own table holds under that number.
-        if (!_handle.SharesBackendWith(toDir._handle))
+        //
+        // A destination that is not a Dir at all, such as a test's stub of the interface, is
+        // refused the same way and for a stronger reason: it holds no handle, so there is
+        // nothing a backend could be given as the other end of the call.
+        if (toDir is not Dir destinationDir || !_handle.SharesBackendWith(destinationDir._handle))
         {
             return CapError.FromCategory(CapErrorCategory.CrossDevice);
         }
@@ -2474,7 +2488,7 @@ public sealed partial class Dir : IDisposable
                 return CapError.FromCategory(CapErrorCategory.IsADirectory);
             }
 
-            toError = toDir.Locate(to, out NameLookup destination, out error);
+            toError = destinationDir.Locate(to, out NameLookup destination, out error);
             using (destination)
             {
                 if (toError != CapPathError.None || error.IsFailure)

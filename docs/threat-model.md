@@ -457,6 +457,33 @@ applies to them unchanged — which is why they are refused outright on platform
 way to name one relative to an open directory, rather than implemented there by resolving a
 path and handing it to a socket call.
 
+### 5.7 The handle interfaces carry no guarantee
+
+`IDir`, `ICapFile`, `IDirEntry` and `ICapOpened` describe the members of `Dir`, `CapFile`,
+`DirEntry` and `CapOpened`, so that a component can be written against them and handed a stub
+in a unit test. The guarantee in §2 is a property of the concrete types' implementation, and
+the interfaces do not carry it: anything can implement `IDir`, and an implementation can
+resolve a name however it likes, the host's whole filesystem included.
+
+So a component that takes `IDir` is confined only if the code that constructed it handed it a
+`Dir`, or something that forwards to one. The in-memory filesystem in `Cap.Std.Testing` hands
+out real `Dir` handles and is confined in the same way. A mocking library's stub is not
+confined at all, and is not meant to be. The interface is a seam for tests, in the way
+`IRandomSource` is for randomness. It is not a second implementation of the guarantee. Code
+whose correctness depends on containment, such as the check that keeps an uploaded filename
+inside a tenant's directory, takes `Dir`. That type is sealed and cannot be constructed
+outside this library.
+
+Two things keep the interfaces from weakening what a real handle does:
+
+- **A real handle never works with a stand-in.** `Rename` and `CreateHardLink` take the
+  destination as an `IDir`, and a `Dir` refuses one that is not itself a `Dir` on the same
+  filesystem. It reports the refusal as a move across devices, before either name is
+  resolved. Nothing a stub does can become the other end of a real rename or link.
+- **The raw handle stays on the concrete types.** `UnsafeGetHandle` is not an interface
+  member, so every way of taking out the operating-system handle is still a call on `Dir` or
+  `CapFile`, where the `CAP0004` analyzer rule reports it.
+
 ## 6. Residual risk
 
 ### 6.1 The fallback resolver narrows TOCTOU; it does not close it
