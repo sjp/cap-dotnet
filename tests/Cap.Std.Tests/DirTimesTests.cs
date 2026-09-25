@@ -43,7 +43,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void An_open_file_is_given_both_times()
     {
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.ReadWrite))
@@ -62,7 +62,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_time_left_out_is_left_alone()
     {
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.Write);
@@ -82,7 +82,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void Now_is_the_time_the_change_is_recorded()
     {
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.Write);
@@ -105,7 +105,7 @@ public sealed class DirTimesTests : IDisposable
     public void An_instant_before_the_Unix_epoch_is_stored_exactly()
     {
         DateTimeOffset early = new DateTimeOffset(1969, 7, 20, 20, 17, 40, TimeSpan.Zero).AddTicks(1234567);
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.Write);
@@ -121,7 +121,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void An_instant_is_stored_whatever_offset_it_is_written_with()
     {
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.Write);
@@ -137,8 +137,8 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_handle_that_can_only_read_cannot_set_times()
     {
-        File.WriteAllText(Host("file"), "content");
-        File.SetLastWriteTimeUtc(Host("file"), Written.UtcDateTime);
+        HostFile.WriteAllText(Host("file"), "content");
+        HostFile.SetLastWriteTimeUtc(Host("file"), Written.UtcDateTime);
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("file");
@@ -151,7 +151,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_closed_file_refuses()
     {
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
         CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.Write);
@@ -173,8 +173,8 @@ public sealed class DirTimesTests : IDisposable
             return;
         }
 
-        File.WriteAllText(Host("file"), "content");
-        File.SetLastWriteTimeUtc(Host("file"), Written.UtcDateTime);
+        HostFile.WriteAllText(Host("file"), "content");
+        HostFile.SetLastWriteTimeUtc(Host("file"), Written.UtcDateTime);
         DateTimeOffset tooEarly = new(1500, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
         using Dir root = OpenRoot();
@@ -197,7 +197,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_directory_handle_sets_the_directory_it_refers_to()
     {
-        Directory.CreateDirectory(Host("branch"));
+        HostDirectory.CreateDirectory(Host("branch"));
 
         using Dir root = OpenRoot();
         using Dir branch = root.OpenDir("branch");
@@ -224,8 +224,8 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_name_holding_a_file_is_set()
     {
-        Directory.CreateDirectory(Host("a", "b"));
-        File.WriteAllText(Host("a", "b", "leaf"), "content");
+        HostDirectory.CreateDirectory(Host("a", "b"));
+        HostFile.WriteAllText(Host("a", "b", "leaf"), "content");
 
         using Dir root = OpenRoot();
         root.SetTimes("a/b/leaf", CapFileTime.At(Accessed), CapFileTime.At(Written));
@@ -242,7 +242,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_name_holding_a_directory_is_set()
     {
-        Directory.CreateDirectory(Host("branch"));
+        HostDirectory.CreateDirectory(Host("branch"));
 
         using Dir root = OpenRoot();
         root.SetTimes("branch/", lastWrite: CapFileTime.At(Written));
@@ -254,8 +254,8 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_file_spelled_as_a_directory_is_refused_and_left_alone()
     {
-        File.WriteAllText(Host("file"), "content");
-        File.SetLastWriteTimeUtc(Host("file"), Written.UtcDateTime);
+        HostFile.WriteAllText(Host("file"), "content");
+        HostFile.SetLastWriteTimeUtc(Host("file"), Written.UtcDateTime);
 
         using Dir root = OpenRoot();
 
@@ -269,7 +269,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_path_ending_in_a_parent_step_sets_the_directory_it_names()
     {
-        Directory.CreateDirectory(Host("outer", "inner"));
+        HostDirectory.CreateDirectory(Host("outer", "inner"));
 
         using Dir root = OpenRoot();
         root.SetTimes("outer/inner/..", lastWrite: CapFileTime.At(Written));
@@ -291,7 +291,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void The_reporting_form_answers_true_when_it_worked()
     {
-        File.WriteAllText(Host("file"), "content");
+        HostFile.WriteAllText(Host("file"), "content");
 
         using Dir root = OpenRoot();
 
@@ -303,7 +303,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_path_that_climbs_out_is_an_escape()
     {
-        Directory.CreateDirectory(Host("inside"));
+        HostDirectory.CreateDirectory(Host("inside"));
 
         using Dir root = OpenRoot();
         using Dir inside = root.OpenDir("inside");
@@ -335,9 +335,9 @@ public sealed class DirTimesTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        File.WriteAllText(Host("target"), "content");
-        File.SetLastWriteTimeUtc(Host("target"), Accessed.UtcDateTime);
-        File.CreateSymbolicLink(Host("link"), "target");
+        HostFile.WriteAllText(Host("target"), "content");
+        HostFile.SetLastWriteTimeUtc(Host("target"), Accessed.UtcDateTime);
+        HostFile.CreateSymbolicLink(Host("link"), "target");
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), policy);
         root.SetTimes("link", lastWrite: CapFileTime.At(Written));
@@ -357,15 +357,15 @@ public sealed class DirTimesTests : IDisposable
 
         using ScratchTree outside = new();
         string victim = Path.Combine(outside.HostPath, "victim");
-        File.WriteAllText(victim, "outside");
-        File.SetLastWriteTimeUtc(victim, Accessed.UtcDateTime);
-        File.CreateSymbolicLink(Host("link"), victim);
+        HostFile.WriteAllText(victim, "outside");
+        HostFile.SetLastWriteTimeUtc(victim, Accessed.UtcDateTime);
+        HostFile.CreateSymbolicLink(Host("link"), victim);
 
         using Dir root = OpenRoot();
         root.SetTimes("link", lastWrite: CapFileTime.At(Written));
 
         Assert.Equal(Written, root.GetMetadata("link").LastWriteTime);
-        Assert.Equal(Accessed.UtcDateTime, File.GetLastWriteTimeUtc(victim));
+        Assert.Equal(Accessed.UtcDateTime, HostFile.GetLastWriteTimeUtc(victim));
     }
 
     /// <summary>A link on the way to the name is still subject to the handle's policy.</summary>
@@ -374,9 +374,9 @@ public sealed class DirTimesTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        Directory.CreateDirectory(Host("actual"));
-        File.WriteAllText(Host("actual", "leaf"), "x");
-        Directory.CreateSymbolicLink(Host("hop"), "actual");
+        HostDirectory.CreateDirectory(Host("actual"));
+        HostFile.WriteAllText(Host("actual", "leaf"), "x");
+        HostDirectory.CreateSymbolicLink(Host("hop"), "actual");
 
         using Dir permissive = OpenRoot();
         using Dir strict = permissive.Restrict(SymlinkPolicy.Deny);
@@ -394,8 +394,8 @@ public sealed class DirTimesTests : IDisposable
 
         try
         {
-            File.CreateSymbolicLink(probe, "target");
-            File.Delete(probe);
+            HostFile.CreateSymbolicLink(probe, "target");
+            HostFile.Delete(probe);
         }
         catch (Exception thrown) when (
             thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)

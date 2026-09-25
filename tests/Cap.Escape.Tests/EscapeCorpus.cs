@@ -244,10 +244,11 @@ internal static class EscapeCorpus
             Differences =
             [
                 new(
-                    [Backends.ConfinedOpen],
+                    [Backends.ConfinedOpen, Backends.InMemoryConfined],
                     Uniform(Outcome.Refused),
                     "the confined open passes the whole path to the kernel, which refuses one longer " +
-                    "than its own limit before looking anything up."),
+                    "than its own limit before looking anything up. The in-memory filesystem's " +
+                    "confined open answers as the kernel does."),
             ],
         });
 
@@ -262,10 +263,11 @@ internal static class EscapeCorpus
             Differences =
             [
                 new(
-                    [Backends.ConfinedOpen],
+                    [Backends.ConfinedOpen, Backends.InMemoryConfined],
                     ExistingFile(),
                     "the depth bound is the walk's, which spends a handle per level; the kernel's " +
-                    "confined open spends none and resolves the path."),
+                    "confined open spends none and resolves the path, and so does the in-memory " +
+                    "filesystem's."),
             ],
         });
 

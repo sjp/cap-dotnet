@@ -37,12 +37,12 @@ public sealed partial class DirEnumerationTests : IDisposable
 
     public void Dispose()
     {
-        // Removed through the C library, because a name that is not valid text cannot be
+        // Removed the way it was planted, because a name that is not valid text cannot be
         // named to the framework at all -- which is the very thing the test that plants one
         // is about, and it applies as much to tidying up afterwards.
         if (_rawName is not null)
         {
-            UnlinkRaw(_rawName);
+            HostFile.DeleteRawName(_tree.HostPath, _rawName);
         }
 
         _tree.Dispose();
@@ -58,9 +58,9 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void Every_entry_is_reported()
     {
-        File.WriteAllText(Host("one"), "1");
-        File.WriteAllText(Host("two"), "2");
-        Directory.CreateDirectory(Host("three"));
+        HostFile.WriteAllText(Host("one"), "1");
+        HostFile.WriteAllText(Host("two"), "2");
+        HostDirectory.CreateDirectory(Host("three"));
 
         using Dir root = OpenRoot();
 
@@ -94,7 +94,7 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void The_directory_does_not_report_itself_or_its_parent()
     {
-        File.WriteAllText(Host("real"), "x");
+        HostFile.WriteAllText(Host("real"), "x");
 
         using Dir root = OpenRoot();
 
@@ -106,8 +106,8 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_reports_what_it_is()
     {
-        File.WriteAllText(Host("plain"), "x");
-        Directory.CreateDirectory(Host("folder"));
+        HostFile.WriteAllText(Host("plain"), "x");
+        HostDirectory.CreateDirectory(Host("folder"));
 
         using Dir root = OpenRoot();
         Dictionary<string, CapFileType> kinds = Kinds(root);
@@ -120,8 +120,8 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_carries_the_identity_of_what_it_names()
     {
-        File.WriteAllText(Host("plain"), "x");
-        Directory.CreateDirectory(Host("folder"));
+        HostFile.WriteAllText(Host("plain"), "x");
+        HostDirectory.CreateDirectory(Host("folder"));
 
         using Dir root = OpenRoot();
         Dictionary<string, CapFileId> identities = Identities(root);
@@ -141,8 +141,8 @@ public sealed partial class DirEnumerationTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        File.WriteAllText(Host("plain"), "x");
-        File.CreateSymbolicLink(Host("to-plain"), "plain");
+        HostFile.WriteAllText(Host("plain"), "x");
+        HostFile.CreateSymbolicLink(Host("to-plain"), "plain");
 
         using Dir root = OpenRoot();
         Dictionary<string, CapFileId> identities = Identities(root);
@@ -155,8 +155,8 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void Hard_links_are_two_entries_with_one_identity()
     {
-        File.WriteAllText(Host("first"), "shared");
-        File.WriteAllText(Host("other"), "shared");
+        HostFile.WriteAllText(Host("first"), "shared");
+        HostFile.WriteAllText(Host("other"), "shared");
 
         using Dir root = OpenRoot();
 
@@ -184,9 +184,9 @@ public sealed partial class DirEnumerationTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        Directory.CreateDirectory(Host("folder"));
-        Directory.CreateSymbolicLink(Host("to-folder"), "folder");
-        File.CreateSymbolicLink(Host("to-file"), "missing");
+        HostDirectory.CreateDirectory(Host("folder"));
+        HostDirectory.CreateSymbolicLink(Host("to-folder"), "folder");
+        HostFile.CreateSymbolicLink(Host("to-file"), "missing");
 
         using Dir root = OpenRoot();
         Dictionary<string, CapFileType> kinds = Kinds(root);
@@ -202,6 +202,7 @@ public sealed partial class DirEnumerationTests : IDisposable
     /// ordinary file would block a thread for ever the first time it opened one.
     /// </remarks>
     [Fact]
+    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void A_pipe_is_reported_as_a_pipe()
     {
         if (OperatingSystem.IsWindows())
@@ -239,7 +240,7 @@ public sealed partial class DirEnumerationTests : IDisposable
             Assert.Skip("Names are UTF-16 on this platform and cannot be ill-formed bytes.");
         }
 
-        File.WriteAllText(Host("ordinary"), "x");
+        HostFile.WriteAllText(Host("ordinary"), "x");
         CreateRawName([0x62, 0xFF, 0x62]);
 
         using Dir root = OpenRoot();
@@ -270,7 +271,7 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_opens_the_file_it_names()
     {
-        File.WriteAllText(Host("content"), "the contents");
+        HostFile.WriteAllText(Host("content"), "the contents");
 
         using Dir root = OpenRoot();
         DirEntry entry = root.EnumerateEntries().Single();
@@ -291,8 +292,8 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_opens_the_directory_it_names()
     {
-        Directory.CreateDirectory(Host("folder"));
-        File.WriteAllText(Host("folder", "inner"), "x");
+        HostDirectory.CreateDirectory(Host("folder"));
+        HostFile.WriteAllText(Host("folder", "inner"), "x");
 
         using Dir root = OpenRoot();
         DirEntry entry = root.EnumerateEntries().Single();
@@ -312,12 +313,12 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_that_has_gone_does_not_open()
     {
-        File.WriteAllText(Host("fleeting"), "x");
+        HostFile.WriteAllText(Host("fleeting"), "x");
 
         using Dir root = OpenRoot();
         DirEntry entry = root.EnumerateEntries().Single();
 
-        File.Delete(Host("fleeting"));
+        HostFile.Delete(Host("fleeting"));
 
         Assert.False(entry.TryOpenFile(out CapFile? file));
         Assert.Null(file);
@@ -333,14 +334,14 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_whose_kind_changed_is_refused_by_the_filesystem()
     {
-        Directory.CreateDirectory(Host("swapped"));
+        HostDirectory.CreateDirectory(Host("swapped"));
 
         using Dir root = OpenRoot();
         DirEntry entry = root.EnumerateEntries().Single();
         Assert.Equal(CapFileType.Directory, entry.Type);
 
-        Directory.Delete(Host("swapped"));
-        File.WriteAllText(Host("swapped"), "x");
+        HostDirectory.Delete(Host("swapped"));
+        HostFile.WriteAllText(Host("swapped"), "x");
 
         Assert.False(entry.TryOpenDir(out Dir? opened));
         Assert.Null(opened);
@@ -422,13 +423,13 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void Reading_does_not_begin_until_the_enumeration_does()
     {
-        Directory.CreateDirectory(Host("folder"));
+        HostDirectory.CreateDirectory(Host("folder"));
 
         using Dir root = OpenRoot();
         using Dir folder = root.OpenDir("folder");
 
         IEnumerable<DirEntry> entries = folder.EnumerateEntries();
-        Directory.Delete(Host("folder"));
+        HostDirectory.Delete(Host("folder"));
 
         // On the platforms that unlink at once the directory is gone and the read fails; on
         // the one that keeps a removed name until the last handle closes, the directory is
@@ -533,8 +534,8 @@ public sealed partial class DirEnumerationTests : IDisposable
     {
         using Dir root = OpenRoot();
 
-        Directory.CreateDirectory(Host("small"));
-        Directory.CreateDirectory(Host("large"));
+        HostDirectory.CreateDirectory(Host("small"));
+        HostDirectory.CreateDirectory(Host("large"));
         Seed(250, "small");
         Seed(4000, "large");
 
@@ -584,31 +585,25 @@ public sealed partial class DirEnumerationTests : IDisposable
         string directory = within is null ? _tree.HostPath : Host(within);
         for (int i = 0; i < count; i++)
         {
-            File.WriteAllText(
+            HostFile.WriteAllText(
                 Path.Combine(directory, i.ToString(System.Globalization.CultureInfo.InvariantCulture)),
                 "x");
         }
     }
 
     /// <summary>Creates a file whose name is the given bytes, whatever they decode to.</summary>
-    /// <remarks>
-    /// Built through the C library rather than through the framework, because the framework
-    /// takes a string and there is no string that encodes to these bytes by its rules. The
-    /// name has to be planted the way a program that predates Unicode would have planted it.
-    /// </remarks>
     private void CreateRawName(byte[] name)
     {
-        byte[] path = [.. System.Text.Encoding.UTF8.GetBytes(_tree.HostPath), (byte)'/', .. name, 0];
+        _rawName = name;
 
-        _rawName = path;
-
-        int fd = OpenRaw(path, 0x40 | 0x1, 0b110_100_100);
-        if (fd < 0)
+        try
         {
-            Assert.Skip($"A file with a name that is not text could not be created here: {Marshal.GetLastPInvokeError()}.");
+            HostFile.CreateRawName(_tree.HostPath, name);
         }
-
-        CloseRaw(fd);
+        catch (IOException thrown)
+        {
+            Assert.Skip(thrown.Message);
+        }
     }
 
     private void RequireSymbolicLinks()
@@ -617,8 +612,8 @@ public sealed partial class DirEnumerationTests : IDisposable
 
         try
         {
-            File.CreateSymbolicLink(probe, "target");
-            File.Delete(probe);
+            HostFile.CreateSymbolicLink(probe, "target");
+            HostFile.Delete(probe);
         }
         catch (Exception thrown) when (
             thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
@@ -626,15 +621,6 @@ public sealed partial class DirEnumerationTests : IDisposable
             Assert.Skip($"Symbolic links cannot be created here, so these cases cannot be built: {thrown.Message}");
         }
     }
-
-    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "open", SetLastError = true)]
-    private static partial int OpenRaw([In] byte[] path, int flags, uint mode);
-
-    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static partial int CloseRaw(int fd);
-
-    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "unlink", SetLastError = true)]
-    private static partial int UnlinkRaw([In] byte[] path);
 
     [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
     private static partial int MakeFifo(

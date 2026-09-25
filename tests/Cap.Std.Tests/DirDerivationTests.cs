@@ -35,12 +35,12 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void A_nested_path_opens_the_directory_it_names()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
 
         using Dir root = OpenRoot();
         using Dir nested = root.OpenDir("a/b/c");
 
-        Assert.True(PlatformOps.Host.StatHandle((SafeDirHandle)nested.UnsafeGetHandle(), out CapNodeInfo opened).IsSuccess);
+        Assert.True(nested.Handle.Backend.StatHandle(nested.Handle, out CapNodeInfo opened).IsSuccess);
         Assert.Equal(CapNodeType.Directory, opened.Type);
     }
 
@@ -48,7 +48,7 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void Redundant_separators_and_dot_components_are_ignored()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
 
         using Dir root = OpenRoot();
         using Dir viaTidyPath = root.OpenDir("a/b");
@@ -72,7 +72,7 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void A_file_is_not_a_directory()
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "file.txt"), "contents");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "file.txt"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -94,7 +94,7 @@ public sealed class DirDerivationTests : IDisposable
     [InlineData("a/../../sibling")]
     public void A_path_that_climbs_out_is_refused(string path)
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a"));
 
         using Dir root = OpenRoot();
 
@@ -188,7 +188,7 @@ public sealed class DirDerivationTests : IDisposable
     [Fact]
     public void A_derived_handle_resolves_under_the_policy_its_root_was_opened_with()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
 
         CapError error = Dir.OpenRootCore(
             PlatformOps.Host, _tree.HostPath, AmbientAuthority.Acquire(), ConfinedResolveOptions.RefuseSymlinks, out Dir? root);
@@ -210,9 +210,8 @@ public sealed class DirDerivationTests : IDisposable
     /// <summary>Whether two handles refer to the same directory, by identity rather than by name.</summary>
     private static bool SameDirectory(Dir left, Dir right)
     {
-        IPlatformOps ops = PlatformOps.Host;
-        Assert.True(ops.StatHandle((SafeDirHandle)left.UnsafeGetHandle(), out CapNodeInfo first).IsSuccess);
-        Assert.True(ops.StatHandle((SafeDirHandle)right.UnsafeGetHandle(), out CapNodeInfo second).IsSuccess);
+        Assert.True(left.Handle.Backend.StatHandle(left.Handle, out CapNodeInfo first).IsSuccess);
+        Assert.True(right.Handle.Backend.StatHandle(right.Handle, out CapNodeInfo second).IsSuccess);
         return first.IsSameNodeAs(second);
     }
 }

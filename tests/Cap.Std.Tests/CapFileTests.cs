@@ -45,7 +45,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void Reads_are_positional_and_carry_nothing_between_calls()
     {
-        File.WriteAllText(Host("data"), "0123456789");
+        HostFile.WriteAllText(Host("data"), "0123456789");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -63,7 +63,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void A_read_past_the_end_returns_nothing()
     {
-        File.WriteAllText(Host("data"), "short");
+        HostFile.WriteAllText(Host("data"), "short");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -75,7 +75,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void Writes_are_positional()
     {
-        File.WriteAllText(Host("data"), "aaaaaaaa");
+        HostFile.WriteAllText(Host("data"), "aaaaaaaa");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Write))
@@ -83,7 +83,7 @@ public sealed class CapFileTests : IDisposable
             file.Write("bb"u8, 3);
         }
 
-        Assert.Equal("aaabbaaa", File.ReadAllText(Host("data")));
+        Assert.Equal("aaabbaaa", HostFile.ReadAllText(Host("data")));
     }
 
     /// <summary>A handle opened to read refuses to write, because the system refused the right.</summary>
@@ -95,7 +95,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void A_read_only_handle_cannot_write()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -107,7 +107,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void A_negative_offset_is_refused()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -121,7 +121,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void Setting_the_length_truncates_and_extends()
     {
-        File.WriteAllText(Host("data"), "0123456789");
+        HostFile.WriteAllText(Host("data"), "0123456789");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.ReadWrite))
@@ -162,7 +162,7 @@ public sealed class CapFileTests : IDisposable
         file.Flush(toDisk: false);
         file.Flush(toDisk: true);
 
-        Assert.Equal("contents", File.ReadAllText(Host("data")));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("data")));
     }
 
     // --- streams and ownership --------------------------------------------------------------------
@@ -171,7 +171,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void A_borrowed_stream_leaves_the_handle_usable()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -190,7 +190,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void Borrowed_streams_are_independent_of_one_another()
     {
-        File.WriteAllText(Host("data"), "0123456789");
+        HostFile.WriteAllText(Host("data"), "0123456789");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -210,7 +210,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void A_stream_given_ownership_leaves_the_handle_spent()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         CapFile file = root.OpenFile("data");
@@ -239,7 +239,7 @@ public sealed class CapFileTests : IDisposable
             stream.Write("streamed"u8);
         }
 
-        Assert.Equal("streamed", File.ReadAllText(Host("data")));
+        Assert.Equal("streamed", HostFile.ReadAllText(Host("data")));
         Assert.Equal(8, file.Length);
     }
 
@@ -253,9 +253,10 @@ public sealed class CapFileTests : IDisposable
     [Theory]
     [InlineData(FileOptions.None)]
     [InlineData(FileOptions.Asynchronous)]
+    [NotInMemory("About the FileStream the framework builds over an operating-system handle. A file held in memory has a stream of its own.")]
     public void A_stream_reports_the_same_asynchrony_as_the_handle(FileOptions options)
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Read, FileShare.Read, options);
@@ -273,7 +274,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public void A_disposed_handle_refuses_every_operation()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         CapFile file = root.OpenFile("data");
@@ -329,7 +330,7 @@ public sealed class CapFileTests : IDisposable
     [Fact]
     public async Task A_cancelled_token_stops_the_operation_before_it_starts()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -374,9 +375,10 @@ public sealed class CapFileTests : IDisposable
 
     /// <summary>The handle it hands out is the one it holds, and is still its own to close.</summary>
     [Fact]
+    [NotInMemory("About the operating-system handle, which a file held in memory does not have.")]
     public void The_raw_handle_is_lent_rather_than_transferred()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
         CapFile file = root.OpenFile("data");

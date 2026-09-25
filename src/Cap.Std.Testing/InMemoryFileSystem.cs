@@ -39,6 +39,10 @@ namespace Cap.Std.Testing;
 /// usable through a handle after their name is removed. Permissions are recorded and
 /// reported but not enforced, except that under Windows rules the read-only attribute refuses
 /// the removal of a name and the opening of a file for writing, as it does on Windows.
+/// Appending, once turned on for an open file, puts every write through that file and its
+/// copies at the end, a stream's included, as Linux's append flag does; under Windows rules
+/// it applies only to the file's own writes, as on Windows. Under Windows rules, too,
+/// flushing a directory's entries is reported unsupported, as Windows reports it.
 /// </para>
 /// <para>
 /// <strong>Times.</strong> Creating something stamps all four of its times; a write or a

@@ -180,7 +180,7 @@ public sealed class FinalLinkWriteTests
 
         root.WriteAllBytes($"{DirectoryLink}/written", "through"u8);
 
-        Assert.Equal("through", File.ReadAllText(Path.Join(arena.SandboxPath, EscapeCorpus.PlainDirectory, "written")));
+        Assert.Equal("through", HostFile.ReadAllText(Path.Join(arena.SandboxPath, EscapeCorpus.PlainDirectory, "written")));
     }
 
     private static Arena PlantLinks()

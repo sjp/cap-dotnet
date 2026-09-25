@@ -99,7 +99,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void Deriving_a_handle_carries_the_policy_across()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain", "deeper"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "plain", "deeper"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
         using Dir child = root.OpenDir("plain");
@@ -135,7 +135,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_handle_derived_from_a_restricted_one_is_restricted_too()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain", "deeper"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "plain", "deeper"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
@@ -194,7 +194,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_restricted_handle_outlives_the_handle_it_came_from()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
 
         Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
@@ -257,9 +257,9 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     /// </remarks>
     private void Build()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "inside-link"), "plain");
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "escape-link"), "..");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "inside-link"), "plain");
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "escape-link"), "..");
     }
 
     /// <summary>
@@ -277,8 +277,8 @@ public sealed class DirSymlinkPolicyTests : IDisposable
 
         try
         {
-            File.CreateSymbolicLink(probe, "target");
-            File.Delete(probe);
+            HostFile.CreateSymbolicLink(probe, "target");
+            HostFile.Delete(probe);
         }
         catch (Exception thrown) when (
             thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
@@ -290,9 +290,8 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     /// <summary>Whether two handles refer to the same directory, by identity rather than by name.</summary>
     private static bool SameDirectory(Dir left, Dir right)
     {
-        IPlatformOps ops = PlatformOps.Host;
-        Assert.True(ops.StatHandle((SafeDirHandle)left.UnsafeGetHandle(), out CapNodeInfo first).IsSuccess);
-        Assert.True(ops.StatHandle((SafeDirHandle)right.UnsafeGetHandle(), out CapNodeInfo second).IsSuccess);
+        Assert.True(left.Handle.Backend.StatHandle(left.Handle, out CapNodeInfo first).IsSuccess);
+        Assert.True(right.Handle.Backend.StatHandle(right.Handle, out CapNodeInfo second).IsSuccess);
         return first.IsSameNodeAs(second);
     }
 }

@@ -31,6 +31,7 @@ public sealed class ResolutionBackendReportingTests : IDisposable
     }
 
     [Fact]
+    [NotInMemory("About which backend the host chose.")]
     public void The_reported_backend_is_the_one_this_platform_can_have()
     {
         ResolutionBackend reported = Dir.ResolutionBackend;
@@ -58,9 +59,10 @@ public sealed class ResolutionBackendReportingTests : IDisposable
     /// somewhere the report cannot see.
     /// </remarks>
     [Fact]
+    [NotInMemory("About how the host's backend reports itself on the meter.")]
     public void The_meter_names_the_backend_and_counts_resolution()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         MeterSnapshot before = MeterSnapshot.Take();

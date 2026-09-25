@@ -2,6 +2,7 @@ using System.Runtime.Versioning;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
+using Cap.Std.Testing;
 
 namespace Cap.Std.Tests;
 
@@ -37,7 +38,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void A_nested_path_costs_one_kernel_operation_where_the_kernel_offers_one()
     {
-        if (PlatformOps.Host is not LinuxPlatformOps ops)
+        if (CountingHost() is not { } ops)
         {
             Assert.Skip("This platform has no kernel-atomic confined open to dispatch to.");
             return;
@@ -47,10 +48,10 @@ public sealed class DirResolutionDispatchTests : IDisposable
         {
             Assert.Skip(
                 "This kernel does not offer the confined open, so the walk is the correct " +
-                $"strategy here. Reason: {ops.ConfinedOpenUnavailableReason}");
+                $"strategy here. Reason: {UnavailableReason(ops)}");
         }
 
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c", "d"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c", "d"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
@@ -76,7 +77,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void A_nested_path_is_walked_a_name_at_a_time_where_the_kernel_offers_nothing()
     {
-        if (PlatformOps.Host is not LinuxPlatformOps ops)
+        if (CountingHost() is not { } ops)
         {
             Assert.Skip("The per-name open count is kept only by this platform's implementation.");
             return;
@@ -87,7 +88,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
             Assert.Skip("This kernel offers the confined open, so the walk is not what dispatch chooses.");
         }
 
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c", "d"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c", "d"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
@@ -125,7 +126,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void Acting_on_a_name_resolves_the_rest_of_the_path_the_same_way()
     {
-        if (PlatformOps.Host is not LinuxPlatformOps ops)
+        if (CountingHost() is not { } ops)
         {
             Assert.Skip("This platform has no kernel-atomic confined open to dispatch to.");
             return;
@@ -135,12 +136,12 @@ public sealed class DirResolutionDispatchTests : IDisposable
         {
             Assert.Skip(
                 "This kernel does not offer the confined open, so the walk is the correct " +
-                $"strategy here. Reason: {ops.ConfinedOpenUnavailableReason}");
+                $"strategy here. Reason: {UnavailableReason(ops)}");
         }
 
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
-        File.WriteAllText(Path.Combine(_tree.HostPath, "a", "b", "c", "doomed"), "contents");
-        File.WriteAllText(Path.Combine(_tree.HostPath, "alone"), "contents");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b", "c"));
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "a", "b", "c", "doomed"), "contents");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "alone"), "contents");
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
@@ -160,4 +161,20 @@ public sealed class DirResolutionDispatchTests : IDisposable
         Assert.Equal(0, ops.ConfinedOpenAttempts - confinedBefore);
         Assert.Equal(0, ops.ComponentOpens - componentsBefore);
     }
+
+    /// <summary>
+    /// The host's backend, when it is one whose counters say which strategy ran: Linux's, or
+    /// a filesystem held in memory standing in for the host, which keeps the same counters and
+    /// offers the confined open or not as it was told to.
+    /// </summary>
+    [SupportedOSPlatform("linux")]
+    private static IPlatformOps? CountingHost() =>
+        PlatformOps.Host is LinuxPlatformOps or InMemoryPlatformOps ? PlatformOps.Host : null;
+
+    /// <summary>Why the backend in force has no confined open.</summary>
+    [SupportedOSPlatform("linux")]
+    private static string UnavailableReason(IPlatformOps ops) =>
+        ops is LinuxPlatformOps linux
+            ? linux.ConfinedOpenUnavailableReason ?? "unknown"
+            : "the filesystem held in memory was told to resolve one name at a time";
 }

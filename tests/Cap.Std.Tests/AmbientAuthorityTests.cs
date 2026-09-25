@@ -33,7 +33,7 @@ public sealed class AmbientAuthorityTests : IDisposable
     public void An_acquired_token_is_accepted()
     {
         using Dir dir = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
-        Assert.False(dir.UnsafeGetHandle().IsInvalid);
+        Assert.False(dir.Handle.IsInvalid);
     }
 
     /// <summary>A value nobody acquired is not a token.</summary>

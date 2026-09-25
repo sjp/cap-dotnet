@@ -37,7 +37,7 @@ public sealed class DirPathLookupTests : IDisposable
     public void A_handle_can_say_what_directory_it_was_opened_on()
     {
         string nested = Path.Combine(_tree.HostPath, "somewhere");
-        Directory.CreateDirectory(nested);
+        HostDirectory.CreateDirectory(nested);
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir child = root.OpenDir("somewhere");
@@ -78,7 +78,7 @@ public sealed class DirPathLookupTests : IDisposable
     [Fact]
     public void The_answer_follows_a_rename_rather_than_recording_the_name_it_was_opened_by()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "before"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "before"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir child = root.OpenDir("before");
@@ -90,7 +90,7 @@ public sealed class DirPathLookupTests : IDisposable
 
         Assert.EndsWith("before", opened.TrimEnd('/', '\\'), StringComparison.Ordinal);
 
-        Directory.Move(Path.Combine(_tree.HostPath, "before"), Path.Combine(_tree.HostPath, "after"));
+        HostDirectory.Move(Path.Combine(_tree.HostPath, "before"), Path.Combine(_tree.HostPath, "after"));
 
         Assert.True(child.TryGetPath(AmbientAuthority.Acquire(), out string? renamed));
         Assert.EndsWith("after", renamed.TrimEnd('/', '\\'), StringComparison.Ordinal);

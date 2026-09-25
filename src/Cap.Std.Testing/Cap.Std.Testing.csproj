@@ -32,12 +32,15 @@
 
   <!--
     The test fake in tests/Fakes shares this assembly's node tree and confined resolution, so
-    the suites that compile it are given access to both.
+    the suites that compile it are given access to both. The suites that can run with this
+    filesystem in place of the host (tests/InMemory) arrange their trees in its node tree
+    directly, so that arranging a scenario does not go through the code under test.
   -->
   <ItemGroup>
     <InternalsVisibleTo Include="Cap.Primitives.Tests" />
     <InternalsVisibleTo Include="Cap.Std.Tests" />
     <InternalsVisibleTo Include="Cap.Fs.Ext.Tests" />
+    <InternalsVisibleTo Include="Cap.Escape.Tests" />
     <InternalsVisibleTo Include="Cap.Fuzz" />
     <InternalsVisibleTo Include="Cap.Fuzz.Tests" />
   </ItemGroup>

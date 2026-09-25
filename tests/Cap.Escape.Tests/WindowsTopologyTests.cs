@@ -19,6 +19,7 @@ public sealed class WindowsTopologyTests
     /// </remarks>
     [Fact]
     [Defends("W6")]
+    [NotInMemory("The alias is one the host's volume generates.")]
     public void A_short_name_alias_does_not_reach_the_entry_it_aliases()
     {
         if (!OperatingSystem.IsWindows())
@@ -62,6 +63,7 @@ public sealed class WindowsTopologyTests
     /// </remarks>
     [Fact]
     [Defends("S9")]
+    [NotInMemory("The alias is one the host's system installed.")]
     public void An_application_execution_alias_is_refused_rather_than_followed()
     {
         if (!OperatingSystem.IsWindows())
@@ -98,6 +100,7 @@ public sealed class WindowsTopologyTests
     [InlineData("NUL")]
     [InlineData("CONIN$")]
     [Defends("W8")]
+    [NotInMemory("About the host's own device paths.")]
     public void A_root_named_by_a_path_to_a_device_is_not_opened(string path)
     {
         if (!OperatingSystem.IsWindows())

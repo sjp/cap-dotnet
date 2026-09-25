@@ -15,11 +15,11 @@ public sealed class PredicateTests : IDisposable
 
     public PredicateTests()
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "report.txt"), "contents");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "folder"));
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-folder"), "folder");
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-file"), "report.txt");
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-nothing"), "absent");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report.txt"), "contents");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "folder"));
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-folder"), "folder");
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-file"), "report.txt");
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-nothing"), "absent");
     }
 
     public void Dispose() => _tree.Dispose();
@@ -60,7 +60,7 @@ public sealed class PredicateTests : IDisposable
     [Fact]
     public void A_longer_path_is_resolved_the_usual_way()
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "folder", "inner.txt"), "contents");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "folder", "inner.txt"), "contents");
 
         Assert.True(_tree.Directory.IsFile(Path.Combine("folder", "inner.txt")));
         Assert.True(_tree.Directory.IsFile(Path.Combine("to-folder", "inner.txt")));

@@ -5,6 +5,8 @@
     <AssemblyName>Cap.Escape.Tests</AssemblyName>
     <!-- The throwaway directory in tests/Scenarios, placed wherever the run was told to. -->
     <CapUsesScratchTree>true</CapUsesScratchTree>
+    <!-- Can run with a filesystem held in memory in place of the host; see tests/InMemory. -->
+    <CapRunsInMemory>true</CapRunsInMemory>
     <!-- Every backend this host has, substituted in turn for the length of one case. -->
     <CapRunsEachBackend>true</CapRunsEachBackend>
   </PropertyGroup>

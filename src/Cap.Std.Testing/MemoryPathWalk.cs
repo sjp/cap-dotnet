@@ -16,7 +16,8 @@ namespace Cap.Std.Testing;
 /// A link's target is resolved in the same walk as the path that reached it, from the
 /// directory the link is in, and one with a rooted target is refused as an escape. A path
 /// that ends in a separator follows a final link whatever the caller asked, and insists on
-/// finding a directory.
+/// finding a directory. A name longer than the kernel looks up is refused as too long, as it
+/// is by <c>openat2</c>, whether it came from the path or from a link's target.
 /// </para>
 /// <para>
 /// Written as one loop over a stack of components rather than as a recursion, because a
@@ -32,6 +33,12 @@ internal static class MemoryPathWalk
     /// Linux allows.
     /// </summary>
     public const int LinkBudget = 40;
+
+    /// <summary>
+    /// The longest single name the kernel looks up: <c>NAME_MAX</c> bytes on Linux, and as many
+    /// UTF-16 units on Windows.
+    /// </summary>
+    public const int MaxNameLength = 255;
 
     /// <summary>
     /// Resolves <paramref name="path"/> beneath <paramref name="start"/>.
@@ -94,6 +101,12 @@ internal static class MemoryPathWalk
             if (current.Unreadable)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+            }
+
+            int length = syntax == CapPathSyntax.Windows ? component.Length : PathEncoding.GetByteCount(component);
+            if (length > MaxNameLength)
+            {
+                return CapError.FromCategory(CapErrorCategory.NameTooLong);
             }
 
             MemoryNode? next = lookup(current, component);

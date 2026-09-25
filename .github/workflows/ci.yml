@@ -236,6 +236,57 @@ jobs:
           dotnet test CapDotnet.slnx --configuration Release --no-build
 
   # ---------------------------------------------------------------------------------
+  # The in-memory filesystem in Cap.Std.Testing is only worth having if it behaves like the
+  # disk, and a second set of tests written for it would encode the same assumptions twice.
+  # So the suites that pin down the disk's behaviour run again here, unchanged, with it
+  # standing in for the host (see tests/InMemory): resolving one name at a time, and a whole
+  # path at once, under the path rules of each runner's platform.
+  #
+  # A test about something only the host has stands aside with its reason. The summary lists
+  # them and how many there are, because each is a test the in-memory backend is excused
+  # from, and the count should only grow for a reason somebody has read.
+  # ---------------------------------------------------------------------------------
+  in-memory:
+    name: in-memory backend (${{ matrix.platform.name }}, ${{ matrix.leg }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { name: linux-x64, os: ubuntu-latest }
+          - { name: windows-x64, os: windows-latest }
+        leg: [in-memory-walk, in-memory-confined]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build CapDotnet.slnx --configuration Release
+
+      - name: Run the suites with the in-memory backend in place of the host
+        shell: bash
+        env:
+          # Read by tests/InMemory before the first test.
+          CAPDOTNET_TEST_BACKEND: ${{ matrix.leg }}
+        run: |
+          set -euo pipefail
+          for project in Cap.Std.Tests Cap.Fs.Ext.Tests Cap.Escape.Tests; do
+            echo "::group::$project"
+            dotnet test "tests/$project/$project.csproj" --configuration Release --no-build
+            echo "::endgroup::"
+          done
+
+      - name: List the tests not run in memory
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: >
+          build/ci/list-in-memory-opt-outs.sh Cap.Std.Tests Cap.Fs.Ext.Tests Cap.Escape.Tests
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------------
   # Passing the escape corpus under NativeAOT is the real test; merely linking is not. A
   # clean publish shows the compiler found nothing it could not analyse. It cannot show that
   # every resolution step it kept still behaves the same once compiled to native code, or once

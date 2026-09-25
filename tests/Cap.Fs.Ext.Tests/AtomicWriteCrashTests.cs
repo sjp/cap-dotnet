@@ -44,11 +44,12 @@ public sealed class AtomicWriteCrashTests : IDisposable
     /// </para>
     /// </remarks>
     [Fact]
+    [NotInMemory("Kills a child process part of the way through a publish, and looks at what it left on the disk.")]
     public void A_publish_killed_part_of_the_way_through_leaves_no_partial_file()
     {
         string target = Path.Combine(_tree.HostPath, AtomicWriteCrashChild.TargetName);
         byte[] before = [1, 2, 3];
-        File.WriteAllBytes(target, before);
+        HostFile.WriteAllBytes(target, before);
 
         using Process child = StartChild();
         bool sawScratch = WaitForScratch(child);
@@ -65,7 +66,7 @@ public sealed class AtomicWriteCrashTests : IDisposable
 
         Assert.True(sawScratch, "No scratch file was ever seen, so the child never began publishing.");
 
-        byte[] after = File.ReadAllBytes(target);
+        byte[] after = HostFile.ReadAllBytes(target);
         Assert.True(
             IsUnchanged(after, before) || IsWholePayload(after),
             $"The published name held {after.Length} bytes, which is neither what was there " +

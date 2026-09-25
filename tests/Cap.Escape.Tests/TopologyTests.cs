@@ -106,7 +106,7 @@ public sealed class TopologyTests
         RequireFeatures(HostFeature.HardLinks);
 
         using Arena arena = new();
-        HostFilesystem.CreateHardLink(
+        HostFile.CreateHardLink(
             Path.Join(arena.OutsidePath, EscapeCorpus.OutsideFile),
             Path.Join(arena.SandboxPath, "planted"));
 
@@ -135,7 +135,7 @@ public sealed class TopologyTests
         using Arena arena = new();
         arena.Plant([new(SetupKind.DirectoryLink, "up", $"../{EscapeCorpus.OutsideDirectory}")]);
         string alias = Path.Join(arena.HostPath, "alias");
-        Directory.CreateSymbolicLink(alias, arena.SandboxPath);
+        HostDirectory.CreateSymbolicLink(alias, arena.SandboxPath);
 
         CapFileId sandbox;
         using (Dir direct = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire()))
@@ -165,7 +165,7 @@ public sealed class TopologyTests
     public void A_temporary_location_that_is_a_link_can_be_a_root()
     {
         const string Location = "/tmp";
-        if (OperatingSystem.IsWindows() || new DirectoryInfo(Location).LinkTarget is null)
+        if (OperatingSystem.IsWindows() || HostEntry.LinkTarget(Location) is null)
         {
             Assert.Skip($"'{Location}' is not a link on this host.");
         }

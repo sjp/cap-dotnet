@@ -31,8 +31,8 @@ public sealed class CopyAcrossBackendsTests : IDisposable
     [Fact]
     public void A_tree_on_disk_is_copied_into_a_simulated_one()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "a", "b"));
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "c"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "a", "b"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "c"));
 
         FakeFileSystem fs = new();
         _ = fs.AddDirectory("/destination");
@@ -55,7 +55,7 @@ public sealed class CopyAcrossBackendsTests : IDisposable
         FakeFileSystem fs = new();
         _ = fs.AddDirectory("/source/a/b");
         FakePlatformOps ops = new(fs);
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
 
         using Dir source = Dir.OpenThrough(ops, "/source", AmbientAuthority.Acquire());
         using Dir destination = _tree.Directory.OpenDir("destination");
@@ -63,7 +63,7 @@ public sealed class CopyAcrossBackendsTests : IDisposable
         CopyReport report = source.CopyTo(destination);
 
         Assert.Equal(2, report.Directories);
-        Assert.True(Directory.Exists(Path.Combine(_tree.HostPath, "destination", "a", "b")));
+        Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "destination", "a", "b")));
     }
 
     /// <summary>

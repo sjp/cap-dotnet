@@ -33,8 +33,8 @@ public sealed class DirParentStepTests : IDisposable
     private void MakeFile(string contents, params string[] parts)
     {
         string path = Host(parts);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, contents);
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
+        HostFile.WriteAllText(path, contents);
     }
 
     /// <summary>A path that climbs and descends again, staying inside, opens what it names.</summary>
@@ -75,8 +75,8 @@ public sealed class DirParentStepTests : IDisposable
     {
         MakeFile("beside the target", "plain", "file");
         MakeFile("beside the link", "file");
-        Directory.CreateDirectory(Host("plain", "inner"));
-        Directory.CreateSymbolicLink(Host("hop"), Path.Combine("plain", "inner"));
+        HostDirectory.CreateDirectory(Host("plain", "inner"));
+        HostDirectory.CreateSymbolicLink(Host("hop"), Path.Combine("plain", "inner"));
 
         using Dir root = OpenRoot();
 
@@ -87,7 +87,7 @@ public sealed class DirParentStepTests : IDisposable
     [Fact]
     public void A_path_ending_in_a_climb_opens_and_describes_the_directory_it_names()
     {
-        Directory.CreateDirectory(Host("a", "b"));
+        HostDirectory.CreateDirectory(Host("a", "b"));
 
         using Dir root = OpenRoot();
         using Dir a = root.OpenDir("a");
@@ -104,7 +104,7 @@ public sealed class DirParentStepTests : IDisposable
     [Fact]
     public void A_path_ending_in_a_climb_above_the_handle_is_refused()
     {
-        Directory.CreateDirectory(Host("a"));
+        HostDirectory.CreateDirectory(Host("a"));
 
         using Dir root = OpenRoot();
 
@@ -155,9 +155,9 @@ public sealed class DirParentStepTests : IDisposable
         Assert.Throws<SandboxEscapeException>(() => root.DeleteFile("a/../.."));
         Assert.Throws<DirectoryNotFoundException>(() => root.DeleteDir("absent/.."));
 
-        Assert.Equal("kept", File.ReadAllText(Host("a", "kept")));
-        Assert.True(File.Exists(Host("source")));
-        Assert.False(File.Exists(Host("moved")) || File.Exists(Host("linked")));
+        Assert.Equal("kept", HostFile.ReadAllText(Host("a", "kept")));
+        Assert.True(HostFile.Exists(Host("source")));
+        Assert.False(HostFile.Exists(Host("moved")) || HostFile.Exists(Host("linked")));
     }
 
     /// <summary>
@@ -203,7 +203,7 @@ public sealed class DirParentStepTests : IDisposable
             Assert.Equal(CapErrorKind.IsADirectory, thrown.Kind);
         }
 
-        Assert.False(File.Exists(Host("dir", "absent")));
+        Assert.False(HostFile.Exists(Host("dir", "absent")));
         Assert.Throws<SandboxEscapeException>(() => root.CreateFile("dir/../../").Dispose());
         Assert.Throws<SandboxEscapeException>(() => root.OpenFile("..").Dispose());
     }

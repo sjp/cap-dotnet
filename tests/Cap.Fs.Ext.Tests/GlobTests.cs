@@ -119,8 +119,8 @@ public sealed class GlobTests : IDisposable
             return;
         }
 
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "sealed"));
-        File.SetUnixFileMode(Path.Combine(_tree.HostPath, "sealed"), UnixFileMode.None);
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "sealed"));
+        HostFile.SetUnixFileMode(Path.Combine(_tree.HostPath, "sealed"), UnixFileMode.None);
 
         try
         {
@@ -128,7 +128,7 @@ public sealed class GlobTests : IDisposable
         }
         finally
         {
-            File.SetUnixFileMode(
+            HostFile.SetUnixFileMode(
                 Path.Combine(_tree.HostPath, "sealed"),
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
@@ -177,7 +177,7 @@ public sealed class GlobTests : IDisposable
     private void Make(params string[] parts)
     {
         string path = Path.Combine([_tree.HostPath, .. parts]);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "contents");
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
+        HostFile.WriteAllText(path, "contents");
     }
 }

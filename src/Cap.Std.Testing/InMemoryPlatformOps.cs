@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Windows;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Std.Testing;
@@ -41,6 +42,15 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
     /// <summary>The code a full disk carries on Unix, where the framework reports the raw errno.</summary>
     private const int NoSpaceErrno = 28;
+
+    /// <summary>
+    /// Linux's limit, in bytes and counting the terminating NUL, on a path handed to it in one
+    /// piece, which also bounds what a symbolic link can store.
+    /// </summary>
+    private const int LinuxPathMax = 4096;
+
+    /// <summary>As many links as one ambient open follows, as Linux allows in one lookup.</summary>
+    private const int MaxAmbientLinks = 40;
 
     /// <summary>The code a full disk carries on Windows: ERROR_DISK_FULL as an HRESULT.</summary>
     private const int DiskFullHResult = unchecked((int)0x80070070);
@@ -94,8 +104,13 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <inheritdoc/>
     /// <remarks>
     /// The path is a build path, as <see cref="InMemoryFileSystem"/> describes, or the name
-    /// <see cref="GetSystemTemporaryDirectory"/> gave for the scratch directory. It is looked
-    /// up as written: nothing ambient exists here for a link to lead to.
+    /// <see cref="GetSystemTemporaryDirectory"/> gave for the scratch directory. Under Windows
+    /// rules <c>\</c> separates components too and a leading drive letter is ignored, so that a
+    /// Windows path to a directory in the tree opens it. Symbolic links on the way, the last
+    /// component included, are followed as the host follows them in a path it is handed:
+    /// a relative target from the directory holding the link, and a rooted one from the top of
+    /// the tree. This is how a path in the host's own syntax behaves when this filesystem is
+    /// standing in for the host.
     /// </remarks>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
@@ -107,7 +122,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
         lock (_fs.Gate)
         {
-            MemoryNode? node = path == InMemoryFileSystem.ScratchPath ? _fs.Scratch : FindBuildPath(path);
+            MemoryNode? node = path == InMemoryFileSystem.ScratchPath ? _fs.Scratch : FindAmbientPath(path);
             if (node is null)
             {
                 return Fail<SafeDirHandle>(CapErrorCategory.NotFound);
@@ -488,12 +503,19 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    /// <remarks>Succeeds at once: nothing in memory is less durable than anything else.</remarks>
+    /// <remarks>
+    /// Under Unix rules this succeeds at once: nothing in memory is less durable than anything
+    /// else. Under Windows rules it reports the request unsupported, as Windows does, since
+    /// that system has no way to commit a directory's entries on their own.
+    /// </remarks>
     public CapError SyncDirectory(SafeDirHandle directory)
     {
         lock (_fs.Gate)
         {
-            return Directory(directory, out _);
+            CapError error = Directory(directory, out _);
+            return error.IsSuccess && _fs.WindowsRules
+                ? CapError.FromCategory(CapErrorCategory.NotSupported)
+                : error;
         }
     }
 
@@ -602,20 +624,28 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             CapError error = File(handle, out OpenFile? file);
             return error.IsFailure
                 ? CapResult<SafeFileHandle>.Fail(error)
-                : CapResult<SafeFileHandle>.Ok(IssueFile(file!.Node, file.Access, appendOnly || file.AppendOnly));
+                : CapResult<SafeFileHandle>.Ok(IssueFile(file!.Node, file.Access, appendOnly || file.AppendOnly, file.Description));
         }
     }
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Nothing is kept on the open file, as on Windows: appending is applied by
-    /// <see cref="WriteAppending"/> alone.
+    /// Under Unix rules the setting is kept on the open file, as Linux keeps its append flag,
+    /// so it reaches every copy made by duplication and every positioned write through any of
+    /// them, a stream's included. Under Windows rules nothing is kept, as on Windows, and
+    /// appending is applied by <see cref="WriteAppending"/> alone.
     /// </remarks>
     public CapError SetFileAppending(SafeFileHandle handle, bool appending)
     {
         lock (_fs.Gate)
         {
-            return File(handle, out _);
+            CapError error = File(handle, out OpenFile? file);
+            if (error.IsSuccess && !_fs.WindowsRules)
+            {
+                file!.Description.Appending = appending;
+            }
+
+            return error;
         }
     }
 
@@ -666,7 +696,8 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <inheritdoc/>
     /// <remarks>
     /// A handle that can only append writes at the end, as the system puts a positioned write
-    /// through such a handle on Windows.
+    /// through such a handle on Windows. So does one whose open file has appending turned on,
+    /// as Linux puts a positioned write to a file opened for appending.
     /// </remarks>
     public void WriteFile(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
     {
@@ -675,11 +706,12 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             MemoryNode node = Demand(handle, FileAccess.Write, out OpenFile file);
             ThrowIfWriteFails();
 
+            bool append = file.AppendOnly || file.Description.Appending;
             long before = node.Length;
-            long end = file.AppendOnly ? before + buffer.Length : fileOffset + buffer.Length;
+            long end = append ? before + buffer.Length : fileOffset + buffer.Length;
             ThrowIfNoRoom(node, end - before);
 
-            if (file.AppendOnly)
+            if (append)
             {
                 node.Append(buffer);
             }
@@ -988,12 +1020,21 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// A target longer than the system would store is refused as too long: under Unix rules
+    /// one that does not fit in Linux's path limit, and under Windows rules one whose reparse
+    /// data does not fit in the most a reparse point holds.
+    /// </remarks>
     public CapError CreateChildSymbolicLink(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
         ReadOnlySpan<char> target,
         bool targetIsDirectory)
     {
+        bool tooLong = _fs.WindowsRules
+            ? ReparseData.SymbolicLinkSize(target, CapPath.IsRooted(target, CapPathSyntax.Windows)) > ReparseData.MaximumBufferSize
+            : PathEncoding.GetByteCount(target) >= LinuxPathMax;
+
         lock (_fs.Gate)
         {
             CapError error = Child(parent, name, out MemoryNode? directory, out _);
@@ -1005,6 +1046,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (error.Category != CapErrorCategory.NotFound || directory is null)
             {
                 return error;
+            }
+
+            if (tooLong)
+            {
+                return CapError.FromCategory(CapErrorCategory.NameTooLong);
             }
 
             MemoryNode link = _fs.NewNode(CapNodeType.SymbolicLink);
@@ -1082,6 +1128,13 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         if (!Capabilities.SupportsConfinedOpen)
         {
             return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        // The kernel takes the whole path in one piece, and refuses one longer than its limit
+        // before looking anything up.
+        if (!_fs.WindowsRules && PathEncoding.GetByteCount(path) >= LinuxPathMax)
+        {
+            return CapError.FromCategory(CapErrorCategory.NameTooLong);
         }
 
         CapError error = Directory(root, out MemoryNode? start);
@@ -1291,10 +1344,10 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <summary>Issues a file handle and records what it was opened for.</summary>
-    private SafeFileHandle IssueFile(MemoryNode node, FileAccess access, bool appendOnly)
+    private SafeFileHandle IssueFile(MemoryNode node, FileAccess access, bool appendOnly, OpenFileDescription? shared = null)
     {
         SafeFileHandle handle = new(NextHandle(), ownsHandle: false);
-        _files.Add(handle, new OpenFile(node, access, appendOnly));
+        _files.Add(handle, new OpenFile(node, access, appendOnly, shared ?? new OpenFileDescription()));
         return handle;
     }
 
@@ -1489,19 +1542,84 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// </summary>
     private static bool IsDirectoryAccess(CapAccess access) => access is CapAccess.None or CapAccess.Read;
 
-    /// <summary>Looks a build path up as written, for the ambient open.</summary>
-    private MemoryNode? FindBuildPath(string path)
+    /// <summary>
+    /// Looks an ambient path up from the top of the tree, following links on the way as the
+    /// host's own resolution would. Null when nothing is there, or links lead round in a loop.
+    /// </summary>
+    private MemoryNode? FindAmbientPath(string path)
     {
-        MemoryNode? node = _fs.Root;
-        foreach (string component in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        Stack<string> pending = new();
+        PushComponents(pending, path);
+
+        List<MemoryNode> trail = [_fs.Root];
+        int links = 0;
+        while (pending.TryPop(out string? component))
         {
-            if (node.Type != CapNodeType.Directory || !node.Entries.TryGetValue(component, out node))
+            if (component == ".")
+            {
+                continue;
+            }
+
+            if (component == "..")
+            {
+                if (trail.Count > 1)
+                {
+                    trail.RemoveAt(trail.Count - 1);
+                }
+
+                continue;
+            }
+
+            MemoryNode current = trail[^1];
+            if (current.Type != CapNodeType.Directory || !current.Entries.TryGetValue(component, out MemoryNode? next))
             {
                 return null;
             }
+
+            if (next.Type != CapNodeType.SymbolicLink)
+            {
+                trail.Add(next);
+                continue;
+            }
+
+            if (++links > MaxAmbientLinks)
+            {
+                return null;
+            }
+
+            string target = next.LinkTarget!;
+            if (target.StartsWith('/') || (_fs.WindowsRules && CapPath.IsRooted(target, CapPathSyntax.Windows)))
+            {
+                trail.RemoveRange(1, trail.Count - 1);
+            }
+
+            PushComponents(pending, target);
         }
 
-        return node;
+        return trail[^1];
+    }
+
+    /// <summary>
+    /// Queues a path's components to be taken first, in order: split at <c>/</c>, and under
+    /// Windows rules at <c>\</c> too with any drive letter dropped, since there is one volume.
+    /// </summary>
+    private void PushComponents(Stack<string> pending, string path)
+    {
+        string[] components;
+        if (_fs.WindowsRules)
+        {
+            bool drive = path.Length >= 2 && path[1] == ':' && char.IsAsciiLetter(path[0]);
+            components = path[(drive ? 2 : 0)..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        }
+        else
+        {
+            components = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        }
+
+        for (int i = components.Length - 1; i >= 0; i--)
+        {
+            pending.Push(components[i]);
+        }
     }
 
     private nint NextHandle() => (nint)Interlocked.Increment(ref _nextHandle);
@@ -1514,5 +1632,16 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <param name="Node">The file.</param>
     /// <param name="Access">What it may do with the contents.</param>
     /// <param name="AppendOnly">Whether every write through it goes to the end.</param>
-    private sealed record OpenFile(MemoryNode Node, FileAccess Access, bool AppendOnly);
+    /// <param name="Description">
+    /// What it shares with every copy made from it by duplication, as copies of a descriptor
+    /// share one open file description on Unix.
+    /// </param>
+    private sealed record OpenFile(MemoryNode Node, FileAccess Access, bool AppendOnly, OpenFileDescription Description);
+
+    /// <summary>The state an open file shares with its duplicates.</summary>
+    private sealed class OpenFileDescription
+    {
+        /// <summary>Whether appending has been turned on, under Unix rules.</summary>
+        public bool Appending { get; set; }
+    }
 }

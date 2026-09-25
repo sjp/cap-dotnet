@@ -47,7 +47,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_file_reports_its_kind_and_its_length()
     {
-        File.WriteAllBytes(Host("payload"), new byte[1234]);
+        HostFile.WriteAllBytes(Host("payload"), new byte[1234]);
 
         using Dir root = OpenRoot();
         CapMetadata metadata = root.GetMetadata("payload");
@@ -60,7 +60,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_directory_reports_itself_as_a_directory()
     {
-        Directory.CreateDirectory(Host("inner"));
+        HostDirectory.CreateDirectory(Host("inner"));
 
         using Dir root = OpenRoot();
 
@@ -71,8 +71,8 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_nested_name_is_described()
     {
-        Directory.CreateDirectory(Host("a", "b"));
-        File.WriteAllText(Host("a", "b", "leaf"), "12345");
+        HostDirectory.CreateDirectory(Host("a", "b"));
+        HostFile.WriteAllText(Host("a", "b", "leaf"), "12345");
 
         using Dir root = OpenRoot();
         CapMetadata metadata = root.GetMetadata("a/b/leaf");
@@ -97,7 +97,7 @@ public sealed class DirMetadataTests : IDisposable
     public void The_times_are_from_around_now()
     {
         DateTimeOffset before = DateTimeOffset.UtcNow.AddMinutes(-5);
-        File.WriteAllText(Host("fresh"), "x");
+        HostFile.WriteAllText(Host("fresh"), "x");
         DateTimeOffset after = DateTimeOffset.UtcNow.AddMinutes(5);
 
         using Dir root = OpenRoot();
@@ -130,8 +130,8 @@ public sealed class DirMetadataTests : IDisposable
     public void The_change_time_records_that_the_write_time_was_put_back()
     {
         DateTimeOffset before = DateTimeOffset.UtcNow.AddMinutes(-5);
-        File.WriteAllText(Host("backdated"), "x");
-        File.SetLastWriteTimeUtc(Host("backdated"), new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc));
+        HostFile.WriteAllText(Host("backdated"), "x");
+        HostFile.SetLastWriteTimeUtc(Host("backdated"), new DateTime(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc));
         DateTimeOffset after = DateTimeOffset.UtcNow.AddMinutes(5);
 
         using Dir root = OpenRoot();
@@ -149,7 +149,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void The_link_count_follows_the_names_a_file_has()
     {
-        File.WriteAllText(Host("counted"), "x");
+        HostFile.WriteAllText(Host("counted"), "x");
 
         using Dir root = OpenRoot();
 
@@ -183,7 +183,7 @@ public sealed class DirMetadataTests : IDisposable
             Assert.Skip("An open file's name cannot be removed out from under it here.");
         }
 
-        File.WriteAllText(Host("orphan"), "x");
+        HostFile.WriteAllText(Host("orphan"), "x");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("orphan");
@@ -199,7 +199,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void Permissions_describe_this_platform_and_never_the_other()
     {
-        File.WriteAllText(Host("subject"), "x");
+        HostFile.WriteAllText(Host("subject"), "x");
 
         using Dir root = OpenRoot();
         CapPermissions permissions = root.GetMetadata("subject").Permissions;
@@ -231,8 +231,8 @@ public sealed class DirMetadataTests : IDisposable
         const UnixFileMode Wanted =
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead;
 
-        File.WriteAllText(Host("restricted"), "x");
-        File.SetUnixFileMode(Host("restricted"), Wanted);
+        HostFile.WriteAllText(Host("restricted"), "x");
+        HostFile.SetUnixFileMode(Host("restricted"), Wanted);
 
         using Dir root = OpenRoot();
 
@@ -248,8 +248,8 @@ public sealed class DirMetadataTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        File.WriteAllBytes(Host("target"), new byte[4096]);
-        File.CreateSymbolicLink(Host("link"), "target");
+        HostFile.WriteAllBytes(Host("target"), new byte[4096]);
+        HostFile.CreateSymbolicLink(Host("link"), "target");
 
         using Dir root = OpenRoot();
         CapMetadata metadata = root.GetMetadata("link");
@@ -268,8 +268,8 @@ public sealed class DirMetadataTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        Directory.CreateDirectory(Host("real"));
-        Directory.CreateSymbolicLink(Host("pointer"), "real");
+        HostDirectory.CreateDirectory(Host("real"));
+        HostDirectory.CreateSymbolicLink(Host("pointer"), "real");
 
         using Dir root = OpenRoot();
 
@@ -291,8 +291,8 @@ public sealed class DirMetadataTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        File.WriteAllText(Host("pointee"), "content");
-        File.CreateSymbolicLink(Host("indirect"), "pointee");
+        HostFile.WriteAllText(Host("pointee"), "content");
+        HostFile.CreateSymbolicLink(Host("indirect"), "pointee");
 
         using Dir permissive = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.FollowWithinSandbox);
         using Dir strict = permissive.Restrict(SymlinkPolicy.Deny);
@@ -312,9 +312,9 @@ public sealed class DirMetadataTests : IDisposable
     {
         RequireSymbolicLinks();
 
-        Directory.CreateDirectory(Host("actual"));
-        File.WriteAllText(Host("actual", "leaf"), "x");
-        Directory.CreateSymbolicLink(Host("hop"), "actual");
+        HostDirectory.CreateDirectory(Host("actual"));
+        HostFile.WriteAllText(Host("actual", "leaf"), "x");
+        HostDirectory.CreateSymbolicLink(Host("hop"), "actual");
 
         using Dir permissive = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.FollowWithinSandbox);
         using Dir strict = permissive.Restrict(SymlinkPolicy.Deny);
@@ -329,7 +329,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_handle_describes_the_directory_it_was_opened_on()
     {
-        Directory.CreateDirectory(Host("branch"));
+        HostDirectory.CreateDirectory(Host("branch"));
 
         using Dir root = OpenRoot();
         using Dir branch = root.OpenDir("branch");
@@ -362,7 +362,7 @@ public sealed class DirMetadataTests : IDisposable
         root.Rename("draft", root, "final", replaceExisting: true);
 
         Assert.Equal(!OperatingSystem.IsWindows(), root.Flush(toDisk: true));
-        Assert.Equal("contents", File.ReadAllText(Host("final")));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("final")));
     }
 
     /// <summary>Not asking to wait does nothing, and reports nothing left undone.</summary>
@@ -389,7 +389,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void An_open_file_describes_itself()
     {
-        File.WriteAllBytes(Host("sized"), new byte[77]);
+        HostFile.WriteAllBytes(Host("sized"), new byte[77]);
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("sized");
@@ -415,15 +415,15 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void An_open_handle_is_unaffected_by_the_name_being_reassigned()
     {
-        File.WriteAllBytes(Host("original"), new byte[10]);
+        HostFile.WriteAllBytes(Host("original"), new byte[10]);
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("original");
 
         CapFileId before = file.GetMetadata().FileId;
 
-        File.Move(Host("original"), Host("moved"));
-        File.WriteAllBytes(Host("original"), new byte[9999]);
+        HostFile.Move(Host("original"), Host("moved"));
+        HostFile.WriteAllBytes(Host("original"), new byte[9999]);
 
         CapMetadata after = file.GetMetadata();
 
@@ -439,7 +439,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void Hard_links_to_one_file_are_reported_as_the_same_file()
     {
-        File.WriteAllText(Host("first"), "shared");
+        HostFile.WriteAllText(Host("first"), "shared");
 
         using Dir root = OpenRoot();
 
@@ -466,14 +466,14 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void Two_distinct_files_that_look_alike_are_not_the_same_file()
     {
-        File.WriteAllText(Host("twin-a"), "identical");
-        File.WriteAllText(Host("twin-b"), "identical");
+        HostFile.WriteAllText(Host("twin-a"), "identical");
+        HostFile.WriteAllText(Host("twin-b"), "identical");
 
         DateTime stamp = new(2021, 3, 4, 5, 6, 7, DateTimeKind.Utc);
-        File.SetLastWriteTimeUtc(Host("twin-a"), stamp);
-        File.SetLastWriteTimeUtc(Host("twin-b"), stamp);
-        File.SetLastAccessTimeUtc(Host("twin-a"), stamp);
-        File.SetLastAccessTimeUtc(Host("twin-b"), stamp);
+        HostFile.SetLastWriteTimeUtc(Host("twin-a"), stamp);
+        HostFile.SetLastWriteTimeUtc(Host("twin-b"), stamp);
+        HostFile.SetLastAccessTimeUtc(Host("twin-a"), stamp);
+        HostFile.SetLastAccessTimeUtc(Host("twin-b"), stamp);
 
         using Dir root = OpenRoot();
 
@@ -491,7 +491,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void An_identity_survives_a_rename()
     {
-        File.WriteAllText(Host("before"), "x");
+        HostFile.WriteAllText(Host("before"), "x");
 
         using Dir root = OpenRoot();
         CapFileId identity = root.GetMetadata("before").FileId;
@@ -507,7 +507,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void An_entry_describes_what_it_names()
     {
-        File.WriteAllBytes(Host("listed"), new byte[64]);
+        HostFile.WriteAllBytes(Host("listed"), new byte[64]);
 
         using Dir root = OpenRoot();
         DirEntry entry = root.EnumerateEntries().Single(candidate => candidate.Name == "listed");
@@ -523,12 +523,12 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void An_entry_that_has_gone_reports_failure()
     {
-        File.WriteAllText(Host("fleeting"), "x");
+        HostFile.WriteAllText(Host("fleeting"), "x");
 
         using Dir root = OpenRoot();
         DirEntry entry = root.EnumerateEntries().Single(candidate => candidate.Name == "fleeting");
 
-        File.Delete(Host("fleeting"));
+        HostFile.Delete(Host("fleeting"));
 
         Assert.False(entry.TryGetMetadata(out CapMetadata metadata));
         Assert.Equal(CapFileType.Unknown, metadata.Type);
@@ -563,8 +563,8 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_path_spelled_as_a_directory_does_not_describe_a_file()
     {
-        File.WriteAllText(Host("plain"), "x");
-        Directory.CreateDirectory(Host("folder"));
+        HostFile.WriteAllText(Host("plain"), "x");
+        HostDirectory.CreateDirectory(Host("folder"));
 
         using Dir root = OpenRoot();
 
@@ -576,7 +576,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_disposed_handle_answers_nothing()
     {
-        File.WriteAllText(Host("anything"), "x");
+        HostFile.WriteAllText(Host("anything"), "x");
 
         Dir root = OpenRoot();
         root.Dispose();
@@ -603,8 +603,8 @@ public sealed class DirMetadataTests : IDisposable
 
         try
         {
-            File.CreateSymbolicLink(probe, "target");
-            File.Delete(probe);
+            HostFile.CreateSymbolicLink(probe, "target");
+            HostFile.Delete(probe);
         }
         catch (Exception thrown) when (
             thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)

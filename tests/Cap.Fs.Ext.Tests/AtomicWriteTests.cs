@@ -38,18 +38,18 @@ public sealed class AtomicWriteTests : IDisposable
 
         _tree.Directory.WriteAllBytesAtomic("report", contents, durability);
 
-        Assert.Equal(contents, File.ReadAllBytes(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal(contents, HostFile.ReadAllBytes(Path.Combine(_tree.HostPath, "report")));
     }
 
     /// <summary>A path that climbs and descends again, staying inside, publishes where it leads.</summary>
     [Fact]
     public void A_path_that_climbs_and_stays_inside_publishes_where_it_leads()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
 
         _tree.Directory.WriteAllTextAtomic("a/b/../report", "published");
 
-        Assert.Equal("published", File.ReadAllText(Path.Combine(_tree.HostPath, "a", "report")));
+        Assert.Equal("published", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "a", "report")));
         Assert.Throws<SandboxEscapeException>(() => _tree.Directory.WriteAllTextAtomic("a/../../report", "leaked"));
         Assert.Throws<SandboxEscapeException>(() => _tree.Directory.WriteAllTextAtomic("..", "leaked"));
         Assert.Throws<ArgumentException>(() => _tree.Directory.WriteAllTextAtomic("a/..", "nowhere"));
@@ -69,18 +69,18 @@ public sealed class AtomicWriteTests : IDisposable
     {
         _tree.Directory.WriteAllBytesAtomic("committed", [7], Durability.FileAndDirectory);
 
-        Assert.Equal([7], File.ReadAllBytes(Path.Combine(_tree.HostPath, "committed")));
+        Assert.Equal([7], HostFile.ReadAllBytes(Path.Combine(_tree.HostPath, "committed")));
     }
 
     /// <summary>Publishing over a file replaces it, and leaves nothing else behind.</summary>
     [Fact]
     public void Publishing_over_a_file_replaces_it_and_leaves_no_scratch_behind()
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
 
         _tree.Directory.WriteAllTextAtomic("report", "new");
 
-        Assert.Equal("new", File.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal("new", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
         Assert.Equal(["report"], Names());
     }
 
@@ -98,7 +98,7 @@ public sealed class AtomicWriteTests : IDisposable
     {
         string oldText = new('a', 1 << 16);
         string newText = new('b', 1 << 20);
-        File.WriteAllText(Path.Combine(_tree.HostPath, "report"), oldText);
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), oldText);
 
         using CancellationTokenSource stop = new();
         Task<List<string>> reader = Task.Run(() => ReadUntilStopped(stop.Token));
@@ -128,13 +128,13 @@ public sealed class AtomicWriteTests : IDisposable
     [Fact]
     public void A_failed_publish_leaves_nothing_behind()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "occupied"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "occupied"));
 
         Assert.ThrowsAny<IOException>(
             () => _tree.Directory.WriteAllTextAtomic("occupied", "contents"));
 
         Assert.Equal(["occupied"], Names());
-        Assert.True(Directory.Exists(Path.Combine(_tree.HostPath, "occupied")));
+        Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "occupied")));
     }
 
     /// <summary>The scratch file is made in the directory the published file lands in.</summary>
@@ -154,7 +154,7 @@ public sealed class AtomicWriteTests : IDisposable
     public async Task The_scratch_file_is_made_beside_the_published_file()
     {
         string nested = Path.Combine(_tree.HostPath, "nested");
-        Directory.CreateDirectory(nested);
+        HostDirectory.CreateDirectory(nested);
 
         using CancellationTokenSource stop = new();
         Task<bool> watcher = Task.Run(() => SawScratchIn(nested, stop.Token));
@@ -189,7 +189,7 @@ public sealed class AtomicWriteTests : IDisposable
     {
         _tree.Directory.WriteAllTextAtomic("report", "naïve");
 
-        byte[] stored = File.ReadAllBytes(Path.Combine(_tree.HostPath, "report"));
+        byte[] stored = HostFile.ReadAllBytes(Path.Combine(_tree.HostPath, "report"));
         Assert.Equal(Encoding.UTF8.GetBytes("naïve"), stored);
     }
 
@@ -197,12 +197,12 @@ public sealed class AtomicWriteTests : IDisposable
     [Fact]
     public async Task The_asynchronous_form_publishes_the_same_way()
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
 
         await _tree.Directory.WriteAllTextAtomicAsync(
             "report", "new", Durability.FileAndDirectory, TestContext.Current.CancellationToken);
 
-        Assert.Equal("new", File.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal("new", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
         Assert.Equal(["report"], Names());
     }
 
@@ -217,7 +217,7 @@ public sealed class AtomicWriteTests : IDisposable
     [Fact]
     public async Task A_cancelled_publish_leaves_the_name_as_it_was()
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
 
         using CancellationTokenSource cancelled = new();
         await cancelled.CancelAsync();
@@ -226,7 +226,7 @@ public sealed class AtomicWriteTests : IDisposable
             () => _tree.Directory.WriteAllTextAtomicAsync(
                 "report", new string('d', 1 << 20), Durability.None, cancelled.Token));
 
-        Assert.Equal("old", File.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal("old", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
         Assert.Equal(["report"], Names());
     }
 
@@ -244,15 +244,15 @@ public sealed class AtomicWriteTests : IDisposable
     [InlineData(true)]
     public async Task A_link_to_a_file_in_the_tree_is_replaced_and_its_target_left_alone(bool asynchronous)
     {
-        File.WriteAllText(Path.Combine(_tree.HostPath, "keep"), "untouched");
-        File.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "keep");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "keep"), "untouched");
+        HostFile.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "keep");
 
         await Publish(_tree.Directory, "report", "new", asynchronous);
 
-        FileInfo published = new(Path.Combine(_tree.HostPath, "report"));
-        Assert.Null(published.LinkTarget);
-        Assert.Equal("new", File.ReadAllText(published.FullName));
-        Assert.Equal("untouched", File.ReadAllText(Path.Combine(_tree.HostPath, "keep")));
+        string published = Path.Combine(_tree.HostPath, "report");
+        Assert.Null(HostEntry.LinkTarget(published));
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "keep")));
         Assert.Equal(["keep", "report"], Names());
     }
 
@@ -271,21 +271,21 @@ public sealed class AtomicWriteTests : IDisposable
     public void A_link_at_the_name_is_replaced_wherever_it_points(string kind)
     {
         string inside = Path.Combine(_tree.HostPath, "inside");
-        Directory.CreateDirectory(inside);
-        File.WriteAllText(Path.Combine(_tree.HostPath, "secret"), "untouched");
+        HostDirectory.CreateDirectory(inside);
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "secret"), "untouched");
         string target = kind == "outside" ? Path.Combine("..", "secret") : "missing";
-        File.CreateSymbolicLink(Path.Combine(inside, "report"), target);
+        HostFile.CreateSymbolicLink(Path.Combine(inside, "report"), target);
 
         using (Dir handle = _tree.Directory.OpenDir("inside"))
         {
             handle.WriteAllTextAtomic("report", "new");
         }
 
-        FileInfo published = new(Path.Combine(inside, "report"));
-        Assert.Null(published.LinkTarget);
-        Assert.Equal("new", File.ReadAllText(published.FullName));
-        Assert.Equal("untouched", File.ReadAllText(Path.Combine(_tree.HostPath, "secret")));
-        Assert.Equal(["report"], Directory.GetFileSystemEntries(inside).Select(Path.GetFileName));
+        string published = Path.Combine(inside, "report");
+        Assert.Null(HostEntry.LinkTarget(published));
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "secret")));
+        Assert.Equal(["report"], HostDirectory.GetFileSystemEntries(inside).Select(Path.GetFileName));
     }
 
     /// <summary>
@@ -305,17 +305,17 @@ public sealed class AtomicWriteTests : IDisposable
         }
 
         string elsewhere = Path.Combine(_tree.HostPath, "elsewhere");
-        Directory.CreateDirectory(elsewhere);
-        File.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "elsewhere");
+        HostDirectory.CreateDirectory(elsewhere);
+        HostFile.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "elsewhere");
 
         _tree.Directory.WriteAllTextAtomic("report", "new");
 
-        FileInfo published = new(Path.Combine(_tree.HostPath, "report"));
-        Assert.Null(published.LinkTarget);
-        Assert.Equal("new", File.ReadAllText(published.FullName));
-        Assert.Equal(["inner"], Directory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
-        Assert.Equal("untouched", File.ReadAllText(Path.Combine(elsewhere, "inner")));
+        string published = Path.Combine(_tree.HostPath, "report");
+        Assert.Null(HostEntry.LinkTarget(published));
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal(["inner"], HostDirectory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
+        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(elsewhere, "inner")));
         Assert.Equal(["elsewhere", "report"], Names());
     }
 
@@ -332,10 +332,18 @@ public sealed class AtomicWriteTests : IDisposable
     /// link rather than as access denied, so a caller does not go looking for a permissions
     /// problem that is not there.
     /// </remarks>
-    [Theory]
-    [InlineData("symlink")]
-    [InlineData("junction")]
-    public void On_windows_a_directory_link_at_the_name_refuses_the_publish(string kind)
+    [Fact]
+    public void On_windows_a_directory_symbolic_link_at_the_name_refuses_the_publish() =>
+        AssertADirectoryLinkRefusesThePublish(link => HostDirectory.CreateSymbolicLink(link, "elsewhere"));
+
+    /// <summary>The same, for a junction.</summary>
+    [Fact]
+    [NotInMemory("A junction is a Windows reparse point that only the host's filesystem holds.")]
+    public void On_windows_a_junction_at_the_name_refuses_the_publish() =>
+        AssertADirectoryLinkRefusesThePublish(
+            link => CreateJunction(link, Path.Combine(_tree.HostPath, "elsewhere")));
+
+    private void AssertADirectoryLinkRefusesThePublish(Action<string> makeLink)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -344,24 +352,17 @@ public sealed class AtomicWriteTests : IDisposable
 
         string elsewhere = Path.Combine(_tree.HostPath, "elsewhere");
         string link = Path.Combine(_tree.HostPath, "report");
-        Directory.CreateDirectory(elsewhere);
-        File.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
-        if (kind == "junction")
-        {
-            CreateJunction(link, elsewhere);
-        }
-        else
-        {
-            Directory.CreateSymbolicLink(link, "elsewhere");
-        }
+        HostDirectory.CreateDirectory(elsewhere);
+        HostFile.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
+        makeLink(link);
 
         CapIOException thrown = Assert.Throws<CapIOException>(
             () => _tree.Directory.WriteAllTextAtomic("report", "new"));
 
         Assert.Equal(CapErrorKind.SymbolicLink, thrown.Kind);
-        Assert.NotNull(new DirectoryInfo(link).LinkTarget);
-        Assert.Equal(["inner"], Directory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
-        Assert.Equal("untouched", File.ReadAllText(Path.Combine(elsewhere, "inner")));
+        Assert.NotNull(HostEntry.LinkTarget(link));
+        Assert.Equal(["inner"], HostDirectory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
+        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(elsewhere, "inner")));
         Assert.Equal(["elsewhere", "report"], Names());
     }
 
@@ -402,12 +403,12 @@ public sealed class AtomicWriteTests : IDisposable
         string errors = process.StandardError.ReadToEnd();
         process.WaitForExit();
 
-        Assert.True(Directory.Exists(link), $"Could not create a junction at '{link}': {errors}{output}");
+        Assert.True(HostDirectory.Exists(link), $"Could not create a junction at '{link}': {errors}{output}");
     }
 
     /// <summary>Everything currently in the scratch tree, by name.</summary>
     private string[] Names() =>
-        [.. Directory.GetFileSystemEntries(_tree.HostPath).Select(Path.GetFileName).Order()!];
+        [.. HostDirectory.GetFileSystemEntries(_tree.HostPath).Select(Path.GetFileName).Order()!];
 
     /// <summary>Reads the published name over and over until it is told to stop.</summary>
     /// <remarks>
@@ -424,7 +425,7 @@ public sealed class AtomicWriteTests : IDisposable
         {
             try
             {
-                seen.Add(File.ReadAllText(path));
+                seen.Add(HostFile.ReadAllText(path));
             }
             catch (IOException)
             {
@@ -443,7 +444,7 @@ public sealed class AtomicWriteTests : IDisposable
     {
         while (!stopping.IsCancellationRequested)
         {
-            foreach (string entry in Directory.EnumerateFiles(directory))
+            foreach (string entry in HostDirectory.GetFileSystemEntries(directory))
             {
                 if (Path.GetFileName(entry).StartsWith("cap-", StringComparison.Ordinal))
                 {

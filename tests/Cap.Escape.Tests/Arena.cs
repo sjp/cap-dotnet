@@ -14,16 +14,20 @@ namespace Cap.Escape.Tests;
 /// result depend on what ran before.
 /// </para>
 /// <para>
-/// Everything here is done through the host's ordinary path-based API. That is the only way to
-/// arrange the tree without asking the code under test to agree to it, and the only way to
-/// check afterwards what happened outside without trusting the code under test to report it.
+/// Everything here is done through the host's ordinary path-based API, or, when a filesystem
+/// held in memory stands in for the host, through that filesystem's own scaffolding (see
+/// <see cref="HostTree"/>). That is the only way to arrange the tree without asking the code
+/// under test to agree to it, and the only way to check afterwards what happened outside
+/// without trusting the code under test to report it.
 /// </para>
 /// </remarks>
 internal sealed class Arena : IDisposable
 {
     /// <summary>
     /// The environment variable naming a directory to build in, so that the corpus can be
-    /// pointed at a particular filesystem. The system's temporary location otherwise.
+    /// pointed at a particular filesystem. The system's temporary location otherwise, and
+    /// ignored when a filesystem held in memory stands in for the host, since it names a
+    /// place on the disk.
     /// </summary>
     public const string LocationVariable = "CAPDOTNET_TEST_ROOT";
 
@@ -36,10 +40,10 @@ internal sealed class Arena : IDisposable
         SandboxPath = Path.Join(HostPath, "sandbox");
         OutsidePath = Path.Join(HostPath, EscapeCorpus.OutsideDirectory);
 
-        Directory.CreateDirectory(SandboxPath);
-        Directory.CreateDirectory(Path.Join(OutsidePath, EscapeCorpus.OutsideSubdirectory));
-        File.WriteAllText(Path.Join(OutsidePath, EscapeCorpus.OutsideFile), EscapeCorpus.OutsideContent);
-        File.WriteAllText(
+        HostDirectory.CreateDirectory(SandboxPath);
+        HostDirectory.CreateDirectory(Path.Join(OutsidePath, EscapeCorpus.OutsideSubdirectory));
+        HostFile.WriteAllText(Path.Join(OutsidePath, EscapeCorpus.OutsideFile), EscapeCorpus.OutsideContent);
+        HostFile.WriteAllText(
             Path.Join(OutsidePath, EscapeCorpus.OutsideSubdirectory, EscapeCorpus.OutsideNestedFile),
             EscapeCorpus.OutsideContent);
 
@@ -49,9 +53,9 @@ internal sealed class Arena : IDisposable
 
     /// <summary>Where arenas are built.</summary>
     public static string Location =>
-        Environment.GetEnvironmentVariable(LocationVariable) is { Length: > 0 } configured
+        !HostTree.InMemory && Environment.GetEnvironmentVariable(LocationVariable) is { Length: > 0 } configured
             ? configured
-            : Path.GetTempPath();
+            : HostTree.Current.TemporaryLocation;
 
     /// <summary>The directory holding the sandbox and the directory beside it.</summary>
     public string HostPath { get; }
@@ -68,24 +72,24 @@ internal sealed class Arena : IDisposable
         foreach (SetupStep step in steps)
         {
             string full = Inside(step.Path);
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+            HostDirectory.CreateDirectory(Path.GetDirectoryName(full)!);
 
             switch (step.Kind)
             {
                 case SetupKind.Directory:
-                    Directory.CreateDirectory(full);
+                    HostDirectory.CreateDirectory(full);
                     break;
 
                 case SetupKind.File:
-                    File.WriteAllText(full, EscapeCorpus.InsideContent);
+                    HostFile.WriteAllText(full, EscapeCorpus.InsideContent);
                     break;
 
                 case SetupKind.FileLink:
-                    File.CreateSymbolicLink(full, LinkTarget(step.Target!));
+                    HostFile.CreateSymbolicLink(full, LinkTarget(step.Target!));
                     break;
 
                 case SetupKind.DirectoryLink:
-                    Directory.CreateSymbolicLink(full, LinkTarget(step.Target!));
+                    HostDirectory.CreateSymbolicLink(full, LinkTarget(step.Target!));
                     break;
 
                 case SetupKind.Junction:
@@ -126,11 +130,7 @@ internal sealed class Arena : IDisposable
     public string SnapshotSandbox() => Snapshot(SandboxPath, [], withTimes: false);
 
     /// <summary>Whether a name beneath the sandbox is taken, without following a link.</summary>
-    public bool ExistsInside(string path)
-    {
-        string full = Inside(path);
-        return File.Exists(full) || Directory.Exists(full) || new FileInfo(full).LinkTarget is not null;
-    }
+    public bool ExistsInside(string path) => HostEntry.IsTaken(Inside(path));
 
     public void Dispose()
     {
@@ -139,34 +139,36 @@ internal sealed class Arena : IDisposable
         // The library's own cleanup leaves behind, silently and by design, anything it will not
         // descend to -- and one case builds a tree deeper than resolution goes, on purpose. What
         // survives is removed here without following a link, so that the run leaves nothing.
-        if (Directory.Exists(HostPath))
+        if (HostEntry.KindOf(HostPath) == HostEntryKind.Directory)
         {
-            RemoveWithoutFollowing(new DirectoryInfo(HostPath));
+            RemoveWithoutFollowing(HostPath);
         }
     }
 
-    private static void RemoveWithoutFollowing(DirectoryInfo directory)
+    private static void RemoveWithoutFollowing(string directory)
     {
-        foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos())
+        foreach (string entry in HostDirectory.GetFileSystemEntries(directory))
         {
-            if (entry.LinkTarget is null && entry is DirectoryInfo nested)
+            switch (HostEntry.KindOf(entry))
             {
-                RemoveWithoutFollowing(nested);
-            }
-            else
-            {
-                entry.Delete();
+                case HostEntryKind.Directory:
+                    RemoveWithoutFollowing(entry);
+                    break;
+
+                default:
+                    HostFile.Delete(entry);
+                    break;
             }
         }
 
-        directory.Delete();
+        HostDirectory.Delete(directory);
     }
 
     private void AddFile(string relative)
     {
         string full = Path.Join(SandboxPath, relative);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, EscapeCorpus.InsideContent);
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(full)!);
+        HostFile.WriteAllText(full, EscapeCorpus.InsideContent);
     }
 
     private string Inside(string path) =>
@@ -186,35 +188,37 @@ internal sealed class Arena : IDisposable
     private static string Snapshot(string root, string[] excluded, bool withTimes)
     {
         List<string> lines = [];
-        Record(new DirectoryInfo(root), root, excluded, withTimes, lines);
+        Record(root, string.Empty, excluded, withTimes, lines);
         lines.Sort(StringComparer.Ordinal);
         return string.Join('\n', lines);
     }
 
     private static void Record(
-        DirectoryInfo directory, string root, string[] excluded, bool withTimes, List<string> lines)
+        string directory, string relativeDirectory, string[] excluded, bool withTimes, List<string> lines)
     {
-        foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos())
+        foreach (string entry in HostDirectory.GetFileSystemEntries(directory))
         {
-            if (excluded.Contains(entry.FullName, StringComparer.Ordinal))
+            if (excluded.Contains(entry, StringComparer.Ordinal))
             {
                 continue;
             }
 
-            string relative = Path.GetRelativePath(root, entry.FullName);
-            if (entry.LinkTarget is { } target)
+            string relative = Path.Join(relativeDirectory, Path.GetFileName(entry));
+            switch (HostEntry.KindOf(entry))
             {
-                lines.Add($"{relative} -> {target}");
-            }
-            else if (entry is DirectoryInfo nested)
-            {
-                lines.Add($"{relative}/{Written(entry, withTimes)}");
-                Record(nested, root, excluded, withTimes, lines);
-            }
-            else
-            {
-                byte[] digest = SHA256.HashData(File.ReadAllBytes(entry.FullName));
-                lines.Add($"{relative} {Convert.ToHexString(digest)}{Written(entry, withTimes)}");
+                case HostEntryKind.SymbolicLink:
+                    lines.Add($"{relative} -> {HostEntry.LinkTarget(entry)}");
+                    break;
+
+                case HostEntryKind.Directory:
+                    lines.Add($"{relative}/{Written(entry, withTimes)}");
+                    Record(entry, relative, excluded, withTimes, lines);
+                    break;
+
+                default:
+                    byte[] digest = SHA256.HashData(HostFile.ReadAllBytes(entry));
+                    lines.Add($"{relative} {Convert.ToHexString(digest)}{Written(entry, withTimes)}");
+                    break;
             }
         }
     }
@@ -223,8 +227,8 @@ internal sealed class Arena : IDisposable
     /// The last-write time, for an entry that is not a link. Access times are left out:
     /// reading a file may move one on, and reading is not an attack.
     /// </summary>
-    private static string Written(FileSystemInfo entry, bool withTimes) =>
-        withTimes ? $" written {entry.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture)}" : string.Empty;
+    private static string Written(string entry, bool withTimes) =>
+        withTimes ? $" written {HostFile.GetLastWriteTimeUtc(entry).ToString("O", CultureInfo.InvariantCulture)}" : string.Empty;
 }
 
 /// <summary>What a case needs from the host, found once per run.</summary>
@@ -241,41 +245,43 @@ internal static class HostFeatures
         string root = scratch.HostPath;
         HostFeature features = HostFeature.None;
 
-        if (Attempt(() => File.CreateSymbolicLink(Path.Join(root, "link"), "target")))
+        if (Attempt(() => HostFile.CreateSymbolicLink(Path.Join(root, "link"), "target")))
         {
             features |= HostFeature.Symlinks;
         }
 
-        File.WriteAllText(Path.Join(root, "Probe-Case"), string.Empty);
-        if (Attempt(() => HostFilesystem.CreateHardLink(Path.Join(root, "Probe-Case"), Path.Join(root, "hard"))))
+        HostFile.WriteAllText(Path.Join(root, "Probe-Case"), string.Empty);
+        if (Attempt(() => HostFile.CreateHardLink(Path.Join(root, "Probe-Case"), Path.Join(root, "hard"))))
         {
             features |= HostFeature.HardLinks;
         }
 
-        if (File.Exists(Path.Join(root, "PROBE-CASE")))
+        if (HostFile.Exists(Path.Join(root, "PROBE-CASE")))
         {
             features |= HostFeature.CaseInsensitive;
         }
 
-        File.WriteAllText(Path.Join(root, "café"), string.Empty);
-        if (File.Exists(Path.Join(root, "café")))
+        HostFile.WriteAllText(Path.Join(root, "café"), string.Empty);
+        if (HostFile.Exists(Path.Join(root, "café")))
         {
             features |= HostFeature.NormalizationInsensitive;
         }
 
         if (!OperatingSystem.IsWindows() &&
-            Attempt(() => File.WriteAllText(Path.Join(root, "a:b\\c*d?e<f>g|h\"i."), string.Empty)))
+            Attempt(() => HostFile.WriteAllText(Path.Join(root, "a:b\\c*d?e<f>g|h\"i."), string.Empty)))
         {
             features |= HostFeature.PosixNames;
         }
 
-        if (OperatingSystem.IsWindows() &&
+        // Junctions and the process filesystem belong to the host, and a filesystem held in
+        // memory in its place has neither.
+        if (OperatingSystem.IsWindows() && !HostTree.InMemory &&
             Attempt(() => HostFilesystem.CreateJunction(Path.Join(root, "junction"), root)))
         {
             features |= HostFeature.Junctions;
         }
 
-        if (OperatingSystem.IsLinux() && Directory.Exists("/proc/self/fd"))
+        if (OperatingSystem.IsLinux() && !HostTree.InMemory && Directory.Exists("/proc/self/fd"))
         {
             features |= HostFeature.ProcessFilesystem;
         }

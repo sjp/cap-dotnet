@@ -25,9 +25,9 @@ public sealed class DirOpenAnyTests : IDisposable
     [Fact]
     public void Each_kind_comes_back_as_what_it_is()
     {
-        File.WriteAllText(Host("data"), "contents");
-        Directory.CreateDirectory(Host("sub"));
-        File.WriteAllText(Host("sub", "inner"), "");
+        HostFile.WriteAllText(Host("data"), "contents");
+        HostDirectory.CreateDirectory(Host("sub"));
+        HostFile.WriteAllText(Host("sub", "inner"), "");
 
         using Dir root = OpenRoot();
 
@@ -54,8 +54,8 @@ public sealed class DirOpenAnyTests : IDisposable
     [Fact]
     public void The_handle_is_taken_once_and_only_as_its_own_kind()
     {
-        File.WriteAllText(Host("data"), "contents");
-        Directory.CreateDirectory(Host("sub"));
+        HostFile.WriteAllText(Host("data"), "contents");
+        HostDirectory.CreateDirectory(Host("sub"));
 
         using Dir root = OpenRoot();
 
@@ -81,8 +81,8 @@ public sealed class DirOpenAnyTests : IDisposable
     [Fact]
     public void Disposing_leaves_a_taken_handle_open_and_hands_nothing_out_after()
     {
-        File.WriteAllText(Host("data"), "contents");
-        Directory.CreateDirectory(Host("sub"));
+        HostFile.WriteAllText(Host("data"), "contents");
+        HostDirectory.CreateDirectory(Host("sub"));
 
         using Dir root = OpenRoot();
 
@@ -104,7 +104,7 @@ public sealed class DirOpenAnyTests : IDisposable
     [Fact]
     public void A_meaningless_request_is_refused_as_an_argument()
     {
-        File.WriteAllText(Host("data"), "contents");
+        HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
 

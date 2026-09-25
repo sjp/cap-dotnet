@@ -12,6 +12,8 @@
     <CapUsesPlatformFake>true</CapUsesPlatformFake>
     <!-- The throwaway directory in tests/Scenarios. -->
     <CapUsesScratchTree>true</CapUsesScratchTree>
+    <!-- Can run with a filesystem held in memory in place of the host; see tests/InMemory. -->
+    <CapRunsInMemory>true</CapRunsInMemory>
   </PropertyGroup>
 
   <ItemGroup>

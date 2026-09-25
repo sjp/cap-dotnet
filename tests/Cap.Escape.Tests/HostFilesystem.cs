@@ -1,4 +1,3 @@
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -14,21 +13,6 @@ namespace Cap.Escape.Tests;
 /// </remarks>
 internal static partial class HostFilesystem
 {
-    /// <summary>Gives an existing file a second name.</summary>
-    public static void CreateHardLink(string existing, string link)
-    {
-        bool created = OperatingSystem.IsWindows()
-            ? CreateHardLinkW(link, existing, 0)
-            : LinkUnix(existing, link) == 0;
-
-        if (!created)
-        {
-            throw new IOException(
-                $"Could not link '{link}' to '{existing}'.",
-                new Win32Exception(Marshal.GetLastPInvokeError()));
-        }
-    }
-
     /// <summary>Creates a junction, which unlike a symbolic link needs no privilege.</summary>
     /// <remarks>
     /// Through the shell because the framework has no API for one. The paths are quoted rather
@@ -56,7 +40,7 @@ internal static partial class HostFilesystem
         string errors = process.StandardError.ReadToEnd();
         process.WaitForExit();
 
-        if (!Directory.Exists(link))
+        if (!HostDirectory.Exists(link))
         {
             throw new IOException($"Could not create a junction at '{link}': {errors}{output}");
         }
@@ -80,13 +64,6 @@ internal static partial class HostFilesystem
         int separator = shortPath.LastIndexOf('\\');
         return separator < 0 ? shortPath : shortPath[(separator + 1)..];
     }
-
-    [LibraryImport("libc", EntryPoint = "link", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
-    private static partial int LinkUnix(string existing, string link);
-
-    [LibraryImport("kernel32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CreateHardLinkW(string link, string existing, nint securityAttributes);
 
     [LibraryImport("kernel32.dll", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial uint GetShortPathNameW(string longPath, [Out] char[] shortPath, uint bufferLength);

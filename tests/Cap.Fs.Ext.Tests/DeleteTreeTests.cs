@@ -37,8 +37,8 @@ public sealed class DeleteTreeTests : IDisposable
 
         _tree.Directory.DeleteTree("doomed");
 
-        Assert.False(Directory.Exists(Path.Combine(_tree.HostPath, "doomed")));
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "kept.txt")));
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "doomed")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "kept.txt")));
     }
 
     /// <summary>A tree named by a path of several components is removed.</summary>
@@ -54,8 +54,8 @@ public sealed class DeleteTreeTests : IDisposable
 
         _tree.Directory.DeleteTree(Path.Combine("a", "b", "doomed"));
 
-        Assert.False(Directory.Exists(Path.Combine(_tree.HostPath, "a", "b", "doomed")));
-        Assert.True(Directory.Exists(Path.Combine(_tree.HostPath, "a", "b")));
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "a", "b", "doomed")));
+        Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "a", "b")));
     }
 
     /// <summary>
@@ -71,14 +71,14 @@ public sealed class DeleteTreeTests : IDisposable
     public void A_link_inside_the_tree_is_removed_without_following_it()
     {
         Make("elsewhere", "precious.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "doomed"));
-        Directory.CreateSymbolicLink(
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "doomed"));
+        HostDirectory.CreateSymbolicLink(
             Path.Combine(_tree.HostPath, "doomed", "escape"), Path.Combine("..", "elsewhere"));
 
         _tree.Directory.DeleteTree("doomed");
 
-        Assert.False(Directory.Exists(Path.Combine(_tree.HostPath, "doomed")));
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "elsewhere", "precious.txt")));
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "doomed")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "elsewhere", "precious.txt")));
     }
 
     /// <summary>A name holding a link is not removed as a tree.</summary>
@@ -91,12 +91,12 @@ public sealed class DeleteTreeTests : IDisposable
     public void A_link_at_the_named_place_is_refused()
     {
         Make("elsewhere", "precious.txt");
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "doomed"), "elsewhere");
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "doomed"), "elsewhere");
 
         Assert.ThrowsAny<IOException>(() => _tree.Directory.DeleteTree("doomed"));
 
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "elsewhere", "precious.txt")));
-        Assert.True(Path.Exists(Path.Combine(_tree.HostPath, "doomed")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "elsewhere", "precious.txt")));
+        Assert.True(HostEntry.Exists(Path.Combine(_tree.HostPath, "doomed")));
     }
 
     /// <summary>A name holding a file is not removed as a tree.</summary>
@@ -107,7 +107,7 @@ public sealed class DeleteTreeTests : IDisposable
 
         Assert.ThrowsAny<IOException>(() => _tree.Directory.DeleteTree("doomed"));
 
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "doomed")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "doomed")));
     }
 
     /// <summary>A name holding nothing is reported as holding nothing.</summary>
@@ -144,8 +144,8 @@ public sealed class DeleteTreeTests : IDisposable
 
         _tree.Directory.DeleteTree("a/b/../doomed");
 
-        Assert.False(Directory.Exists(Path.Combine(_tree.HostPath, "a", "doomed")));
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "a", "b", "kept.txt")));
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "a", "doomed")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "a", "b", "kept.txt")));
     }
 
     /// <summary>
@@ -166,7 +166,7 @@ public sealed class DeleteTreeTests : IDisposable
         Assert.False(_tree.Directory.TryDeleteTree("a/.."));
         Assert.Throws<SandboxEscapeException>(() => _tree.Directory.TryDeleteTree("a/../.."));
 
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "a", "b", "leaf.txt")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "a", "b", "leaf.txt")));
     }
 
     /// <summary>Emptying a directory leaves the directory.</summary>
@@ -182,15 +182,15 @@ public sealed class DeleteTreeTests : IDisposable
 
         _tree.Directory.DeleteTreeContents();
 
-        Assert.True(Directory.Exists(_tree.HostPath));
-        Assert.Empty(Directory.GetFileSystemEntries(_tree.HostPath));
+        Assert.True(HostDirectory.Exists(_tree.HostPath));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
     }
 
     /// <summary>Creates a file, and whatever directories it needs, under the scratch tree.</summary>
     private void Make(params string[] parts)
     {
         string path = Path.Combine([_tree.HostPath, .. parts]);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "contents");
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
+        HostFile.WriteAllText(path, "contents");
     }
 }

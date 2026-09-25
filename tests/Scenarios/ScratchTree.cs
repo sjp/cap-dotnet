@@ -30,9 +30,12 @@ internal sealed class ScratchTree : IDisposable
 {
     private readonly CapTempDir _temp;
 
-    /// <summary>Creates the directory under the system's temporary location.</summary>
+    /// <summary>
+    /// Creates the directory under the system's temporary location, or under the temporary
+    /// directory of the filesystem standing in for the host when a run has one.
+    /// </summary>
     public ScratchTree()
-        : this(Path.GetTempPath())
+        : this(HostTree.Current.TemporaryLocation)
     {
     }
 
@@ -57,7 +60,10 @@ internal sealed class ScratchTree : IDisposable
     /// <summary>The directory, as the authority a test hands to the code under test.</summary>
     public Dir Directory => _temp.Directory;
 
-    /// <summary>The directory, as an ordinary path for the ambient set-up to build in.</summary>
+    /// <summary>
+    /// The directory, as an ordinary path for the ambient set-up to build in through
+    /// <see cref="HostFile"/>, <see cref="HostDirectory"/> and <see cref="HostEntry"/>.
+    /// </summary>
     public string HostPath { get; }
 
     /// <summary>Removes the directory and everything the test left in it.</summary>

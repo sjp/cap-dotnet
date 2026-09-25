@@ -78,6 +78,16 @@ public sealed partial class Dir : IDisposable
     private IPlatformOps Ops => _handle.Backend;
 
     /// <summary>
+    /// The handle itself, whichever backend issued it, for the library's own tests to ask that
+    /// backend about it.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="UnsafeGetHandle"/> this also gives out a handle on a filesystem held in
+    /// memory, since what it gives out is only ever handed back to the backend that issued it.
+    /// </remarks>
+    internal SafeDirHandle Handle => _handle;
+
+    /// <summary>
     /// What resolution beneath this handle does with a symbolic link on the way to the thing
     /// a path names.
     /// </summary>

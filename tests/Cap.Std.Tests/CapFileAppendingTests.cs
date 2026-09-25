@@ -37,7 +37,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [Fact]
     public void A_handle_can_read_and_append()
     {
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite, append: true))
@@ -55,7 +55,7 @@ public sealed class CapFileAppendingTests : IDisposable
             Assert.Equal("first second"u8, whole);
         }
 
-        Assert.Equal("first second", File.ReadAllText(Host("log")));
+        Assert.Equal("first second", HostFile.ReadAllText(Host("log")));
     }
 
     /// <summary>An open can empty the file and then append to it.</summary>
@@ -68,7 +68,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [InlineData(FileMode.Truncate)]
     public void An_open_can_truncate_and_append(FileMode mode)
     {
-        File.WriteAllText(Host("log"), "discarded");
+        HostFile.WriteAllText(Host("log"), "discarded");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("log", mode, FileAccess.Write, append: true))
@@ -77,7 +77,7 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("cd"u8, 0);
         }
 
-        Assert.Equal("abcd", File.ReadAllText(Host("log")));
+        Assert.Equal("abcd", HostFile.ReadAllText(Host("log")));
     }
 
     /// <summary>An open that must create the file can append to it.</summary>
@@ -91,7 +91,7 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("cd"u8, 1);
         }
 
-        Assert.Equal("abcd", File.ReadAllText(Host("log")));
+        Assert.Equal("abcd", HostFile.ReadAllText(Host("log")));
     }
 
     /// <summary>The framework's append mode reports that it appends.</summary>
@@ -108,7 +108,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [Fact]
     public void An_ordinary_open_does_not_append()
     {
-        File.WriteAllText(Host("data"), "aaaa");
+        HostFile.WriteAllText(Host("data"), "aaaa");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.ReadWrite))
@@ -117,14 +117,14 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("b"u8, 1);
         }
 
-        Assert.Equal("abaa", File.ReadAllText(Host("data")));
+        Assert.Equal("abaa", HostFile.ReadAllText(Host("data")));
     }
 
     /// <summary>Asking to append through a handle that cannot write is a mistake in the request.</summary>
     [Fact]
     public void Appending_without_write_access_is_refused()
     {
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
 
@@ -137,7 +137,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [Fact]
     public void The_reporting_form_opens_to_append()
     {
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
         Assert.True(root.TryOpenFile(
@@ -150,7 +150,7 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("!"u8, 0);
         }
 
-        Assert.Equal("first!", File.ReadAllText(Host("log")));
+        Assert.Equal("first!", HostFile.ReadAllText(Host("log")));
     }
 
     // --- changing it on an open file -----------------------------------------------------------
@@ -159,7 +159,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [Fact]
     public void Appending_can_be_turned_on_and_off()
     {
-        File.WriteAllText(Host("data"), "aaaa");
+        HostFile.WriteAllText(Host("data"), "aaaa");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.ReadWrite))
@@ -176,14 +176,14 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("d"u8, 0);
         }
 
-        Assert.Equal("caaabd", File.ReadAllText(Host("data")));
+        Assert.Equal("caaabd", HostFile.ReadAllText(Host("data")));
     }
 
     /// <summary>A handle opened to append can stop, and then writes where it is told.</summary>
     [Fact]
     public void A_handle_opened_to_append_can_stop()
     {
-        File.WriteAllText(Host("data"), "aaaa");
+        HostFile.WriteAllText(Host("data"), "aaaa");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("data", FileMode.Append, FileAccess.Write))
@@ -192,14 +192,14 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("b"u8, 0);
         }
 
-        Assert.Equal("baaa", File.ReadAllText(Host("data")));
+        Assert.Equal("baaa", HostFile.ReadAllText(Host("data")));
     }
 
     /// <summary>A handle that cannot write has nothing for appending to place.</summary>
     [Fact]
     public void Appending_cannot_be_turned_on_for_a_handle_that_cannot_write()
     {
-        File.WriteAllText(Host("data"), "aaaa");
+        HostFile.WriteAllText(Host("data"), "aaaa");
 
         using Dir root = OpenRoot();
         using CapFile file = root.OpenFile("data");
@@ -227,7 +227,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [InlineData(FileOptions.Asynchronous)]
     public async Task The_asynchronous_write_appends(FileOptions options)
     {
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile(
@@ -236,14 +236,14 @@ public sealed class CapFileAppendingTests : IDisposable
             await file.WriteAsync(" second"u8.ToArray(), 0, TestContext.Current.CancellationToken);
         }
 
-        Assert.Equal("first second", File.ReadAllText(Host("log")));
+        Assert.Equal("first second", HostFile.ReadAllText(Host("log")));
     }
 
     /// <summary>A write asked to stop before it starts does not happen.</summary>
     [Fact]
     public async Task A_cancelled_appending_write_does_not_happen()
     {
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.Write, append: true))
@@ -252,7 +252,7 @@ public sealed class CapFileAppendingTests : IDisposable
                 () => file.WriteAsync(" second"u8.ToArray(), 0, new CancellationToken(canceled: true)).AsTask());
         }
 
-        Assert.Equal("first", File.ReadAllText(Host("log")));
+        Assert.Equal("first", HostFile.ReadAllText(Host("log")));
     }
 
     /// <summary>Two handles appending to one file never overwrite each other.</summary>
@@ -264,7 +264,7 @@ public sealed class CapFileAppendingTests : IDisposable
     public void Two_appending_handles_never_overwrite_each_other()
     {
         const int Writes = 200;
-        File.WriteAllText(Host("log"), string.Empty);
+        HostFile.WriteAllText(Host("log"), string.Empty);
 
         using Dir root = OpenRoot();
         using CapFile first = root.OpenFile(
@@ -288,7 +288,7 @@ public sealed class CapFileAppendingTests : IDisposable
                 }
             });
 
-        string[] lines = File.ReadAllText(Host("log")).Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        string[] lines = HostFile.ReadAllText(Host("log")).Split('\n', StringSplitOptions.RemoveEmptyEntries);
         Assert.Equal(Writes, lines.Count(line => line == "a"));
         Assert.Equal(Writes, lines.Count(line => line == "b"));
         Assert.Equal(2 * Writes, lines.Length);
@@ -298,7 +298,7 @@ public sealed class CapFileAppendingTests : IDisposable
     [Fact]
     public void Resizing_an_appending_file_still_works()
     {
-        File.WriteAllText(Host("log"), "first second");
+        HostFile.WriteAllText(Host("log"), "first second");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.Write, append: true))
@@ -307,7 +307,7 @@ public sealed class CapFileAppendingTests : IDisposable
             file.Write("!"u8, 0);
         }
 
-        Assert.Equal("first!", File.ReadAllText(Host("log")));
+        Assert.Equal("first!", HostFile.ReadAllText(Host("log")));
     }
 
     // --- streams -------------------------------------------------------------------------------
@@ -324,7 +324,7 @@ public sealed class CapFileAppendingTests : IDisposable
     {
         Assert.SkipWhen(OperatingSystem.IsMacOS(), "macOS does not document where a positioned write to an appending file goes.");
 
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
         CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite, append: true);
@@ -347,7 +347,7 @@ public sealed class CapFileAppendingTests : IDisposable
         }
 
         string expected = leaveOpen ? "first second third" : "first second";
-        Assert.Equal(expected, File.ReadAllText(Host("log")));
+        Assert.Equal(expected, HostFile.ReadAllText(Host("log")));
     }
 
     /// <summary>
@@ -363,7 +363,7 @@ public sealed class CapFileAppendingTests : IDisposable
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "Only Linux both keeps the flag and documents where a stream's write then goes.");
 
-        File.WriteAllText(Host("log"), "first");
+        HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite))
@@ -374,6 +374,6 @@ public sealed class CapFileAppendingTests : IDisposable
             stream.Write(Encoding.ASCII.GetBytes(" second"));
         }
 
-        Assert.Equal("first second", File.ReadAllText(Host("log")));
+        Assert.Equal("first second", HostFile.ReadAllText(Host("log")));
     }
 }

@@ -63,10 +63,24 @@
     the name-at-a-time walk from one process. Opt-in, because it reaches into Cap.Primitives
     internals and so only compiles where that assembly has granted access.
   -->
-  <ItemGroup Condition="'$(CapRunsEachBackend)' == 'true'">
+  <ItemGroup Condition="'$(CapRunsEachBackend)' == 'true' Or '$(CapRunsInMemory)' == 'true'">
     <Compile Include="$(MSBuildThisFileDirectory)Backends/*.cs"
              Link="Backends/%(Filename)%(Extension)" />
     <Using Include="Cap.Testing" Condition="'$(CapUsesScratchTree)' != 'true'" />
+  </ItemGroup>
+
+  <!--
+    The switch in tests/InMemory that lets a run put a filesystem held in memory in place of the
+    host, so that a suite written against the disk runs unchanged against the in-memory backend.
+    Set CAPDOTNET_TEST_BACKEND to in-memory-walk or in-memory-confined to take that leg. Opt-in,
+    because it reaches into the internals of Cap.Primitives and Cap.Std.Testing, and builds on
+    the scratch tree and the backend switch above.
+  -->
+  <ItemGroup Condition="'$(CapRunsInMemory)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)InMemory/*.cs"
+             Link="InMemory/%(Filename)%(Extension)" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Cap.Std.Testing/Cap.Std.Testing.csproj"
+                      Condition="'$(CapUsesPlatformFake)' != 'true'" />
   </ItemGroup>
 
   <!--

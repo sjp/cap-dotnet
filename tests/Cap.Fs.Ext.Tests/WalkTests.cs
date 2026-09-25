@@ -164,7 +164,7 @@ public sealed class WalkTests : IDisposable
         for (int i = 0; i < 12; i++)
         {
             path = Path.Combine(path, "level");
-            Directory.CreateDirectory(path);
+            HostDirectory.CreateDirectory(path);
         }
 
         WalkOptions options = new() { MaxDepth = 4 };
@@ -198,7 +198,7 @@ public sealed class WalkTests : IDisposable
         for (int i = 0; i < 2000; i++)
         {
             path = Path.Combine(path, "d");
-            Directory.CreateDirectory(path);
+            HostDirectory.CreateDirectory(path);
             levels.Add(path);
         }
 
@@ -210,7 +210,7 @@ public sealed class WalkTests : IDisposable
         {
             for (int i = levels.Count - 1; i >= 0; i--)
             {
-                Directory.Delete(levels[i]);
+                HostDirectory.Delete(levels[i]);
             }
         }
     }
@@ -296,11 +296,11 @@ public sealed class WalkTests : IDisposable
     private void Make(params string[] parts)
     {
         string path = Path.Combine([_tree.HostPath, .. parts]);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "contents");
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
+        HostFile.WriteAllText(path, "contents");
     }
 
     /// <summary>Creates a symbolic link under the scratch tree.</summary>
     private void Link(string name, string target) =>
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, name), target);
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, name), target);
 }

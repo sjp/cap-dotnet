@@ -76,7 +76,7 @@ public sealed class TreeOperationTests
         using Arena arena = new();
         arena.Plant(HostileTree(features));
         string destination = Path.Join(arena.HostPath, "destination");
-        Directory.CreateDirectory(destination);
+        HostDirectory.CreateDirectory(destination);
 
         Oracle oracle = new(arena, destination);
         Observation observation = new(Outcome.Success, null);
@@ -109,7 +109,7 @@ public sealed class TreeOperationTests
 
         if (operation == TreeOperation.DeleteTreeContents && observation.Outcome == Outcome.Success)
         {
-            Assert.Empty(Directory.EnumerateFileSystemEntries(arena.SandboxPath));
+            Assert.Empty(HostDirectory.GetFileSystemEntries(arena.SandboxPath));
         }
 
         if (operation == TreeOperation.DeleteTree && observation.Outcome == Outcome.Success)
@@ -119,11 +119,11 @@ public sealed class TreeOperationTests
 
         // Carried across as the text it stores, not as what it names -- when the copy reached
         // it before stopping at a rooted one, which depends on the order the directory lists in.
-        if (operation == TreeOperation.CopyRecreatingLinks && Path.Exists(Path.Join(destination, "escape-dir")))
+        if (operation == TreeOperation.CopyRecreatingLinks && HostEntry.Exists(Path.Join(destination, "escape-dir")))
         {
             Assert.Equal(
                 $"../{EscapeCorpus.OutsideDirectory}".Replace('/', Path.DirectorySeparatorChar),
-                new FileInfo(Path.Join(destination, "escape-dir")).LinkTarget);
+                HostEntry.LinkTarget(Path.Join(destination, "escape-dir")));
         }
     }
 
@@ -247,26 +247,27 @@ public sealed class TreeOperationTests
     /// </remarks>
     private static void AssertNothingOutsideWasCopied(string destination, string context)
     {
-        foreach (FileSystemInfo info in new DirectoryInfo(destination).EnumerateFileSystemInfos())
+        foreach (string entry in HostDirectory.GetFileSystemEntries(destination))
         {
             Assert.False(
-                info.Name.StartsWith("outside", StringComparison.Ordinal),
-                $"{context}: the copy produced '{info.FullName}', a name that exists only outside the sandbox.");
+                Path.GetFileName(entry).StartsWith("outside", StringComparison.Ordinal),
+                $"{context}: the copy produced '{entry}', a name that exists only outside the sandbox.");
 
-            if (info.LinkTarget is not null)
+            HostEntryKind kind = HostEntry.KindOf(entry);
+            if (kind == HostEntryKind.SymbolicLink)
             {
                 continue;
             }
 
-            if (info is DirectoryInfo)
+            if (kind == HostEntryKind.Directory)
             {
-                AssertNothingOutsideWasCopied(info.FullName, context);
+                AssertNothingOutsideWasCopied(entry, context);
             }
             else
             {
                 Assert.False(
-                    File.ReadAllText(info.FullName).Contains(EscapeCorpus.OutsideContent, StringComparison.Ordinal),
-                    $"{context}: the copy wrote the contents of a file outside the sandbox to '{info.FullName}'.");
+                    HostFile.ReadAllText(entry).Contains(EscapeCorpus.OutsideContent, StringComparison.Ordinal),
+                    $"{context}: the copy wrote the contents of a file outside the sandbox to '{entry}'.");
             }
         }
     }

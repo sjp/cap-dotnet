@@ -40,7 +40,7 @@ public sealed class FailureKindTests : IDisposable
     [Fact]
     public void A_name_already_taken_is_reported_as_already_existing()
     {
-        File.WriteAllText(Host("file"), "x");
+        HostFile.WriteAllText(Host("file"), "x");
         using Dir root = OpenRoot();
 
         CapIOException thrown = Assert.ThrowsAny<CapIOException>(() => root.CreateNewFile("file").Dispose());
@@ -51,8 +51,8 @@ public sealed class FailureKindTests : IDisposable
     [Fact]
     public void A_directory_with_entries_is_reported_as_not_empty()
     {
-        Directory.CreateDirectory(Host("full"));
-        File.WriteAllText(Host("full", "inside"), "x");
+        HostDirectory.CreateDirectory(Host("full"));
+        HostFile.WriteAllText(Host("full", "inside"), "x");
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.NotEmpty, KindOf(() => root.DeleteDir("full")));
@@ -61,7 +61,7 @@ public sealed class FailureKindTests : IDisposable
     [Fact]
     public void A_path_that_continues_past_a_file_is_reported_as_not_a_directory()
     {
-        File.WriteAllText(Host("file"), "x");
+        HostFile.WriteAllText(Host("file"), "x");
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.NotADirectory, KindOf(() => root.OpenDir("file").Dispose()));
@@ -70,7 +70,7 @@ public sealed class FailureKindTests : IDisposable
     [Fact]
     public void A_file_removal_that_names_a_directory_is_reported_as_one()
     {
-        Directory.CreateDirectory(Host("dir"));
+        HostDirectory.CreateDirectory(Host("dir"));
         using Dir root = OpenRoot();
 
         // macOS refuses unlink on a directory as a permission failure, which is what it reports.
@@ -103,8 +103,8 @@ public sealed class FailureKindTests : IDisposable
     [Fact]
     public void A_link_the_policy_will_not_follow_is_reported_as_not_followed()
     {
-        Directory.CreateDirectory(Host("plain"));
-        RequireSymlinks(() => Directory.CreateSymbolicLink(Host("link"), "plain"));
+        HostDirectory.CreateDirectory(Host("plain"));
+        RequireSymlinks(() => HostDirectory.CreateSymbolicLink(Host("link"), "plain"));
         using Dir root = OpenRoot();
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
 
@@ -119,53 +119,53 @@ public sealed class FailureKindTests : IDisposable
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.NotFound, KindOf(() => root.CreateSymlink("target/", "source")));
-        Assert.False(Path.Exists(Host("target")));
+        Assert.False(HostEntry.Exists(Host("target")));
     }
 
     [Fact]
     public void A_link_made_at_a_directory_spelled_as_one_is_reported_as_already_existing()
     {
-        Directory.CreateDirectory(Host("target"));
+        HostDirectory.CreateDirectory(Host("target"));
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.AlreadyExists, KindOf(() => root.CreateSymlink("target/", "source")));
-        Assert.True(Directory.Exists(Host("target")));
+        Assert.True(HostDirectory.Exists(Host("target")));
     }
 
     [Fact]
     public void A_link_made_at_a_file_spelled_as_a_directory_is_reported_as_not_a_directory()
     {
-        File.WriteAllText(Host("target"), "x");
+        HostFile.WriteAllText(Host("target"), "x");
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.NotADirectory, KindOf(() => root.CreateSymlink("target/", "source")));
-        Assert.Equal("x", File.ReadAllText(Host("target")));
+        Assert.Equal("x", HostFile.ReadAllText(Host("target")));
     }
 
     [Fact]
     public void A_file_removal_spelled_as_a_directory_is_refused_by_what_the_name_holds()
     {
-        File.WriteAllText(Host("file"), "x");
-        Directory.CreateDirectory(Host("dir"));
+        HostFile.WriteAllText(Host("file"), "x");
+        HostDirectory.CreateDirectory(Host("dir"));
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.NotADirectory, KindOf(() => root.DeleteFile("file/")));
         Assert.Equal(CapErrorKind.IsADirectory, KindOf(() => root.DeleteFile("dir/")));
         Assert.Equal(CapErrorKind.NotFound, KindOf(() => root.DeleteFile("absent/")));
-        Assert.True(File.Exists(Host("file")));
-        Assert.True(Directory.Exists(Host("dir")));
+        Assert.True(HostFile.Exists(Host("file")));
+        Assert.True(HostDirectory.Exists(Host("dir")));
     }
 
     [Fact]
     public void A_second_name_for_a_file_spelled_as_a_directory_is_refused_by_what_the_name_holds()
     {
-        File.WriteAllText(Host("file"), "x");
-        Directory.CreateDirectory(Host("dir"));
+        HostFile.WriteAllText(Host("file"), "x");
+        HostDirectory.CreateDirectory(Host("dir"));
         using Dir root = OpenRoot();
 
         Assert.Equal(CapErrorKind.NotFound, KindOf(() => root.CreateHardLink("file", root, "link/")));
         Assert.Equal(CapErrorKind.AlreadyExists, KindOf(() => root.CreateHardLink("file", root, "dir/")));
-        Assert.False(Path.Exists(Host("link")));
+        Assert.False(HostEntry.Exists(Host("link")));
     }
 
     // --- the helper ---------------------------------------------------------------------------

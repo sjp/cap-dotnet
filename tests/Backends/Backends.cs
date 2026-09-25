@@ -40,12 +40,30 @@ internal static class Backends
     /// <summary>The Windows backend: relative native opens against a directory handle.</summary>
     public const string Windows = "windows";
 
+    /// <summary>A filesystem held in memory, resolving one name at a time.</summary>
+    public const string InMemoryWalk = "in-memory-walk";
+
+    /// <summary>A filesystem held in memory, resolving a whole path at once.</summary>
+    public const string InMemoryConfined = "in-memory-confined";
+
     private static readonly Lock Gate = new();
     private static readonly Dictionary<string, IPlatformOps> Built = [];
 
+    /// <summary>
+    /// The backend standing in for the host for the whole run, when the run was told to put a
+    /// filesystem held in memory in its place. Set once, before the first test.
+    /// </summary>
+    /// <remarks>
+    /// While it is set, it is the only backend this host has as far as a suite is concerned:
+    /// the trees the suite arranges are in that filesystem, and the host's own backends could
+    /// not reach them.
+    /// </remarks>
+    public static (string Name, IPlatformOps Ops)? StandIn { get; set; }
+
     /// <summary>Every backend this host can run.</summary>
     public static IReadOnlyList<string> OnThisHost =>
-        OperatingSystem.IsLinux() ? [ConfinedOpen, LinuxWalk]
+        StandIn is { } standIn ? [standIn.Name]
+        : OperatingSystem.IsLinux() ? [ConfinedOpen, LinuxWalk]
         : OperatingSystem.IsMacOS() ? [DarwinWalk]
         : OperatingSystem.IsWindows() ? [Windows]
         : [];
@@ -92,6 +110,14 @@ internal static class Backends
 
     private static IPlatformOps Build(string backend)
     {
+        if (StandIn is { } standIn)
+        {
+            return backend == standIn.Name
+                ? standIn.Ops
+                : throw new ArgumentOutOfRangeException(
+                    nameof(backend), backend, $"This run stands {standIn.Name} in for the host, and has no other backend.");
+        }
+
         switch (backend)
         {
             case ConfinedOpen when OperatingSystem.IsLinux():
@@ -135,7 +161,7 @@ internal sealed class BackendScope : IDisposable
         Name = name;
         _ops = ops;
         _substitution = substitution;
-        _confinedOpensBefore = OperatingSystem.IsLinux() && ops is LinuxPlatformOps linux ? linux.ConfinedOpenAttempts : 0;
+        _confinedOpensBefore = ops.ConfinedOpenAttempts;
     }
 
     /// <summary>The backend's name.</summary>
@@ -150,9 +176,9 @@ internal sealed class BackendScope : IDisposable
     /// </remarks>
     public void AssertItRan()
     {
-        if (OperatingSystem.IsLinux() && Name == Backends.LinuxWalk && _ops is LinuxPlatformOps linux)
+        if (Name is Backends.LinuxWalk or Backends.InMemoryWalk)
         {
-            Assert.Equal(_confinedOpensBefore, linux.ConfinedOpenAttempts);
+            Assert.Equal(_confinedOpensBefore, _ops.ConfinedOpenAttempts);
         }
     }
 

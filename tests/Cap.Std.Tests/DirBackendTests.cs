@@ -54,14 +54,14 @@ public sealed class DirBackendTests : IDisposable
             diskChild.CreateDir("nested").Dispose();
 
             Assert.NotNull(fs.Find("/sandbox/in-memory/nested"));
-            Assert.True(Directory.Exists(Path.Combine(_tree.HostPath, "on-disk", "nested")));
+            Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "on-disk", "nested")));
 
             Assert.Equal(["in-memory"], simulated.EnumerateEntries().Select(entry => entry.Name));
             Assert.Equal(["on-disk"], disk.EnumerateEntries().Select(entry => entry.Name));
             Assert.False(simulated.Exists("on-disk"));
             Assert.False(disk.Exists("in-memory"));
             Assert.Null(fs.Find("/sandbox/on-disk"));
-            Assert.False(Directory.Exists(Path.Combine(_tree.HostPath, "in-memory")));
+            Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "in-memory")));
         }
     }
 
@@ -96,7 +96,7 @@ public sealed class DirBackendTests : IDisposable
     {
         (FakeFileSystem fs, FakePlatformOps ops, Dir simulated) = OpenSimulated();
         _ = fs.AddFile("/sandbox/entry");
-        File.WriteAllText(Path.Combine(_tree.HostPath, "entry"), "on disk");
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "entry"), "on disk");
 
         using Dir disk = OpenDisk();
         using (simulated)
@@ -116,7 +116,7 @@ public sealed class DirBackendTests : IDisposable
             Assert.NotNull(fs.Find("/sandbox/entry"));
             Assert.Null(fs.Find("/sandbox/moved"));
             Assert.Null(fs.Find("/sandbox/linked"));
-            Assert.Equal(["entry"], Directory.EnumerateFileSystemEntries(_tree.HostPath).Select(Path.GetFileName));
+            Assert.Equal(["entry"], HostDirectory.GetFileSystemEntries(_tree.HostPath).Select(Path.GetFileName));
         }
     }
 

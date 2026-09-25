@@ -33,14 +33,14 @@ public sealed class CopyTests : IDisposable
     {
         Make("source", "top.txt");
         Make("source", "a", "b", "deep.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
 
         CopyReport report = Copy();
 
-        Assert.Equal("contents", File.ReadAllText(Path.Combine(_tree.HostPath, "destination", "top.txt")));
+        Assert.Equal("contents", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "destination", "top.txt")));
         Assert.Equal(
             "contents",
-            File.ReadAllText(Path.Combine(_tree.HostPath, "destination", "a", "b", "deep.txt")));
+            HostFile.ReadAllText(Path.Combine(_tree.HostPath, "destination", "a", "b", "deep.txt")));
         Assert.Equal(2, report.Files);
         Assert.Equal(2, report.Directories);
         Assert.Equal(0, report.Skipped);
@@ -51,9 +51,9 @@ public sealed class CopyTests : IDisposable
     public void A_link_stops_the_copy_by_default()
     {
         Make("outside", "secret.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        Directory.CreateSymbolicLink(
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateSymbolicLink(
             Path.Combine(_tree.HostPath, "source", "escape"), Path.Combine("..", "outside"));
 
         Assert.Throws<CapIOException>(() => Copy());
@@ -61,7 +61,7 @@ public sealed class CopyTests : IDisposable
         // And above all, what the link pointed at was not reached: a copy that followed it
         // would have written the contents of a directory outside the source into the
         // destination under the link's name.
-        Assert.False(Path.Exists(Path.Combine(_tree.HostPath, "destination", "escape")));
+        Assert.False(HostEntry.Exists(Path.Combine(_tree.HostPath, "destination", "escape")));
     }
 
     /// <summary>A symbolic link can be left out.</summary>
@@ -70,16 +70,16 @@ public sealed class CopyTests : IDisposable
     {
         Make("outside", "secret.txt");
         Make("source", "kept.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        Directory.CreateSymbolicLink(
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateSymbolicLink(
             Path.Combine(_tree.HostPath, "source", "escape"), Path.Combine("..", "outside"));
 
         CopyReport report = Copy(new CopyOptions { Symlinks = CopyAction.Skip });
 
         Assert.Equal(1, report.Skipped);
         Assert.Equal(1, report.Files);
-        Assert.False(Path.Exists(Path.Combine(_tree.HostPath, "destination", "escape")));
-        Assert.True(File.Exists(Path.Combine(_tree.HostPath, "destination", "kept.txt")));
+        Assert.False(HostEntry.Exists(Path.Combine(_tree.HostPath, "destination", "escape")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "destination", "kept.txt")));
     }
 
     /// <summary>A symbolic link can be made again, with its target text unchanged.</summary>
@@ -92,16 +92,16 @@ public sealed class CopyTests : IDisposable
     [Fact]
     public void A_link_can_be_made_again_with_the_same_target()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        Directory.CreateSymbolicLink(
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateSymbolicLink(
             Path.Combine(_tree.HostPath, "source", "pointer"), Path.Combine("..", "outside"));
 
         CopyReport report = Copy(new CopyOptions { Symlinks = CopyAction.Recreate });
 
         string copied = Path.Combine(_tree.HostPath, "destination", "pointer");
         Assert.Equal(1, report.Symlinks);
-        Assert.Equal(Path.Combine("..", "outside"), new FileInfo(copied).LinkTarget);
+        Assert.Equal(Path.Combine("..", "outside"), HostEntry.LinkTarget(copied));
     }
 
     /// <summary>
@@ -115,16 +115,16 @@ public sealed class CopyTests : IDisposable
         Make("outside", "secret.txt");
         Make("destination", "pointer");
         string rooted = Path.Combine(_tree.HostPath, "outside");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
-        Directory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), rooted);
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), rooted);
 
         SandboxEscapeException refusal = Assert.Throws<SandboxEscapeException>(
             () => Copy(new CopyOptions { Symlinks = CopyAction.Recreate, Overwrite = true }));
 
         Assert.Contains(rooted, refusal.Message, StringComparison.Ordinal);
         string existing = Path.Combine(_tree.HostPath, "destination", "pointer");
-        Assert.Null(new FileInfo(existing).LinkTarget);
-        Assert.Equal("contents", File.ReadAllText(existing));
+        Assert.Null(HostEntry.LinkTarget(existing));
+        Assert.Equal("contents", HostFile.ReadAllText(existing));
     }
 
     /// <summary>A named pipe stops the copy, and can be skipped.</summary>
@@ -134,6 +134,7 @@ public sealed class CopyTests : IDisposable
     /// no explanation. Refused by default, left out on request, and never turned into a file.
     /// </remarks>
     [Fact]
+    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void A_named_pipe_stops_the_copy_and_can_be_skipped()
     {
         if (OperatingSystem.IsWindows())
@@ -143,7 +144,7 @@ public sealed class CopyTests : IDisposable
         }
 
         Make("source", "kept.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
         MakeFifo(Path.Combine(_tree.HostPath, "source", "pipe"));
 
         Assert.Throws<CapIOException>(() => Copy());
@@ -155,15 +156,15 @@ public sealed class CopyTests : IDisposable
         });
 
         Assert.Equal(1, report.Skipped);
-        Assert.False(Path.Exists(Path.Combine(_tree.HostPath, "destination", "pipe")));
+        Assert.False(HostEntry.Exists(Path.Combine(_tree.HostPath, "destination", "pipe")));
     }
 
     /// <summary>Asking for an object of a kind this cannot create is refused up front.</summary>
     [Fact]
     public void Recreating_a_pipe_or_a_device_is_refused_as_a_request()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
 
         Assert.Throws<ArgumentException>(
             () => Copy(new CopyOptions { OtherKinds = CopyAction.Recreate }));
@@ -185,7 +186,7 @@ public sealed class CopyTests : IDisposable
         }
 
         Make("source", "original.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
         MakeHardLink(
             Path.Combine(_tree.HostPath, "source", "original.txt"),
             Path.Combine(_tree.HostPath, "source", "second.txt"));
@@ -196,8 +197,8 @@ public sealed class CopyTests : IDisposable
 
         string first = Path.Combine(_tree.HostPath, "destination", "original.txt");
         string second = Path.Combine(_tree.HostPath, "destination", "second.txt");
-        File.WriteAllText(first, "changed");
-        Assert.Equal("contents", File.ReadAllText(second));
+        HostFile.WriteAllText(first, "changed");
+        Assert.Equal("contents", HostFile.ReadAllText(second));
     }
 
     /// <summary>A name already taken in the destination stops the copy.</summary>
@@ -215,14 +216,14 @@ public sealed class CopyTests : IDisposable
     public void A_name_already_taken_is_written_over_when_asked()
     {
         Make("source", "report.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        File.WriteAllText(Path.Combine(_tree.HostPath, "destination", "report.txt"), "stale");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "destination", "report.txt"), "stale");
 
         Copy(new CopyOptions { Overwrite = true });
 
         Assert.Equal(
             "contents",
-            File.ReadAllText(Path.Combine(_tree.HostPath, "destination", "report.txt")));
+            HostFile.ReadAllText(Path.Combine(_tree.HostPath, "destination", "report.txt")));
     }
 
     /// <summary>
@@ -239,20 +240,20 @@ public sealed class CopyTests : IDisposable
     {
         Make("source", "report.txt");
         string destination = Path.Combine(_tree.HostPath, "destination");
-        Directory.CreateDirectory(destination);
-        File.WriteAllText(Path.Combine(destination, "keep.txt"), "untouched");
-        File.CreateSymbolicLink(Path.Combine(destination, "report.txt"), "keep.txt");
+        HostDirectory.CreateDirectory(destination);
+        HostFile.WriteAllText(Path.Combine(destination, "keep.txt"), "untouched");
+        HostFile.CreateSymbolicLink(Path.Combine(destination, "report.txt"), "keep.txt");
 
         CopyReport report = Copy(new CopyOptions { Overwrite = true });
 
-        FileInfo copied = new(Path.Combine(destination, "report.txt"));
+        string copied = Path.Combine(destination, "report.txt");
         Assert.Equal(1, report.Files);
-        Assert.Null(copied.LinkTarget);
-        Assert.Equal("contents", File.ReadAllText(copied.FullName));
-        Assert.Equal("untouched", File.ReadAllText(Path.Combine(destination, "keep.txt")));
+        Assert.Null(HostEntry.LinkTarget(copied));
+        Assert.Equal("contents", HostFile.ReadAllText(copied));
+        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(destination, "keep.txt")));
         Assert.Equal(
             ["keep.txt", "report.txt"],
-            Directory.GetFileSystemEntries(destination).Select(Path.GetFileName).Order());
+            HostDirectory.GetFileSystemEntries(destination).Select(Path.GetFileName).Order());
     }
 
     /// <summary>
@@ -267,19 +268,19 @@ public sealed class CopyTests : IDisposable
         Make("source", "report.txt");
         Make("outside", "secret.txt");
         string destination = Path.Combine(_tree.HostPath, "destination");
-        Directory.CreateDirectory(destination);
+        HostDirectory.CreateDirectory(destination);
         string target = kind == "outside"
             ? Path.Combine("..", "outside", "secret.txt")
             : "missing.txt";
-        File.CreateSymbolicLink(Path.Combine(destination, "report.txt"), target);
+        HostFile.CreateSymbolicLink(Path.Combine(destination, "report.txt"), target);
 
         Copy(new CopyOptions { Overwrite = true });
 
-        FileInfo copied = new(Path.Combine(destination, "report.txt"));
-        Assert.Null(copied.LinkTarget);
-        Assert.Equal("contents", File.ReadAllText(copied.FullName));
-        Assert.Equal("contents", File.ReadAllText(Path.Combine(_tree.HostPath, "outside", "secret.txt")));
-        Assert.False(File.Exists(Path.Combine(destination, "missing.txt")));
+        string copied = Path.Combine(destination, "report.txt");
+        Assert.Null(HostEntry.LinkTarget(copied));
+        Assert.Equal("contents", HostFile.ReadAllText(copied));
+        Assert.Equal("contents", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "outside", "secret.txt")));
+        Assert.False(HostFile.Exists(Path.Combine(destination, "missing.txt")));
     }
 
     /// <summary>
@@ -291,13 +292,13 @@ public sealed class CopyTests : IDisposable
     {
         Make("source", "nested", "inner.txt");
         string destination = Path.Combine(_tree.HostPath, "destination");
-        Directory.CreateDirectory(Path.Combine(destination, "elsewhere"));
-        Directory.CreateSymbolicLink(Path.Combine(destination, "nested"), "elsewhere");
+        HostDirectory.CreateDirectory(Path.Combine(destination, "elsewhere"));
+        HostDirectory.CreateSymbolicLink(Path.Combine(destination, "nested"), "elsewhere");
 
         Assert.Throws<CapIOException>(() => Copy(new CopyOptions { Overwrite = true }));
 
-        Assert.Equal("elsewhere", new DirectoryInfo(Path.Combine(destination, "nested")).LinkTarget);
-        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(destination, "elsewhere")));
+        Assert.Equal("elsewhere", HostEntry.LinkTarget(Path.Combine(destination, "nested")));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(Path.Combine(destination, "elsewhere")));
     }
 
     /// <summary>A directory where the source has a file stops the copy, and is left in place.</summary>
@@ -310,8 +311,8 @@ public sealed class CopyTests : IDisposable
         Assert.Throws<CapIOException>(() => Copy(new CopyOptions { Overwrite = true }));
 
         string destination = Path.Combine(_tree.HostPath, "destination");
-        Assert.True(File.Exists(Path.Combine(destination, "report.txt", "inside.txt")));
-        Assert.Equal(["report.txt"], Directory.GetFileSystemEntries(destination).Select(Path.GetFileName));
+        Assert.True(HostFile.Exists(Path.Combine(destination, "report.txt", "inside.txt")));
+        Assert.Equal(["report.txt"], HostDirectory.GetFileSystemEntries(destination).Select(Path.GetFileName));
     }
 
     /// <summary>Permissions are carried across when the caller asks for them.</summary>
@@ -325,8 +326,8 @@ public sealed class CopyTests : IDisposable
         }
 
         Make("source", "private.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        File.SetUnixFileMode(
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostFile.SetUnixFileMode(
             Path.Combine(_tree.HostPath, "source", "private.txt"),
             UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
@@ -334,7 +335,7 @@ public sealed class CopyTests : IDisposable
 
         Assert.Equal(
             UnixFileMode.UserRead | UnixFileMode.UserWrite,
-            File.GetUnixFileMode(Path.Combine(_tree.HostPath, "destination", "private.txt")));
+            HostFile.GetUnixFileMode(Path.Combine(_tree.HostPath, "destination", "private.txt")));
     }
 
     /// <summary>Without being asked, a copy gets whatever a new file would get.</summary>
@@ -348,8 +349,8 @@ public sealed class CopyTests : IDisposable
         }
 
         Make("source", "private.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        File.SetUnixFileMode(
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostFile.SetUnixFileMode(
             Path.Combine(_tree.HostPath, "source", "private.txt"),
             UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
@@ -357,7 +358,7 @@ public sealed class CopyTests : IDisposable
 
         Assert.NotEqual(
             UnixFileMode.UserRead | UnixFileMode.UserWrite,
-            File.GetUnixFileMode(Path.Combine(_tree.HostPath, "destination", "private.txt")));
+            HostFile.GetUnixFileMode(Path.Combine(_tree.HostPath, "destination", "private.txt")));
     }
 
     /// <summary>
@@ -379,8 +380,8 @@ public sealed class CopyTests : IDisposable
 
         Make("source", "top.txt");
         Make("source", "nested", "inner.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        File.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), "top.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostFile.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), "top.txt");
         if (overwrite)
         {
             Make("destination", "top.txt");
@@ -412,7 +413,7 @@ public sealed class CopyTests : IDisposable
         DateTimeOffset written = new(2003, 4, 5, 6, 7, 8, TimeSpan.Zero);
 
         Make("source", "top.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
         _tree.Directory.SetTimes("source/top.txt", lastWrite: CapFileTime.At(written));
 
         Copy();
@@ -430,7 +431,7 @@ public sealed class CopyTests : IDisposable
         DateTimeOffset written = new(2003, 4, 5, 6, 7, 8, TimeSpan.Zero);
 
         Make("source", "top.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
         _tree.Directory.SetTimes("source", lastWrite: CapFileTime.At(written));
 
         Copy(new CopyOptions { PreserveTimes = true });
@@ -448,7 +449,7 @@ public sealed class CopyTests : IDisposable
     public void A_destination_inside_the_source_is_refused()
     {
         Make("source", "top.txt");
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "destination"));
 
         using Dir source = _tree.Directory.OpenDir("source");
         using Dir destination = source.OpenDir("destination");
@@ -464,10 +465,10 @@ public sealed class CopyTests : IDisposable
         for (int i = 0; i < 8; i++)
         {
             path = Path.Combine(path, "level");
-            Directory.CreateDirectory(path);
+            HostDirectory.CreateDirectory(path);
         }
 
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
 
         Assert.Throws<CapIOException>(() => Copy(new CopyOptions { MaxDepth = 3 }));
     }
@@ -485,15 +486,15 @@ public sealed class CopyTests : IDisposable
     private void Make(params string[] parts)
     {
         string path = Path.Combine([_tree.HostPath, .. parts]);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "contents");
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
+        HostFile.WriteAllText(path, "contents");
     }
 
     /// <summary>Creates a named pipe, which the framework has no call for.</summary>
     private static void MakeFifo(string path) => Run("mkfifo", path);
 
     /// <summary>Creates a second name for an existing file.</summary>
-    private static void MakeHardLink(string existing, string added) => Run("ln", existing, added);
+    private static void MakeHardLink(string existing, string added) => HostFile.CreateHardLink(existing, added);
 
     /// <summary>Runs one of the system's own tools, and insists that it worked.</summary>
     private static void Run(string program, params string[] arguments)

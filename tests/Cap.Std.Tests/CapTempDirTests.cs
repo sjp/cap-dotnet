@@ -42,19 +42,21 @@ public sealed class CapTempDirTests
 
     /// <summary>A new scratch directory is there, and it is empty.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void A_new_scratch_directory_is_created_empty()
     {
         using CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
 
         string path = HostPath(temp.Directory);
 
-        Assert.True(Directory.Exists(path));
-        Assert.Empty(Directory.GetFileSystemEntries(path));
+        Assert.True(HostDirectory.Exists(path));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(path));
         Assert.Empty(temp.Directory.EnumerateEntries());
     }
 
     /// <summary>The directory is under the system's temporary location, by the name given.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void The_directory_sits_beneath_the_system_temporary_location_under_its_own_name()
     {
         using CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
@@ -117,6 +119,7 @@ public sealed class CapTempDirTests
 
     /// <summary>Disposal removes the directory.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Disposal_removes_the_directory()
     {
         CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
@@ -124,11 +127,12 @@ public sealed class CapTempDirTests
 
         temp.Dispose();
 
-        Assert.False(Directory.Exists(path));
+        Assert.False(HostDirectory.Exists(path));
     }
 
     /// <summary>Disposal removes what is inside it, at every depth.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Disposal_removes_a_populated_tree()
     {
         CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
@@ -144,7 +148,7 @@ public sealed class CapTempDirTests
 
         temp.Dispose();
 
-        Assert.False(Directory.Exists(path));
+        Assert.False(HostDirectory.Exists(path));
     }
 
     /// <summary>A link in the tree is unlinked; what it points at is untouched.</summary>
@@ -154,33 +158,35 @@ public sealed class CapTempDirTests
     /// directory holds, so its survival is the whole assertion.
     /// </remarks>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Disposal_removes_a_link_without_reaching_what_it_points_at()
     {
-        string outside = Directory.CreateTempSubdirectory("cap-tempdir-victim-").FullName;
+        string outside = HostDirectory.CreateTempSubdirectory("cap-tempdir-victim-");
         try
         {
             string victim = Path.Combine(outside, "victim");
-            File.WriteAllText(victim, "must survive");
+            HostFile.WriteAllText(victim, "must survive");
 
             CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
             string path = HostPath(temp.Directory);
-            File.CreateSymbolicLink(Path.Join(path, "escape"), victim);
-            Directory.CreateSymbolicLink(Path.Join(path, "escape-dir"), outside);
+            HostFile.CreateSymbolicLink(Path.Join(path, "escape"), victim);
+            HostDirectory.CreateSymbolicLink(Path.Join(path, "escape-dir"), outside);
 
             temp.Dispose();
 
-            Assert.False(Directory.Exists(path));
-            Assert.True(File.Exists(victim));
-            Assert.True(Directory.Exists(outside));
+            Assert.False(HostDirectory.Exists(path));
+            Assert.True(HostFile.Exists(victim));
+            Assert.True(HostDirectory.Exists(outside));
         }
         finally
         {
-            Directory.Delete(outside, recursive: true);
+            HostDirectory.Delete(outside, recursive: true);
         }
     }
 
     /// <summary>Keeping a directory leaves it, and its contents, on the disk.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Keeping_a_directory_leaves_it_behind()
     {
         CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
@@ -192,16 +198,17 @@ public sealed class CapTempDirTests
 
         try
         {
-            Assert.True(File.Exists(Path.Combine(path, "evidence")));
+            Assert.True(HostFile.Exists(Path.Combine(path, "evidence")));
         }
         finally
         {
-            Directory.Delete(path, recursive: true);
+            HostDirectory.Delete(path, recursive: true);
         }
     }
 
     /// <summary>The switch keeps every directory in the process, without anybody asking per directory.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void The_persistence_switch_keeps_directories()
     {
         AppContext.SetSwitch(CapTempDir.PersistSwitchName, true);
@@ -213,14 +220,14 @@ public sealed class CapTempDirTests
             path = HostPath(temp.Directory);
             temp.Dispose();
 
-            Assert.True(Directory.Exists(path));
+            Assert.True(HostDirectory.Exists(path));
         }
         finally
         {
             AppContext.SetSwitch(CapTempDir.PersistSwitchName, false);
         }
 
-        Directory.Delete(path, recursive: true);
+        HostDirectory.Delete(path, recursive: true);
 
         // With the switch off again the next directory is removed as usual, which is what
         // makes the switch a switch rather than a change of behaviour for the rest of the run.
@@ -228,11 +235,12 @@ public sealed class CapTempDirTests
         string second = HostPath(after.Directory);
         after.Dispose();
 
-        Assert.False(Directory.Exists(second));
+        Assert.False(HostDirectory.Exists(second));
     }
 
     /// <summary>A scratch directory can be made inside a handle, with no ambient authority.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void A_scratch_directory_can_be_made_inside_a_handle()
     {
         using CapTempDir enclosing = CapTempDir.New(AmbientAuthority.Acquire());
@@ -246,7 +254,7 @@ public sealed class CapTempDirTests
             Assert.True(enclosing.Directory.Exists(inner.Name));
         }
 
-        Assert.False(Directory.Exists(path));
+        Assert.False(HostDirectory.Exists(path));
         Assert.True(enclosing.Directory.Exists("sibling"));
     }
 
@@ -257,6 +265,7 @@ public sealed class CapTempDirTests
     /// directory would silently depend on the lifetime of something it was only handed once.
     /// </remarks>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Closing_the_enclosing_handle_does_not_stop_the_cleanup()
     {
         using CapTempDir enclosing = CapTempDir.New(AmbientAuthority.Acquire());
@@ -268,12 +277,13 @@ public sealed class CapTempDirTests
 
         inner.Dispose();
 
-        Assert.False(Directory.Exists(path));
+        Assert.False(HostDirectory.Exists(path));
         Assert.False(enclosing.Directory.Exists(inner.Name));
     }
 
     /// <summary>Disposing twice does nothing the second time.</summary>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Disposing_twice_is_harmless()
     {
         CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
@@ -282,7 +292,7 @@ public sealed class CapTempDirTests
         temp.Dispose();
         temp.Dispose();
 
-        Assert.False(Directory.Exists(path));
+        Assert.False(HostDirectory.Exists(path));
     }
 
     /// <summary>The handle it hands out is confined to the directory, like any other.</summary>
@@ -303,17 +313,18 @@ public sealed class CapTempDirTests
     /// outcome and not a fault.
     /// </remarks>
     [Fact]
+    [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
     public void Disposal_is_quiet_when_the_directory_has_already_gone()
     {
         CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
         string path = HostPath(temp.Directory);
         temp.Directory.WriteAllBytes("contents", "contents"u8);
 
-        Directory.Delete(path, recursive: true);
+        HostDirectory.Delete(path, recursive: true);
 
         temp.Dispose();
 
-        Assert.False(Directory.Exists(path));
+        Assert.False(HostDirectory.Exists(path));
     }
 
     /// <summary>A default token is refused, as everywhere else that demands one.</summary>

@@ -34,7 +34,7 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Disposing_a_handle_does_not_invalidate_handles_derived_from_it()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child", "grandchild"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child", "grandchild"));
 
         Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         Dir child = root.OpenDir("child");
@@ -44,7 +44,7 @@ public sealed class DirLifetimeTests : IDisposable
         // The child was not reached through the parent; it is its own open directory, and
         // resolution from it has nothing to do with the handle it was derived from.
         using Dir grandchild = child.OpenDir("grandchild");
-        Assert.False(grandchild.UnsafeGetHandle().IsInvalid);
+        Assert.False(grandchild.Handle.IsInvalid);
 
         child.Dispose();
         grandchild.Dispose();
@@ -54,7 +54,7 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Disposing_a_handle_does_not_invalidate_a_copy_of_it()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
         Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir copy = root.Clone();
@@ -62,20 +62,20 @@ public sealed class DirLifetimeTests : IDisposable
         root.Dispose();
 
         using Dir child = copy.OpenDir("child");
-        Assert.False(child.UnsafeGetHandle().IsInvalid);
+        Assert.False(child.Handle.IsInvalid);
     }
 
     /// <summary>And the original outlives the copy, which is the same claim from the other side.</summary>
     [Fact]
     public void Disposing_a_copy_does_not_invalidate_the_handle_it_came_from()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         root.Clone().Dispose();
 
         using Dir child = root.OpenDir("child");
-        Assert.False(child.UnsafeGetHandle().IsInvalid);
+        Assert.False(child.Handle.IsInvalid);
     }
 
     /// <summary>Closing twice is not an error.</summary>
@@ -100,7 +100,7 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Operations_on_a_closed_handle_report_it()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
         Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         root.Dispose();
@@ -135,7 +135,7 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void A_handle_closed_part_way_through_a_call_is_reported_as_disposed()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
         CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(_tree.HostPath, CapAccess.Read);
         Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
@@ -168,8 +168,8 @@ public sealed class DirLifetimeTests : IDisposable
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
         using Dir copy = root.Clone();
 
-        SafeDirHandle original = (SafeDirHandle)root.UnsafeGetHandle();
-        SafeDirHandle duplicate = (SafeDirHandle)copy.UnsafeGetHandle();
+        SafeDirHandle original = root.Handle;
+        SafeDirHandle duplicate = copy.Handle;
 
         Assert.Equal(original.Access, duplicate.Access);
         Assert.NotEqual(original.DangerousGetHandle(), duplicate.DangerousGetHandle());
@@ -190,14 +190,14 @@ public sealed class DirLifetimeTests : IDisposable
     [Fact]
     public void Concurrent_use_of_one_handle_is_safe()
     {
-        Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child", "grandchild"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child", "grandchild"));
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
 
         Parallel.For(0, 128, iteration =>
         {
             using Dir child = root.OpenDir("child/grandchild");
-            Assert.False(child.UnsafeGetHandle().IsInvalid);
+            Assert.False(child.Handle.IsInvalid);
 
             using Dir copy = root.Clone();
             Assert.True(copy.TryOpenDir("child", out Dir? viaCopy));

@@ -50,7 +50,7 @@ public sealed class DirMutationTests : IDisposable
         using Dir root = OpenRoot();
         using Dir made = root.CreateDir("fresh");
 
-        Assert.True(Directory.Exists(Host("fresh")));
+        Assert.True(HostDirectory.Exists(Host("fresh")));
 
         using Dir reopened = root.OpenDir("fresh");
         Assert.True(made.TryClone(out Dir? copy));
@@ -61,12 +61,12 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_nested_name_is_created_beneath_directories_that_already_exist()
     {
-        Directory.CreateDirectory(Host("a", "b"));
+        HostDirectory.CreateDirectory(Host("a", "b"));
 
         using Dir root = OpenRoot();
         using Dir made = root.CreateDir("a/b/c");
 
-        Assert.True(Directory.Exists(Host("a", "b", "c")));
+        Assert.True(HostDirectory.Exists(Host("a", "b", "c")));
     }
 
     /// <summary>A directory above the new one has to exist already.</summary>
@@ -86,11 +86,11 @@ public sealed class DirMutationTests : IDisposable
     {
         if (kind == "directory")
         {
-            Directory.CreateDirectory(Host("taken"));
+            HostDirectory.CreateDirectory(Host("taken"));
         }
         else
         {
-            File.WriteAllText(Host("taken"), "contents");
+            HostFile.WriteAllText(Host("taken"), "contents");
         }
 
         using Dir root = OpenRoot();
@@ -105,20 +105,20 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void Opening_or_creating_accepts_a_directory_that_already_exists()
     {
-        Directory.CreateDirectory(Host("present"));
+        HostDirectory.CreateDirectory(Host("present"));
 
         using Dir root = OpenRoot();
         using Dir opened = root.OpenOrCreateDir("present");
         using Dir created = root.OpenOrCreateDir("other");
 
-        Assert.True(Directory.Exists(Host("other")));
+        Assert.True(HostDirectory.Exists(Host("other")));
     }
 
     /// <summary>It does not accept a name held by something that is not a directory.</summary>
     [Fact]
     public void Opening_or_creating_refuses_a_name_held_by_a_file()
     {
-        File.WriteAllText(Host("file"), "contents");
+        HostFile.WriteAllText(Host("file"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -136,8 +136,8 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void Opening_or_creating_refuses_a_symbolic_link_standing_in_for_the_directory()
     {
-        Directory.CreateDirectory(Host("real"));
-        Directory.CreateSymbolicLink(Host("link"), "real");
+        HostDirectory.CreateDirectory(Host("real"));
+        HostDirectory.CreateSymbolicLink(Host("link"), "real");
 
         using Dir root = OpenRoot();
 
@@ -150,12 +150,12 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_file_is_removed()
     {
-        File.WriteAllText(Host("doomed"), "contents");
+        HostFile.WriteAllText(Host("doomed"), "contents");
 
         using Dir root = OpenRoot();
         root.DeleteFile("doomed");
 
-        Assert.False(File.Exists(Host("doomed")));
+        Assert.False(HostFile.Exists(Host("doomed")));
     }
 
     /// <summary>A name that is not there is a failure, and the reporting form says so quietly.</summary>
@@ -172,13 +172,13 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void Removing_a_file_refuses_a_directory()
     {
-        Directory.CreateDirectory(Host("dir"));
+        HostDirectory.CreateDirectory(Host("dir"));
 
         using Dir root = OpenRoot();
 
         Exception thrown = Assert.ThrowsAny<IOException>(() => root.DeleteFile("dir"));
         Assert.IsNotType<SandboxEscapeException>(thrown);
-        Assert.True(Directory.Exists(Host("dir")));
+        Assert.True(HostDirectory.Exists(Host("dir")));
     }
 
     /// <summary>
@@ -192,22 +192,22 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void Removing_a_symbolic_link_removes_the_link_and_not_its_target()
     {
-        string outside = Path.Combine(Path.GetTempPath(), $"cap-outside-{Guid.NewGuid():N}");
-        File.WriteAllText(outside, "must survive");
+        string outside = Path.Combine(HostTree.Current.TemporaryLocation, $"cap-outside-{Guid.NewGuid():N}");
+        HostFile.WriteAllText(outside, "must survive");
 
         try
         {
-            File.CreateSymbolicLink(Host("escaping"), outside);
+            HostFile.CreateSymbolicLink(Host("escaping"), outside);
 
             using Dir root = OpenRoot();
             root.DeleteFile("escaping");
 
-            Assert.False(Path.Exists(Host("escaping")));
-            Assert.True(File.Exists(outside));
+            Assert.False(HostEntry.Exists(Host("escaping")));
+            Assert.True(HostFile.Exists(outside));
         }
         finally
         {
-            File.Delete(outside);
+            HostFile.Delete(outside);
         }
     }
 
@@ -220,66 +220,66 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_handle_that_refuses_to_follow_links_can_still_remove_one()
     {
-        File.CreateSymbolicLink(Host("link"), "target");
+        HostFile.CreateSymbolicLink(Host("link"), "target");
 
         using Dir root = OpenRoot();
         using Dir strict = root.Restrict(SymlinkPolicy.Deny);
 
         strict.DeleteFile("link");
 
-        Assert.False(Path.Exists(Host("link")));
+        Assert.False(HostEntry.Exists(Host("link")));
     }
 
     /// <summary>An empty directory is removed.</summary>
     [Fact]
     public void An_empty_directory_is_removed()
     {
-        Directory.CreateDirectory(Host("empty"));
+        HostDirectory.CreateDirectory(Host("empty"));
 
         using Dir root = OpenRoot();
         root.DeleteDir("empty");
 
-        Assert.False(Directory.Exists(Host("empty")));
+        Assert.False(HostDirectory.Exists(Host("empty")));
     }
 
     /// <summary>A directory with anything in it is not.</summary>
     [Fact]
     public void A_directory_with_entries_is_not_removed()
     {
-        Directory.CreateDirectory(Host("full"));
-        File.WriteAllText(Host("full", "entry"), "contents");
+        HostDirectory.CreateDirectory(Host("full"));
+        HostFile.WriteAllText(Host("full", "entry"), "contents");
 
         using Dir root = OpenRoot();
 
         Exception thrown = Assert.ThrowsAny<IOException>(() => root.DeleteDir("full"));
         Assert.IsNotType<SandboxEscapeException>(thrown);
-        Assert.True(Directory.Exists(Host("full")));
+        Assert.True(HostDirectory.Exists(Host("full")));
     }
 
     /// <summary>A link that points at a directory is not a directory.</summary>
     [Fact]
     public void Removing_a_directory_refuses_a_link_that_points_at_one()
     {
-        Directory.CreateDirectory(Host("real"));
-        Directory.CreateSymbolicLink(Host("link"), "real");
+        HostDirectory.CreateDirectory(Host("real"));
+        HostDirectory.CreateSymbolicLink(Host("link"), "real");
 
         using Dir root = OpenRoot();
 
         _ = Assert.ThrowsAny<IOException>(() => root.DeleteDir("link"));
-        Assert.True(Directory.Exists(Host("real")));
-        Assert.True(Path.Exists(Host("link")));
+        Assert.True(HostDirectory.Exists(Host("real")));
+        Assert.True(HostEntry.Exists(Host("link")));
     }
 
     /// <summary>A trailing separator insists on a directory, so it cannot remove a file.</summary>
     [Fact]
     public void A_name_spelled_as_a_directory_does_not_remove_a_file()
     {
-        File.WriteAllText(Host("file"), "contents");
+        HostFile.WriteAllText(Host("file"), "contents");
 
         using Dir root = OpenRoot();
 
         _ = Assert.ThrowsAny<IOException>(() => root.DeleteFile("file/"));
-        Assert.True(File.Exists(Host("file")));
+        Assert.True(HostFile.Exists(Host("file")));
     }
 
     // --- moving -------------------------------------------------------------------------------
@@ -288,22 +288,22 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void An_entry_is_moved_to_its_new_name()
     {
-        File.WriteAllText(Host("before"), "contents");
+        HostFile.WriteAllText(Host("before"), "contents");
 
         using Dir root = OpenRoot();
         root.Rename("before", root, "after");
 
-        Assert.False(File.Exists(Host("before")));
-        Assert.Equal("contents", File.ReadAllText(Host("after")));
+        Assert.False(HostFile.Exists(Host("before")));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("after")));
     }
 
     /// <summary>The destination handle need not be the source handle.</summary>
     [Fact]
     public void An_entry_is_moved_between_two_handles()
     {
-        Directory.CreateDirectory(Host("from"));
-        Directory.CreateDirectory(Host("to"));
-        File.WriteAllText(Host("from", "entry"), "contents");
+        HostDirectory.CreateDirectory(Host("from"));
+        HostDirectory.CreateDirectory(Host("to"));
+        HostFile.WriteAllText(Host("from", "entry"), "contents");
 
         using Dir root = OpenRoot();
         using Dir source = root.OpenDir("from");
@@ -311,23 +311,23 @@ public sealed class DirMutationTests : IDisposable
 
         source.Rename("entry", destination, "entry");
 
-        Assert.False(File.Exists(Host("from", "entry")));
-        Assert.Equal("contents", File.ReadAllText(Host("to", "entry")));
+        Assert.False(HostFile.Exists(Host("from", "entry")));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("to", "entry")));
     }
 
     /// <summary>By default a name already in use is not destroyed.</summary>
     [Fact]
     public void A_move_refuses_a_destination_that_is_taken()
     {
-        File.WriteAllText(Host("source"), "new");
-        File.WriteAllText(Host("destination"), "old");
+        HostFile.WriteAllText(Host("source"), "new");
+        HostFile.WriteAllText(Host("destination"), "old");
 
         using Dir root = OpenRoot();
 
         Exception thrown = Assert.ThrowsAny<IOException>(() => root.Rename("source", root, "destination"));
         Assert.IsNotType<SandboxEscapeException>(thrown);
-        Assert.Equal("old", File.ReadAllText(Host("destination")));
-        Assert.True(File.Exists(Host("source")));
+        Assert.Equal("old", HostFile.ReadAllText(Host("destination")));
+        Assert.True(HostFile.Exists(Host("source")));
     }
 
     /// <summary>
@@ -343,8 +343,8 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_name_spelled_as_a_directory_does_not_move_a_file()
     {
-        File.WriteAllText(Host("file"), "contents");
-        Directory.CreateDirectory(Host("dir"));
+        HostFile.WriteAllText(Host("file"), "contents");
+        HostDirectory.CreateDirectory(Host("dir"));
 
         using Dir root = OpenRoot();
 
@@ -352,25 +352,25 @@ public sealed class DirMutationTests : IDisposable
         Exception toFile = Assert.ThrowsAny<IOException>(() => root.Rename("file", root, "moved/"));
         Assert.IsType<CapIOException>(fromFile, exactMatch: true);
         Assert.IsType<CapIOException>(toFile, exactMatch: true);
-        Assert.True(File.Exists(Host("file")));
-        Assert.False(Path.Exists(Host("moved")));
+        Assert.True(HostFile.Exists(Host("file")));
+        Assert.False(HostEntry.Exists(Host("moved")));
 
         root.Rename("dir/", root, "moved/");
-        Assert.True(Directory.Exists(Host("moved")));
+        Assert.True(HostDirectory.Exists(Host("moved")));
     }
 
     /// <summary>Asking for replacement replaces, which is how a file is published atomically.</summary>
     [Fact]
     public void A_move_replaces_the_destination_when_asked_to()
     {
-        File.WriteAllText(Host("source"), "new");
-        File.WriteAllText(Host("destination"), "old");
+        HostFile.WriteAllText(Host("source"), "new");
+        HostFile.WriteAllText(Host("destination"), "old");
 
         using Dir root = OpenRoot();
         root.Rename("source", root, "destination", replaceExisting: true);
 
-        Assert.Equal("new", File.ReadAllText(Host("destination")));
-        Assert.False(File.Exists(Host("source")));
+        Assert.Equal("new", HostFile.ReadAllText(Host("destination")));
+        Assert.False(HostFile.Exists(Host("source")));
     }
 
     /// <summary>
@@ -390,10 +390,10 @@ public sealed class DirMutationTests : IDisposable
             Assert.Skip("Only Windows records a link to a directory as a directory entry.");
         }
 
-        Directory.CreateDirectory(Host("elsewhere"));
-        File.WriteAllText(Host("elsewhere", "inner"), "untouched");
-        Directory.CreateSymbolicLink(Host("destination"), "elsewhere");
-        File.WriteAllText(Host("source"), "new");
+        HostDirectory.CreateDirectory(Host("elsewhere"));
+        HostFile.WriteAllText(Host("elsewhere", "inner"), "untouched");
+        HostDirectory.CreateSymbolicLink(Host("destination"), "elsewhere");
+        HostFile.WriteAllText(Host("source"), "new");
 
         using Dir root = OpenRoot();
 
@@ -401,9 +401,9 @@ public sealed class DirMutationTests : IDisposable
             () => root.Rename("source", root, "destination", replaceExisting: true));
 
         Assert.Equal(CapErrorKind.SymbolicLink, thrown.Kind);
-        Assert.NotNull(new DirectoryInfo(Host("destination")).LinkTarget);
-        Assert.Equal("untouched", File.ReadAllText(Host("elsewhere", "inner")));
-        Assert.Equal("new", File.ReadAllText(Host("source")));
+        Assert.NotNull(HostEntry.LinkTarget(Host("destination")));
+        Assert.Equal("untouched", HostFile.ReadAllText(Host("elsewhere", "inner")));
+        Assert.Equal("new", HostFile.ReadAllText(Host("source")));
     }
 
     /// <summary>
@@ -417,8 +417,8 @@ public sealed class DirMutationTests : IDisposable
             Assert.Skip("Covers how this platform's refusal to move a file over a directory is reported.");
         }
 
-        Directory.CreateDirectory(Host("destination"));
-        File.WriteAllText(Host("source"), "new");
+        HostDirectory.CreateDirectory(Host("destination"));
+        HostFile.WriteAllText(Host("source"), "new");
 
         using Dir root = OpenRoot();
 
@@ -428,7 +428,7 @@ public sealed class DirMutationTests : IDisposable
         Assert.False(
             thrown is CapIOException { Kind: CapErrorKind.SymbolicLink },
             $"A plain directory was reported as a link: {thrown.Message}");
-        Assert.True(Directory.Exists(Host("destination")));
+        Assert.True(HostDirectory.Exists(Host("destination")));
     }
 
     /// <summary>A missing source is a missing thing, not an escape.</summary>
@@ -445,14 +445,14 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_directory_is_moved_with_its_contents()
     {
-        Directory.CreateDirectory(Host("before", "inner"));
-        File.WriteAllText(Host("before", "inner", "entry"), "contents");
+        HostDirectory.CreateDirectory(Host("before", "inner"));
+        HostFile.WriteAllText(Host("before", "inner", "entry"), "contents");
 
         using Dir root = OpenRoot();
         root.Rename("before", root, "after");
 
-        Assert.False(Directory.Exists(Host("before")));
-        Assert.Equal("contents", File.ReadAllText(Host("after", "inner", "entry")));
+        Assert.False(HostDirectory.Exists(Host("before")));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("after", "inner", "entry")));
     }
 
     /// <summary>
@@ -468,14 +468,14 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_move_of_a_directory_beneath_itself_is_refused()
     {
-        Directory.CreateDirectory(Host("outer", "inner"));
+        HostDirectory.CreateDirectory(Host("outer", "inner"));
 
         using Dir root = OpenRoot();
         using Dir inner = root.OpenDir("outer/inner");
 
         Exception thrown = Assert.ThrowsAny<IOException>(() => root.Rename("outer", inner, "swallowed"));
         Assert.IsNotType<SandboxEscapeException>(thrown);
-        Assert.True(Directory.Exists(Host("outer", "inner")));
+        Assert.True(HostDirectory.Exists(Host("outer", "inner")));
     }
 
     // --- linking ------------------------------------------------------------------------------
@@ -484,13 +484,13 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_symbolic_link_stores_its_target_verbatim()
     {
-        File.WriteAllText(Host("real"), "contents");
+        HostFile.WriteAllText(Host("real"), "contents");
 
         using Dir root = OpenRoot();
         root.CreateSymlink("alias", "real");
 
         Assert.Equal("real", root.ReadLink("alias"));
-        Assert.Equal("contents", File.ReadAllText(Host("alias")));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("alias")));
     }
 
     /// <summary>
@@ -530,7 +530,7 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_name_that_is_not_a_link_has_no_target()
     {
-        File.WriteAllText(Host("plain"), "contents");
+        HostFile.WriteAllText(Host("plain"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -543,26 +543,26 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_hard_link_is_a_second_name_for_the_same_object()
     {
-        File.WriteAllText(Host("original"), "contents");
+        HostFile.WriteAllText(Host("original"), "contents");
 
         using Dir root = OpenRoot();
         root.CreateHardLink("original", root, "second");
 
-        File.WriteAllText(Host("original"), "changed");
-        Assert.Equal("changed", File.ReadAllText(Host("second")));
+        HostFile.WriteAllText(Host("original"), "changed");
+        Assert.Equal("changed", HostFile.ReadAllText(Host("second")));
     }
 
     /// <summary>It never overwrites: a name in use is a failure.</summary>
     [Fact]
     public void A_hard_link_refuses_a_name_that_is_taken()
     {
-        File.WriteAllText(Host("original"), "contents");
-        File.WriteAllText(Host("taken"), "other");
+        HostFile.WriteAllText(Host("original"), "contents");
+        HostFile.WriteAllText(Host("taken"), "other");
 
         using Dir root = OpenRoot();
 
         _ = Assert.ThrowsAny<IOException>(() => root.CreateHardLink("original", root, "taken"));
-        Assert.Equal("other", File.ReadAllText(Host("taken")));
+        Assert.Equal("other", HostFile.ReadAllText(Host("taken")));
     }
 
     /// <summary>
@@ -575,7 +575,7 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_hard_link_to_a_directory_is_refused_as_what_it_is()
     {
-        Directory.CreateDirectory(Host("dir"));
+        HostDirectory.CreateDirectory(Host("dir"));
 
         using Dir root = OpenRoot();
 
@@ -583,7 +583,7 @@ public sealed class DirMutationTests : IDisposable
             Assert.ThrowsAny<Exception>(() => root.CreateHardLink("dir", root, "second")), exactMatch: true);
         Assert.IsType<CapIOException>(
             Assert.ThrowsAny<Exception>(() => root.CreateHardLink("dir/", root, "second")), exactMatch: true);
-        Assert.False(Path.Exists(Host("second")));
+        Assert.False(HostEntry.Exists(Host("second")));
     }
 
     // --- asking what is there -------------------------------------------------------------------
@@ -592,8 +592,8 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_name_that_is_taken_exists()
     {
-        File.WriteAllText(Host("file"), "contents");
-        Directory.CreateDirectory(Host("dir"));
+        HostFile.WriteAllText(Host("file"), "contents");
+        HostDirectory.CreateDirectory(Host("dir"));
 
         using Dir root = OpenRoot();
 
@@ -625,8 +625,8 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_name_spelled_as_a_directory_exists_only_when_it_is_one()
     {
-        File.WriteAllText(Host("file"), "contents");
-        Directory.CreateDirectory(Host("dir"));
+        HostFile.WriteAllText(Host("file"), "contents");
+        HostDirectory.CreateDirectory(Host("dir"));
 
         using Dir root = OpenRoot();
 
@@ -653,8 +653,8 @@ public sealed class DirMutationTests : IDisposable
     [InlineData("/etc/passwd")]
     public void Every_mutating_operation_refuses_a_path_that_leaves(string path)
     {
-        Directory.CreateDirectory(Host("a"));
-        File.WriteAllText(Host("subject"), "contents");
+        HostDirectory.CreateDirectory(Host("a"));
+        HostFile.WriteAllText(Host("subject"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -685,7 +685,7 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_refusal_names_the_argument_it_came_from()
     {
-        File.WriteAllText(Host("subject"), "contents");
+        HostFile.WriteAllText(Host("subject"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -718,14 +718,14 @@ public sealed class DirMutationTests : IDisposable
         Assert.Equal(
             "target",
             Assert.Throws<ArgumentException>(() => root.CreateDirSymlink("link", "plain\0")).ParamName);
-        Assert.False(Path.Exists(Host("link")));
+        Assert.False(HostEntry.Exists(Host("link")));
     }
 
     /// <summary>The reporting forms refuse the same paths, without building an exception.</summary>
     [Fact]
     public void The_reporting_forms_refuse_a_path_that_leaves_by_returning_false()
     {
-        File.WriteAllText(Host("subject"), "contents");
+        HostFile.WriteAllText(Host("subject"), "contents");
 
         using Dir root = OpenRoot();
 
@@ -746,21 +746,21 @@ public sealed class DirMutationTests : IDisposable
     [Fact]
     public void A_link_used_as_a_directory_component_cannot_carry_a_removal_outside()
     {
-        string outside = Directory.CreateTempSubdirectory("cap-outside-").FullName;
-        File.WriteAllText(Path.Combine(outside, "victim"), "must survive");
+        string outside = HostDirectory.CreateTempSubdirectory("cap-outside-");
+        HostFile.WriteAllText(Path.Combine(outside, "victim"), "must survive");
 
         try
         {
-            Directory.CreateSymbolicLink(Host("door"), outside);
+            HostDirectory.CreateSymbolicLink(Host("door"), outside);
 
             using Dir root = OpenRoot();
 
             _ = Assert.Throws<SandboxEscapeException>(() => root.DeleteFile("door/victim"));
-            Assert.True(File.Exists(Path.Combine(outside, "victim")));
+            Assert.True(HostFile.Exists(Path.Combine(outside, "victim")));
         }
         finally
         {
-            Directory.Delete(outside, recursive: true);
+            HostDirectory.Delete(outside, recursive: true);
         }
     }
 

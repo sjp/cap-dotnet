@@ -42,9 +42,20 @@ Windows attributes; renames with and without replacing the destination; the refu
 a directory that is not empty; and files that stay readable through an open handle after their
 name is removed. Where two answers are possible, it gives the one Linux gives.
 
+It is held to the disk's behaviour by the library's own tests. The suites for `Cap.Std`,
+`Cap.Fs.Ext` and the escape corpus, written against the disk, also run in continuous
+integration with this filesystem standing in for it, under Linux and Windows path rules, and
+resolving both ways. A place where it answers differently from the disk fails one of those
+tests.
+
 Permissions are recorded and reported but not enforced. The exception is the Windows
 read-only attribute, which, when the filesystem follows Windows rules, refuses removal of the
 name and refuses opening the file for writing, as it does on Windows.
+
+Turning appending on for an open file sends every later write through it, and through its
+copies and any stream taken from it, to the end, as Linux's append flag does. Under Windows
+rules appending applies only to the file's own writes, and `Dir.Flush(toDisk: true)` returns
+false, as they do on Windows.
 
 Reading never changes a file's access time, as on a filesystem mounted with `noatime`.
 Creating something stamps all four of its times. A write stamps the write and change times, and
