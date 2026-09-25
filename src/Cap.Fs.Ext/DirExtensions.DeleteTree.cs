@@ -30,6 +30,16 @@ namespace Cap.Fs.Ext;
 /// an entry created while it runs may or may not be removed. What it guarantees is that every
 /// one of those operations lands inside the subtree the handle covers.
 /// </para>
+/// <para>
+/// <strong>On a handle that is not a <see cref="Dir"/>.</strong> A <see cref="Dir"/> is removed
+/// through the core layer, which works on the raw handle. Any other <see cref="IDir"/> — a
+/// stub, or a wrapper — is removed with the same walk written against the interface: descent
+/// by opening each entry through the handle that listed it, refusing links, and removal by
+/// single name. The one difference is that the interface has no way to clear the Windows
+/// read-only mark, so an entry carrying it is reported as the failure the implementation gives
+/// and left in place, where a <see cref="Dir"/> would clear the mark and remove it. Failures
+/// from such a handle are the exceptions it threw, the first of them rethrown.
+/// </para>
 /// </remarks>
 public static partial class DirExtensions
 {
@@ -77,13 +87,26 @@ public static partial class DirExtensions
     /// The name holds something that is not a directory, or the tree could not be removed.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static void DeleteTree(this Dir dir, string path)
+    public static void DeleteTree(this IDir dir, string path)
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: true);
 
-        CapError error = location.Refusal.IsFailure
-            ? location.Refusal
-            : TreeRemoval.Remove(location.Directory, location.Name);
+        if (location.Refusal.IsFailure)
+        {
+            throw FailureTranslation.ToException(location.Refusal, path, ExpectedTarget.Directory);
+        }
+
+        if (location.Directory is not Dir concrete)
+        {
+            if (InterfaceTreeRemoval.Remove(location.Directory, location.Name, path) is { } failure)
+            {
+                InterfaceTreeRemoval.Rethrow(failure);
+            }
+
+            return;
+        }
+
+        CapError error = TreeRemoval.Remove(concrete, location.Name);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToException(error, path, ExpectedTarget.Directory);
@@ -120,11 +143,18 @@ public static partial class DirExtensions
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static bool TryDeleteTree(this Dir dir, string path)
+    public static bool TryDeleteTree(this IDir dir, string path)
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: true);
 
-        return location.Refusal.IsSuccess && TreeRemoval.Remove(location.Directory, location.Name).IsSuccess;
+        if (location.Refusal.IsFailure)
+        {
+            return false;
+        }
+
+        return location.Directory is Dir concrete
+            ? TreeRemoval.Remove(concrete, location.Name).IsSuccess
+            : InterfaceTreeRemoval.Remove(location.Directory, location.Name, path) is null;
     }
 
     /// <summary>
@@ -162,11 +192,21 @@ public static partial class DirExtensions
     /// <exception cref="UnauthorizedAccessException">The filesystem refused a removal.</exception>
     /// <exception cref="CapIOException">The directory could not be emptied.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static void DeleteTreeContents(this Dir dir)
+    public static void DeleteTreeContents(this IDir dir)
     {
         ArgumentNullException.ThrowIfNull(dir);
 
-        CapError error = TreeRemoval.Empty(dir);
+        if (dir is not Dir concrete)
+        {
+            if (InterfaceTreeRemoval.Empty(dir) is { } failure)
+            {
+                InterfaceTreeRemoval.Rethrow(failure);
+            }
+
+            return;
+        }
+
+        CapError error = TreeRemoval.Empty(concrete);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToEnumerationException(error);

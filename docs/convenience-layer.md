@@ -6,8 +6,10 @@ assembly on purpose. Every one of these is built entirely out of the core surfac
 an enumeration, a rename, an unlink — so the security-critical code stays small enough to
 read, and none of the convenience needs to be trusted to keep the containment promise.
 
-Everything here is an extension method on `Dir`. A `using Cap.Fs.Ext;` brings the whole set
-into view on a handle you already hold.
+Everything here is an extension method on `IDir`, which `Dir` implements. A
+`using Cap.Fs.Ext;` brings the whole set into view on a handle you already hold, and on a
+component that takes the interface so that a test can hand it something else. See
+[Handles that are not a `Dir`](#handles-that-are-not-a-dir) for what changes then.
 
 ```csharp
 using Cap.Std;
@@ -19,7 +21,7 @@ root.WriteAllTextAtomic("state.json", json);
 
 foreach (WalkEntry entry in root.Glob("logs/**/*.txt"))
 {
-    using CapFile file = entry.OpenFile();
+    using ICapFile file = entry.OpenFile();
     // ...
 }
 ```
@@ -43,6 +45,14 @@ directory and closed when the walk moves on, so an entry is usable during the it
 that produced it and not afterwards. To keep something, open it — `entry.OpenFile()`,
 `entry.OpenDir()` — or take a copy of the directory handle with `Clone()`, while the entry is
 current.
+
+A walk can start from any `IDir`, so `WalkEntry` gives its handles as the interfaces:
+`Directory` is an `IDir`, `Entry` an `IDirEntry`, and `OpenDir()` and `OpenFile()` return an
+`IDir` and an `ICapFile`. A walk that starts from a `Dir` reaches every level through `Dir`
+handles, so those are a `Dir`, a `DirEntry` and a `CapFile` underneath, and a caller that needs
+a member only the concrete type has can cast. Reading `Entry` boxes the entry; `Name`, `Type`
+and the open and describe members on `WalkEntry` do not, and are the ones to use in a loop over
+a large tree.
 
 ## Atomic writes
 
@@ -239,6 +249,40 @@ out, including the directories a search would otherwise descend into.
 A pattern is relative, like every other name this library takes. One that begins at a root, or
 that contains `..`, is refused when it is parsed: a pattern describes names beneath a
 directory, and a piece that climbed would describe names beside it.
+
+## Handles that are not a `Dir`
+
+Each helper accepts any `IDir`. Given a `Dir`, it works as the rest of this page describes,
+including the parts that reach below the public surface: tree removal through the raw handle,
+and the directory commit at the end of an atomic write. Given anything else, such as a
+wrapper that logs or meters what a component does or a stub in a unit test, it does the same
+work through the interface's own members. A walk, a copy and a tree removal still descend one
+handle at a time and use only single names against each handle, so a wrapper sees the same
+shape of calls a `Dir` would.
+
+A few things cannot be done or known through the interface, and change as follows:
+
+- **Tree removal cannot clear the Windows read-only mark.** A `Dir` clears it and retries when
+  the mark refuses a removal. Through the interface, the entry is left in place and the
+  implementation's own failure is reported, after the rest of the tree has been removed.
+  Failures are the exceptions the implementation threw, the first of them rethrown.
+- **The directory commit is `IDir.Flush(toDisk: true)`.** A false answer from it is accepted,
+  as it is on Windows.
+- **A copy can only preserve permissions onto a `Dir` or a `CapFile`.** No interface member
+  writes permissions, so `PreservePermissions` fails the copy with a `CapIOException` of kind
+  `NotSupported` when the destination hands back anything else.
+- **A copy into its own subtree may not be noticed early.** The check compares identities, and
+  identities from two handles are comparable only when both are `Dir` handles on one
+  filesystem, or both report a backend on the host's own filesystem. Otherwise the copy stops
+  when it reaches `MaxDepth`.
+- **Paths, patterns and the hidden attribute follow the machine.** A `Dir` says which path
+  syntax its filesystem uses, and a filesystem held in memory may use Windows rules anywhere.
+  The interface does not say, so for anything else the running machine's syntax is assumed.
+
+None of this adds a guarantee. The helpers are confined because the handle they work through
+is. Given a `Dir`, or something that forwards to one, they stay inside it. Given an
+implementation that resolves names some other way, they do whatever it does. See the
+[threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee).
 
 ## Asking what a name holds
 

@@ -142,7 +142,7 @@ public sealed class GlobTests : IDisposable
         {
             Assert.Equal("three.txt", entry.Name);
             Assert.Equal(3, entry.Depth);
-            using Cap.Std.CapFile file = entry.OpenFile();
+            using Cap.Std.ICapFile file = entry.OpenFile();
             Assert.Equal(8, file.Length);
         }
     }

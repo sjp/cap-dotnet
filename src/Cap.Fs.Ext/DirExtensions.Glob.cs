@@ -43,6 +43,11 @@ public static partial class DirExtensions
     /// directories the search would otherwise descend into.
     /// </para>
     /// <para>
+    /// The pattern's separators are the ones the handle reads a path with: its filesystem's
+    /// own for a <see cref="Dir"/>, and the machine's for any other <see cref="IDir"/>, which
+    /// has no way to say.
+    /// </para>
+    /// <para>
     /// Safe to enumerate any number of times from any number of threads at once, as a walk
     /// is; each enumerator is for one consumer at a time.
     /// </para>
@@ -65,14 +70,14 @@ public static partial class DirExtensions
     /// read.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static IEnumerable<WalkEntry> Glob(this Dir dir, string pattern, WalkOptions? options = null) =>
+    public static IEnumerable<WalkEntry> Glob(this IDir dir, string pattern, WalkOptions? options = null) =>
         Glob(dir, ParsePattern(dir, pattern), options);
 
     /// <summary>Reads a pattern given as text as the handle it will search beneath reads a path.</summary>
-    private static GlobPattern ParsePattern(Dir dir, string pattern)
+    private static GlobPattern ParsePattern(IDir dir, string pattern)
     {
         ArgumentNullException.ThrowIfNull(dir);
-        return GlobPattern.Parse(pattern, ignoreCase: false, dir.PathSyntax);
+        return GlobPattern.Parse(pattern, ignoreCase: false, Handles.SyntaxOf(dir));
     }
 
     /// <summary>
@@ -108,7 +113,7 @@ public static partial class DirExtensions
     /// read.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static IEnumerable<WalkEntry> Glob(this Dir dir, GlobPattern pattern, WalkOptions? options = null)
+    public static IEnumerable<WalkEntry> Glob(this IDir dir, GlobPattern pattern, WalkOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(dir);
         ArgumentNullException.ThrowIfNull(pattern);
@@ -117,7 +122,7 @@ public static partial class DirExtensions
         return Globbing(dir, pattern, settings);
     }
 
-    private static IEnumerable<WalkEntry> Globbing(Dir root, GlobPattern pattern, WalkOptions options)
+    private static IEnumerable<WalkEntry> Globbing(IDir root, GlobPattern pattern, WalkOptions options)
     {
         Descent descent = new(root, options, asynchronous: false);
 
@@ -127,14 +132,13 @@ public static partial class DirExtensions
 
             while (descent.Level is { } level)
             {
-                if (!level.Entries!.MoveNext())
+                if (!level.Reader.TryNext(out ListedEntry entry))
                 {
                     descent.Leave();
                     continue;
                 }
 
-                DirEntry entry = level.Entries.Current;
-                if (descent.Skips(entry))
+                if (descent.Skips(in entry))
                 {
                     continue;
                 }
@@ -151,7 +155,7 @@ public static partial class DirExtensions
                     // Nothing else is entered. A directory no remaining piece of the pattern
                     // could match through is not read at all, which is the whole difference
                     // between this and walking the tree and filtering afterwards.
-                    descent.Enter(entry, beneath);
+                    descent.Enter(in entry, beneath);
                 }
             }
         }

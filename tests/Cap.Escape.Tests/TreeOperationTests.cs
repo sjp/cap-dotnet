@@ -233,7 +233,7 @@ public sealed class TreeOperationTests
                 continue;
             }
 
-            using CapFile file = entry.OpenFile();
+            using ICapFile file = entry.OpenFile();
             observation.Objects.Add(file.GetMetadata().FileId);
             byte[] buffer = new byte[4096];
             observation.Contents.Add(System.Text.Encoding.UTF8.GetString(buffer, 0, file.Read(buffer, 0)));

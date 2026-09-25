@@ -44,6 +44,10 @@ new ReportIndex(reports.Object).Load();
 reports.Verify(dir => dir.ReadAllText("a.json"), Times.Once);
 ```
 
+The helpers in `Cap.Fs.Ext` (`Walk`, `Glob`, `CopyTo`, the atomic writes, `DeleteTree` and
+the rest) are extension methods on `IDir`, so a component that takes the interface keeps them,
+and a stub or a wrapper sees the individual calls each helper makes through it.
+
 A stub runs none of this library's resolution, so it cannot show that the component stays
 inside its directory. The in-memory filesystem can, so prefer it unless the test is about the
 calls themselves. The interfaces do not carry the containment guarantee, which belongs to

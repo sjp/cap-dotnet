@@ -45,7 +45,7 @@ public static partial class DirExtensions
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static bool IsDir(this Dir dir, string path) => Holds(dir, path, CapFileType.Directory);
+    public static bool IsDir(this IDir dir, string path) => Holds(dir, path, CapFileType.Directory);
 
     /// <summary>Whether a name beneath this handle currently holds an ordinary file.</summary>
     /// <param name="dir">The handle the path is relative to.</param>
@@ -65,7 +65,7 @@ public static partial class DirExtensions
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static bool IsFile(this Dir dir, string path) => Holds(dir, path, CapFileType.File);
+    public static bool IsFile(this IDir dir, string path) => Holds(dir, path, CapFileType.File);
 
     /// <summary>Whether a name beneath this handle currently holds a symbolic link.</summary>
     /// <param name="dir">The handle the path is relative to.</param>
@@ -85,10 +85,10 @@ public static partial class DirExtensions
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static bool IsSymlink(this Dir dir, string path) => Holds(dir, path, CapFileType.Symlink);
+    public static bool IsSymlink(this IDir dir, string path) => Holds(dir, path, CapFileType.Symlink);
 
     /// <summary>Whether the name holds the kind asked about.</summary>
-    private static bool Holds(Dir dir, string path, CapFileType type)
+    private static bool Holds(IDir dir, string path, CapFileType type)
     {
         ArgumentNullException.ThrowIfNull(dir);
         ArgumentNullException.ThrowIfNull(path);

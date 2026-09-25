@@ -98,6 +98,19 @@ public static partial class DirExtensions
     /// on disk, or the reverse. A destination on another backend cannot be inside the source,
     /// so that check is not made.
     /// </para>
+    /// <para>
+    /// <strong>Handles that are not a <see cref="Dir"/>.</strong> Either side may be any
+    /// <see cref="IDir"/>, and the copy uses only the interface's members on it. Whether the
+    /// destination lies inside the source is decided by comparing identities, which is done
+    /// only when both handles can be shown to number their objects the same way: two
+    /// <see cref="Dir"/> handles on one filesystem, or two handles of any kind that both report
+    /// a backend on the host's own filesystem. Otherwise the check is not made, and a copy into
+    /// its own subtree ends when it reaches <see cref="CopyOptions.MaxDepth"/>.
+    /// <see cref="CopyOptions.PreservePermissions"/> needs to write permissions, which no
+    /// member of the interface does, so it applies only to directories and files the
+    /// destination hands back as a <see cref="Dir"/> or a <see cref="CapFile"/>; for anything
+    /// else the copy fails rather than finish without the permissions it was asked to carry.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
@@ -111,10 +124,11 @@ public static partial class DirExtensions
     /// <exception cref="FileNotFoundException">An entry went away while it was being copied.</exception>
     /// <exception cref="CapIOException">
     /// The source holds something the options say to refuse, a destination name is already
-    /// taken, the destination lies inside the source, or the copy failed otherwise.
+    /// taken, the destination lies inside the source, permissions were to be preserved on a
+    /// destination that cannot take them, or the copy failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public static CopyReport CopyTo(this Dir dir, Dir destination, CopyOptions? options = null)
+    public static CopyReport CopyTo(this IDir dir, IDir destination, CopyOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(dir);
         ArgumentNullException.ThrowIfNull(destination);
@@ -154,7 +168,7 @@ public static partial class DirExtensions
         private int _skipped;
         private long _bytes;
 
-        public Copier(Dir source, Dir destination, CopyOptions options)
+        public Copier(IDir source, IDir destination, CopyOptions options)
         {
             _options = options;
 
@@ -162,15 +176,15 @@ public static partial class DirExtensions
             // one on disk, cannot be inside the source, and the two backends number their
             // objects independently, so an identity from one can equal an identity from the
             // other by coincidence. Comparing them would refuse a copy for no reason.
-            _destinationRoot = source.SharesBackendWith(destination)
+            _destinationRoot = Handles.ShareIdentities(source, destination)
                 ? destination.GetMetadata().FileId
                 : null;
             Destination = destination;
         }
 
-        private Dir Destination { get; }
+        private IDir Destination { get; }
 
-        public CopyReport Run(Dir source)
+        public CopyReport Run(IDir source)
         {
             try
             {
@@ -179,7 +193,7 @@ public static partial class DirExtensions
                 while (_levels.Count > 0)
                 {
                     CopyLevel level = _levels[^1];
-                    if (!level.Entries.MoveNext())
+                    if (!level.Reader.MoveNext())
                     {
                         _levels.RemoveAt(_levels.Count - 1);
                         try
@@ -194,7 +208,7 @@ public static partial class DirExtensions
                         continue;
                     }
 
-                    Copy(level, level.Entries.Current);
+                    Copy(level, level.Reader.Current);
                 }
             }
             finally
@@ -218,7 +232,7 @@ public static partial class DirExtensions
         /// an earlier instant, while the permissions the copy may be about to carry across
         /// have to be read now anyway. One lookup answers both.
         /// </remarks>
-        private void Copy(CopyLevel level, DirEntry entry)
+        private void Copy(CopyLevel level, ListedEntry entry)
         {
             CapMetadata metadata = entry.GetMetadata();
 
@@ -243,12 +257,12 @@ public static partial class DirExtensions
         }
 
         /// <summary>Creates the matching directory in the destination and goes into both.</summary>
-        private void Descend(CopyLevel level, DirEntry entry, in CapMetadata metadata)
+        private void Descend(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
         {
-            Dir source = entry.OpenDir();
+            IDir source = entry.OpenDir();
 
             bool kept = false;
-            Dir? target = null;
+            IDir? target = null;
             try
             {
                 if (_destinationRoot is { } destinationRoot && source.GetMetadata().FileId == destinationRoot)
@@ -297,9 +311,9 @@ public static partial class DirExtensions
         /// name and moved onto the real one. Either way nothing already at the name is written
         /// through, so a link there cannot steer the contents into whatever it points at.
         /// </remarks>
-        private void CopyFile(CopyLevel level, DirEntry entry, in CapMetadata metadata)
+        private void CopyFile(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
         {
-            using CapFile source = entry.OpenFile(
+            using ICapFile source = entry.OpenFile(
                 FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.SequentialScan, 0);
 
             if (_options.Overwrite)
@@ -308,7 +322,7 @@ public static partial class DirExtensions
             }
             else
             {
-                using CapFile target = level.Destination.CreateNewFile(entry.Name);
+                using ICapFile target = level.Destination.CreateNewFile(entry.Name);
                 Fill(source, target, metadata, entry.Name);
             }
 
@@ -331,7 +345,7 @@ public static partial class DirExtensions
         /// been told to replace files still has no business deciding to replace a directory.
         /// </para>
         /// </remarks>
-        private void Replace(Dir directory, string name, CapFile source, in CapMetadata metadata)
+        private void Replace(IDir directory, string name, ICapFile source, in CapMetadata metadata)
         {
             if (directory.TryGetMetadata(name, out CapMetadata existing) &&
                 existing.Type == CapFileType.Directory)
@@ -343,7 +357,7 @@ public static partial class DirExtensions
                     $"first if it is meant to go.");
             }
 
-            string? scratch = Claim(directory, asynchronous: false, out CapFile target);
+            string? scratch = Claim(directory, asynchronous: false, out ICapFile target);
             try
             {
                 using (target)
@@ -367,13 +381,15 @@ public static partial class DirExtensions
         /// The times are set last, after every write, so that nothing written afterwards moves
         /// them on again.
         /// </remarks>
-        private void Fill(CapFile source, CapFile target, in CapMetadata metadata, string name)
+        private void Fill(ICapFile source, ICapFile target, in CapMetadata metadata, string name)
         {
             _bytes += Transfer(source, target);
 
             if (_options.PreservePermissions)
             {
-                Demand(target.SetPermissions(metadata.Permissions), name);
+                Demand(
+                    (target as CapFile ?? throw CannotSetPermissions(name)).SetPermissions(metadata.Permissions),
+                    name);
             }
 
             if (_options.PreserveTimes)
@@ -386,7 +402,7 @@ public static partial class DirExtensions
         /// <summary>Deals with an entry that is neither a file nor a directory.</summary>
         private void Irregular(
             CopyLevel level,
-            DirEntry entry,
+            ListedEntry entry,
             in CapMetadata metadata,
             CopyAction action,
             bool recreate)
@@ -433,11 +449,11 @@ public static partial class DirExtensions
         /// absent, which is the same answer arrived at by asking.
         /// </para>
         /// </remarks>
-        private void Relink(CopyLevel level, DirEntry entry, in CapMetadata metadata)
+        private void Relink(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
         {
             string target = level.Source.ReadLink(entry.Name);
 
-            if (CapPath.IsRooted(target, level.Destination.PathSyntax))
+            if (CapPath.IsRooted(target, Handles.SyntaxOf(level.Destination)))
             {
                 throw new SandboxEscapeException(
                     $"'{entry.Name}' is a symbolic link to '{target}', which is rooted, and a link " +
@@ -475,13 +491,31 @@ public static partial class DirExtensions
         }
 
         /// <summary>Carries the source's permissions onto a copied directory, if asked.</summary>
-        private void Apply(Dir target, in CapMetadata metadata, string name)
+        private void Apply(IDir target, in CapMetadata metadata, string name)
         {
             if (_options.PreservePermissions)
             {
-                Demand(target.SetPermissions(metadata.Permissions), name);
+                Demand(
+                    (target as Dir ?? throw CannotSetPermissions(name)).SetPermissions(metadata.Permissions),
+                    name);
             }
         }
+
+        /// <summary>
+        /// Refuses to carry permissions onto a destination handle that has no way to take them.
+        /// </summary>
+        /// <remarks>
+        /// Writing permissions is not something the interfaces offer, so only a handle this
+        /// library opened itself can be given them. Anything else is refused for the reason
+        /// <see cref="Demand"/> reports a refusal: finishing without the permissions would look
+        /// like success.
+        /// </remarks>
+        private static CapIOException CannotSetPermissions(string name) =>
+            new(
+                CapErrorKind.NotSupported,
+                $"'{name}' could not be given the source's permissions: the destination handle " +
+                $"is not one this library opened, and permissions can only be written through " +
+                $"one that is. Copy without preserving permissions, or copy into a Dir.");
 
         /// <summary>
         /// Gives a copied directory the source's times, if asked, once everything inside it
@@ -522,7 +556,7 @@ public static partial class DirExtensions
         /// shared state and a short read is handled as what it is: the amount available now,
         /// and not a statement about what follows.
         /// </remarks>
-        private static long Transfer(CapFile source, CapFile target)
+        private static long Transfer(ICapFile source, ICapFile target)
         {
             byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
             try
@@ -546,7 +580,7 @@ public static partial class DirExtensions
             }
         }
 
-        private void Push(Dir source, Dir destination, bool ownsSource, bool ownsDestination, CapMetadata? times) =>
+        private void Push(IDir source, IDir destination, bool ownsSource, bool ownsDestination, CapMetadata? times) =>
             _levels.Add(new CopyLevel(source, destination, ownsSource, ownsDestination, times));
     }
 
@@ -556,21 +590,21 @@ public static partial class DirExtensions
         private readonly bool _ownsSource;
         private readonly bool _ownsDestination;
 
-        public CopyLevel(Dir source, Dir destination, bool ownsSource, bool ownsDestination, CapMetadata? times)
+        public CopyLevel(IDir source, IDir destination, bool ownsSource, bool ownsDestination, CapMetadata? times)
         {
             Source = source;
             Destination = destination;
             Times = times;
             _ownsSource = ownsSource;
             _ownsDestination = ownsDestination;
-            Entries = source.EnumerateEntries().GetEnumerator();
+            Reader = EntryReader.Open(source);
         }
 
         /// <summary>The directory being read.</summary>
-        public Dir Source { get; }
+        public IDir Source { get; }
 
         /// <summary>The directory being written.</summary>
-        public Dir Destination { get; }
+        public IDir Destination { get; }
 
         /// <summary>
         /// The source directory's description, whose times the destination is given when it
@@ -579,11 +613,11 @@ public static partial class DirExtensions
         public CapMetadata? Times { get; }
 
         /// <summary>The reading in progress.</summary>
-        public IEnumerator<DirEntry> Entries { get; }
+        public EntryReader Reader { get; }
 
         public void Dispose()
         {
-            Entries.Dispose();
+            Reader.Dispose();
 
             if (_ownsSource)
             {

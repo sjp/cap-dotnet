@@ -80,7 +80,7 @@ public static partial class DirExtensions
     /// read.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static IEnumerable<WalkEntry> Walk(this Dir dir, WalkOptions? options = null)
+    public static IEnumerable<WalkEntry> Walk(this IDir dir, WalkOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(dir);
         WalkOptions settings = Demand(options);
@@ -123,7 +123,7 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IAsyncEnumerable<WalkEntry> WalkAsync(
-        this Dir dir,
+        this IDir dir,
         WalkOptions? options = null,
         CancellationToken cancellationToken = default)
     {
@@ -141,7 +141,7 @@ public static partial class DirExtensions
         return settings;
     }
 
-    private static IEnumerable<WalkEntry> Walking(Dir root, WalkOptions options)
+    private static IEnumerable<WalkEntry> Walking(IDir root, WalkOptions options)
     {
         Descent descent = new(root, options, asynchronous: false);
 
@@ -149,21 +149,20 @@ public static partial class DirExtensions
         {
             while (descent.Level is { } level)
             {
-                if (!level.Entries!.MoveNext())
+                if (!level.Reader.TryNext(out ListedEntry entry))
                 {
                     descent.Leave();
                     continue;
                 }
 
-                DirEntry entry = level.Entries.Current;
-                if (descent.Skips(entry))
+                if (descent.Skips(in entry))
                 {
                     continue;
                 }
 
                 yield return new WalkEntry(level.Directory, entry, descent.Depth);
 
-                descent.Enter(entry);
+                descent.Enter(in entry);
             }
         }
         finally
@@ -173,7 +172,7 @@ public static partial class DirExtensions
     }
 
     private static async IAsyncEnumerable<WalkEntry> WalkingAsync(
-        Dir root,
+        IDir root,
         WalkOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -183,21 +182,21 @@ public static partial class DirExtensions
         {
             while (descent.Level is { } level)
             {
-                if (!await level.AsyncEntries!.MoveNextAsync().ConfigureAwait(false))
+                if (!await level.Reader.MoveNextAsync().ConfigureAwait(false))
                 {
                     await descent.LeaveAsync().ConfigureAwait(false);
                     continue;
                 }
 
-                DirEntry entry = level.AsyncEntries.Current;
-                if (descent.Skips(entry))
+                ListedEntry entry = level.Reader.Current;
+                if (descent.Skips(in entry))
                 {
                     continue;
                 }
 
                 yield return new WalkEntry(level.Directory, entry, descent.Depth);
 
-                descent.Enter(entry);
+                descent.Enter(in entry);
             }
         }
         finally
@@ -234,7 +233,7 @@ public static partial class DirExtensions
         private readonly HashSet<CapFileId>? _entered;
 
         public Descent(
-            Dir root,
+            IDir root,
             WalkOptions options,
             bool asynchronous,
             CancellationToken cancellationToken = default)
@@ -258,7 +257,7 @@ public static partial class DirExtensions
         public int Depth => _levels.Count;
 
         /// <summary>Whether an entry is one the caller asked not to see.</summary>
-        public bool Skips(DirEntry entry) => _options.SkipHidden && IsHidden(entry);
+        public bool Skips(in ListedEntry entry) => _options.SkipHidden && IsHidden(_levels[^1].Directory, in entry);
 
         /// <summary>
         /// Descends into an entry, if it is something to descend into and the walk may go
@@ -285,9 +284,9 @@ public static partial class DirExtensions
         /// was never going to happen.
         /// </para>
         /// </remarks>
-        public void Enter(DirEntry entry, int[]? states = null)
+        public void Enter(in ListedEntry entry, int[]? states = null)
         {
-            if (!MayDescend(entry.Type) || !TryOpen(entry, out Dir? child))
+            if (!MayDescend(entry.Type) || !TryOpen(in entry, out IDir? child))
             {
                 return;
             }
@@ -378,23 +377,41 @@ public static partial class DirExtensions
         };
 
         /// <summary>Opens an entry as the next level down, following a link only when asked to.</summary>
-        private bool TryOpen(DirEntry entry, [NotNullWhen(true)] out Dir? child) =>
-            _options.FollowSymlinks
-                ? entry.TryOpenDir(out child)
-                : _levels[^1].Directory.TryOpenDirRefusingLinks(entry.Name, out child);
+        /// <remarks>
+        /// A <see cref="Dir"/> refuses a link anywhere in the resolution. Any other handle is
+        /// asked not to follow one at the last component, which for the single name used here
+        /// is the whole of the resolution.
+        /// </remarks>
+        private bool TryOpen(in ListedEntry entry, [NotNullWhen(true)] out IDir? child)
+        {
+            if (_options.FollowSymlinks)
+            {
+                return entry.TryOpenDir(out child);
+            }
+
+            IDir directory = _levels[^1].Directory;
+            if (directory is Dir concrete)
+            {
+                bool opened = concrete.TryOpenDirRefusingLinks(entry.Name, out Dir? strict);
+                child = strict;
+                return opened;
+            }
+
+            return directory.TryOpenDir(entry.Name, noFollow: true, out child);
+        }
 
         /// <summary>Opens a directory's entries and makes it the level the walk is reading.</summary>
-        private void Push(Dir directory, bool owned, int[]? states)
+        private void Push(IDir directory, bool owned, int[]? states)
         {
             CapFileId id = _entered is null ? default : directory.GetMetadata().FileId;
 
-            WalkLevel level = _asynchronous
-                ? new WalkLevel(
-                    directory,
-                    owned,
-                    id,
-                    directory.EnumerateEntriesAsync(_cancellationToken).GetAsyncEnumerator(_cancellationToken))
-                : new WalkLevel(directory, owned, id, directory.EnumerateEntries().GetEnumerator());
+            WalkLevel level = new(
+                directory,
+                owned,
+                id,
+                _asynchronous
+                    ? EntryReader.OpenAsync(directory, _cancellationToken)
+                    : EntryReader.Open(directory));
 
             level.States = states;
             _levels.Add(level);
@@ -413,14 +430,14 @@ public static partial class DirExtensions
         /// running machine's, since a filesystem held in memory can keep Windows attributes on
         /// a machine that is not Windows.
         /// </remarks>
-        private static bool IsHidden(DirEntry entry)
+        private static bool IsHidden(IDir directory, in ListedEntry entry)
         {
             if (entry.Name.StartsWith('.'))
             {
                 return true;
             }
 
-            if (entry.Owner.PathSyntax != CapPathSyntax.Windows || !entry.TryGetMetadata(out CapMetadata metadata))
+            if (Handles.SyntaxOf(directory) != CapPathSyntax.Windows || !entry.TryGetMetadata(out CapMetadata metadata))
             {
                 return false;
             }
@@ -435,24 +452,19 @@ public static partial class DirExtensions
     {
         private readonly bool _owned;
 
-        public WalkLevel(Dir directory, bool owned, CapFileId id, IEnumerator<DirEntry> entries)
-        {
-            Directory = directory;
-            _owned = owned;
-            Id = id;
-            Entries = entries;
-        }
+        /// <summary>The reading in progress, in whichever form the walk reads.</summary>
+        private readonly EntryReader _reader;
 
-        public WalkLevel(Dir directory, bool owned, CapFileId id, IAsyncEnumerator<DirEntry> entries)
+        public WalkLevel(IDir directory, bool owned, CapFileId id, EntryReader reader)
         {
             Directory = directory;
             _owned = owned;
             Id = id;
-            AsyncEntries = entries;
+            _reader = reader;
         }
 
         /// <summary>The directory, open for as long as the walk is inside it.</summary>
-        public Dir Directory { get; }
+        public IDir Directory { get; }
 
         /// <summary>Its identity, kept only when the walk is watching for cycles.</summary>
         public CapFileId Id { get; }
@@ -469,11 +481,8 @@ public static partial class DirExtensions
         /// </remarks>
         public int[]? States { get; set; }
 
-        /// <summary>The reading in progress, for a walk that reads on the calling thread.</summary>
-        public IEnumerator<DirEntry>? Entries { get; }
-
-        /// <summary>The reading in progress, for a walk that does not.</summary>
-        public IAsyncEnumerator<DirEntry>? AsyncEntries { get; }
+        /// <summary>The reading in progress, reached in place rather than copied out per entry.</summary>
+        public ref readonly EntryReader Reader => ref _reader;
 
         /// <summary>Stops the reading and closes the directory, if this level opened it.</summary>
         /// <remarks>
@@ -483,19 +492,14 @@ public static partial class DirExtensions
         /// </remarks>
         public void Dispose()
         {
-            Entries?.Dispose();
+            Reader.Dispose();
             Close();
         }
 
         /// <summary>Stops the reading and closes the directory, waiting for the reading to stop.</summary>
         public async ValueTask DisposeAsync()
         {
-            Entries?.Dispose();
-            if (AsyncEntries is not null)
-            {
-                await AsyncEntries.DisposeAsync().ConfigureAwait(false);
-            }
-
+            await Reader.DisposeAsync().ConfigureAwait(false);
             Close();
         }
 

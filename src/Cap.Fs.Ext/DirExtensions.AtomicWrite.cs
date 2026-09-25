@@ -70,6 +70,12 @@ public static partial class DirExtensions
     /// file is created exclusively, so a link planted at its name makes the creation fail
     /// rather than redirecting it.
     /// </para>
+    /// <para>
+    /// <strong>On a handle that is not a <see cref="Dir"/>.</strong> The same steps are taken
+    /// through the interface's members, and the directory is committed with
+    /// <see cref="IDir.Flush"/>, whose answer that it cannot commit one is accepted as it is
+    /// on Windows.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
@@ -83,14 +89,14 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static void WriteAllBytesAtomic(
-        this Dir dir,
+        this IDir dir,
         string path,
         ReadOnlySpan<byte> bytes,
         Durability durability = Durability.FileAndDirectory)
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
 
-        string? scratch = Claim(location.Directory, asynchronous: false, out CapFile file);
+        string? scratch = Claim(location.Directory, asynchronous: false, out ICapFile file);
         try
         {
             using (file)
@@ -143,7 +149,7 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static void WriteAllTextAtomic(
-        this Dir dir,
+        this IDir dir,
         string path,
         string contents,
         Durability durability = Durability.FileAndDirectory)
@@ -195,6 +201,12 @@ public static partial class DirExtensions
     /// file is created exclusively, so a link planted at its name makes the creation fail
     /// rather than redirecting it.
     /// </para>
+    /// <para>
+    /// <strong>On a handle that is not a <see cref="Dir"/>.</strong> The same steps are taken
+    /// through the interface's members, and the directory is committed with
+    /// <see cref="IDir.Flush"/>, whose answer that it cannot commit one is accepted as it is
+    /// on Windows.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
@@ -209,7 +221,7 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static async Task WriteAllBytesAtomicAsync(
-        this Dir dir,
+        this IDir dir,
         string path,
         ReadOnlyMemory<byte> bytes,
         Durability durability = Durability.FileAndDirectory,
@@ -217,7 +229,7 @@ public static partial class DirExtensions
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
 
-        string? scratch = Claim(location.Directory, asynchronous: true, out CapFile file);
+        string? scratch = Claim(location.Directory, asynchronous: true, out ICapFile file);
         try
         {
             using (file)
@@ -269,7 +281,7 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static Task WriteAllTextAtomicAsync(
-        this Dir dir,
+        this IDir dir,
         string path,
         string contents,
         Durability durability = Durability.FileAndDirectory,
@@ -305,7 +317,7 @@ public static partial class DirExtensions
     /// mount — is reported as that reason rather than as an improbable run of collisions.
     /// </para>
     /// </remarks>
-    private static string Claim(Dir directory, bool asynchronous, out CapFile file)
+    private static string Claim(IDir directory, bool asynchronous, out ICapFile file)
     {
         FileOptions options = asynchronous ? FileOptions.Asynchronous : FileOptions.None;
 
@@ -314,7 +326,7 @@ public static partial class DirExtensions
             string candidate = TemporaryNames.Next();
             if (directory.TryOpenFile(
                     candidate, FileMode.CreateNew, FileAccess.Write, FileShare.Read, options, 0,
-                    append: false, noFollow: false, out CapFile? created))
+                    append: false, noFollow: false, out ICapFile? created))
             {
                 file = created;
                 return candidate;
@@ -327,7 +339,7 @@ public static partial class DirExtensions
     }
 
     /// <summary>Commits the contents, if the caller asked for the contents to be committed.</summary>
-    private static void Commit(CapFile file, Durability durability)
+    private static void Commit(ICapFile file, Durability durability)
     {
         if (durability != Durability.None)
         {
@@ -350,8 +362,14 @@ public static partial class DirExtensions
     /// the setting they chose, that this step does not happen there. Every other failure is
     /// reported, because it means the directory could have been committed and was not.
     /// </para>
+    /// <para>
+    /// A <see cref="Dir"/> is committed directly, so a failure names the file being published.
+    /// Any other handle is asked through <see cref="IDir.Flush"/>, whose false answer is the
+    /// same "no way to commit a directory here" and is accepted in the same way; a failure is
+    /// whatever that implementation throws.
+    /// </para>
     /// </remarks>
-    private static void Publish(Dir directory, string scratch, string name, Durability durability)
+    private static void Publish(IDir directory, string scratch, string name, Durability durability)
     {
         directory.Rename(scratch, directory, name, replaceExisting: true);
 
@@ -360,7 +378,13 @@ public static partial class DirExtensions
             return;
         }
 
-        CapError synced = directory.SyncContents();
+        if (directory is not Dir concrete)
+        {
+            _ = directory.Flush(toDisk: true);
+            return;
+        }
+
+        CapError synced = concrete.SyncContents();
         if (synced.IsFailure && synced.Category != CapErrorCategory.NotSupported)
         {
             throw FailureTranslation.ToException(synced, name, ExpectedTarget.Name);
@@ -374,7 +398,7 @@ public static partial class DirExtensions
     /// is a stray file rather than a reason to replace that exception with one about tidying
     /// up.
     /// </remarks>
-    private static void Abandon(Dir directory, string? scratch)
+    private static void Abandon(IDir directory, string? scratch)
     {
         if (scratch is not null)
         {

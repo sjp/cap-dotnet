@@ -21,9 +21,17 @@ namespace Cap.Fs.Ext;
 /// walk is inside that directory, and the walk closes it when it moves on — so an entry kept
 /// past the iteration step that produced it refers to a handle that has been disposed. Acting
 /// on an entry means acting on it now: open what it names, or describe it, or take a copy of
-/// the directory handle with <see cref="Cap.Std.Dir.Clone"/>, while the entry is the one the
+/// the directory handle with <see cref="IDir.Clone"/>, while the entry is the one the
 /// walk has just yielded. Collecting the entries into a list and using them afterwards does
 /// not work, and that is the type saying what a walk over handles actually is.
+/// </para>
+/// <para>
+/// <strong>Handles are typed as the interfaces.</strong> A walk may start from any
+/// <see cref="IDir"/>, so the directory, the entry and whatever is opened from it are given
+/// as <see cref="IDir"/>, <see cref="IDirEntry"/> and <see cref="ICapFile"/>. A walk that
+/// started from a <see cref="Dir"/> reaches every level through <see cref="Dir"/> handles, so
+/// what those members return is a <see cref="Dir"/> or a <see cref="CapFile"/> underneath,
+/// and a caller that needs a member only the concrete type has may cast to it.
 /// </para>
 /// <para>
 /// <strong>Immutable.</strong> An entry is a read-only value; nothing about it changes after
@@ -32,13 +40,14 @@ namespace Cap.Fs.Ext;
 /// </remarks>
 public readonly struct WalkEntry
 {
-    private readonly Dir? _directory;
+    private readonly IDir? _directory;
+    private readonly ListedEntry _entry;
     private readonly int _depth;
 
-    internal WalkEntry(Dir directory, DirEntry entry, int depth)
+    internal WalkEntry(IDir directory, ListedEntry entry, int depth)
     {
         _directory = directory;
-        Entry = entry;
+        _entry = entry;
         _depth = depth;
     }
 
@@ -60,7 +69,7 @@ public readonly struct WalkEntry
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no walk.</exception>
-    public Dir Directory =>
+    public IDir Directory =>
         _directory ??
         throw new InvalidOperationException(
             "This entry did not come from a walk, so there is no handle to open it through. " +
@@ -68,10 +77,17 @@ public readonly struct WalkEntry
 
     /// <summary>The entry itself, as reading the directory produced it.</summary>
     /// <remarks>
+    /// <para>
     /// Safe to read from any thread. It opens through <see cref="Directory"/>, so it is
     /// usable only while that handle is.
+    /// </para>
+    /// <para>
+    /// For a walk over a <see cref="Dir"/> this is a <see cref="DirEntry"/>, and reading this
+    /// property boxes it. The members on this type answer without doing so, and are the ones
+    /// to use in a loop over a large tree.
+    /// </para>
     /// </remarks>
-    public DirEntry Entry { get; }
+    public IDirEntry Entry => _entry.AsInterface();
 
     /// <summary>The entry's name: a single component, as the filesystem stores it.</summary>
     /// <remarks>
@@ -81,7 +97,7 @@ public readonly struct WalkEntry
     /// target's.
     /// </para>
     /// </remarks>
-    public string Name => Entry.Name;
+    public string Name => _entry.Name;
 
     /// <summary>What the entry is, as the directory read reported it.</summary>
     /// <remarks>
@@ -96,7 +112,7 @@ public readonly struct WalkEntry
     /// it.
     /// </para>
     /// </remarks>
-    public CapFileType Type => Entry.Type;
+    public CapFileType Type => _entry.Type;
 
     /// <summary>
     /// How far below the directory the walk started at this entry is.
@@ -138,7 +154,7 @@ public readonly struct WalkEntry
     /// <exception cref="DirectoryNotFoundException">The entry is gone, or was never a directory.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="ObjectDisposedException">The walk has moved past this entry.</exception>
-    public Dir OpenDir() => Entry.OpenDir();
+    public IDir OpenDir() => _entry.OpenDir();
 
     /// <summary>Opens the entry as a directory, reporting failure rather than throwing.</summary>
     /// <param name="dir">The open directory, when this returns true.</param>
@@ -158,7 +174,7 @@ public readonly struct WalkEntry
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no walk.</exception>
     /// <exception cref="ObjectDisposedException">The walk has moved past this entry.</exception>
-    public bool TryOpenDir([NotNullWhen(true)] out Dir? dir) => Entry.TryOpenDir(out dir);
+    public bool TryOpenDir([NotNullWhen(true)] out IDir? dir) => _entry.TryOpenDir(out dir);
 
     /// <summary>Opens the entry as a file to read.</summary>
     /// <returns>The open file.</returns>
@@ -181,7 +197,7 @@ public readonly struct WalkEntry
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">The name holds a directory, or the open failed otherwise.</exception>
     /// <exception cref="ObjectDisposedException">The walk has moved past this entry.</exception>
-    public CapFile OpenFile() => Entry.OpenFile();
+    public ICapFile OpenFile() => _entry.OpenFile();
 
     /// <summary>Opens the entry as a file to read, reporting failure rather than throwing.</summary>
     /// <param name="file">The open file, when this returns true.</param>
@@ -201,7 +217,7 @@ public readonly struct WalkEntry
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no walk.</exception>
     /// <exception cref="ObjectDisposedException">The walk has moved past this entry.</exception>
-    public bool TryOpenFile([NotNullWhen(true)] out CapFile? file) => Entry.TryOpenFile(out file);
+    public bool TryOpenFile([NotNullWhen(true)] out ICapFile? file) => _entry.TryOpenFile(out file);
 
     /// <summary>Describes what the entry's name holds now.</summary>
     /// <returns>A snapshot of the entry, taken at the moment of the call.</returns>
@@ -222,7 +238,7 @@ public readonly struct WalkEntry
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the question.</exception>
     /// <exception cref="CapIOException">The question could not be answered.</exception>
     /// <exception cref="ObjectDisposedException">The walk has moved past this entry.</exception>
-    public CapMetadata GetMetadata() => Entry.GetMetadata();
+    public CapMetadata GetMetadata() => _entry.GetMetadata();
 
     /// <summary>Describes what the entry's name holds now, reporting failure rather than throwing.</summary>
     /// <param name="metadata">The snapshot, when this returns true.</param>
@@ -240,5 +256,5 @@ public readonly struct WalkEntry
     /// </remarks>
     /// <exception cref="InvalidOperationException">This entry came from no walk.</exception>
     /// <exception cref="ObjectDisposedException">The walk has moved past this entry.</exception>
-    public bool TryGetMetadata(out CapMetadata metadata) => Entry.TryGetMetadata(out metadata);
+    public bool TryGetMetadata(out CapMetadata metadata) => _entry.TryGetMetadata(out metadata);
 }

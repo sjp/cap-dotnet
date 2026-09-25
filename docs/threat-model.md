@@ -484,6 +484,12 @@ Two things keep the interfaces from weakening what a real handle does:
   member, so every way of taking out the operating-system handle is still a call on `Dir` or
   `CapFile`, where the `CAP0004` analyzer rule reports it.
 
+The helpers in `Cap.Fs.Ext` accept an `IDir`, and follow the same rule. Given a `Dir`, they
+take the same paths they always have, tree removal through the raw handle included. Given
+anything else, they use only interface members and single names against each handle. So they
+are confined exactly as far as the implementation they were handed, and add no guarantee of
+their own.
+
 ## 6. Residual risk
 
 ### 6.1 The fallback resolver narrows TOCTOU; it does not close it

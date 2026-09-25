@@ -96,6 +96,12 @@ public sealed class WalkOptions
     /// attributes of the link rather than of its target — so a visible link to a hidden
     /// directory is kept, and a hidden link to a visible one is skipped.
     /// </para>
+    /// <para>
+    /// Whether the hidden attribute is looked at is decided by the handle rather than the
+    /// machine, since a filesystem held in memory can follow Windows rules anywhere. A walk
+    /// over an <see cref="Cap.Std.IDir"/> that is not a <see cref="Cap.Std.Dir"/> has no way
+    /// to ask, and looks at it when the machine is Windows.
+    /// </para>
     /// </remarks>
     public bool SkipHidden { get; init; }
 }

@@ -25,9 +25,9 @@ namespace Cap.Fs.Ext;
 /// </remarks>
 internal readonly struct ParentLocation : IDisposable
 {
-    private readonly Dir? _owned;
+    private readonly IDir? _owned;
 
-    private ParentLocation(Dir? owned, Dir directory, string name, CapError refusal = default)
+    private ParentLocation(IDir? owned, IDir directory, string name, CapError refusal = default)
     {
         _owned = owned;
         Directory = directory;
@@ -36,7 +36,7 @@ internal readonly struct ParentLocation : IDisposable
     }
 
     /// <summary>The directory the name is used against.</summary>
-    public Dir Directory { get; }
+    public IDir Directory { get; }
 
     /// <summary>The single component the operation acts on.</summary>
     public string Name { get; }
@@ -65,14 +65,14 @@ internal readonly struct ParentLocation : IDisposable
     /// <exception cref="SandboxEscapeException">
     /// The part ahead of the last component named something outside the handle's authority.
     /// </exception>
-    public static ParentLocation Resolve(Dir dir, string path, string parameterName, bool mayNameDirectory)
+    public static ParentLocation Resolve(IDir dir, string path, string parameterName, bool mayNameDirectory)
     {
         ArgumentNullException.ThrowIfNull(dir);
         ArgumentNullException.ThrowIfNull(path);
 
         // Parsed as the handle parses it, with `..` carried through, so that a path means the
         // same thing to these operations as it does to the handle's own members.
-        if (!CapPath.TryParse(path, dir.PathSyntax, ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError parseError))
+        if (!CapPath.TryParse(path, Handles.SyntaxOf(dir), ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError parseError))
         {
             throw FailureTranslation.ToException(parseError, path, parameterName);
         }
@@ -116,7 +116,7 @@ internal readonly struct ParentLocation : IDisposable
         // Resolved through the ordinary confined open, so the part of the path ahead of the
         // last component is subject to the same refusals as any other: a link the handle's
         // policy declines, a component that climbs out, a name this platform will not open.
-        Dir parent = dir.OpenDir(new string(prefix));
+        IDir parent = dir.OpenDir(new string(prefix));
         return new ParentLocation(parent, parent, new string(name));
     }
 
