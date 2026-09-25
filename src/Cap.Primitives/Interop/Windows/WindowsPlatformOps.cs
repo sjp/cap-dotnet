@@ -1104,6 +1104,43 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public int ReadFile(SafeFileHandle handle, Span<byte> buffer, long fileOffset) =>
+        HostFileContent.Read(handle, buffer, fileOffset);
+
+    /// <inheritdoc/>
+    public void WriteFile(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset) =>
+        HostFileContent.Write(handle, buffer, fileOffset);
+
+    /// <inheritdoc/>
+    public ValueTask<int> ReadFileAsync(
+        SafeFileHandle handle,
+        Memory<byte> buffer,
+        long fileOffset,
+        CancellationToken cancellationToken) =>
+        HostFileContent.ReadAsync(handle, buffer, fileOffset, cancellationToken);
+
+    /// <inheritdoc/>
+    public ValueTask WriteFileAsync(
+        SafeFileHandle handle,
+        ReadOnlyMemory<byte> buffer,
+        long fileOffset,
+        CancellationToken cancellationToken) =>
+        HostFileContent.WriteAsync(handle, buffer, fileOffset, cancellationToken);
+
+    /// <inheritdoc/>
+    public long GetFileLength(SafeFileHandle handle) => HostFileContent.GetLength(handle);
+
+    /// <inheritdoc/>
+    public void SetFileLength(SafeFileHandle handle, long length) => HostFileContent.SetLength(handle, length);
+
+    /// <inheritdoc/>
+    public void FlushFileToDisk(SafeFileHandle handle) => HostFileContent.FlushToDisk(handle);
+
+    /// <inheritdoc/>
+    public Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync) =>
+        HostFileContent.OpenStream(handle, access, bufferSize, isAsync);
+
+    /// <inheritdoc/>
     /// <remarks>
     /// The visibility asked for is not expressible in a create on this system. Access here
     /// is decided by a security descriptor, the new directory inherits the one belonging to

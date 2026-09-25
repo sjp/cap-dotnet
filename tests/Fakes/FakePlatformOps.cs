@@ -19,6 +19,14 @@ namespace Cap.Tests.Fakes;
 /// afternoon.
 /// </para>
 /// <para>
+/// Files hold bytes, read and written through the handle's recorded access, and a stream over
+/// one is <see cref="PositionedFileStream"/> rather than a <see cref="FileStream"/>, which
+/// would take the table index for a real descriptor. Content failures are thrown with the
+/// exception types the framework throws for the same failure on a real file. Appending is
+/// modelled the way Windows does it: nothing is kept on the open file, each appending write
+/// goes to the end, and a copy made for appending can write nowhere else.
+/// </para>
+/// <para>
 /// A directory handle from any other backend is refused with an exception rather than looked
 /// up. Its number means nothing here, and a lookup could find an unrelated entry of this
 /// table under it. That is exactly the confusion the public layer has to prevent by checking
@@ -40,6 +48,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     private readonly FakeFileSystem _fileSystem;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, FakeNode> _open = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, OpenFile> _files = [];
     private readonly List<SafeHandle> _issued = [];
     private nint _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
@@ -177,7 +186,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         if (error.Category == CapErrorCategory.NotFound && request.Creates)
         {
-            return CreateChildFile(parent, name);
+            return CreateChildFile(parent, name, request.Access);
         }
 
         if (error.IsFailure)
@@ -201,7 +210,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         return request.Mode == FileMode.CreateNew
             ? CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.AlreadyExists))
-            : CapResult<SafeFileHandle>.Ok(RegisterFile(node));
+            : CapResult<SafeFileHandle>.Ok(OpenExistingFile(node, in request));
     }
 
     /// <inheritdoc/>
@@ -222,12 +231,12 @@ internal sealed class FakePlatformOps : IPlatformOps
             CapNodeType.SymbolicLink => CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.SymbolicLink)),
             CapNodeType.UnknownReparsePoint => CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.Reparse)),
             CapNodeType.Directory => CapResult<OpenedNode>.Ok(new OpenedNode(Register(node, CapAccess.Read))),
-            _ => CapResult<OpenedNode>.Ok(new OpenedNode(RegisterFile(node), this)),
+            _ => CapResult<OpenedNode>.Ok(new OpenedNode(OpenExistingFile(node, in request), this)),
         };
     }
 
     /// <summary>Adds a file to the simulation and hands back a handle on it.</summary>
-    private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
+    private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, FileAccess access)
     {
         CapError error = ResolveDirectory(parent, out FakeNode? directory);
         if (error.IsFailure)
@@ -243,7 +252,18 @@ internal sealed class FakePlatformOps : IPlatformOps
         };
 
         directory.Entries[name.ToString()] = created;
-        return CapResult<SafeFileHandle>.Ok(RegisterFile(created));
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(created, access));
+    }
+
+    /// <summary>Hands back a handle on a file that exists, emptying it first if the open says to.</summary>
+    private SafeFileHandle OpenExistingFile(FakeNode node, in FileOpenRequest request)
+    {
+        if (request.Truncates)
+        {
+            node.SetLength(0);
+        }
+
+        return RegisterFile(node, request.Access);
     }
 
     /// <inheritdoc/>
@@ -285,7 +305,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         return node!.Type == CapNodeType.Directory
             ? CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.IsADirectory))
-            : CapResult<SafeFileHandle>.Ok(RegisterFile(node));
+            : CapResult<SafeFileHandle>.Ok(OpenExistingFile(node, in request));
     }
 
     /// <inheritdoc/>
@@ -303,7 +323,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         return CapResult<OpenedNode>.Ok(node!.Type == CapNodeType.Directory
             ? new OpenedNode(Register(node, CapAccess.Read))
-            : new OpenedNode(RegisterFile(node), this));
+            : new OpenedNode(OpenExistingFile(node, in request), this));
     }
 
     /// <inheritdoc/>
@@ -523,27 +543,192 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
+    public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: false);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The copy can only append, as on Windows, so a stream given it puts every write at the
+    /// end whatever its position says.
+    /// </remarks>
+    public CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: true);
+
+    private CapResult<SafeFileHandle> Duplicate(SafeFileHandle handle, bool appendOnly)
     {
-        if (handle.IsInvalid || handle.IsClosed || !_open.TryGetValue(handle.DangerousGetHandle(), out FakeNode? node))
+        if (!TryResolveFile(handle, out FakeNode? node, out OpenFile file))
         {
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        return CapResult<SafeFileHandle>.Ok(RegisterFile(node));
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(node!, file.Access, appendOnly || file.AppendOnly));
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeFileHandle> DuplicateAppendingFile(SafeFileHandle handle) => DuplicateFile(handle);
-
-    /// <inheritdoc/>
-    /// <remarks>The fake holds no file contents, so there is no setting to keep.</remarks>
+    /// <remarks>
+    /// Nothing is kept on the open file, as on Windows: appending is applied by
+    /// <see cref="WriteAppending"/> alone.
+    /// </remarks>
     public CapError SetFileAppending(SafeFileHandle handle, bool appending) => CapError.Success;
 
     /// <inheritdoc/>
-    /// <remarks>The fake holds no file contents, so there is nothing to write to.</remarks>
-    public CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset) =>
-        CapError.FromCategory(CapErrorCategory.NotSupported);
+    public CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
+    {
+        if (!TryResolveFile(handle, out FakeNode? node, out OpenFile file))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        if ((file.Access & FileAccess.Write) == 0 || node!.Unreadable)
+        {
+            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+        }
+
+        node.Append(buffer);
+        node.LastWriteTime = _fileSystem.Now;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public int ReadFile(SafeFileHandle handle, Span<byte> buffer, long fileOffset)
+    {
+        FakeNode node = DemandFile(handle, FileAccess.Read, out _);
+        return node.ReadAt(buffer, fileOffset);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A handle that can only append writes at the end, as the system puts a positioned write
+    /// through such a handle on Windows.
+    /// </remarks>
+    public void WriteFile(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
+    {
+        FakeNode node = DemandFile(handle, FileAccess.Write, out OpenFile file);
+        if (file.AppendOnly)
+        {
+            node.Append(buffer);
+        }
+        else
+        {
+            node.WriteAt(buffer, fileOffset);
+        }
+
+        node.LastWriteTime = _fileSystem.Now;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Completes before it returns: there is nothing in memory to wait for.</remarks>
+    public ValueTask<int> ReadFileAsync(
+        SafeFileHandle handle,
+        Memory<byte> buffer,
+        long fileOffset,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled<int>(cancellationToken);
+        }
+
+        try
+        {
+            return ValueTask.FromResult(ReadFile(handle, buffer.Span, fileOffset));
+        }
+        catch (Exception thrown)
+        {
+            return ValueTask.FromException<int>(thrown);
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Completes before it returns: there is nothing in memory to wait for.</remarks>
+    public ValueTask WriteFileAsync(
+        SafeFileHandle handle,
+        ReadOnlyMemory<byte> buffer,
+        long fileOffset,
+        CancellationToken cancellationToken)
+    {
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(cancellationToken);
+        }
+
+        try
+        {
+            WriteFile(handle, buffer.Span, fileOffset);
+            return ValueTask.CompletedTask;
+        }
+        catch (Exception thrown)
+        {
+            return ValueTask.FromException(thrown);
+        }
+    }
+
+    /// <inheritdoc/>
+    public long GetFileLength(SafeFileHandle handle) => DemandFile(handle, 0, out _).Length;
+
+    /// <inheritdoc/>
+    public void SetFileLength(SafeFileHandle handle, long length)
+    {
+        FakeNode node = DemandFile(handle, FileAccess.Write, out _);
+        node.SetLength(length);
+        node.LastWriteTime = _fileSystem.Now;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Counted rather than performed, for the reason <see cref="SyncDirectory"/> is.</remarks>
+    public void FlushFileToDisk(SafeFileHandle handle)
+    {
+        _ = DemandFile(handle, 0, out _);
+        _ = Interlocked.Increment(ref _fileFlushes);
+    }
+
+    /// <summary>How many times a file has been asked to commit its contents to storage.</summary>
+    public int FileFlushes => Volatile.Read(ref _fileFlushes);
+
+    private int _fileFlushes;
+
+    /// <inheritdoc/>
+    public Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync)
+    {
+        _ = DemandFile(handle, 0, out _);
+        return new PositionedFileStream(this, handle, access);
+    }
+
+    /// <summary>
+    /// Finds the file a handle refers to, refusing it as the framework refuses a real one.
+    /// </summary>
+    /// <param name="handle">The handle a content operation was given.</param>
+    /// <param name="needed">The access the operation needs, or none to need nothing.</param>
+    /// <param name="file">How the handle was opened.</param>
+    private FakeNode DemandFile(SafeFileHandle handle, FileAccess needed, out OpenFile file)
+    {
+        ObjectDisposedException.ThrowIf(handle.IsClosed, handle);
+
+        if (!TryResolveFile(handle, out FakeNode? node, out file))
+        {
+            throw new ArgumentException(
+                "The handle is not one this simulated filesystem issued for a file.", nameof(handle));
+        }
+
+        if ((file.Access & needed) != needed || node!.Unreadable)
+        {
+            throw new UnauthorizedAccessException(
+                needed == FileAccess.Write
+                    ? "The simulated file was not opened for writing, or refuses it."
+                    : "The simulated file was not opened for reading, or refuses it.");
+        }
+
+        return node;
+    }
+
+    private bool TryResolveFile(SafeFileHandle handle, out FakeNode? node, out OpenFile file)
+    {
+        file = default;
+        if (!TryResolveHandle(handle, out node))
+        {
+            return false;
+        }
+
+        return _files.TryGetValue(handle.DangerousGetHandle(), out file);
+    }
 
     /// <inheritdoc/>
     public CapError CreateChildDirectory(
@@ -622,7 +807,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             NodeId = _fileSystem.NextNodeId(),
         };
 
-        return CapResult<SafeFileHandle>.Ok(RegisterFile(created));
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(created, access));
     }
 
     /// <inheritdoc/>
@@ -861,8 +1046,17 @@ internal sealed class FakePlatformOps : IPlatformOps
     private SafeDirHandle Register(FakeNode node, CapAccess access) =>
         Track(new SafeDirHandle(NextHandle(node), this, access));
 
-    private SafeFileHandle RegisterFile(FakeNode node) =>
-        Track(new SafeFileHandle(NextHandle(node), ownsHandle: false));
+    private SafeFileHandle RegisterFile(FakeNode node, FileAccess access, bool appendOnly = false)
+    {
+        nint value = NextHandle(node);
+        _files[value] = new OpenFile(access, appendOnly);
+        return Track(new SafeFileHandle(value, ownsHandle: false));
+    }
+
+    /// <summary>How a simulated file handle was opened.</summary>
+    /// <param name="Access">What it may do with the contents.</param>
+    /// <param name="AppendOnly">Whether every write through it goes to the end.</param>
+    private readonly record struct OpenFile(FileAccess Access, bool AppendOnly);
 
     /// <summary>Remembers a handle so that its eventual closing can be observed.</summary>
     private T Track<T>(T handle)

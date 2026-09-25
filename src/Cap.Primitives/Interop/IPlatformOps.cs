@@ -590,6 +590,80 @@ internal interface IPlatformOps
     /// </remarks>
     CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset);
 
+    // The members from here to the stream read and write a file's contents. Unlike the rest of
+    // this contract they report failure by throwing, with the exceptions
+    // System.IO.RandomAccess throws for the same failure, and do not return a CapError. The
+    // host implementations are that class and nothing more: its exceptions carry the
+    // framework's own wording and error codes, which callers of a file API already handle,
+    // and converting them to a CapError and back would lose both. The throwing form also keeps
+    // the asynchronous members free of a wrapper around every call, which reads and writes are
+    // too frequent to pay for. A simulated filesystem throws the same exception types for the
+    // same failures, so that code written against one behaves alike against the other.
+
+    /// <summary>Reads from a given position in an open file.</summary>
+    /// <returns>How many bytes were read. Zero at the end of the file.</returns>
+    /// <remarks>
+    /// The caller has already refused a negative offset and a closed handle.
+    /// </remarks>
+    int ReadFile(SafeFileHandle handle, Span<byte> buffer, long fileOffset);
+
+    /// <summary>Writes the whole of a buffer at a given position in an open file.</summary>
+    /// <remarks>
+    /// Not used while the file is appending, which goes through <see cref="WriteAppending"/>.
+    /// A write beyond the end extends the file, and the gap reads as zeroes.
+    /// </remarks>
+    void WriteFile(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset);
+
+    /// <summary>The asynchronous form of <see cref="ReadFile"/>.</summary>
+    ValueTask<int> ReadFileAsync(
+        SafeFileHandle handle,
+        Memory<byte> buffer,
+        long fileOffset,
+        CancellationToken cancellationToken);
+
+    /// <summary>The asynchronous form of <see cref="WriteFile"/>.</summary>
+    ValueTask WriteFileAsync(
+        SafeFileHandle handle,
+        ReadOnlyMemory<byte> buffer,
+        long fileOffset,
+        CancellationToken cancellationToken);
+
+    /// <summary>The current length of an open file, in bytes.</summary>
+    long GetFileLength(SafeFileHandle handle);
+
+    /// <summary>Truncates an open file, or extends it with zeroes.</summary>
+    void SetFileLength(SafeFileHandle handle, long length);
+
+    /// <summary>Waits for what has been written to an open file to reach storage.</summary>
+    void FlushFileToDisk(SafeFileHandle handle);
+
+    /// <summary>
+    /// Builds a stream over an open file, giving it ownership of the handle.
+    /// </summary>
+    /// <param name="handle">
+    /// The handle the stream reads and writes through, and closes when it is disposed. The
+    /// caller does not use it again.
+    /// </param>
+    /// <param name="access">What the handle was opened for.</param>
+    /// <param name="bufferSize">How much the stream buffers. Zero or one turns buffering off.</param>
+    /// <param name="isAsync">Whether the handle was opened for overlapped operation.</param>
+    /// <remarks>
+    /// <para>
+    /// The host implementations return a <see cref="FileStream"/>. A simulated filesystem
+    /// returns a stream of its own, since a <see cref="FileStream"/> reads and writes through
+    /// the operating system and would take the simulation's handle value for a real one.
+    /// </para>
+    /// <para>
+    /// Every stream supports reading or writing as the access allows, seeking, a position,
+    /// setting the length and flushing, which are the members callers of a file stream rely
+    /// on.
+    /// </para>
+    /// <para>
+    /// On failure the handle has not been taken, and the caller still closes it.
+    /// </para>
+    /// </remarks>
+    Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync);
+
     /// <summary>
     /// Creates a directory named <paramref name="name"/> directly beneath
     /// <paramref name="parent"/>.

@@ -82,7 +82,7 @@ internal static class Program
                 EnsureParent(destination, entry.FullName);
 
                 using CapFile file = destination.CreateNewFile(entry.FullName);
-                using FileStream output = file.AsStream();
+                using Stream output = file.AsStream();
                 using Stream input = entry.Open();
                 input.CopyTo(output);
 

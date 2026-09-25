@@ -1404,11 +1404,31 @@ public sealed partial class Dir : IDisposable
     /// type's reach: closing it, from any thread, disposes this instance for every other
     /// caller, which then sees <see cref="ObjectDisposedException"/>.
     /// </para>
+    /// <para>
+    /// <strong>Only for a directory on the host's filesystem.</strong> A directory on a
+    /// filesystem held in memory has no descriptor or kernel handle, and the value that stands
+    /// for one is an index into that filesystem's own table. Passed to the system, it would
+    /// act on, or close, whichever real object has that number, so such a directory refuses
+    /// instead.
+    /// </para>
     /// </remarks>
+    /// <exception cref="NotSupportedException">
+    /// The directory is not on the host's filesystem, so it has no operating-system handle.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public SafeHandle UnsafeGetHandle()
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        if (!Ops.IssuesKernelHandles)
+        {
+            throw new NotSupportedException(
+                "This directory is not on the host's filesystem, so it has no operating-system " +
+                "handle to give out. Its handle value means something only to the filesystem " +
+                "that issued it, and passed to the system it would reach whichever real object " +
+                "has that number. Use the members of Dir instead.");
+        }
+
         return _handle;
     }
 

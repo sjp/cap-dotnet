@@ -44,7 +44,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.WriteAllLines(p, lines)` | a `StreamWriter` over `dir.CreateFile(p).AsStream()` | |
 | `File.AppendAllText(p, s)` | a `StreamWriter` over `dir.OpenFile(p, FileMode.Append, FileAccess.Write).AsStream()` | |
 | No equivalent: an open that appends and also reads, empties the file or must create it | `dir.OpenFile(p, mode, access, append: true)` | Appending is a flag of its own here, as in POSIX, so it combines with any mode and with reading, and `CapFile.IsAppending` changes it on an open file. `FileMode.Append` keeps its framework meaning. |
-| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `FileStream`. Every mode but `FileMode.Open` refuses a symbolic link at `p`, and `noFollow: true` makes `FileMode.Open` refuse one too. |
+| `File.Open(p, mode, access, share)` | `dir.OpenFile(p, mode, access, share)` | Returns a `CapFile`; `.AsStream()` gives a `Stream`. Every mode but `FileMode.Open` refuses a symbolic link at `p`, and `noFollow: true` makes `FileMode.Open` refuse one too. |
 | `File.OpenRead(p)` | `dir.OpenFile(p)` | Read is the default. |
 | `File.OpenWrite(p)` | `dir.OpenFile(p, FileMode.OpenOrCreate, FileAccess.Write)` | |
 | `File.Create(p)` | `dir.CreateFile(p)` | Refuses a symbolic link at `p`. |
@@ -114,9 +114,12 @@ authority without the ambient lookup this library exists to remove.
 
 ## Streams
 
-`CapFile.AsStream()` returns an ordinary `FileStream` over the same handle, so everything
-that takes a `Stream` — `StreamReader`, `JsonSerializer`, `ZipArchive`, `HttpContent` —
-works unchanged.
+`CapFile.AsStream()` returns a `Stream` over the same open file, so everything that takes a
+`Stream` — `StreamReader`, `JsonSerializer`, `ZipArchive`, `HttpContent` — works unchanged.
+For a file on disk it is a `FileStream`, and code that needs a member only `FileStream` has,
+such as `Name` or `Lock`, can cast to it. The declared type is `Stream` because a file on a
+filesystem held in memory has no operating-system handle to build a `FileStream` over, and
+code written against `Stream` works against both.
 
 ```csharp
 using CapFile file = data.OpenFile("events.log");

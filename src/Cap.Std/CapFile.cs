@@ -21,8 +21,8 @@ namespace Cap.Std;
 /// handle usable from several threads at once without any of them agreeing about whose turn
 /// it is, and it is why nothing here buffers: a buffer only pays for itself where reads
 /// follow one another, which is a stream's assumption rather than a file's. A caller who
-/// wants the stream's assumptions asks for <see cref="AsStream"/> and gets the framework's
-/// own implementation of them.
+/// wants the stream's assumptions asks for <see cref="AsStream"/>, which on the host's
+/// filesystem is the framework's own implementation of them.
 /// </para>
 /// <para>
 /// <strong>Disposing this closes the file.</strong> A stream taken from it is given a
@@ -186,7 +186,7 @@ public sealed class CapFile : IDisposable
         get
         {
             Demand();
-            return RandomAccess.GetLength(_handle);
+            return _backend.GetFileLength(_handle);
         }
     }
 
@@ -252,7 +252,7 @@ public sealed class CapFile : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         Demand();
-        RandomAccess.SetLength(_handle, length);
+        _backend.SetFileLength(_handle, length);
     }
 
     /// <summary>
@@ -341,7 +341,7 @@ public sealed class CapFile : IDisposable
 
         if (toDisk)
         {
-            RandomAccess.FlushToDisk(_handle);
+            _backend.FlushFileToDisk(_handle);
         }
     }
 
@@ -386,7 +386,7 @@ public sealed class CapFile : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(fileOffset);
         Demand();
-        return RandomAccess.Read(_handle, buffer, fileOffset);
+        return _backend.ReadFile(_handle, buffer, fileOffset);
     }
 
     /// <summary>
@@ -428,7 +428,7 @@ public sealed class CapFile : IDisposable
             return;
         }
 
-        RandomAccess.Write(_handle, buffer, fileOffset);
+        _backend.WriteFile(_handle, buffer, fileOffset);
     }
 
     /// <summary>
@@ -463,7 +463,7 @@ public sealed class CapFile : IDisposable
     {
         ArgumentOutOfRangeException.ThrowIfNegative(fileOffset);
         Demand();
-        return RandomAccess.ReadAsync(_handle, buffer, fileOffset, cancellationToken);
+        return _backend.ReadFileAsync(_handle, buffer, fileOffset, cancellationToken);
     }
 
     /// <summary>
@@ -509,11 +509,11 @@ public sealed class CapFile : IDisposable
                 : new ValueTask(Task.Run(() => WriteAtEnd(buffer.Span, fileOffset), cancellationToken));
         }
 
-        return RandomAccess.WriteAsync(_handle, buffer, fileOffset, cancellationToken);
+        return _backend.WriteFileAsync(_handle, buffer, fileOffset, cancellationToken);
     }
 
     /// <summary>
-    /// Presents the file as a <see cref="FileStream"/>, for code that wants a position, a
+    /// Presents the file as a <see cref="Stream"/>, for code that wants a position, a
     /// buffer and the rest of the stream vocabulary.
     /// </summary>
     /// <param name="leaveOpen">
@@ -529,6 +529,16 @@ public sealed class CapFile : IDisposable
     /// </param>
     /// <returns>A stream over the file.</returns>
     /// <remarks>
+    /// <para>
+    /// <strong>What kind of stream.</strong> For a file on the host's filesystem it is a
+    /// <see cref="FileStream"/>, and a caller that needs a member only that type has can cast
+    /// to it. A file on a filesystem held in memory has no operating-system handle for a
+    /// <see cref="FileStream"/> to be built over, and is given a stream of that filesystem's
+    /// own, which reads, writes, seeks, reports and sets its length and position, and
+    /// flushes, as a <see cref="FileStream"/> does. The return type is the one both share so
+    /// that code taking a stream from here works the same against either, which is what lets
+    /// it be tested without a disk.
+    /// </para>
     /// <para>
     /// The stream can read or write exactly what this handle can, which is not a check it
     /// performs but a fact about the handle underneath it: the operating system refused the
@@ -555,15 +565,15 @@ public sealed class CapFile : IDisposable
     /// each platform.
     /// </para>
     /// <para>
-    /// What the copy does not share is a position. A <see cref="FileStream"/> keeps its own
-    /// and reads and writes at it by offset, so each stream taken from this handle moves
+    /// What the copy does not share is a position. The stream keeps its own and reads and
+    /// writes at it by offset, so each stream taken from this handle moves
     /// independently of every other, and this handle, whose reads and writes all name their
     /// offset, has no position to share.
     /// </para>
     /// <para>
     /// <strong>Thread safety.</strong> The borrowing form is safe to call from any thread.
-    /// The stream it returns is not: it is an ordinary <see cref="FileStream"/>, with a
-    /// position and a buffer that belong to one caller at a time, so a thread that wants one
+    /// The stream it returns is not: like any <see cref="FileStream"/>, it has a position and
+    /// a buffer that belong to one caller at a time, so a thread that wants one
     /// of its own should take one of its own. Handing the handle over with
     /// <paramref name="leaveOpen"/> false must not race any other call on this object, since
     /// those calls can no longer tell that the handle has changed owner.
@@ -576,7 +586,7 @@ public sealed class CapFile : IDisposable
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="bufferSize"/> is negative.</exception>
     /// <exception cref="CapIOException">The handle could not be copied.</exception>
-    public FileStream AsStream(bool leaveOpen = true, int bufferSize = DefaultStreamBufferSize)
+    public Stream AsStream(bool leaveOpen = true, int bufferSize = DefaultStreamBufferSize)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(bufferSize);
         Demand();
@@ -588,7 +598,7 @@ public sealed class CapFile : IDisposable
             // Marked spent only once the stream exists. A constructor that refuses the
             // handle has taken nothing, and recording the transfer before knowing it
             // happened would leave the file open with nothing left able to close it.
-            FileStream owned = new(_handle, _access, bufferSize, _isAsync);
+            Stream owned = _backend.OpenFileStream(_handle, _access, bufferSize, _isAsync);
             _given = true;
             return owned;
         }
@@ -605,10 +615,10 @@ public sealed class CapFile : IDisposable
                 $"own. ({copy.Error})");
         }
 
-        FileStream stream;
+        Stream stream;
         try
         {
-            stream = new FileStream(copy.Value, _access, bufferSize, _isAsync);
+            stream = _backend.OpenFileStream(copy.Value, _access, bufferSize, _isAsync);
         }
         catch
         {
@@ -646,6 +656,13 @@ public sealed class CapFile : IDisposable
     /// given, because appending there is applied by this object to its own writes.
     /// </para>
     /// <para>
+    /// <strong>Only for a file on the host's filesystem.</strong> A file on a filesystem held
+    /// in memory has no operating-system handle, and the value that stands for one is an
+    /// index into that filesystem's own table. Handing it out as if it were a descriptor
+    /// would invite a caller to pass it to the system, which would read, write or close
+    /// whichever real file has that number, so such a file refuses instead.
+    /// </para>
+    /// <para>
     /// It is not a transfer. This object still closes the handle when it is disposed, so a
     /// caller that keeps it past that point holds a closed handle — and a descriptor number
     /// that something else may by then have been given.
@@ -656,10 +673,23 @@ public sealed class CapFile : IDisposable
     /// under them.
     /// </para>
     /// </remarks>
+    /// <exception cref="NotSupportedException">
+    /// The file is not on the host's filesystem, so it has no operating-system handle.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public SafeFileHandle UnsafeGetHandle()
     {
         Demand();
+
+        if (!_backend.IssuesKernelHandles)
+        {
+            throw new NotSupportedException(
+                "This file is not on the host's filesystem, so it has no operating-system " +
+                "handle to give out. Its handle value means something only to the filesystem " +
+                "that issued it, and passed to the system it would reach whichever real file " +
+                "has that number. Use the members of CapFile, or AsStream, instead.");
+        }
+
         return _handle;
     }
 

@@ -116,7 +116,7 @@ handle only: handles derived from it stay open, because each owns its own. Every
 ends as that operation throwing `ObjectDisposedException`.
 
 A `CapFile` is an open file. Its positional `Read(buffer, offset)` and `Write(buffer, offset)`
-can be called concurrently; `AsStream()` gives a `FileStream` for APIs that need one, with a
+can be called concurrently; `AsStream()` gives a `Stream` for APIs that need one, with a
 stream's usual single-caller rules.
 
 ## The rest of the surface

@@ -108,7 +108,67 @@ public sealed class HostBackendAuditTests
             "host is only for opening a first handle where there is none.");
     }
 
+    /// <summary>
+    /// No method outside the host's own content implementation reads or writes a file through
+    /// the operating system directly.
+    /// </summary>
+    /// <remarks>
+    /// A file's contents go through the backend that opened it, like everything else about
+    /// it. A direct call to <see cref="RandomAccess"/>, or a <see cref="FileStream"/> built
+    /// over a handle, would pass every test on the disk and then take a simulated handle's
+    /// number for a real descriptor.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(ShippedAssemblies))]
+    public void Only_the_host_reads_and_writes_files_through_the_system(string assemblyName)
+    {
+        Assembly assembly = Shipped.Single(candidate => candidate.GetName().Name == assemblyName);
+
+        string[] strays =
+        [
+            .. Callers(assembly, IsDirectFileAccess)
+                .Where(caller => caller.Type != typeof(HostFileContent))
+                .Select(caller => $"{caller.Type.FullName}.{caller.Method.Name}"),
+        ];
+
+        Assert.True(
+            strays.Length == 0,
+            $"{assemblyName} reads or writes a file through the system from " +
+            $"{string.Join(", ", strays)}. File contents must go through the backend that " +
+            "issued the handle.");
+    }
+
+    /// <summary>The content audit finds the host's own implementation, so an empty result means something.</summary>
+    [Fact]
+    public void The_content_audit_finds_the_host_implementation()
+    {
+        Assert.Contains(
+            Callers(typeof(HostFileContent).Assembly, IsDirectFileAccess),
+            caller => caller.Type == typeof(HostFileContent));
+    }
+
+    private static bool IsDirectFileAccess(MethodBase called) =>
+        called.DeclaringType == typeof(RandomAccess) ||
+        (called is ConstructorInfo && called.DeclaringType == typeof(FileStream));
+
     /// <summary>Every method in the assembly that reads the host's accessor.</summary>
+    private static IEnumerable<string> Readers(Assembly assembly, bool excludeEntryPoints = false)
+    {
+        foreach ((Type type, MethodBase method) in Callers(assembly, IsHostAccessor))
+        {
+            if (excludeEntryPoints && IsEntryPoint(type, method))
+            {
+                continue;
+            }
+
+            yield return $"{type.FullName}.{method.Name}";
+        }
+    }
+
+    private static bool IsHostAccessor(MethodBase called) =>
+        called.DeclaringType == HostAccessor.DeclaringType && called.Name == HostAccessor.Name;
+
+    /// <summary>Every method in the assembly whose body calls something matching <paramref name="target"/>.</summary>
     [UnconditionalSuppressMessage(
         "Trimming",
         "IL2026:RequiresUnreferencedCode",
@@ -118,7 +178,7 @@ public sealed class HostBackendAuditTests
         "Trimming",
         "IL2075:UnrecognizedReflectionPattern",
         Justification = "The types reflected over are whatever the assembly defines. The suite is not trimmed.")]
-    private static IEnumerable<string> Readers(Assembly assembly, bool excludeEntryPoints = false)
+    private static IEnumerable<(Type Type, MethodBase Method)> Callers(Assembly assembly, Func<MethodBase, bool> target)
     {
         const BindingFlags Everything =
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
@@ -129,17 +189,10 @@ public sealed class HostBackendAuditTests
             IEnumerable<MethodBase> methods = [.. type.GetMethods(Everything), .. type.GetConstructors(Everything)];
             foreach (MethodBase method in methods)
             {
-                if (!Calls(method, HostAccessor))
+                if (Calls(method, target))
                 {
-                    continue;
+                    yield return (type, method);
                 }
-
-                if (excludeEntryPoints && IsEntryPoint(type, method))
-                {
-                    continue;
-                }
-
-                yield return $"{type.FullName}.{method.Name}";
             }
         }
     }
@@ -165,7 +218,7 @@ public sealed class HostBackendAuditTests
             entry.Type == outermost && (entry.Method is null || (entry.Type == type && entry.Method == method.Name)));
     }
 
-    /// <summary>Whether a method's body calls, or takes the address of, <paramref name="target"/>.</summary>
+    /// <summary>Whether a method's body calls, or takes the address of, anything matching <paramref name="target"/>.</summary>
     /// <remarks>
     /// Walks the body one instruction at a time, skipping each operand by its declared size,
     /// so that an operand's bytes are never mistaken for an instruction.
@@ -175,7 +228,7 @@ public sealed class HostBackendAuditTests
         "IL2026:RequiresUnreferencedCode",
         Justification = "The subject is every method body in an assembly, which cannot be named " +
                         "statically, and the suite is not trimmed.")]
-    private static bool Calls(MethodBase method, MethodInfo target)
+    private static bool Calls(MethodBase method, Func<MethodBase, bool> target)
     {
         byte[]? body = method.GetMethodBody()?.GetILAsByteArray();
         if (body is null)
@@ -195,9 +248,7 @@ public sealed class HostBackendAuditTests
             if (code.OperandType == OperandType.InlineMethod)
             {
                 int token = BitConverter.ToInt32(body, offset);
-                if (Resolve(method, token) is MethodInfo called &&
-                    called.DeclaringType == target.DeclaringType &&
-                    called.Name == target.Name)
+                if (Resolve(method, token) is { } called && target(called))
                 {
                     return true;
                 }

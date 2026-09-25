@@ -15,6 +15,12 @@ namespace Cap.Tests.Fakes;
 /// </remarks>
 internal sealed class FakeNode
 {
+    // The contents are guarded because a file handle promises reads and writes from several
+    // threads at once, and a test of that promise must not be defeated by the simulation.
+    private readonly object _contentLock = new();
+    private byte[] _content = [];
+    private long _length;
+
     /// <summary>What this object is.</summary>
     public CapNodeType Type { get; set; } = CapNodeType.Directory;
 
@@ -67,8 +73,48 @@ internal sealed class FakeNode
     /// </remarks>
     public CapFileType? EntryType { get; set; }
 
-    /// <summary>The length the simulation reports for this object.</summary>
-    public long Length { get; set; }
+    /// <summary>The length of this object's contents, in bytes.</summary>
+    /// <remarks>
+    /// Setting it truncates the contents or extends them with zeroes, as setting the length of
+    /// a real file does.
+    /// </remarks>
+    public long Length
+    {
+        get
+        {
+            lock (_contentLock)
+            {
+                return _length;
+            }
+        }
+
+        set => SetLength(value);
+    }
+
+    /// <summary>A copy of this object's contents.</summary>
+    /// <remarks>
+    /// Setting it replaces them, which is how a test seeds a file with bytes to be read.
+    /// </remarks>
+    public byte[] Contents
+    {
+        get
+        {
+            lock (_contentLock)
+            {
+                return _content.AsSpan(0, (int)_length).ToArray();
+            }
+        }
+
+        set
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            lock (_contentLock)
+            {
+                _content = (byte[])value.Clone();
+                _length = value.Length;
+            }
+        }
+    }
 
     /// <summary>When this object's contents were last read.</summary>
     public DateTimeOffset LastAccessTime { get; set; }
@@ -111,6 +157,82 @@ internal sealed class FakeNode
 
     /// <summary>Entries, when this is a directory.</summary>
     public Dictionary<string, FakeNode> Entries { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Copies contents from a position into a buffer.</summary>
+    /// <returns>How many bytes were copied. Zero at or beyond the end.</returns>
+    public int ReadAt(Span<byte> buffer, long offset)
+    {
+        lock (_contentLock)
+        {
+            if (offset >= _length)
+            {
+                return 0;
+            }
+
+            int count = (int)Math.Min(buffer.Length, _length - offset);
+            _content.AsSpan((int)offset, count).CopyTo(buffer);
+            return count;
+        }
+    }
+
+    /// <summary>Writes a buffer at a position, extending the contents with zeroes to reach it.</summary>
+    public void WriteAt(ReadOnlySpan<byte> buffer, long offset)
+    {
+        lock (_contentLock)
+        {
+            WriteLocked(buffer, offset);
+        }
+    }
+
+    /// <summary>Writes a buffer at the end of the contents, found and written in one step.</summary>
+    public void Append(ReadOnlySpan<byte> buffer)
+    {
+        lock (_contentLock)
+        {
+            WriteLocked(buffer, _length);
+        }
+    }
+
+    /// <summary>Truncates the contents, or extends them with zeroes.</summary>
+    public void SetLength(long length)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        lock (_contentLock)
+        {
+            EnsureCapacity(length);
+            if (length < _length)
+            {
+                _content.AsSpan((int)length, (int)(_length - length)).Clear();
+            }
+
+            _length = length;
+        }
+    }
+
+    private void WriteLocked(ReadOnlySpan<byte> buffer, long offset)
+    {
+        long end = offset + buffer.Length;
+        EnsureCapacity(end);
+        buffer.CopyTo(_content.AsSpan((int)offset));
+        _length = Math.Max(_length, end);
+    }
+
+    /// <summary>
+    /// Grows the backing array to hold a length. Bytes past the current length are always
+    /// zero, so growing the length exposes zeroes, as a gap in a real file reads.
+    /// </summary>
+    private void EnsureCapacity(long length)
+    {
+        if (length > Array.MaxLength)
+        {
+            throw new IOException("The simulated file cannot hold that much.");
+        }
+
+        if (length > _content.Length)
+        {
+            Array.Resize(ref _content, (int)Math.Max(length, Math.Min(Array.MaxLength, (long)_content.Length * 2)));
+        }
+    }
 
     /// <summary>Its description, as the platform layer would report it.</summary>
     public CapNodeInfo Info => new(Type, VolumeId, NodeId, ReparseTag);

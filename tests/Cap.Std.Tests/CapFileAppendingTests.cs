@@ -330,7 +330,7 @@ public sealed class CapFileAppendingTests : IDisposable
         CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite, append: true);
         using (file)
         {
-            using (FileStream stream = file.AsStream(leaveOpen, bufferSize: 0))
+            using (Stream stream = file.AsStream(leaveOpen, bufferSize: 0))
             {
                 stream.Position = 0;
                 stream.Write(Encoding.ASCII.GetBytes(" second"));
@@ -367,7 +367,7 @@ public sealed class CapFileAppendingTests : IDisposable
 
         using Dir root = OpenRoot();
         using (CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite))
-        using (FileStream stream = file.AsStream(bufferSize: 0))
+        using (Stream stream = file.AsStream(bufferSize: 0))
         {
             file.IsAppending = true;
             stream.Position = 0;

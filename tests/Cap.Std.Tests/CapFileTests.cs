@@ -262,10 +262,10 @@ public sealed class CapFileTests : IDisposable
 
         Assert.Equal(OperatingSystem.IsWindows() && options == FileOptions.Asynchronous, file.IsAsync);
 
-        using FileStream stream = file.AsStream();
+        using FileStream stream = Assert.IsType<FileStream>(file.AsStream());
         Assert.Equal(file.IsAsync, stream.IsAsync);
 
-        using FileStream owned = file.AsStream(leaveOpen: false);
+        using FileStream owned = Assert.IsType<FileStream>(file.AsStream(leaveOpen: false));
         Assert.Equal(file.IsAsync, owned.IsAsync);
     }
 
