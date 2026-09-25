@@ -68,6 +68,15 @@ composition root, which is where a log line like this usually belongs anyway.
 The result is for reading by people. Opening it again, joining onto it, or comparing it with
 another path brings back exactly the problem described above.
 
+## `DirFileSystem` has full names
+
+`DirFileSystem`, the `IFileSystem` over a `Dir` in `Cap.IO.Abstractions`, does have
+`FullName`, because the interface it implements requires it. Its full names are paths in a
+virtual namespace whose root is the `Dir`, not host paths. Given back to the same
+`DirFileSystem` they resolve beneath the handle like any other path. Given to `System.IO` they
+name a different file on the host, which is the same mistake as above.
+[`IFileSystem` over a `Dir`](io-abstractions.md#full-names-are-virtual) has the detail.
+
 ## What cap-std does
 
 cap-std, which this library ports, makes the same choice: its `Dir` has no path accessor

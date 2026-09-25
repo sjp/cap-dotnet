@@ -24,6 +24,17 @@ than just claimed.
   marshal a non-blittable type does not compile, and there is no marshalling code that
   would have to be generated when the program runs.
 
+### `Cap.IO.Abstractions`
+
+This package depends on `TestableIO.System.IO.Abstractions` and
+`Testably.Abstractions.FileSystem.Interface`. Their authors do not mark those assemblies as
+trimmable, so this document cannot promise for them what it promises for the library's own.
+What they hold is the `IFileSystem` interfaces and one abstract `Stream` subclass, with no
+reflection. The adapter itself builds under the same analyzers as every other assembly here,
+and a NativeAOT publish of a program that uses `DirFileSystem`, with trim and AOT warnings as
+errors, succeeds with no warnings and runs. That publish is not part of the CI job below, so
+treat support for this package as checked by hand rather than tested on every change.
+
 ## How it is checked
 
 A publish with no warnings only tells you the compiler could analyse everything. It

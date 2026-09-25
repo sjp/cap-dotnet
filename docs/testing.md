@@ -26,6 +26,10 @@ Assert.Equal("""{ "x": 2 }""", fs.ReadAllText("config/app.json"));
 Reference it from test projects only. It lives in its own package so that production code
 cannot pick up an in-memory backend without depending on a test package.
 
+Code written against System.IO.Abstractions' `IFileSystem` rather than a `Dir` can be tested
+the same way: wrap the in-memory root in a `DirFileSystem` from `Cap.IO.Abstractions`. See
+[`IFileSystem` over a `Dir`](io-abstractions.md).
+
 ## Stubbing the interfaces
 
 Some tests want a stub rather than a filesystem: one that fails the third write, or checks that

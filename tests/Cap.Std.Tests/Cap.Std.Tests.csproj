@@ -35,6 +35,7 @@
     <ProjectReference Include="../../src/Cap.Net/Cap.Net.csproj" />
     <ProjectReference Include="../../src/Cap.Rand/Cap.Rand.csproj" />
     <ProjectReference Include="../../src/Cap.Time/Cap.Time.csproj" />
+    <ProjectReference Include="../../src/Cap.IO.Abstractions/Cap.IO.Abstractions.csproj" />
   </ItemGroup>
 
   <!--

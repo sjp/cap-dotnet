@@ -10,6 +10,17 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="4.14.0" />
   </ItemGroup>
 
+  <!--
+    The interfaces Cap.IO.Abstractions implements, and the only third-party runtime dependency
+    of any package. Pinned to one minor version each, because both projects add members to the
+    interfaces in minor releases; see src/Cap.IO.Abstractions/Cap.IO.Abstractions.csproj. Raise
+    both together, and only once the adapter implements every new member.
+  -->
+  <ItemGroup Label="Runtime (Cap.IO.Abstractions only)">
+    <PackageVersion Include="TestableIO.System.IO.Abstractions" Version="[22.2.0,22.3.0)" />
+    <PackageVersion Include="Testably.Abstractions.FileSystem.Interface" Version="[10.3.0,10.4.0)" />
+  </ItemGroup>
+
   <ItemGroup Label="Testing">
     <PackageVersion Include="xunit.v3" Version="4.0.1" />
     <PackageVersion Include="xunit.v3.aot.mtp-off" Version="4.0.1" />
@@ -17,6 +28,7 @@
     <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
     <PackageVersion Include="CsCheck" Version="4.9.1" />
     <PackageVersion Include="Moq" Version="4.21.0" />
+    <PackageVersion Include="TestableIO.System.IO.Abstractions.TestingHelpers" Version="22.2.0" />
   </ItemGroup>
 
   <ItemGroup Label="Fuzzing">

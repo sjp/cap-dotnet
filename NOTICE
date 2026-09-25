@@ -14,8 +14,23 @@ API built on it. That is re-expressed in C# from scratch. cap-std's test suite w
 checklist of cases to cover. Every test here was written for this repository, and none is a
 translation of an upstream test.
 
-The packages have no runtime dependencies beyond .NET itself. The analyzer shipped in
-Cap.Std runs inside the compiler that loads it, and brings no Roslyn assemblies of its own.
+The packages have no runtime dependencies beyond .NET itself, with one exception below. The
+analyzer shipped in Cap.Std runs inside the compiler that loads it, and brings no Roslyn
+assemblies of its own.
+
+Runtime dependencies
+====================
+
+Cap.IO.Abstractions depends on two NuGet packages, which are not included in it and are
+installed alongside it:
+
+  - TestableIO.System.IO.Abstractions (https://github.com/TestableIO/System.IO.Abstractions),
+    MIT licence;
+  - Testably.Abstractions.FileSystem.Interface
+    (https://github.com/Testably/Testably.Abstractions), MIT licence.
+
+Cap.IO.Abstractions implements the interfaces they declare. No code from either is copied into
+this repository. No other package depends on anything beyond .NET.
 
 Borrowing from upstream
 =======================

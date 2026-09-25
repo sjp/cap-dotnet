@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using Cap.Directories;
 using Cap.Fs.Ext;
+using Cap.IO.Abstractions;
 using Cap.Net;
 using Cap.Primitives.Interop;
 using Cap.Rand;
@@ -49,6 +50,7 @@ public sealed class HostBackendAuditTests
         typeof(CapClock).Assembly,
         typeof(CapRandom).Assembly,
         typeof(InMemoryFileSystem).Assembly,
+        typeof(DirFileSystem).Assembly,
     ];
 
     /// <summary>

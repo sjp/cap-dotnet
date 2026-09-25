@@ -89,7 +89,7 @@ attacks that are defended, and names the test that covers each one.
 | **`Cap.Std.Dir`** | resolving each name beneath an open directory handle | refused | **yes**, for untrusted paths; see above |
 | `Microsoft.Extensions.FileProviders.PhysicalFileProvider` | `Path.GetFullPath` and a prefix comparison on the resulting string | followed | **no** — its documentation makes no security claim, and its check is the string check above |
 | `Zio.FileSystems.SubFileSystem` | joining the path onto a sub-path and testing the result as text | followed | **no** — it is a view for composing file systems, and nothing in it examines links |
-| `System.IO.Abstractions` | nothing: it is an injectable wrapper over `System.IO` | followed | **no** — it exists to make file access testable, and does not claim to confine it |
+| `System.IO.Abstractions` | nothing: it is an injectable wrapper over `System.IO` | followed | **no** — it exists to make file access testable, and does not claim to confine it. `Cap.IO.Abstractions` implements its `IFileSystem` over a `Dir`, which gives code written against it both ([docs](docs/io-abstractions.md)) |
 
 [`samples/StaticFileServer`](samples/StaticFileServer) serves one content root both ways —
 through a `Dir`, and through `UseStaticFiles` over `PhysicalFileProvider` — and shows the
@@ -140,6 +140,7 @@ reviewed to know that — it was never given anything else.
 | [The analyzer](docs/analyzers.md) | The build-time rules shipped in `Cap.Std`, and the one line that makes ambient `System.IO` an error. |
 | [NativeAOT and trimming](docs/aot.md) | What an application can rely on, and the size of a native binary. |
 | [Testing](docs/testing.md) | An in-memory filesystem that hands out real `Dir` handles, for testing code that takes one. |
+| [`IFileSystem` over a `Dir`](docs/io-abstractions.md) | Confining code written against System.IO.Abstractions without changing it, and every difference from `System.IO` and `MockFileSystem`. |
 
 **Other capabilities**
 
@@ -176,6 +177,7 @@ src/Cap.Time/          the system clock as a TimeProvider, behind a token
 src/Cap.Rand/          OS entropy behind a token, and a seeded stream for tests
 src/Cap.Directories/   well-known project directories as Dir handles
 src/Cap.Std.Testing/   an in-memory filesystem that hands out real Dir handles, for tests
+src/Cap.IO.Abstractions/  System.IO.Abstractions' IFileSystem, confined to a Dir
 src/Cap.Analyzers/     Roslyn analyzer shipped in Cap.Std: ambient IO, clock and entropy
 samples/               runnable programs, each built and run in CI
 tests/                 unit, adversarial escape corpus, TOCTOU stress, property tests

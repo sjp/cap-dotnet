@@ -17,6 +17,7 @@ package you have downloaded.
 | `Cap.Rand` | `Cap.Rand.dll`; depends on `Cap.Std` |
 | `Cap.Directories` | `Cap.Directories.dll`; depends on `Cap.Std` |
 | `Cap.Std.Testing` | `Cap.Std.Testing.dll`; depends on exactly the `Cap.Std` of the same version |
+| `Cap.IO.Abstractions` | `Cap.IO.Abstractions.dll`; depends on `Cap.Std`, `Cap.Fs.Ext`, and on `TestableIO.System.IO.Abstractions` and `Testably.Abstractions.FileSystem.Interface` pinned to one minor version each |
 
 There is no `Cap.Primitives` package. The assembly holds the few public types every package
 shares, such as `AmbientAuthority`, `CapPath` and `SymlinkPolicy`, together with the
@@ -29,6 +30,13 @@ that installs only `Cap.Time`, say, as well as one that installs `Cap.Std` direc
 than a minimum. It implements a contract inside `Cap.Std` that is not public and can change in
 any release, so it is correct only beside the `Cap.Std` it was built with, and NuGet refuses a
 combination of the two that would compile and then fail at run time.
+
+`Cap.IO.Abstractions` is the one package with a third-party runtime dependency. It implements
+the System.IO.Abstractions interfaces, whose maintainers add members in minor releases, so
+each dependency is a range within one minor version (for example `[22.2.0,22.3.0)`) rather
+than a minimum. A newer minor version needs a release of this package that implements its
+members. The build refuses a reference to either dependency from any other shipped project,
+so the rest of the packages keep depending on .NET alone.
 
 Each package carries `LICENSE` (MIT), `NOTICE` and a readme. Each assembly embeds its PDB,
 with SourceLink pointing at the commit it was built from, so a debugger can step into the

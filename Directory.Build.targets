@@ -20,4 +20,16 @@
                      Condition="'$(CapBanSystemIoPath)' == 'true'" />
   </ItemGroup>
 
+  <!--
+    System.IO.Abstractions is a runtime dependency of Cap.IO.Abstractions and of nothing else
+    that ships. Every other package depends on .NET alone, and a reference added to one of
+    them by habit would quietly make that untrue for everyone who installs it.
+  -->
+  <Target Name="CapRestrictSystemIoAbstractions"
+          BeforeTargets="CollectPackageReferences"
+          Condition="'$(CapIsProductCode)' == 'true' and '$(MSBuildProjectName)' != 'Cap.IO.Abstractions'">
+    <Error Condition="'@(PackageReference->AnyHaveMetadataValue('Identity', 'TestableIO.System.IO.Abstractions'))' == 'true' or '@(PackageReference->AnyHaveMetadataValue('Identity', 'Testably.Abstractions.FileSystem.Interface'))' == 'true'"
+           Text="$(MSBuildProjectName) references System.IO.Abstractions, which only Cap.IO.Abstractions may depend on." />
+  </Target>
+
 </Project>

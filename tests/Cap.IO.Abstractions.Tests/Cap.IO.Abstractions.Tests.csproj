@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.IO.Abstractions.Tests</RootNamespace>
+    <AssemblyName>Cap.IO.Abstractions.Tests</AssemblyName>
+    <!-- The throwaway directory in tests/Scenarios, for the on-disk runs. -->
+    <CapUsesScratchTree>true</CapUsesScratchTree>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.IO.Abstractions/Cap.IO.Abstractions.csproj" />
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+    <ProjectReference Include="../../src/Cap.Std.Testing/Cap.Std.Testing.csproj" />
+  </ItemGroup>
+
+  <!--
+    MockFileSystem, the in-memory IFileSystem most IFileSystem code is already tested with.
+    The shared behavioural tests run against it as well as against the adapter, so that where
+    the two differ it shows, and the differences are the ones the package documentation lists.
+  -->
+  <ItemGroup>
+    <PackageReference Include="TestableIO.System.IO.Abstractions.TestingHelpers" />
+  </ItemGroup>
+
+  <!--
+    The Cap.IO.Abstractions sources, carried into this assembly so that the path-construction
+    audit can read them.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../src/Cap.IO.Abstractions/**/*.cs"
+                      Exclude="../../src/Cap.IO.Abstractions/obj/**/*.cs;../../src/Cap.IO.Abstractions/bin/**/*.cs"
+                      LogicalName="CapIOAbstractionsSource.%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

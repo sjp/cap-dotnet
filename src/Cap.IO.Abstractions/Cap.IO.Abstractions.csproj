@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.IO.Abstractions</RootNamespace>
+    <Description>An IFileSystem from System.IO.Abstractions whose every path is resolved beneath a Dir, so code written against IFileSystem gets containment by changing the composition root rather than the component.</Description>
+    <PackageTags>$(PackageTags);System.IO.Abstractions;IFileSystem;testing</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Cap.Std/Cap.Std.csproj" PrivateAssets="none" />
+    <ProjectReference Include="../Cap.Fs.Ext/Cap.Fs.Ext.csproj" PrivateAssets="none" />
+    <!-- Cap.Primitives ships inside Cap.Std, and Cap.Std carries the analyzer on to whoever
+         installs this package. Both are explained in Cap.Std.csproj. -->
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
+    The only third-party runtime dependency in any package here. The interfaces this assembly
+    implements are declared in Testably.Abstractions.FileSystem.Interface, which
+    TestableIO.System.IO.Abstractions depends on and forwards to, so both are referenced
+    directly and both are pinned in Directory.Packages.props to the minor versions this
+    assembly was built and tested against. Their maintainers add members to the interfaces in
+    minor releases, and a newer interface assembly beside this one would load and then fail
+    the first time a new member was called.
+
+    The Wrappers package, which holds the ambient FileSystem over the static System.IO types,
+    is deliberately not referenced: a containment package has no business shipping the thing
+    it exists to replace.
+  -->
+  <ItemGroup>
+    <PackageReference Include="TestableIO.System.IO.Abstractions" />
+    <PackageReference Include="Testably.Abstractions.FileSystem.Interface" />
+  </ItemGroup>
+
+  <!--
+    The members of System.IO.Path that are string functions are used here to give IPath the
+    platform's behaviour. The members that consult the host, or that fold `..` away as text,
+    are banned; see the notes in the file.
+  -->
+  <ItemGroup>
+    <AdditionalFiles Include="CapBannedSymbols.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cap.IO.Abstractions.Tests" />
+  </ItemGroup>
+
+</Project>

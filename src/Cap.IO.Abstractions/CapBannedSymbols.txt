@@ -1,0 +1,17 @@
+# Additional bans for Cap.IO.Abstractions.
+#
+# This assembly presents a virtual namespace whose root is a Dir, and it may use the string
+# functions of System.IO.Path to give IPath the platform's behaviour (GetFileName,
+# GetExtension, Combine and the like). The members below are not string functions: each one
+# either consults the host (its working directory, its scratch directory, its filesystem) or
+# collapses `..` as text. The analyzer that ships in Cap.Std already bans GetFullPath(string),
+# GetTempPath, GetTempFileName and GetRandomFileName in every assembly under src/; these are
+# the rest.
+#
+# The adapter's own lexical GetFullPath and GetRelativePath live in VirtualPath, work only over
+# the virtual namespace, and name a request rather than a location. Nothing resolves them:
+# every path reaches the Dir as the caller wrote it, less the virtual root.
+
+M:System.IO.Path.GetFullPath(System.String,System.String);Folds `..` away as text and, for a base that is not fully qualified, consults the process's working directory. Use VirtualPath.GetFullPath.
+M:System.IO.Path.GetRelativePath(System.String,System.String);Resolves both arguments against the process's working directory. Use VirtualPath.GetRelativePath.
+M:System.IO.Path.Exists(System.String);Asks the host filesystem. Ask the Dir.
