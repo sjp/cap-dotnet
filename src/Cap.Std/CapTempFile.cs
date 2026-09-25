@@ -135,13 +135,12 @@ public sealed class CapTempFile : IDisposable
     {
         ArgumentNullException.ThrowIfNull(parent);
 
-        CapResult<SafeFileHandle> anonymous = parent.OpenAnonymousFile();
+        CapResult<CapFile> anonymous = parent.OpenAnonymousFile();
         if (anonymous.IsSuccess)
         {
             // Nothing is kept beyond the handle. There is no name to remove later and no
             // directory to remove it from, so there is nothing for this object to hold.
-            CapFile file = new(anonymous.Value, FileAccess.ReadWrite, isAsync: false, appending: false);
-            return new CapTempFile(parent: null, file, name: null);
+            return new CapTempFile(parent: null, anonymous.Value, name: null);
         }
 
         if (anonymous.Error.Category != CapErrorCategory.NotSupported)

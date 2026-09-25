@@ -137,12 +137,12 @@ public sealed class DirLifetimeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
 
-        CapResult<SafeDirHandle> opened = PlatformOps.Current.OpenAmbientDirectory(_tree.HostPath, CapAccess.Read);
+        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(_tree.HostPath, CapAccess.Read);
         Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
         SafeDirHandle handle = opened.Value;
         handle.Dispose();
 
-        CapResult<SafeDirHandle> child = PlatformOps.Current.OpenChildDirectory(handle, "child", CapAccess.Read);
+        CapResult<SafeDirHandle> child = PlatformOps.Host.OpenChildDirectory(handle, "child", CapAccess.Read);
         Assert.False(child.IsSuccess);
         Assert.Equal(CapErrorCategory.Closed, child.Error.Category);
 

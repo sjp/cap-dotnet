@@ -15,8 +15,11 @@ namespace Cap.Primitives.Interop;
 /// guarantees that nothing was substituted along the way.
 /// </para>
 /// <para>
-/// The choice is made from the capability the platform reported, which is settled once at
-/// first use. It is not remade per call, and a failure from the kernel-atomic path is never
+/// The choice is made from the capability reported by the backend that issued the starting
+/// handle, and every call goes to that backend, never to the host's. A handle from a
+/// simulated filesystem is resolved by the simulation even while the host is resolving
+/// other handles in the same process. The capability is settled once per backend. It is not
+/// remade per call, and a failure from the kernel-atomic path is never
 /// answered by quietly walking instead. That is the point worth being explicit about: a
 /// demotion nobody notices leaves callers believing they have the stronger property while
 /// they have the weaker one, and there is no way to tell from the outside. So a platform
@@ -34,7 +37,7 @@ internal static class Resolver
 {
     /// <summary>
     /// Opens the directory that <paramref name="path"/> names beneath
-    /// <paramref name="root"/>, by whichever strategy this platform provides.
+    /// <paramref name="root"/>, by whichever strategy its backend provides.
     /// </summary>
     /// <remarks>
     /// A link at the last component is followed, subject to the same policy as any other
@@ -49,7 +52,7 @@ internal static class Resolver
         ConfinedResolveOptions options,
         bool followFinalLink = true)
     {
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = root.Backend;
 
         return ops.Capabilities.SupportsConfinedOpen
             ? ops.OpenConfinedDirectory(root, path.Raw, access, options, followFinalLink)
@@ -58,7 +61,7 @@ internal static class Resolver
 
     /// <summary>
     /// Opens the file that <paramref name="path"/> names beneath <paramref name="root"/>,
-    /// by whichever strategy this platform provides.
+    /// by whichever strategy its backend provides.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -83,7 +86,7 @@ internal static class Resolver
         scoped in FileOpenRequest request,
         ConfinedResolveOptions options)
     {
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = root.Backend;
 
         return ops.Capabilities.SupportsConfinedOpen
             ? ops.OpenConfinedFile(root, path.Raw, in request, options)
@@ -92,7 +95,7 @@ internal static class Resolver
 
     /// <summary>
     /// Opens whatever <paramref name="path"/> names beneath <paramref name="root"/>, a
-    /// directory or a file, by whichever strategy this platform provides.
+    /// directory or a file, by whichever strategy its backend provides.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -120,7 +123,7 @@ internal static class Resolver
             return CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = root.Backend;
 
         return ops.Capabilities.SupportsConfinedOpen
             ? ops.OpenConfinedNode(root, path.Raw, in request, options)
@@ -160,7 +163,7 @@ internal static class Resolver
         scoped in CapPath path,
         ConfinedResolveOptions options)
     {
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = root.Backend;
 
         if (!ops.Capabilities.SupportsConfinedOpen)
         {

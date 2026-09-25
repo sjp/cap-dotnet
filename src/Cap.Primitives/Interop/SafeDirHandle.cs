@@ -19,9 +19,9 @@ namespace Cap.Primitives.Interop;
 /// through <see cref="Lease"/>.
 /// </para>
 /// <para>
-/// One type covers both platforms because every caller of it is platform-neutral resolution
-/// code; the difference between a descriptor and a handle lives entirely in
-/// <see cref="ReleaseHandle"/>.
+/// One type covers every platform because every caller of it is platform-neutral resolution
+/// code; the difference between a descriptor and a handle lives entirely in the
+/// <see cref="Backend"/> that issued it, which is also what closes it.
 /// </para>
 /// <para>
 /// A file handle is deliberately *not* wrapped by a type of our own. Files are handed to
@@ -36,25 +36,66 @@ namespace Cap.Primitives.Interop;
 /// Refusing it costs nothing real and removes the ambiguity from every validity check.
 /// </para>
 /// </remarks>
-internal sealed partial class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
+internal sealed class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
     /// <summary>
     /// Wraps an already-open descriptor or handle.
     /// </summary>
     /// <param name="handle">The raw descriptor or handle value.</param>
-    /// <param name="ownsHandle">
-    /// Whether disposal should close it. A simulated filesystem passes
-    /// <see langword="false"/>: its handle values are indices into its own tables and
-    /// closing them through the OS would close whatever real object happened to share the
-    /// number.
+    /// <param name="backend">
+    /// The implementation that issued it, and so the only one that knows what the value
+    /// refers to.
     /// </param>
     /// <param name="access">The authority the open was granted.</param>
-    public SafeDirHandle(nint handle, bool ownsHandle, CapAccess access)
+    /// <param name="ownsHandle">
+    /// Whether disposal should close it. False only where something else has taken the value
+    /// over and will close it itself, such as a directory stream built on the descriptor.
+    /// </param>
+    public SafeDirHandle(nint handle, IPlatformOps backend, CapAccess access, bool ownsHandle = true)
         : base(ownsHandle)
     {
+        ArgumentNullException.ThrowIfNull(backend);
+
+        Backend = backend;
         Access = access;
         SetHandle(handle);
     }
+
+    /// <summary>
+    /// The implementation that issued this handle, which every operation on it goes through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Carried on the handle rather than chosen per process, so that two filesystems can be
+    /// in use at once: a simulated tree in a test alongside the disk the test runner itself
+    /// is writing to. Each handle reaches the filesystem it came from, whatever else the
+    /// process is doing.
+    /// </para>
+    /// <para>
+    /// The value is meaningless to any other implementation. To a simulated filesystem a
+    /// real descriptor number is an index into its own table, and a simulated index handed
+    /// to the kernel names whatever real object happens to hold that number. So an operation
+    /// that involves two handles has to check that they share a backend before calling
+    /// either one, and a handle produced from another — a copy, or a step of a walk — records
+    /// the same backend as the one it came from.
+    /// </para>
+    /// </remarks>
+    public IPlatformOps Backend { get; }
+
+    /// <summary>
+    /// Whether <paramref name="other"/> may be passed to this handle's backend in the same
+    /// call, as the destination of a rename or a link.
+    /// </summary>
+    /// <remarks>
+    /// True when both came from the same implementation, and also when both are the
+    /// operating system's own objects, because every implementation over the host shares the
+    /// kernel's table. Otherwise the answer is no, and the caller must refuse the operation
+    /// before calling either backend. A rename between filesystems is refused by the kernel
+    /// as a move across devices, and that is what a caller should report here too.
+    /// </remarks>
+    public bool SharesBackendWith(SafeDirHandle other) =>
+        ReferenceEquals(Backend, other.Backend) ||
+        (Backend.IssuesKernelHandles && other.Backend.IssuesKernelHandles);
 
     /// <summary>
     /// The authority this handle was opened with.
@@ -82,23 +123,12 @@ internal sealed partial class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
     public HandleLease Lease() => new(this);
 
     /// <inheritdoc/>
-    protected override bool ReleaseHandle()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            return CloseHandle(handle);
-        }
-
-        // close(2) can report EINTR, and on Linux the descriptor is closed regardless --
-        // retrying would close whatever has since taken the number. So the result is read,
-        // never acted on.
-        return Close(checked((int)handle)) == 0;
-    }
-
-    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
-    private static partial int Close(int fd);
-
-    [LibraryImport("kernel32.dll", EntryPoint = "CloseHandle", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CloseHandle(nint handle);
+    /// <remarks>
+    /// Closes through the backend that issued the handle, because only that backend knows
+    /// whether the value is a kernel object or an entry in a table of its own. That is one
+    /// interface call on the finalizer thread for a handle nobody disposed; the host
+    /// implementations answer it with the bare close and nothing else, so the finalizer does
+    /// no more work than it did when the close was made here directly.
+    /// </remarks>
+    protected override bool ReleaseHandle() => Backend.CloseDirectory(handle);
 }

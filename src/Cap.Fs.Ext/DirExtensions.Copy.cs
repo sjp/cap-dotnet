@@ -91,6 +91,13 @@ public static partial class DirExtensions
     /// link already sitting at a name in the destination does is set out under
     /// <see cref="CopyOptions.Overwrite"/>.
     /// </para>
+    /// <para>
+    /// <strong>The two handles may be on different backends.</strong> Everything is read
+    /// through the source handle and written through the destination handle, and nothing
+    /// from one is ever handed to the other. So a tree held in memory can be filled from one
+    /// on disk, or the reverse. A destination on another backend cannot be inside the source,
+    /// so that check is not made.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
@@ -124,7 +131,7 @@ public static partial class DirExtensions
                 nameof(options));
         }
 
-        Copier copier = new(destination, settings);
+        Copier copier = new(dir, destination, settings);
         return copier.Run(dir);
     }
 
@@ -138,7 +145,7 @@ public static partial class DirExtensions
     private sealed class Copier
     {
         private readonly CopyOptions _options;
-        private readonly CapFileId _destinationRoot;
+        private readonly CapFileId? _destinationRoot;
         private readonly List<CopyLevel> _levels = [];
 
         private int _directories;
@@ -147,10 +154,17 @@ public static partial class DirExtensions
         private int _skipped;
         private long _bytes;
 
-        public Copier(Dir destination, CopyOptions options)
+        public Copier(Dir source, Dir destination, CopyOptions options)
         {
             _options = options;
-            _destinationRoot = destination.GetMetadata().FileId;
+
+            // A destination on another backend, such as a tree in memory being filled from
+            // one on disk, cannot be inside the source, and the two backends number their
+            // objects independently, so an identity from one can equal an identity from the
+            // other by coincidence. Comparing them would refuse a copy for no reason.
+            _destinationRoot = source.SharesBackendWith(destination)
+                ? destination.GetMetadata().FileId
+                : null;
             Destination = destination;
         }
 
@@ -237,7 +251,7 @@ public static partial class DirExtensions
             Dir? target = null;
             try
             {
-                if (source.GetMetadata().FileId == _destinationRoot)
+                if (_destinationRoot is { } destinationRoot && source.GetMetadata().FileId == destinationRoot)
                 {
                     throw new CapIOException(
                         CapErrorKind.InvalidArgument,

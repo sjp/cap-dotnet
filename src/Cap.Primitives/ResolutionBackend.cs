@@ -18,11 +18,13 @@ namespace Cap.Primitives;
 /// would still pass, and the fast path would never run again on any machine.
 /// </para>
 /// <para>
-/// The choice is made once per process, the first time anything is resolved, and does not
-/// change afterwards. The same process-wide answer is read through the static
+/// The host's choice is made once per process, the first time anything is resolved, and
+/// does not change afterwards. That answer is read through the static
 /// <c>Dir.ResolutionBackend</c> property in <c>Cap.Std</c>, and published, together with
-/// counts of the operations each backend performs, as instruments on the
-/// <c>Cap.Primitives</c> meter.
+/// counts of the operations the host performs, as instruments on the
+/// <c>Cap.Primitives</c> meter. A handle carries the backend it was opened through, so one
+/// process can also hold handles on a filesystem that is not the host's; each handle reports
+/// its own through the instance <c>Dir.Backend</c> property.
 /// </para>
 /// </remarks>
 public enum ResolutionBackend
@@ -53,4 +55,11 @@ public enum ResolutionBackend
     /// handle as the resolution root rather than through a path string.
     /// </summary>
     WindowsRelativeOpen,
+
+    /// <summary>
+    /// A filesystem held in the process's memory rather than on a disk, for tests. Its
+    /// handles are not kernel objects, so an operation that needs one, such as naming a
+    /// socket beneath a directory, is not supported on it.
+    /// </summary>
+    InMemory,
 }

@@ -94,7 +94,7 @@ public sealed class WindowsDeviceHandleTests
                 WindowsPlatformOps.RefuseUnlessFilesystemObject(fileHandle).IsSuccess,
                 "an ordinary file was refused as though it were a device.");
 
-            CapResult<SafeDirHandle> directory = PlatformOps.Current.OpenAmbientDirectory(root, CapAccess.Read);
+            CapResult<SafeDirHandle> directory = PlatformOps.Host.OpenAmbientDirectory(root, CapAccess.Read);
             Assert.True(directory.IsSuccess, directory.Error.FailureDescription);
 
             using SafeDirHandle handle = directory.Value!;
@@ -139,12 +139,12 @@ public sealed class WindowsDeviceHandleTests
         string root = Directory.CreateTempSubdirectory("cap-dev-").FullName;
         try
         {
-            CapResult<SafeDirHandle> opened = PlatformOps.Current.OpenAmbientDirectory(root, CapAccess.Read);
+            CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(root, CapAccess.Read);
             Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
             using SafeDirHandle directory = opened.Value!;
 
             CapResult<SafeFileHandle> file =
-                PlatformOps.Current.OpenChildFile(directory, name, FileOpenRequest.Existing(FileAccess.Read));
+                PlatformOps.Host.OpenChildFile(directory, name, FileOpenRequest.Existing(FileAccess.Read));
             if (file.IsSuccess)
             {
                 file.Value!.Dispose();
@@ -152,7 +152,7 @@ public sealed class WindowsDeviceHandleTests
             }
 
             CapResult<SafeDirHandle> child =
-                PlatformOps.Current.OpenChildDirectory(directory, name, CapAccess.Read);
+                PlatformOps.Host.OpenChildDirectory(directory, name, CapAccess.Read);
             if (child.IsSuccess)
             {
                 child.Value!.Dispose();

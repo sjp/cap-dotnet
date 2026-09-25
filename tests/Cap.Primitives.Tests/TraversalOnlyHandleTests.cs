@@ -45,7 +45,7 @@ public sealed class TraversalOnlyHandleTests : IDisposable
         Directory.Delete(_root, recursive: true);
     }
 
-    private static IPlatformOps Ops => PlatformOps.Current;
+    private static IPlatformOps Ops => PlatformOps.Host;
 
     /// <summary>
     /// A traversal-only handle is a position in the tree: names resolve against it, it can

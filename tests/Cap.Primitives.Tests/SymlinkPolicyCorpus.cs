@@ -184,8 +184,8 @@ internal static class SymlinkPolicyCorpus
         return backend switch
         {
             SymlinkPolicyBackend.ConfinedOpen => entry.Kind == ResolvedKind.Directory
-                ? Close(PlatformOps.Current.OpenConfinedDirectory(root, entry.Path, CapAccess.Read, options))
-                : Close(PlatformOps.Current.OpenConfinedFile(root, entry.Path, FileOpenRequest.Existing(FileAccess.Read), options)),
+                ? Close(root.Backend.OpenConfinedDirectory(root, entry.Path, CapAccess.Read, options))
+                : Close(root.Backend.OpenConfinedFile(root, entry.Path, FileOpenRequest.Existing(FileAccess.Read), options)),
 
             _ => ResolveByWalk(root, entry, options),
         };

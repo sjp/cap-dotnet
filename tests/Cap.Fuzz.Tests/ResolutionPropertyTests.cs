@@ -97,7 +97,6 @@ public sealed class ResolutionPropertyTests
                 FakeNode? expected = ReadAsText(sandbox, path);
 
                 FakePlatformOps ops = new(fs);
-                using PlatformOps.SubstitutionScope substitution = PlatformOps.Substitute(ops);
                 using SafeDirHandle root = ops.OpenAmbientDirectory(ResolutionScenario.SandboxName, CapAccess.Read).Value!;
 
                 CapResult<SafeDirHandle> result =

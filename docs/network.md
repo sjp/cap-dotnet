@@ -214,6 +214,11 @@ result to a socket call — which is the technique a directory handle exists to 
 would make the guarantee the type states untrue rather than merely weaker. Ask
 `IsSupported` before offering the feature; the answer does not change while a process runs.
 
+Both mechanisms name the socket by the kernel's descriptor for the directory, so the `Dir`
+has to be on the host's filesystem. A handle on a filesystem held in memory has no
+descriptor to name, and connecting or binding beneath one throws `CapIOException` with
+`CapErrorKind.NotSupported`, even where `IsSupported` is true.
+
 ### Closing a listener leaves the name
 
 As it does for every other program that binds one. Removing it is `Dir.DeleteFile`, and it is

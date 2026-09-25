@@ -18,10 +18,12 @@ namespace Cap.Std.Tests;
 /// </para>
 /// <para>
 /// The simulation stands in for the platform, not for the code under test: everything above
-/// the platform contract is the shipping code, driven the way a caller drives it.
+/// the platform contract is the shipping code, driven the way a caller drives it. The only
+/// difference is where the first handle comes from. It is opened through the simulation
+/// rather than the host, and every handle derived from it stays there, so these run
+/// alongside tests using the disk.
 /// </para>
 /// </remarks>
-[Collection(DirTestGroup.Name)]
 public sealed class TemporaryHelperSimulationTests
 {
     /// <summary>Where the simulated platform says scratch files go.</summary>
@@ -47,17 +49,15 @@ public sealed class TemporaryHelperSimulationTests
     public void A_scratch_directory_is_asked_for_closed_to_everybody_else()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            using CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
+        FakePlatformOps ops = new(fs);
+        using CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
 
-            FakeNode? created = fs.Find(Inside(temp.Name));
+        FakeNode? created = fs.Find(Inside(temp.Name));
 
-            Assert.NotNull(created);
-            Assert.Equal(
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
-                created!.UnixMode);
-        }
+        Assert.NotNull(created);
+        Assert.Equal(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            created!.UnixMode);
     }
 
     /// <summary>An ordinary directory creation is not narrowed the same way.</summary>
@@ -71,16 +71,14 @@ public sealed class TemporaryHelperSimulationTests
     public void A_directory_the_caller_named_is_asked_for_with_the_usual_permissions()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            using Dir root = Dir.Open(TemporaryLocation, AmbientAuthority.Acquire());
-            using Dir made = root.CreateDir("ordinary");
+        FakePlatformOps ops = new(fs);
+        using Dir root = Dir.OpenThrough(ops, TemporaryLocation, AmbientAuthority.Acquire());
+        using Dir made = root.CreateDir("ordinary");
 
-            FakeNode? created = fs.Find(Inside("ordinary"));
+        FakeNode? created = fs.Find(Inside("ordinary"));
 
-            Assert.NotNull(created);
-            Assert.True(created!.UnixMode!.Value.HasFlag(UnixFileMode.OtherRead));
-        }
+        Assert.NotNull(created);
+        Assert.True(created!.UnixMode!.Value.HasFlag(UnixFileMode.OtherRead));
     }
 
     /// <summary>A system with no temporary location says so rather than guessing at one.</summary>
@@ -90,10 +88,8 @@ public sealed class TemporaryHelperSimulationTests
         FakeFileSystem fs = Simulated();
         fs.TemporaryDirectory = null;
 
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            _ = Assert.Throws<DirectoryNotFoundException>(() => CapTempDir.New(AmbientAuthority.Acquire()));
-        }
+        FakePlatformOps ops = new(fs);
+        _ = Assert.Throws<DirectoryNotFoundException>(() => CapTempDir.NewThrough(ops, AmbientAuthority.Acquire()));
     }
 
     /// <summary>A file that refuses its own removal is cleared, and then removed.</summary>
@@ -107,18 +103,16 @@ public sealed class TemporaryHelperSimulationTests
     public void A_file_that_refuses_removal_is_cleared_and_removed()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            string name = temp.Name;
+        FakePlatformOps ops = new(fs);
+        CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        string name = temp.Name;
 
-            temp.Directory.CreateFile("stubborn").Dispose();
-            fs.Find(Inside($"{name}/stubborn"))!.RefusesRemoval = true;
+        temp.Directory.CreateFile("stubborn").Dispose();
+        fs.Find(Inside($"{name}/stubborn"))!.RefusesRemoval = true;
 
-            temp.Dispose();
+        temp.Dispose();
 
-            Assert.Null(fs.Find(Inside(name)));
-        }
+        Assert.Null(fs.Find(Inside(name)));
     }
 
     /// <summary>A file that goes on refusing is left behind, and disposal still returns.</summary>
@@ -131,20 +125,18 @@ public sealed class TemporaryHelperSimulationTests
     public void A_file_that_cannot_be_removed_is_left_behind_without_a_failure()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            string name = temp.Name;
+        FakePlatformOps ops = new(fs);
+        CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        string name = temp.Name;
 
-            temp.Directory.CreateFile("immovable").Dispose();
-            FakeNode file = fs.Find(Inside($"{name}/immovable"))!;
-            file.RefusesRemoval = true;
-            file.Unreadable = true;
+        temp.Directory.CreateFile("immovable").Dispose();
+        FakeNode file = fs.Find(Inside($"{name}/immovable"))!;
+        file.RefusesRemoval = true;
+        file.Unreadable = true;
 
-            temp.Dispose();
+        temp.Dispose();
 
-            Assert.NotNull(fs.Find(Inside(name)));
-        }
+        Assert.NotNull(fs.Find(Inside(name)));
     }
 
     /// <summary>A file with no name is used where the system offers one.</summary>
@@ -154,15 +146,13 @@ public sealed class TemporaryHelperSimulationTests
         FakeFileSystem fs = Simulated();
         fs.SupportsAnonymousFiles = true;
 
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            using CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            using CapTempFile file = CapTempFile.NewAnonymous(temp.Directory);
+        FakePlatformOps ops = new(fs);
+        using CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        using CapTempFile file = CapTempFile.NewAnonymous(temp.Directory);
 
-            Assert.False(file.HasName);
-            Assert.Null(file.Name);
-            Assert.Empty(temp.Directory.EnumerateEntries());
-        }
+        Assert.False(file.HasName);
+        Assert.Null(file.Name);
+        Assert.Empty(temp.Directory.EnumerateEntries());
     }
 
     /// <summary>Where it does not, a named file is used and says so.</summary>
@@ -172,14 +162,12 @@ public sealed class TemporaryHelperSimulationTests
         FakeFileSystem fs = Simulated();
         fs.SupportsAnonymousFiles = false;
 
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            using CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            using CapTempFile file = CapTempFile.NewAnonymous(temp.Directory);
+        FakePlatformOps ops = new(fs);
+        using CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        using CapTempFile file = CapTempFile.NewAnonymous(temp.Directory);
 
-            Assert.True(file.HasName);
-            Assert.True(temp.Directory.Exists(file.Name!));
-        }
+        Assert.True(file.HasName);
+        Assert.True(temp.Directory.Exists(file.Name!));
     }
 
     /// <summary>A tree deeper than the walk will follow is left behind rather than followed.</summary>
@@ -193,24 +181,22 @@ public sealed class TemporaryHelperSimulationTests
     public void A_tree_too_deep_to_walk_is_left_behind()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
+        FakePlatformOps ops = new(fs);
+        CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        string name = temp.Name;
+
+        Dir current = temp.Directory.Clone();
+        for (int depth = 0; depth < 300; depth++)
         {
-            CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            string name = temp.Name;
-
-            Dir current = temp.Directory.Clone();
-            for (int depth = 0; depth < 300; depth++)
-            {
-                Dir next = current.CreateDir("down");
-                current.Dispose();
-                current = next;
-            }
-
+            Dir next = current.CreateDir("down");
             current.Dispose();
-            temp.Dispose();
-
-            Assert.NotNull(fs.Find(Inside(name)));
+            current = next;
         }
+
+        current.Dispose();
+        temp.Dispose();
+
+        Assert.NotNull(fs.Find(Inside(name)));
     }
 
     /// <summary>A tree within the limit is removed entirely.</summary>
@@ -218,25 +204,23 @@ public sealed class TemporaryHelperSimulationTests
     public void A_deep_but_walkable_tree_is_removed()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
+        FakePlatformOps ops = new(fs);
+        CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        string name = temp.Name;
+
+        Dir current = temp.Directory.Clone();
+        for (int depth = 0; depth < 200; depth++)
         {
-            CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            string name = temp.Name;
-
-            Dir current = temp.Directory.Clone();
-            for (int depth = 0; depth < 200; depth++)
-            {
-                current.CreateFile("leaf").Dispose();
-                Dir next = current.CreateDir("down");
-                current.Dispose();
-                current = next;
-            }
-
+            current.CreateFile("leaf").Dispose();
+            Dir next = current.CreateDir("down");
             current.Dispose();
-            temp.Dispose();
-
-            Assert.Null(fs.Find(Inside(name)));
+            current = next;
         }
+
+        current.Dispose();
+        temp.Dispose();
+
+        Assert.Null(fs.Find(Inside(name)));
     }
 
     /// <summary>
@@ -261,51 +245,49 @@ public sealed class TemporaryHelperSimulationTests
     public void Disposal_does_not_empty_a_directory_through_a_link_swapped_in_beneath_it()
     {
         FakeFileSystem fs = Simulated();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
+        FakePlatformOps ops = new(fs);
+        CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+        Assert.Equal(SymlinkPolicy.FollowWithinSandbox, temp.Directory.SymlinkPolicy);
+        string name = temp.Name;
+
+        // Created first so that disposal reaches it before the directory it will lead to.
+        temp.Directory.CreateDir("swapped").Dispose();
+        temp.Directory.CreateDir("target").Dispose();
+        temp.Directory.CreateFile("target/survivor").Dispose();
+
+        FakeNode tree = fs.Find(Inside(name))!;
+        FakeNode target = fs.Find(Inside($"{name}/target"))!;
+        bool swapped = false;
+        bool intact = true;
+        fs.BeforeLookup = (directory, entry) =>
         {
-            CapTempDir temp = CapTempDir.New(AmbientAuthority.Acquire());
-            Assert.Equal(SymlinkPolicy.FollowWithinSandbox, temp.Directory.SymlinkPolicy);
-            string name = temp.Name;
-
-            // Created first so that disposal reaches it before the directory it will lead to.
-            temp.Directory.CreateDir("swapped").Dispose();
-            temp.Directory.CreateDir("target").Dispose();
-            temp.Directory.CreateFile("target/survivor").Dispose();
-
-            FakeNode tree = fs.Find(Inside(name))!;
-            FakeNode target = fs.Find(Inside($"{name}/target"))!;
-            bool swapped = false;
-            bool intact = true;
-            fs.BeforeLookup = (directory, entry) =>
+            if (directory != tree || entry != "swapped")
             {
-                if (directory != tree || entry != "swapped")
-                {
-                    return;
-                }
+                return;
+            }
 
-                if (!swapped)
+            if (!swapped)
+            {
+                swapped = true;
+                fs.Replace(Inside($"{name}/swapped"), new FakeNode
                 {
-                    swapped = true;
-                    fs.Replace(Inside($"{name}/swapped"), new FakeNode
-                    {
-                        Type = CapNodeType.SymbolicLink,
-                        LinkTarget = "target",
-                        VolumeId = 1,
-                        NodeId = fs.NextNodeId(),
-                    });
-                }
-                else
-                {
-                    intact &= target.Entries.ContainsKey("survivor");
-                }
-            };
+                    Type = CapNodeType.SymbolicLink,
+                    LinkTarget = "target",
+                    VolumeId = 1,
+                    NodeId = fs.NextNodeId(),
+                });
+            }
+            else
+            {
+                intact &= target.Entries.ContainsKey("survivor");
+            }
+        };
 
-            temp.Dispose();
-            fs.BeforeLookup = null;
+        temp.Dispose();
+        fs.BeforeLookup = null;
 
-            Assert.True(swapped);
-            Assert.True(intact, "The target was emptied through the link before disposal reached it.");
-            Assert.Null(fs.Find(Inside(name)));
-        }
+        Assert.True(swapped);
+        Assert.True(intact, "The target was emptied through the link before disposal reached it.");
+        Assert.Null(fs.Find(Inside(name)));
     }
 }

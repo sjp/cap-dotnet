@@ -13,24 +13,8 @@ namespace Cap.Primitives.Tests;
 /// boundaries, and mutation timed to land between two steps — are asserted here directly,
 /// before anything is built on top of them.
 /// </remarks>
-[Collection(PlatformOpsTestGroup.Name)]
 public sealed class SimulatedFilesystemTests
 {
-    /// <summary>The platform slot can be replaced, and puts itself back.</summary>
-    [Fact]
-    public void Substituting_the_platform_is_scoped()
-    {
-        IPlatformOps real = PlatformOps.Current;
-
-        FakeFileSystem fs = new();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            Assert.NotSame(real, PlatformOps.Current);
-        }
-
-        Assert.Same(real, PlatformOps.Current);
-    }
-
     /// <summary>A link is reported as a link rather than followed, as on every real platform.</summary>
     [Fact]
     public void A_link_is_reported_rather_than_followed()

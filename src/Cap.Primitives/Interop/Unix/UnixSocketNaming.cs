@@ -101,10 +101,16 @@ internal static class UnixSocketNaming
     /// name is the part that cannot be raced: the answer is about the object the address
     /// already names.
     /// </para>
+    /// <para>
+    /// Both this and <see cref="ForBind"/> refuse a directory whose handle is not a kernel
+    /// object, as not supported. The address is written in terms of the kernel's descriptor
+    /// table, and a directory in a simulated filesystem has no entry there for a socket to
+    /// be named beneath.
+    /// </para>
     /// </remarks>
     public static CapResult<UnixSocketName> ForConnect(SafeDirHandle holder, ReadOnlySpan<char> name)
     {
-        if (!IsSupported)
+        if (!IsSupported || !holder.Backend.IssuesKernelHandles)
         {
             return CapResult<UnixSocketName>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
         }
@@ -141,7 +147,7 @@ internal static class UnixSocketNaming
         }
 
         var anchor = new SafeFileHandle(fd, ownsHandle: true);
-        CapError described = PlatformOps.Current.DescribeHandle(anchor, out CapNodeStat stat);
+        CapError described = holder.Backend.DescribeHandle(anchor, out CapNodeStat stat);
         if (described.IsFailure)
         {
             anchor.Dispose();
@@ -172,7 +178,7 @@ internal static class UnixSocketNaming
     /// </remarks>
     public static CapResult<UnixSocketName> ForBind(SafeDirHandle holder, ReadOnlySpan<char> name)
     {
-        if (!IsSupported)
+        if (!IsSupported || !holder.Backend.IssuesKernelHandles)
         {
             return CapResult<UnixSocketName>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
         }
@@ -182,7 +188,7 @@ internal static class UnixSocketNaming
             return CapResult<UnixSocketName>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        CapResult<SafeDirHandle> copy = PlatformOps.Current.DuplicateDirectory(holder);
+        CapResult<SafeDirHandle> copy = holder.Backend.DuplicateDirectory(holder);
         if (!copy.IsSuccess)
         {
             return CapResult<UnixSocketName>.Fail(copy.Error);
@@ -259,7 +265,7 @@ internal static class UnixSocketNaming
             return false;
         }
 
-        using var opened = new SafeDirHandle(fd, ownsHandle: true, CapAccess.None);
+        _ = LinuxNative.Close(fd);
         return true;
     }
 }

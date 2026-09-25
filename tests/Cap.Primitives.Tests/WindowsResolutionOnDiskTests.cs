@@ -120,7 +120,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         AssertFails(CapErrorCategory.Escaped, root, "Jn");
 
-        CapResult<string> read = PlatformOps.Current.ReadChildLink(root, "Jn");
+        CapResult<string> read = PlatformOps.Host.ReadChildLink(root, "Jn");
         Assert.False(read.IsSuccess, "a junction's target was handed back as though it could be followed.");
         Assert.Equal(CapErrorCategory.Escaped, read.Error.Category);
     }
@@ -299,7 +299,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     private SafeDirHandle OpenSandbox()
     {
         Directory.CreateDirectory(Sandbox);
-        CapResult<SafeDirHandle> root = PlatformOps.Current.OpenAmbientDirectory(Sandbox, CapAccess.Read);
+        CapResult<SafeDirHandle> root = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.Read);
         Assert.True(root.IsSuccess, root.Error.FailureDescription);
         return root.Value!;
     }
@@ -311,7 +311,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
         Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
 
         using SafeDirHandle handle = opened.Value!;
-        CapError error = PlatformOps.Current.StatHandle(handle, out CapNodeInfo info);
+        CapError error = PlatformOps.Host.StatHandle(handle, out CapNodeInfo info);
         Assert.True(error.IsSuccess, error.FailureDescription);
         return info;
     }
@@ -327,7 +327,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
     private static void AssertAmbientFails(string path)
     {
-        CapResult<SafeDirHandle> result = PlatformOps.Current.OpenAmbientDirectory(path, CapAccess.Read);
+        CapResult<SafeDirHandle> result = PlatformOps.Host.OpenAmbientDirectory(path, CapAccess.Read);
         if (result.IsSuccess)
         {
             result.Value!.Dispose();

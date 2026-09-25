@@ -209,11 +209,26 @@ does not change for the life of the process. A service whose threat model needs 
 guarantee should check it at start-up, as above, and refuse to run without it; one that can
 live with either should at least log it.
 
+The static property describes the host: it is what `Dir.Open` gives you, and what every
+handle derived from one of those resolves through. A handle records the backend that opened
+it, so one process can also hold handles on a filesystem that is not the host's, such as a
+tree held in memory for a test. Each handle reports its own backend through the instance
+property:
+
+```csharp
+using Dir root = Dir.Open("/srv/data", AmbientAuthority.Acquire());
+Debug.Assert(root.Backend == Dir.ResolutionBackend);
+```
+
+A handle derived from another (`OpenDir`, `CreateDir`, `Clone`, `Restrict`, a walk) stays on
+the backend it came from, and reports the same value.
+
 | `ResolutionBackend` | Where | What holds |
 |---|---|---|
 | `ConfinedOpen` | Linux 5.6 and later, unless a syscall filter denies `openat2` or it is turned off as above | The guarantee in [threat model §2](threat-model.md#2-the-guarantee) in full: each path is resolved in one kernel operation that cannot leave the root, so there is no instant at which anything can be substituted. |
 | `PortableWalk` | macOS; Linux when `openat2` is unavailable or turned off | Containment holds: nothing outside the root is reached. Within one operation, someone who can write inside the tree can, with the right timing, steer it to a different object that is also inside ([§6.1](threat-model.md#61-the-fallback-resolver-narrows-toctou-it-does-not-close-it)). |
 | `WindowsRelativeOpen` | Windows | As for `PortableWalk`. |
+| `InMemory` | A filesystem held in the process's memory, for tests; never what `Dir.ResolutionBackend` reports | Nothing about the host. Its handles are not kernel objects, so an operation that needs one, such as reaching a Unix-domain socket beneath the directory, fails as not supported. |
 | `None` | Any other operating system | Nothing: opening a directory fails, and there is no weaker backend for it to fall back to. |
 
 From outside the process, the same answer and the work behind it are published on the
@@ -232,12 +247,35 @@ application:
 dotnet-counters monitor --process-id <pid> --counters Cap.Primitives
 ```
 
+The instruments describe the host only. Opens on a filesystem held in memory are not
+counted, so a test's simulated tree cannot hide what the host's real filesystem access did.
+
 The counts are what make a demotion visible after the fact rather than only at start-up. A
 process expected to be on the kernel-atomic backend whose confined-open attempts stay at zero
 while its component opens climb is walking, whatever it was configured to do. The
 instruments appear once the process has resolved its first path or read
 `Dir.ResolutionBackend`, and are read only when a listener asks, so a process that nobody is
 watching pays nothing for them.
+
+## Handles on different backends
+
+A handle's value means something only to the backend that issued it: to the kernel a
+descriptor number, to a filesystem in memory an entry in its own table. So an operation that
+takes two handles never hands one backend the other's handle.
+
+- `Rename`, `TryRename`, `CreateHardLink` and `TryCreateHardLink` between handles on
+  different backends fail as a move across filesystems would: `CapIOException` with
+  `CapErrorKind.CrossDevice`, or `false` from the `Try` form. The refusal comes before either
+  backend is asked to do anything, so neither tree changes.
+- `CopyTo` works across backends. It reads everything through the source handle and writes
+  everything through the destination handle, so nothing crosses. A destination on another
+  backend cannot be inside the source, so that check is not made. Each backend numbers its
+  objects on its own, and two numbers that happen to match mean nothing.
+- `CapUnixStream.Connect` and `CapUnixListener.Bind` need a kernel object to name the socket
+  beneath, and fail as not supported on a handle that is not one.
+
+Handles opened on the host always share a backend with each other, however they were
+reached.
 
 ## What the Windows walk does differently
 

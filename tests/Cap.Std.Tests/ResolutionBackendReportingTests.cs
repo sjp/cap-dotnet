@@ -27,7 +27,7 @@ public sealed class ResolutionBackendReportingTests : IDisposable
         ResolutionBackend reported = Dir.ResolutionBackend;
 
         Assert.NotEqual(ResolutionBackend.None, reported);
-        Assert.Equal(PlatformOps.Current.Capabilities.Backend, reported);
+        Assert.Equal(PlatformOps.Host.Capabilities.Backend, reported);
     }
 
     [Fact]

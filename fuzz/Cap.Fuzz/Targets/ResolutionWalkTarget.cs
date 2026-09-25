@@ -61,8 +61,6 @@ internal static class ResolutionWalkTarget
         string shown = $"{Show(scenario.Path)} ({scenario.Operation}, {scenario.Options})";
 
         FakePlatformOps ops = new(fs);
-        using PlatformOps.SubstitutionScope substitution = PlatformOps.Substitute(ops);
-
         CapResult<SafeDirHandle> opened = ops.OpenAmbientDirectory(ResolutionScenario.SandboxName, CapAccess.Read);
         Require(opened.IsSuccess, "The simulated sandbox could not be opened.");
         using SafeDirHandle root = opened.Value!;

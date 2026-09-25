@@ -262,13 +262,13 @@ public sealed partial class Dir
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
-        CapResult<DirectoryReader> opened = PlatformOps.Current.OpenDirectoryReader(_handle);
+        CapResult<DirectoryReader> opened = Ops.OpenDirectoryReader(_handle);
         if (!opened.IsSuccess)
         {
             throw FailureTranslation.ToEnumerationException(opened.Error);
         }
 
-        CapError error = PlatformOps.Current.StatHandle(_handle, out CapNodeInfo info);
+        CapError error = Ops.StatHandle(_handle, out CapNodeInfo info);
         if (error.IsFailure)
         {
             opened.Value.Dispose();

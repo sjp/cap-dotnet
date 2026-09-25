@@ -147,6 +147,11 @@ lands inside the subtree the handle covers.
 another's, handle to handle. Both ends are capabilities, which is the correct reading of what
 a copy is: it joins two places together, so it needs authority over both.
 
+The two handles may be on different backends, for example a tree on disk and one held in
+memory for a test. Everything is read through the source handle and written through the
+destination handle, so neither backend is ever handed the other's handle. See
+[backends.md](backends.md#handles-on-different-backends).
+
 ### What happens to each kind
 
 | In the source | Default | `Skip` | `Recreate` |

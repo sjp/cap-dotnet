@@ -16,7 +16,6 @@ namespace Cap.Primitives.Tests;
 /// second lookup would be seen every time and a swap made after the first is made at exactly
 /// the instant that would matter.
 /// </remarks>
-[Collection(PlatformOpsTestGroup.Name)]
 public sealed class PortableWalkNodeTests
 {
     /// <summary>A file is opened as a file, and a directory as a directory.</summary>
@@ -206,14 +205,11 @@ public sealed class PortableWalkNodeTests
     private static void Run(FakeFileSystem fs, Action<FakePlatformOps, SafeDirHandle> body)
     {
         FakePlatformOps ops = new(fs);
-        using (PlatformOps.Substitute(ops))
-        {
-            CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
-            Assert.True(root.IsSuccess, root.Error.FailureDescription);
+        CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
+        Assert.True(root.IsSuccess, root.Error.FailureDescription);
 
-            using SafeDirHandle handle = root.Value!;
-            body(ops, handle);
-        }
+        using SafeDirHandle handle = root.Value!;
+        body(ops, handle);
     }
 
     private static OpenedNode OpenNode(SafeDirHandle root, string path)

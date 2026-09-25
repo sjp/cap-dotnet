@@ -28,7 +28,6 @@ namespace Cap.Primitives.Tests;
 /// half of the corpus is for.
 /// </para>
 /// </remarks>
-[Collection(PlatformOpsTestGroup.Name)]
 public sealed class SymlinkPolicyTests
 {
     /// <summary>Every case in the table, one theory case each.</summary>
@@ -78,8 +77,6 @@ public sealed class SymlinkPolicyTests
     {
         FakeFileSystem fs = BuildTree(SymlinkTreeFeature.NonLinkReparsePoint, confined: false);
         FakePlatformOps ops = new(fs);
-        using PlatformOps.SubstitutionScope scope = PlatformOps.Substitute(ops);
-
         using SafeDirHandle root = OpenSandbox(ops);
 
         // Through the link: refused, because the policy refuses to follow one.
@@ -136,7 +133,6 @@ public sealed class SymlinkPolicyTests
             confined: backend == SymlinkPolicyBackend.ConfinedOpen);
 
         FakePlatformOps ops = new(fs);
-        using PlatformOps.SubstitutionScope scope = PlatformOps.Substitute(ops);
         using SafeDirHandle root = OpenSandbox(ops);
 
         CapError existing = Resolve(backend, root, "escape-via-parent-link-target-exists");
@@ -171,7 +167,6 @@ public sealed class SymlinkPolicyTests
             confined: backend == SymlinkPolicyBackend.ConfinedOpen);
 
         FakePlatformOps ops = new(fs);
-        using PlatformOps.SubstitutionScope scope = PlatformOps.Substitute(ops);
         using SafeDirHandle root = OpenSandbox(ops);
 
         CapError error = SymlinkPolicyCorpus.Resolve(backend, root, entry);

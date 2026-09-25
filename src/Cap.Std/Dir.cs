@@ -72,6 +72,12 @@ public sealed partial class Dir : IDisposable
     }
 
     /// <summary>
+    /// The implementation every operation on this handle goes through: the one that issued
+    /// it, which every handle derived from it shares.
+    /// </summary>
+    private IPlatformOps Ops => _handle.Backend;
+
+    /// <summary>
     /// What resolution beneath this handle does with a symbolic link on the way to the thing
     /// a path names.
     /// </summary>
@@ -92,7 +98,8 @@ public sealed partial class Dir : IDisposable
     public SymlinkPolicy SymlinkPolicy => _options.ToSymlinkPolicy();
 
     /// <summary>
-    /// The implementation this process resolves every path beneath every handle through.
+    /// The implementation this process resolves paths through beneath every handle opened
+    /// from the host's filesystem: what <see cref="Open(string, AmbientAuthority, SymlinkPolicy)"/> gives you.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -108,8 +115,9 @@ public sealed partial class Dir : IDisposable
     /// </para>
     /// <para>
     /// Settled once, the first time anything is resolved, and fixed for the life of the
-    /// process; reading it before then settles it. It is a property of the process rather
-    /// than of a handle, which is why it is static. On Linux the kernel-atomic backend can be
+    /// process; reading it before then settles it. It describes the host rather than any one
+    /// handle, which is why it is static. A handle from another filesystem, such as a
+    /// simulated one in a test, reports its own through <see cref="Backend"/>. On Linux the kernel-atomic backend can be
     /// unavailable — an old kernel, or a syscall filter such as a container runtime's — and a
     /// process that depends on it should check this at start-up and refuse to run on
     /// anything else, rather than discover the difference from a report.
@@ -121,6 +129,28 @@ public sealed partial class Dir : IDisposable
     /// <para>Safe to read from any thread.</para>
     /// </remarks>
     public static ResolutionBackend ResolutionBackend => ResolutionMetrics.ActiveBackend;
+
+    /// <summary>
+    /// The implementation paths beneath this handle are resolved through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a handle on the host's filesystem, which is every handle
+    /// <see cref="Open(string, AmbientAuthority, SymlinkPolicy)"/> and the handles derived from it produce,
+    /// this is the same as <see cref="ResolutionBackend"/>. A handle on a filesystem that
+    /// lives in memory reports <see cref="Cap.Primitives.ResolutionBackend.InMemory"/>
+    /// instead, and so does every handle derived from it: a handle stays on the filesystem
+    /// it came from.
+    /// </para>
+    /// <para>
+    /// Two handles on different backends cannot be used together. Moving or linking an entry
+    /// from one to the other fails as a move across devices would, before either backend is
+    /// asked to do anything.
+    /// </para>
+    /// <para>Fixed for the life of the handle, and safe to read from any thread, even after
+    /// the handle has been disposed.</para>
+    /// </remarks>
+    public ResolutionBackend Backend => Ops.Capabilities.Backend;
 
     /// <summary>
     /// Opens a directory by an ordinary path, using the authority the process already has.
@@ -169,9 +199,20 @@ public sealed partial class Dir : IDisposable
     public static Dir Open(
         string path,
         AmbientAuthority authority,
+        SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox) =>
+        OpenThrough(PlatformOps.Host, path, authority, policy);
+
+    /// <summary>
+    /// Opens a directory by path through <paramref name="backend"/>, as
+    /// <see cref="Open(string, AmbientAuthority, SymlinkPolicy)"/> does through the host.
+    /// </summary>
+    internal static Dir OpenThrough(
+        IPlatformOps backend,
+        string path,
+        AmbientAuthority authority,
         SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox)
     {
-        CapError error = OpenRootCore(path, authority, Demand(policy), out Dir? dir);
+        CapError error = OpenRootCore(backend, path, authority, Demand(policy), out Dir? dir);
         return error.IsSuccess ? dir! : throw FailureTranslation.ToException(error, path);
     }
 
@@ -201,7 +242,7 @@ public sealed partial class Dir : IDisposable
         AmbientAuthority authority,
         [NotNullWhen(true)] out Dir? dir,
         SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox) =>
-        OpenRootCore(path, authority, Demand(policy), out dir).IsSuccess;
+        OpenRootCore(PlatformOps.Host, path, authority, Demand(policy), out dir).IsSuccess;
 
     /// <summary>
     /// Opens a directory beneath this one.
@@ -1093,7 +1134,7 @@ public sealed partial class Dir : IDisposable
                 return true;
             }
 
-            CapError stat = PlatformOps.Current.StatChild(lookup.Directory, lookup.Name, out CapNodeInfo info);
+            CapError stat = Ops.StatChild(lookup.Directory, lookup.Name, out CapNodeInfo info);
             return stat.IsSuccess && (!lookup.RequiresDirectory || info.Type == CapNodeType.Directory);
         }
     }
@@ -1335,7 +1376,7 @@ public sealed partial class Dir : IDisposable
         authority.Demand(nameof(authority));
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
-        CapResult<string> result = PlatformOps.Current.GetHandlePath(_handle);
+        CapResult<string> result = Ops.GetHandlePath(_handle);
         path = result.IsSuccess ? result.Value : null;
         return path is not null;
     }
@@ -1413,13 +1454,21 @@ public sealed partial class Dir : IDisposable
     /// seam the whole library opens roots through, and confinement carries more than the
     /// treatment of links.
     /// </para>
+    /// <para>
+    /// Takes the backend as well, which is the host for every public entry point. A test
+    /// passes a simulated one to get a real handle on a simulated tree without replacing the
+    /// host for the rest of the process; the handle, and everything derived from it, then
+    /// resolves through that backend alone.
+    /// </para>
     /// </remarks>
     internal static CapError OpenRootCore(
+        IPlatformOps backend,
         string path,
         AmbientAuthority authority,
         ConfinedResolveOptions options,
         out Dir? dir)
     {
+        ArgumentNullException.ThrowIfNull(backend);
         ArgumentException.ThrowIfNullOrEmpty(path);
         authority.Demand(nameof(authority));
 
@@ -1428,7 +1477,7 @@ public sealed partial class Dir : IDisposable
         // Read rather than traversal alone: a handle a caller was given in order to work in
         // a directory is expected to be able to list it, and narrowing that is a choice for
         // whoever opens the root to make rather than a default to impose on them.
-        CapResult<SafeDirHandle> opened = PlatformOps.Current.OpenAmbientDirectory(path, CapAccess.Read);
+        CapResult<SafeDirHandle> opened = backend.OpenAmbientDirectory(path, CapAccess.Read);
         if (!opened.IsSuccess)
         {
             return opened.Error;
@@ -1440,6 +1489,12 @@ public sealed partial class Dir : IDisposable
 
     /// <summary>The policy this handle resolves under, for a handle derived from it to copy.</summary>
     internal ConfinedResolveOptions Options => _options;
+
+    /// <summary>
+    /// Whether <paramref name="other"/> is on the same filesystem as this handle, so that the
+    /// two can take part in one operation and their identities can be compared.
+    /// </summary>
+    internal bool SharesBackendWith(Dir other) => _handle.SharesBackendWith(other._handle);
 
     /// <summary>
     /// Opens a directory beneath this one without following a symbolic link anywhere on the
@@ -1516,7 +1571,7 @@ public sealed partial class Dir : IDisposable
 
             return error.IsFailure
                 ? error
-                : PlatformOps.Current.ClearChildRemovalBlock(lookup.Directory, lookup.Name);
+                : Ops.ClearChildRemovalBlock(lookup.Directory, lookup.Name);
         }
     }
 
@@ -1640,7 +1695,7 @@ public sealed partial class Dir : IDisposable
                 return CapPathError.None;
             }
 
-            CapResult<SafeDirHandle> copy = PlatformOps.Current.DuplicateDirectory(lookup.Directory);
+            CapResult<SafeDirHandle> copy = Ops.DuplicateDirectory(lookup.Directory);
             if (!copy.IsSuccess)
             {
                 error = copy.Error;
@@ -1874,7 +1929,7 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     private CapError FollowLastLink(CapPath path, ref NameLookup lookup)
     {
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = Ops;
         int budget = PortableResolver.MaxSymbolicLinks;
 
         while (!lookup.NamesDirectoryItself)
@@ -2137,7 +2192,7 @@ public sealed partial class Dir : IDisposable
                 return pathError;
             }
 
-            error = PlatformOps.Current.CreateChildDirectory(
+            error = Ops.CreateChildDirectory(
                 lookup.Directory, lookup.Name, visibility);
             if (error.IsFailure && (exclusive || error.Category != CapErrorCategory.AlreadyExists))
             {
@@ -2149,7 +2204,7 @@ public sealed partial class Dir : IDisposable
             // rather than followed, and the worst a swap can achieve is a handle on some
             // other directory inside the same subtree.
             CapResult<SafeDirHandle> opened =
-                PlatformOps.Current.OpenChildDirectory(lookup.Directory, lookup.Name, CapAccess.Read);
+                Ops.OpenChildDirectory(lookup.Directory, lookup.Name, CapAccess.Read);
 
             if (!opened.IsSuccess)
             {
@@ -2195,8 +2250,8 @@ public sealed partial class Dir : IDisposable
             }
 
             error = directory
-                ? PlatformOps.Current.RemoveChildDirectory(lookup.Directory, lookup.Name)
-                : PlatformOps.Current.RemoveChildFile(lookup.Directory, lookup.Name);
+                ? Ops.RemoveChildDirectory(lookup.Directory, lookup.Name)
+                : Ops.RemoveChildFile(lookup.Directory, lookup.Name);
 
             return CapPathError.None;
         }
@@ -2258,7 +2313,7 @@ public sealed partial class Dir : IDisposable
                 return CapPathError.None;
             }
 
-            error = PlatformOps.Current.CreateChildSymbolicLink(
+            error = Ops.CreateChildSymbolicLink(
                 lookup.Directory, lookup.Name, target, targetIsDirectory);
 
             return CapPathError.None;
@@ -2280,7 +2335,7 @@ public sealed partial class Dir : IDisposable
     /// </remarks>
     private static CapError RefuseAsDirectory(SafeDirHandle parent, ReadOnlySpan<char> name, CapErrorCategory existing)
     {
-        CapError described = PlatformOps.Current.StatChild(parent, name, out CapNodeInfo info);
+        CapError described = parent.Backend.StatChild(parent, name, out CapNodeInfo info);
         if (described.IsFailure)
         {
             return described;
@@ -2310,10 +2365,24 @@ public sealed partial class Dir : IDisposable
         out CapPathError toError,
         out ExpectedTarget expected)
     {
+        ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(toDir);
+        ArgumentNullException.ThrowIfNull(to);
 
+        fromError = CapPathError.None;
         toError = CapPathError.None;
         expected = ExpectedTarget.Name;
+
+        // Two handles from different filesystems, such as a simulated tree and the disk, can
+        // no more share an entry than two mounted volumes can, and the kernel refuses a rename
+        // between those as a move across devices. This is refused the same way, before either
+        // backend sees anything: a handle is meaningful only to the backend that issued it,
+        // and handing one backend the other's handle as a destination would have it act on
+        // whatever its own table holds under that number.
+        if (!_handle.SharesBackendWith(toDir._handle))
+        {
+            return CapError.FromCategory(CapErrorCategory.CrossDevice);
+        }
 
         fromError = Locate(from, out NameLookup source, out CapError error, followLastLink: followLink);
         using (source)
@@ -2350,7 +2419,7 @@ public sealed partial class Dir : IDisposable
                 // separator would have got, so nothing is reached that was not already in reach.
                 if (source.RequiresDirectory || destination.RequiresDirectory)
                 {
-                    CapError described = PlatformOps.Current.StatChild(source.Directory, source.Name, out CapNodeInfo info);
+                    CapError described = Ops.StatChild(source.Directory, source.Name, out CapNodeInfo info);
                     if (described.IsFailure)
                     {
                         return described;
@@ -2377,11 +2446,11 @@ public sealed partial class Dir : IDisposable
 
                 if (rename)
                 {
-                    return PlatformOps.Current.RenameChild(
+                    return Ops.RenameChild(
                         source.Directory, source.Name, destination.Directory, destination.Name, replaceExisting);
                 }
 
-                CapError linked = PlatformOps.Current.CreateChildHardLink(
+                CapError linked = Ops.CreateChildHardLink(
                     source.Directory, source.Name, destination.Directory, destination.Name);
 
                 // Linux and macOS refuse a second name for a directory as a permission failure,
@@ -2391,7 +2460,7 @@ public sealed partial class Dir : IDisposable
                 // links refuses a directory the same way, and a directory is the more precise
                 // answer there too, since no volume would have linked one.
                 if (linked.Category is CapErrorCategory.PermissionDenied or CapErrorCategory.NotSupported &&
-                    PlatformOps.Current.StatChild(source.Directory, source.Name, out CapNodeInfo refused).IsSuccess &&
+                    Ops.StatChild(source.Directory, source.Name, out CapNodeInfo refused).IsSuccess &&
                     refused.Type == CapNodeType.Directory)
                 {
                     return CapError.FromCategory(CapErrorCategory.IsADirectory);
@@ -2421,7 +2490,7 @@ public sealed partial class Dir : IDisposable
                 return pathError;
             }
 
-            CapResult<string> read = PlatformOps.Current.ReadChildLink(lookup.Directory, lookup.Name);
+            CapResult<string> read = Ops.ReadChildLink(lookup.Directory, lookup.Name);
             if (!read.IsSuccess)
             {
                 error = read.Error;
@@ -2509,7 +2578,7 @@ public sealed partial class Dir : IDisposable
                 nameof(policy));
         }
 
-        CapResult<SafeDirHandle> copy = PlatformOps.Current.DuplicateDirectory(_handle);
+        CapResult<SafeDirHandle> copy = Ops.DuplicateDirectory(_handle);
         if (!copy.IsSuccess)
         {
             return copy.Error;
@@ -2525,7 +2594,7 @@ public sealed partial class Dir : IDisposable
 
         clone = null;
 
-        CapResult<SafeDirHandle> copy = PlatformOps.Current.DuplicateDirectory(_handle);
+        CapResult<SafeDirHandle> copy = Ops.DuplicateDirectory(_handle);
         if (!copy.IsSuccess)
         {
             return copy.Error;

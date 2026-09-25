@@ -50,14 +50,21 @@ public sealed class CapFile : IDisposable
     private const int DefaultStreamBufferSize = 4096;
 
     private readonly SafeFileHandle _handle;
+
+    // Held beside the handle rather than on it: the handle is the framework's own type, so
+    // that framework APIs accept it directly, and has nowhere to keep one. Every operation
+    // on the handle goes through this, the implementation that issued it, because a handle
+    // value means something only to that implementation.
+    private readonly IPlatformOps _backend;
     private readonly FileAccess _access;
     private readonly bool _isAsync;
     private volatile bool _appending;
     private bool _given;
 
-    internal CapFile(SafeFileHandle handle, FileAccess access, bool isAsync, bool appending)
+    internal CapFile(SafeFileHandle handle, IPlatformOps backend, FileAccess access, bool isAsync, bool appending)
     {
         _handle = handle;
+        _backend = backend;
         _access = access;
         _isAsync = isAsync;
         _appending = appending;
@@ -151,7 +158,7 @@ public sealed class CapFile : IDisposable
                     "appending to place. Open it for writing to append to it.");
             }
 
-            CapError error = PlatformOps.Current.SetFileAppending(_handle, value);
+            CapError error = _backend.SetFileAppending(_handle, value);
             if (error.IsFailure)
             {
                 throw FailureTranslation.ToWriteException(error);
@@ -219,7 +226,7 @@ public sealed class CapFile : IDisposable
     {
         Demand();
 
-        CapError error = PlatformOps.Current.DescribeHandle(_handle, out CapNodeStat stat);
+        CapError error = _backend.DescribeHandle(_handle, out CapNodeStat stat);
         return error.IsSuccess ? new CapMetadata(stat) : throw FailureTranslation.ToHandleException(error);
     }
 
@@ -298,7 +305,7 @@ public sealed class CapFile : IDisposable
                 "through it. Open it for writing to change them.");
         }
 
-        CapError error = PlatformOps.Current.SetHandleTimes(_handle, lastAccess, lastWrite);
+        CapError error = _backend.SetHandleTimes(_handle, lastAccess, lastWrite);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToTimesException(error);
@@ -352,7 +359,7 @@ public sealed class CapFile : IDisposable
     {
         Demand();
 
-        return PlatformOps.Current.SetHandlePermissions(
+        return _backend.SetHandlePermissions(
             _handle, permissions.UnixMode, permissions.WindowsAttributes);
     }
 
@@ -587,8 +594,8 @@ public sealed class CapFile : IDisposable
         }
 
         CapResult<SafeFileHandle> copy = appending
-            ? PlatformOps.Current.DuplicateAppendingFile(_handle)
-            : PlatformOps.Current.DuplicateFile(_handle);
+            ? _backend.DuplicateAppendingFile(_handle)
+            : _backend.DuplicateFile(_handle);
         if (!copy.IsSuccess)
         {
             FailureTranslation.ThrowIfClosed(copy.Error);
@@ -691,7 +698,7 @@ public sealed class CapFile : IDisposable
     /// <summary>Writes the whole of a buffer at the end of the file.</summary>
     private void WriteAtEnd(ReadOnlySpan<byte> buffer, long fileOffset)
     {
-        CapError error = PlatformOps.Current.WriteAppending(_handle, buffer, fileOffset);
+        CapError error = _backend.WriteAppending(_handle, buffer, fileOffset);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToWriteException(error);

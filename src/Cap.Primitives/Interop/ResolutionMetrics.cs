@@ -20,6 +20,13 @@ namespace Cap.Primitives.Interop;
 /// component opens climbing is walking, whatever it was configured to do.
 /// </para>
 /// <para>
+/// Only the host is counted. The instruments exist to show which strategy the process's
+/// real filesystem access took, and a forced-fallback run asserts on them that the host
+/// walked when it was told to. A simulated filesystem has no security property to report,
+/// and counting its opens in with the host's would let a test's in-memory tree hide a host
+/// that was not doing what it was configured to.
+/// </para>
+/// <para>
 /// Every instrument is observable, read from counters the platform layer keeps anyway, so a
 /// process with no listener pays nothing on the resolution path for any of this.
 /// </para>
@@ -57,7 +64,7 @@ internal static class ResolutionMetrics
     /// </remarks>
     public static ResolutionBackend ActiveBackend =>
         OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows()
-            ? PlatformOps.Current.Capabilities.Backend
+            ? PlatformOps.Host.Capabilities.Backend
             : ResolutionBackend.None;
 
     /// <summary>
@@ -78,19 +85,19 @@ internal static class ResolutionMetrics
 
         meter.CreateObservableCounter(
             ConfinedOpenAttemptsInstrument,
-            static () => PlatformOps.Current.ConfinedOpenAttempts,
+            static () => PlatformOps.Host.ConfinedOpenAttempts,
             unit: "{open}",
             description: "Confined, kernel-atomic opens attempted. Zero on a process that is walking.");
 
         meter.CreateObservableCounter(
             ConfinedOpenRaceRetriesInstrument,
-            static () => PlatformOps.Current.ConfinedOpenRaceRetries,
+            static () => PlatformOps.Host.ConfinedOpenRaceRetries,
             unit: "{retry}",
             description: "Confined opens retried after the kernel reported that resolution lost a race with a rename.");
 
         meter.CreateObservableCounter(
             ComponentOpensInstrument,
-            static () => PlatformOps.Current.ComponentOpens,
+            static () => PlatformOps.Host.ComponentOpens,
             unit: "{open}",
             description: "Single-name opens beneath an existing handle: one per name on a walk, none on a confined open.");
 

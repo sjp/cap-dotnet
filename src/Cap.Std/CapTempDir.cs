@@ -147,17 +147,28 @@ public sealed class CapTempDir : IDisposable
     /// <exception cref="CapIOException">The directory could not be created.</exception>
     public static CapTempDir New(
         AmbientAuthority authority,
+        SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox) =>
+        NewThrough(PlatformOps.Host, authority, policy);
+
+    /// <summary>
+    /// Creates a scratch directory in the temporary location <paramref name="backend"/>
+    /// reports, as <see cref="New(AmbientAuthority, SymlinkPolicy)"/> does on the host.
+    /// </summary>
+    internal static CapTempDir NewThrough(
+        IPlatformOps backend,
+        AmbientAuthority authority,
         SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox)
     {
+        ArgumentNullException.ThrowIfNull(backend);
         authority.Demand(nameof(authority));
 
-        CapResult<string> location = PlatformOps.Current.GetSystemTemporaryDirectory();
+        CapResult<string> location = backend.GetSystemTemporaryDirectory();
         if (!location.IsSuccess)
         {
             throw FailureTranslation.ToException(location.Error, SystemLocationDescription);
         }
 
-        Dir parent = Dir.Open(location.Value, authority, policy);
+        Dir parent = Dir.OpenThrough(backend, location.Value, authority, policy);
         try
         {
             return CreateIn(parent, location.Value);

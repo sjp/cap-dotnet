@@ -92,7 +92,7 @@ internal static class Backend
 
     /// <summary>The name of the backend this process resolves through.</summary>
     public static string Current() =>
-        PlatformOps.Current.Capabilities.Backend switch
+        PlatformOps.Host.Capabilities.Backend switch
         {
             ResolutionBackend.ConfinedOpen => ConfinedOpen,
             ResolutionBackend.PortableWalk => Walk,

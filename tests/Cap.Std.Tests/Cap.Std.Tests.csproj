@@ -20,6 +20,18 @@
   </ItemGroup>
 
   <!--
+    The rest of the shipped libraries, referenced only so that the audit of who reads the
+    host backend can load them and read their code. Nothing here calls into them.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Directories/Cap.Directories.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+    <ProjectReference Include="../../src/Cap.Net/Cap.Net.csproj" />
+    <ProjectReference Include="../../src/Cap.Rand/Cap.Rand.csproj" />
+    <ProjectReference Include="../../src/Cap.Time/Cap.Time.csproj" />
+  </ItemGroup>
+
+  <!--
     The Cap.Std sources, carried into this assembly so that a test can read them.
 
     One of the guarantees this library makes is not expressible as behaviour: that no

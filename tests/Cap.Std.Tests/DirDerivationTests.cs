@@ -40,7 +40,7 @@ public sealed class DirDerivationTests : IDisposable
         using Dir root = OpenRoot();
         using Dir nested = root.OpenDir("a/b/c");
 
-        Assert.True(PlatformOps.Current.StatHandle((SafeDirHandle)nested.UnsafeGetHandle(), out CapNodeInfo opened).IsSuccess);
+        Assert.True(PlatformOps.Host.StatHandle((SafeDirHandle)nested.UnsafeGetHandle(), out CapNodeInfo opened).IsSuccess);
         Assert.Equal(CapNodeType.Directory, opened.Type);
     }
 
@@ -191,7 +191,7 @@ public sealed class DirDerivationTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_tree.HostPath, "a", "b"));
 
         CapError error = Dir.OpenRootCore(
-            _tree.HostPath, AmbientAuthority.Acquire(), ConfinedResolveOptions.RefuseSymlinks, out Dir? root);
+            PlatformOps.Host, _tree.HostPath, AmbientAuthority.Acquire(), ConfinedResolveOptions.RefuseSymlinks, out Dir? root);
         Assert.True(error.IsSuccess, error.FailureDescription);
 
         using Dir opened = root!;
@@ -210,7 +210,7 @@ public sealed class DirDerivationTests : IDisposable
     /// <summary>Whether two handles refer to the same directory, by identity rather than by name.</summary>
     private static bool SameDirectory(Dir left, Dir right)
     {
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = PlatformOps.Host;
         Assert.True(ops.StatHandle((SafeDirHandle)left.UnsafeGetHandle(), out CapNodeInfo first).IsSuccess);
         Assert.True(ops.StatHandle((SafeDirHandle)right.UnsafeGetHandle(), out CapNodeInfo second).IsSuccess);
         return first.IsSameNodeAs(second);

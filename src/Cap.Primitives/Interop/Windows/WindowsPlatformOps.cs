@@ -142,6 +142,12 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     public long ComponentOpens => Interlocked.Read(ref _componentOpens);
 
     /// <inheritdoc/>
+    public bool IssuesKernelHandles => true;
+
+    /// <inheritdoc/>
+    public bool CloseDirectory(nint handle) => NtNative.NtClose(handle) >= 0;
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -169,7 +175,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(Win32Errors.ToError(Marshal.GetLastWin32Error()));
         }
 
-        SafeDirHandle root = new(raw, ownsHandle: true, access);
+        SafeDirHandle root = new(raw, this, access);
         CapError check = RefuseUnlessFilesystemDirectory(root);
         if (check.IsFailure)
         {
@@ -238,7 +244,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(error);
         }
 
-        SafeDirHandle handle = new(raw, ownsHandle: true, access);
+        SafeDirHandle handle = new(raw, this, access);
         CapError linkCheck = RefuseIfReparsePoint(handle);
         if (linkCheck.IsFailure)
         {
@@ -314,7 +320,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // Held as a directory handle only so that it can be the root of the second open. It
         // was granted the right to ask what the object is and no other, and it is closed
         // before this returns.
-        using SafeDirHandle found = new(raw, ownsHandle: true, CapAccess.None);
+        using SafeDirHandle found = new(raw, this, CapAccess.None);
 
         CapError kind = QueryAttributeTag(found, out FileAttributeTagInformation tagInfo);
         kind = Classify(kind, in tagInfo);
@@ -332,7 +338,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// Opens the directory a handle refers to a second time, as a directory open for reading
     /// opens one.
     /// </summary>
-    private static CapResult<OpenedNode> ReopenNodeAsDirectory(SafeDirHandle found)
+    private CapResult<OpenedNode> ReopenNodeAsDirectory(SafeDirHandle found)
     {
         CapError error = OpenRelative(
             found,
@@ -347,7 +353,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<OpenedNode>.Fail(error);
         }
 
-        SafeDirHandle directory = new(raw, ownsHandle: true, CapAccess.Read);
+        SafeDirHandle directory = new(raw, this, CapAccess.Read);
         CapError linkCheck = RefuseIfReparsePoint(directory);
         if (linkCheck.IsFailure)
         {
@@ -362,7 +368,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// Opens the file a handle refers to a second time, as <paramref name="request"/>
     /// describes.
     /// </summary>
-    private static CapResult<OpenedNode> ReopenNodeAsFile(SafeDirHandle found, in FileOpenRequest request)
+    private CapResult<OpenedNode> ReopenNodeAsFile(SafeDirHandle found, in FileOpenRequest request)
     {
         CapError error = OpenFileRelative(found, ReadOnlySpan<char>.Empty, in request, out nint raw);
         if (error.IsFailure)
@@ -378,7 +384,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<OpenedNode>.Fail(linkCheck);
         }
 
-        return CapResult<OpenedNode>.Ok(new OpenedNode(file));
+        return CapResult<OpenedNode>.Ok(new OpenedNode(file, this));
     }
 
     /// <inheritdoc/>
@@ -433,7 +439,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         }
 
         return CapResult<DirectoryReader>.Ok(
-            new WindowsDirectoryReader(new SafeDirHandle(raw, ownsHandle: true, CapAccess.Read)));
+            new WindowsDirectoryReader(new SafeDirHandle(raw, this, CapAccess.Read)));
     }
 
     /// <inheritdoc/>
@@ -451,7 +457,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return CapResult<string>.Fail(error);
         }
 
-        using SafeDirHandle handle = new(raw, ownsHandle: true, CapAccess.None);
+        using SafeDirHandle handle = new(raw, this, CapAccess.None);
         byte[] buffer = ArrayPool<byte>.Shared.Rent(ReparseData.MaximumBufferSize);
         try
         {
@@ -544,7 +550,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return error;
         }
 
-        using SafeDirHandle handle = new(raw, ownsHandle: true, CapAccess.None);
+        using SafeDirHandle handle = new(raw, this, CapAccess.None);
         return Describe(handle, out info);
     }
 
@@ -572,7 +578,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return error;
         }
 
-        using SafeDirHandle handle = new(raw, ownsHandle: true, CapAccess.None);
+        using SafeDirHandle handle = new(raw, this, CapAccess.None);
         return DescribeStat(handle, out stat);
     }
 
@@ -946,7 +952,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, ownsHandle: true, handle.Access));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, this, handle.Access));
     }
 
     /// <inheritdoc/>

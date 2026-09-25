@@ -31,7 +31,7 @@ public sealed partial class Dir
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
-        CapError error = PlatformOps.Current.DescribeHandle(_handle, out CapNodeStat stat);
+        CapError error = Ops.DescribeHandle(_handle, out CapNodeStat stat);
         return error.IsSuccess ? new CapMetadata(stat) : throw FailureTranslation.ToHandleException(error);
     }
 
@@ -127,7 +127,7 @@ public sealed partial class Dir
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
-        return PlatformOps.Current.SyncDirectory(_handle);
+        return Ops.SyncDirectory(_handle);
     }
 
     /// <summary>
@@ -144,7 +144,7 @@ public sealed partial class Dir
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
-        return PlatformOps.Current.SetHandlePermissions(
+        return Ops.SetHandlePermissions(
             _handle, permissions.UnixMode, permissions.WindowsAttributes);
     }
 
@@ -311,7 +311,7 @@ public sealed partial class Dir
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
-        CapError error = PlatformOps.Current.SetHandleTimes(_handle, lastAccess, lastWrite);
+        CapError error = Ops.SetHandleTimes(_handle, lastAccess, lastWrite);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToTimesException(error);
@@ -493,13 +493,13 @@ public sealed partial class Dir
 
             if (lookup.NamesDirectoryItself)
             {
-                error = PlatformOps.Current.SetHandleTimes(lookup.Directory, lastAccess, lastWrite);
+                error = Ops.SetHandleTimes(lookup.Directory, lastAccess, lastWrite);
             }
             else
             {
                 if (lookup.RequiresDirectory)
                 {
-                    error = PlatformOps.Current.DescribeChild(lookup.Directory, lookup.Name, out CapNodeStat stat);
+                    error = Ops.DescribeChild(lookup.Directory, lookup.Name, out CapNodeStat stat);
                     if (error.IsFailure)
                     {
                         return CapPathError.None;
@@ -512,7 +512,7 @@ public sealed partial class Dir
                     }
                 }
 
-                error = PlatformOps.Current.SetChildTimes(lookup.Directory, lookup.Name, lastAccess, lastWrite);
+                error = Ops.SetChildTimes(lookup.Directory, lookup.Name, lastAccess, lastWrite);
             }
 
             refusedTime = error.Category == CapErrorCategory.InvalidArgument;
@@ -548,8 +548,8 @@ public sealed partial class Dir
             // description without following means for it.
             CapNodeStat stat;
             error = lookup.NamesDirectoryItself
-                ? PlatformOps.Current.DescribeHandle(lookup.Directory, out stat)
-                : PlatformOps.Current.DescribeChild(lookup.Directory, lookup.Name, out stat);
+                ? Ops.DescribeHandle(lookup.Directory, out stat)
+                : Ops.DescribeChild(lookup.Directory, lookup.Name, out stat);
             if (error.IsFailure)
             {
                 return CapPathError.None;

@@ -23,7 +23,6 @@ namespace Cap.Primitives.Tests;
 /// would therefore never exercise the defence at all.
 /// </para>
 /// </remarks>
-[Collection(PlatformOpsTestGroup.Name)]
 public sealed class PortableWalkTests
 {
     /// <summary>Several names in a row reach the directory the path spells out.</summary>
@@ -760,14 +759,11 @@ public sealed class PortableWalkTests
     private static void Run(FakeFileSystem fs, Action<FakePlatformOps, SafeDirHandle> body)
     {
         FakePlatformOps ops = new(fs);
-        using (PlatformOps.Substitute(ops))
-        {
-            CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
-            Assert.True(root.IsSuccess, root.Error.FailureDescription);
+        CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
+        Assert.True(root.IsSuccess, root.Error.FailureDescription);
 
-            using SafeDirHandle handle = root.Value!;
-            body(ops, handle);
-        }
+        using SafeDirHandle handle = root.Value!;
+        body(ops, handle);
     }
 
     private static SafeDirHandle OpenDirectory(

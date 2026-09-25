@@ -65,6 +65,38 @@ internal interface IPlatformOps
     long ComponentOpens { get; }
 
     /// <summary>
+    /// Whether the handles this implementation issues are the operating system's own objects.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// True for every implementation over the host. Their handles all live in the kernel's
+    /// table for this process, so one of them may be handed to another. That happens when a
+    /// test swaps one host implementation for another configured differently while handles
+    /// from the first are still open.
+    /// </para>
+    /// <para>
+    /// False for a simulated filesystem. Its values mean something only to itself, and
+    /// nothing that needs a real kernel object, such as naming a socket beneath a directory,
+    /// can be done with them.
+    /// </para>
+    /// </remarks>
+    bool IssuesKernelHandles { get; }
+
+    /// <summary>
+    /// Closes a directory handle this implementation issued.
+    /// </summary>
+    /// <remarks>
+    /// Called from <see cref="SafeDirHandle"/>'s release, which can run on the finalizer
+    /// thread. It must do nothing but release the value: no allocation, no locks that
+    /// resolution holds, and no retry. On Linux a close that reports an interruption has
+    /// already closed the descriptor, and a retry would close whatever has since taken the
+    /// number.
+    /// </remarks>
+    /// <param name="handle">The raw value, which the caller will not use again.</param>
+    /// <returns>Whether the close succeeded. The result is read and never acted on.</returns>
+    bool CloseDirectory(nint handle);
+
+    /// <summary>
     /// Opens a directory by an ordinary path, with the process's ambient authority.
     /// </summary>
     /// <remarks>

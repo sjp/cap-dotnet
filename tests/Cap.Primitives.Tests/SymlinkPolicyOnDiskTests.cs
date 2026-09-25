@@ -50,7 +50,7 @@ public sealed class SymlinkPolicyOnDiskTests : IDisposable
     [MemberData(nameof(Cases))]
     public void The_hosts_confined_open_answers_the_policy_table(string caseName)
     {
-        if (!PlatformOps.Current.Capabilities.SupportsConfinedOpen)
+        if (!PlatformOps.Host.Capabilities.SupportsConfinedOpen)
         {
             Assert.Skip("This kernel has no confined, atomic open; the walk theory covers the host.");
         }
@@ -87,7 +87,7 @@ public sealed class SymlinkPolicyOnDiskTests : IDisposable
     private static SafeDirHandle OpenSandbox(OnDiskSymlinkTree tree)
     {
         CapResult<SafeDirHandle> root =
-            PlatformOps.Current.OpenAmbientDirectory(tree.SandboxPath, CapAccess.Read);
+            PlatformOps.Host.OpenAmbientDirectory(tree.SandboxPath, CapAccess.Read);
         Assert.True(root.IsSuccess, root.Error.FailureDescription);
         return root.Value!;
     }

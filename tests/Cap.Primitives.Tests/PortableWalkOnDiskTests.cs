@@ -243,7 +243,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     private SafeDirHandle OpenSandbox()
     {
         CapResult<SafeDirHandle> root =
-            PlatformOps.Current.OpenAmbientDirectory(Path.Join(_root, "sandbox"), CapAccess.Read);
+            PlatformOps.Host.OpenAmbientDirectory(Path.Join(_root, "sandbox"), CapAccess.Read);
         Assert.True(root.IsSuccess, root.Error.FailureDescription);
         return root.Value!;
     }

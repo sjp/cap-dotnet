@@ -157,7 +157,7 @@ internal static class PortableResolver
 
         return CapResult<OpenedNode>.Ok(outcome.Directory is { } directory
             ? new OpenedNode(directory)
-            : new OpenedNode(outcome.File!));
+            : new OpenedNode(outcome.File!, root.Backend));
     }
 
     /// <summary>
@@ -211,7 +211,7 @@ internal static class PortableResolver
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
 
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = root.Backend;
         DirectoryStack stack = new(root);
         PendingComponents pending = new(path);
         int linkBudget = MaxSymbolicLinks;

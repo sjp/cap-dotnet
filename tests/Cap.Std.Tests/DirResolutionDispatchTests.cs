@@ -37,7 +37,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void A_nested_path_costs_one_kernel_operation_where_the_kernel_offers_one()
     {
-        if (PlatformOps.Current is not LinuxPlatformOps ops)
+        if (PlatformOps.Host is not LinuxPlatformOps ops)
         {
             Assert.Skip("This platform has no kernel-atomic confined open to dispatch to.");
             return;
@@ -76,7 +76,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void A_nested_path_is_walked_a_name_at_a_time_where_the_kernel_offers_nothing()
     {
-        if (PlatformOps.Current is not LinuxPlatformOps ops)
+        if (PlatformOps.Host is not LinuxPlatformOps ops)
         {
             Assert.Skip("The per-name open count is kept only by this platform's implementation.");
             return;
@@ -125,7 +125,7 @@ public sealed class DirResolutionDispatchTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void Acting_on_a_name_resolves_the_rest_of_the_path_the_same_way()
     {
-        if (PlatformOps.Current is not LinuxPlatformOps ops)
+        if (PlatformOps.Host is not LinuxPlatformOps ops)
         {
             Assert.Skip("This platform has no kernel-atomic confined open to dispatch to.");
             return;

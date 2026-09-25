@@ -60,6 +60,12 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     public long ComponentOpens => Interlocked.Read(ref _componentOpens);
 
     /// <inheritdoc/>
+    public bool IssuesKernelHandles => true;
+
+    /// <inheritdoc/>
+    public bool CloseDirectory(nint handle) => DarwinNative.Close(checked((int)handle)) == 0;
+
+    /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -304,8 +310,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         }
 
         return CapResult<OpenedNode>.Ok(isDirectory
-            ? new OpenedNode(new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read))
-            : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true)));
+            ? new OpenedNode(new SafeDirHandle(fd, this, CapAccess.Read))
+            : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true), this));
     }
 
     /// <inheritdoc/>
@@ -375,12 +381,12 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             // The stream takes the descriptor over only when it is built successfully, so
             // this is the one path where the descriptor is still this code's to close.
             CapError error = DarwinErrno.ToError(Marshal.GetLastPInvokeError());
-            new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read).Dispose();
+            new SafeDirHandle(fd, this, CapAccess.Read).Dispose();
             return CapResult<DirectoryReader>.Fail(error);
         }
 
         return CapResult<DirectoryReader>.Ok(new DarwinDirectoryReader(
-            stream, new SafeDirHandle(fd, ownsHandle: false, CapAccess.Read)));
+            stream, new SafeDirHandle(fd, this, CapAccess.Read, ownsHandle: false)));
     }
 
     /// <inheritdoc/>
@@ -782,7 +788,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(DarwinErrno.ToError(Marshal.GetLastPInvokeError()));
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, this, handle.Access));
     }
 
     /// <inheritdoc/>
@@ -1339,7 +1345,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         }
     }
 
-    private static CapResult<SafeDirHandle> OpenDirectoryDescriptor(
+    private CapResult<SafeDirHandle> OpenDirectoryDescriptor(
         int directoryFd,
         in UnixPathBuffer encoded,
         int flags,
@@ -1363,7 +1369,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         return fd < 0
             ? CapResult<SafeDirHandle>.Fail(
                 TranslateOpenFailure(directoryFd, encoded.Bytes, errno, noFollow))
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, this, access));
     }
 
     /// <summary>

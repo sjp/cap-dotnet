@@ -16,9 +16,12 @@ namespace Cap.Testing;
 /// untested on every developer's machine.
 /// </para>
 /// <para>
-/// So a suite substitutes each in turn for the process-wide implementation, for the length of
-/// one test. The tests themselves still go through the public API; only which backend that
-/// API dispatches to is chosen here. The walk is obtained the way a user would obtain it,
+/// So a suite substitutes each in turn for the host, for the length of one test. A handle
+/// resolves through the backend that opened it, so what the substitution chooses is the
+/// backend of every root opened by path inside the scope, and of every handle derived from
+/// one. A test must therefore open its root after entering the scope. A root opened before
+/// it stays on whatever the host was then. The tests themselves still go through the public
+/// API; only which backend that API dispatches to is chosen here. The walk is obtained the way a user would obtain it,
 /// by turning the confined open off with the documented switch, so the instance under test is
 /// the shipped implementation in its shipped fallback configuration rather than a test double.
 /// </para>
@@ -48,7 +51,8 @@ internal static class Backends
         : [];
 
     /// <summary>
-    /// Makes a backend the one every handle dispatches to, until the returned scope is disposed.
+    /// Makes a backend the one every root opened by path resolves through, until the returned
+    /// scope is disposed.
     /// </summary>
     /// <remarks>
     /// A backend the host does not offer skips the test with the reason, rather than passing
@@ -109,7 +113,7 @@ internal static class Backends
 
             case DarwinWalk when OperatingSystem.IsMacOS():
             case Windows when OperatingSystem.IsWindows():
-                return PlatformOps.Current;
+                return PlatformOps.Host;
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(backend), backend, "Not a backend this host has.");

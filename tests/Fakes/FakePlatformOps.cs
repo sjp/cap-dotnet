@@ -10,11 +10,20 @@ namespace Cap.Tests.Fakes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every handle it produces is marked as not owning its value, because the value is an index
-/// into this object's own table rather than anything the operating system issued. Closing
-/// one through the OS would close whatever real file happened to be using that number —
-/// which, in a test suite whose entire subject is handle confusion, would be a memorable way
-/// to spend an afternoon.
+/// Every handle it produces holds an index into this object's own table rather than anything
+/// the operating system issued. A directory handle records this object as its backend and is
+/// closed through it, which drops the entry from the table. A file handle is the framework's
+/// type, which closes through the OS, so it is marked as not owning its value: closing it
+/// through the OS would close whatever real file happened to be using that number. In a test
+/// suite whose entire subject is handle confusion, that would be a memorable way to spend an
+/// afternoon.
+/// </para>
+/// <para>
+/// A directory handle from any other backend is refused with an exception rather than looked
+/// up. Its number means nothing here, and a lookup could find an unrelated entry of this
+/// table under it. That is exactly the confusion the public layer has to prevent by checking
+/// that two handles share a backend before it calls one, so here it fails loudly and never
+/// gets answered by chance.
 /// </para>
 /// <para>
 /// The confined open is modelled as well as the single steps, so that resolution logic
@@ -30,11 +39,12 @@ internal sealed class FakePlatformOps : IPlatformOps
     private const int FirstHandleValue = 0x7000;
 
     private readonly FakeFileSystem _fileSystem;
-    private readonly Dictionary<nint, FakeNode> _open = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, FakeNode> _open = [];
     private readonly List<SafeHandle> _issued = [];
     private nint _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
     private long _componentOpens;
+    private int _handleLookups;
 
     /// <summary>How many times a link may be followed before resolution gives up.</summary>
     private const int LinkBudget = 8;
@@ -54,6 +64,26 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     public long ComponentOpens => _componentOpens;
+
+    /// <summary>
+    /// How many times a handle passed in has been looked up in this instance's table.
+    /// </summary>
+    /// <remarks>
+    /// Every operation on a handle starts with that lookup, so this staying still across a
+    /// call shows the call never reached this backend. That is how a test can insist that an
+    /// operation refused before it began, rather than part of the way through.
+    /// </remarks>
+    public int HandleLookups => Volatile.Read(ref _handleLookups);
+
+    /// <inheritdoc/>
+    public bool IssuesKernelHandles => false;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Can run on the finalizer thread for a handle a test forgot, which is why the table is
+    /// safe to change from two threads at once.
+    /// </remarks>
+    public bool CloseDirectory(nint handle) => _open.TryRemove(handle, out _);
 
     /// <summary>
     /// How many of the handles this instance has produced are still open.
@@ -192,7 +222,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             CapNodeType.SymbolicLink => CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.SymbolicLink)),
             CapNodeType.UnknownReparsePoint => CapResult<OpenedNode>.Fail(CapError.FromCategory(CapErrorCategory.Reparse)),
             CapNodeType.Directory => CapResult<OpenedNode>.Ok(new OpenedNode(Register(node, CapAccess.Read))),
-            _ => CapResult<OpenedNode>.Ok(new OpenedNode(RegisterFile(node))),
+            _ => CapResult<OpenedNode>.Ok(new OpenedNode(RegisterFile(node), this)),
         };
     }
 
@@ -273,7 +303,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         return CapResult<OpenedNode>.Ok(node!.Type == CapNodeType.Directory
             ? new OpenedNode(Register(node, CapAccess.Read))
-            : new OpenedNode(RegisterFile(node)));
+            : new OpenedNode(RegisterFile(node), this));
     }
 
     /// <inheritdoc/>
@@ -829,7 +859,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         access is CapAccess.None or CapAccess.Read;
 
     private SafeDirHandle Register(FakeNode node, CapAccess access) =>
-        Track(new SafeDirHandle(NextHandle(node), ownsHandle: false, access));
+        Track(new SafeDirHandle(NextHandle(node), this, access));
 
     private SafeFileHandle RegisterFile(FakeNode node) =>
         Track(new SafeFileHandle(NextHandle(node), ownsHandle: false));
@@ -851,10 +881,18 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     private bool TryResolveHandle(SafeHandle handle, out FakeNode? node)
     {
+        _ = Interlocked.Increment(ref _handleLookups);
         node = null;
         if (handle.IsInvalid || handle.IsClosed)
         {
             return false;
+        }
+
+        if (handle is SafeDirHandle directory && !ReferenceEquals(directory.Backend, this))
+        {
+            throw new InvalidOperationException(
+                "A directory handle from another backend was passed to the simulated one. " +
+                "Its value is not an entry in this table, and must never be looked up as one.");
         }
 
         return _open.TryGetValue(handle.DangerousGetHandle(), out node);

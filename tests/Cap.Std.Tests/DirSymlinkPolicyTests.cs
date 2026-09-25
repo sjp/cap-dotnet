@@ -290,7 +290,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     /// <summary>Whether two handles refer to the same directory, by identity rather than by name.</summary>
     private static bool SameDirectory(Dir left, Dir right)
     {
-        IPlatformOps ops = PlatformOps.Current;
+        IPlatformOps ops = PlatformOps.Host;
         Assert.True(ops.StatHandle((SafeDirHandle)left.UnsafeGetHandle(), out CapNodeInfo first).IsSuccess);
         Assert.True(ops.StatHandle((SafeDirHandle)right.UnsafeGetHandle(), out CapNodeInfo second).IsSuccess);
         return first.IsSameNodeAs(second);

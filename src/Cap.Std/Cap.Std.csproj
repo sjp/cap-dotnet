@@ -68,6 +68,7 @@
     <InternalsVisibleTo Include="Cap.Net" />
     <InternalsVisibleTo Include="Cap.Directories" />
     <InternalsVisibleTo Include="Cap.Std.Tests" />
+    <InternalsVisibleTo Include="Cap.Fs.Ext.Tests" />
     <InternalsVisibleTo Include="Cap.Escape.Tests" />
     <InternalsVisibleTo Include="Cap.Escape.Aot.Tests" />
     <InternalsVisibleTo Include="Cap.Stress.Tests" />

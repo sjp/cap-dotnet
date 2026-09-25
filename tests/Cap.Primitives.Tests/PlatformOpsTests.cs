@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
@@ -19,7 +20,7 @@ public sealed class PlatformOpsTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    private static IPlatformOps Ops => PlatformOps.Current;
+    private static IPlatformOps Ops => PlatformOps.Host;
 
     /// <summary>
     /// Every host has a backend, and it is one this library knows how to drive.
@@ -32,6 +33,48 @@ public sealed class PlatformOpsTests : IDisposable
         Assert.Equal(
             capabilities.Backend == ResolutionBackend.ConfinedOpen,
             capabilities.SupportsConfinedOpen);
+    }
+
+    /// <summary>The host can be replaced, and puts itself back.</summary>
+    [Fact]
+    public void Substituting_the_host_is_scoped()
+    {
+        IPlatformOps real = PlatformOps.Host;
+
+        FakeFileSystem fs = new();
+        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
+        {
+            Assert.NotSame(real, PlatformOps.Host);
+        }
+
+        Assert.Same(real, PlatformOps.Host);
+    }
+
+    /// <summary>
+    /// A handle keeps working through the backend that issued it while the host is replaced.
+    /// </summary>
+    /// <remarks>
+    /// Replacing the host changes where the next root opened by path comes from, and nothing
+    /// else. A handle that went on consulting the host would start sending a descriptor
+    /// number to the simulation, where it names nothing or something unrelated.
+    /// </remarks>
+    [Fact]
+    public void A_handle_keeps_its_backend_when_the_host_is_replaced()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "child"));
+        using SafeDirHandle root = OpenRoot();
+
+        FakeFileSystem fs = new();
+        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
+        {
+            Assert.True(CapPath.TryParse("child", out CapPath path, out _));
+            CapResult<SafeDirHandle> child =
+                Resolver.OpenDirectory(root, in path, CapAccess.Read, ConfinedResolveOptions.None);
+
+            Assert.True(child.IsSuccess, child.Error.FailureDescription);
+            Assert.Same(root.Backend, child.Value.Backend);
+            child.Value.Dispose();
+        }
     }
 
     /// <summary>A directory opened by an ordinary path becomes a handle.</summary>

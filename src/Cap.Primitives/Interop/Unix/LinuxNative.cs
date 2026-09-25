@@ -23,6 +23,14 @@ namespace Cap.Primitives.Interop.Unix;
 /// </remarks>
 internal static unsafe partial class LinuxNative
 {
+    /// <summary>Closes a descriptor.</summary>
+    /// <remarks>
+    /// Never retried. A close interrupted by a signal has still released the number, and a
+    /// second call would close whatever has since been handed it.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "close", SetLastError = true)]
+    internal static partial int Close(int fd);
+
     /// <summary>Opens a name relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
     internal static partial int OpenAt(int directoryFd, byte* path, int flags);

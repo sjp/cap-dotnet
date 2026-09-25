@@ -18,17 +18,12 @@ namespace Cap.Fs.Ext.Tests;
 /// simulation does.
 /// </para>
 /// <para>
-/// The simulated platform replaces the real one for the whole process, so these tests run on
-/// their own rather than beside the ones walking real trees.
+/// Each root is opened through the simulation directly, and the handle carries it from there,
+/// so these tests run beside the ones walking real trees without either seeing the other.
 /// </para>
 /// </remarks>
-[Collection(Name)]
-[CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class WalkSimulationTests
 {
-    /// <summary>The collection that keeps the simulated platform away from every other test.</summary>
-    public const string Name = "simulated platform";
-
     /// <summary>The three searches that share the walk's descent.</summary>
     public enum Search
     {
@@ -48,16 +43,14 @@ public sealed class WalkSimulationTests
     public void An_unclassified_link_is_not_entered(Search search)
     {
         FakeFileSystem fs = TreeWithAnUnclassifiedLink();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            using Dir root = Dir.Open("/tree", AmbientAuthority.Acquire());
-            Assert.Equal(SymlinkPolicy.FollowWithinSandbox, root.SymlinkPolicy);
+        FakePlatformOps ops = new(fs);
+        using Dir root = Dir.OpenThrough(ops, "/tree", AmbientAuthority.Acquire());
+        Assert.Equal(SymlinkPolicy.FollowWithinSandbox, root.SymlinkPolicy);
 
-            List<(string Name, CapFileType Type)> seen = Run(root, search, WalkOptions.Default);
+        List<(string Name, CapFileType Type)> seen = Run(root, search, WalkOptions.Default);
 
-            Assert.Contains(("link", CapFileType.Unknown), seen);
-            Assert.Equal(1, seen.Count(e => e.Name == "inside.txt"));
-        }
+        Assert.Contains(("link", CapFileType.Unknown), seen);
+        Assert.Equal(1, seen.Count(e => e.Name == "inside.txt"));
     }
 
     /// <summary>
@@ -71,14 +64,12 @@ public sealed class WalkSimulationTests
     public void An_unclassified_link_is_entered_when_links_are_followed(Search search)
     {
         FakeFileSystem fs = TreeWithAnUnclassifiedLink();
-        using (PlatformOps.Substitute(new FakePlatformOps(fs)))
-        {
-            using Dir root = Dir.Open("/tree", AmbientAuthority.Acquire());
+        FakePlatformOps ops = new(fs);
+        using Dir root = Dir.OpenThrough(ops, "/tree", AmbientAuthority.Acquire());
 
-            List<(string Name, CapFileType Type)> seen = Run(root, search, new WalkOptions { FollowSymlinks = true });
+        List<(string Name, CapFileType Type)> seen = Run(root, search, new WalkOptions { FollowSymlinks = true });
 
-            Assert.Equal(2, seen.Count(e => e.Name == "inside.txt"));
-        }
+        Assert.Equal(2, seen.Count(e => e.Name == "inside.txt"));
     }
 
     /// <summary>

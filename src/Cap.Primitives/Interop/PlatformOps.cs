@@ -4,21 +4,27 @@ using Cap.Primitives.Interop.Windows;
 namespace Cap.Primitives.Interop;
 
 /// <summary>
-/// Holds the <see cref="IPlatformOps"/> implementation the rest of the library calls.
+/// Holds the <see cref="IPlatformOps"/> implementation for the host: the one a handle is
+/// opened through when there is no handle yet to take one from.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A single mutable slot rather than a constructor parameter threaded through every type.
-/// The resolver is called from static helpers and from struct methods that cannot carry an
-/// extra field without changing their size, and an interface call per syscall is not
-/// measurable next to the syscall itself.
+/// Every operation on an existing handle goes through the implementation recorded on that
+/// handle (<see cref="SafeDirHandle.Backend"/>), never through this. What is left here is
+/// the first step: opening a directory by an ordinary path, finding the system's temporary
+/// location, and the few other places that start from the process rather than from a
+/// handle. Anything else that reads this is a bug, because it would send a handle from one
+/// filesystem to another's methods. The name says "host" so that such a read stands out in
+/// review, and a test scans the shipped assemblies for readers outside the entry points.
 /// </para>
 /// <para>
-/// The slot is writable so that a test can substitute a simulated filesystem. That is a
-/// deliberate hole in an otherwise closed design, and it is why the type is internal and the
-/// substitution is scoped: <see cref="Substitute"/> hands back something that puts the real
-/// implementation back, so a test that replaces the platform cannot leak that replacement
-/// into the next one.
+/// The slot is writable so that a test can stand a differently configured or simulated
+/// implementation in for the host itself. That is a deliberate hole in an otherwise closed
+/// design, and it is why the type is internal and the substitution is scoped:
+/// <see cref="Substitute"/> hands back something that puts the real implementation back, so a
+/// test that replaces the host cannot leak that replacement into the next one. A test that
+/// only needs a simulated tree does not substitute anything; it opens its root through the
+/// simulated implementation directly, and runs alongside tests using the disk.
 /// </para>
 /// </remarks>
 internal static class PlatformOps
@@ -29,17 +35,18 @@ internal static class PlatformOps
     // to the meter sees the instruments as soon as anything has been resolved.
     private static readonly bool s_metricsPublished = ResolutionMetrics.Publish();
 
-    /// <summary>The implementation in use.</summary>
-    public static IPlatformOps Current => s_current;
+    /// <summary>The implementation for the host, for opening a first handle.</summary>
+    public static IPlatformOps Host => s_current;
 
     /// <summary>
-    /// Replaces the implementation until the returned scope is disposed.
+    /// Replaces the host implementation until the returned scope is disposed.
     /// </summary>
     /// <remarks>
-    /// Process-wide, not per-thread, because the implementation it replaces is process-wide
-    /// too and a per-thread override would make the two disagree about which backend is
-    /// active. Tests that substitute must therefore not run in parallel with tests that use
-    /// the real platform.
+    /// Process-wide, not per-thread, because the host is one thing for the whole process and
+    /// a per-thread override would make two threads disagree about what it is. A test that
+    /// substitutes changes what every root opened by path during its run resolves through,
+    /// so it must not run in parallel with tests that open roots on the real host. Handles
+    /// already open are unaffected: each keeps the implementation that issued it.
     /// </remarks>
     public static SubstitutionScope Substitute(IPlatformOps replacement)
     {

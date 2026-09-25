@@ -875,10 +875,14 @@ public sealed partial class Dir
     /// that" is something to act on, and building an exception for it would make the
     /// ordinary case on those systems the expensive one.
     /// </remarks>
-    internal CapResult<SafeFileHandle> OpenAnonymousFile()
+    internal CapResult<CapFile> OpenAnonymousFile()
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
-        return PlatformOps.Current.OpenAnonymousChildFile(_handle, FileAccess.ReadWrite);
+
+        CapResult<SafeFileHandle> opened = Ops.OpenAnonymousChildFile(_handle, FileAccess.ReadWrite);
+        return opened.IsSuccess
+            ? CapResult<CapFile>.Ok(new CapFile(opened.Value, Ops, FileAccess.ReadWrite, isAsync: false, appending: false))
+            : CapResult<CapFile>.Fail(opened.Error);
     }
 
     private CapPathError OpenFileCore(
@@ -917,8 +921,9 @@ public sealed partial class Dir
 
         file = new CapFile(
             opened.Value,
+            Ops,
             request.Access,
-            request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles,
+            request.IsAsynchronous && Ops.Capabilities.SupportsOverlappedFileHandles,
             request.Appends);
 
         return CapPathError.None;
@@ -959,8 +964,9 @@ public sealed partial class Dir
             ? new CapOpened(new Dir(directory, _options))
             : new CapOpened(new CapFile(
                 node.Value.File!,
+                node.Value.Backend,
                 request.Access,
-                request.IsAsynchronous && PlatformOps.Current.Capabilities.SupportsOverlappedFileHandles,
+                request.IsAsynchronous && node.Value.Backend.Capabilities.SupportsOverlappedFileHandles,
                 appending: false));
 
         return CapPathError.None;

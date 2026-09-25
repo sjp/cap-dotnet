@@ -93,6 +93,12 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// </remarks>
     public long ComponentOpens => Interlocked.Read(ref _componentOpens);
 
+    /// <inheritdoc/>
+    public bool IssuesKernelHandles => true;
+
+    /// <inheritdoc/>
+    public bool CloseDirectory(nint handle) => LinuxNative.Close(checked((int)handle)) == 0;
+
     /// <summary>
     /// How many times a confined open has been retried after the kernel reported that
     /// resolution lost a race.
@@ -378,7 +384,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                     : error);
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, this, access));
     }
 
     /// <summary>
@@ -517,7 +523,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         return CapResult<DirectoryReader>.Ok(
-            new LinuxDirectoryReader(new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read)));
+            new LinuxDirectoryReader(new SafeDirHandle(fd, this, CapAccess.Read)));
     }
 
     /// <inheritdoc/>
@@ -966,7 +972,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(LinuxErrno.ToError(Marshal.GetLastPInvokeError()));
         }
 
-        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, handle.Access));
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, this, handle.Access));
     }
 
     /// <inheritdoc/>
@@ -1548,7 +1554,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// the authority a directory opened for reading carries, which is what the read-only
     /// descriptor already is.
     /// </remarks>
-    private static CapResult<OpenedNode> FinishNodeOpen(int fd)
+    private CapResult<OpenedNode> FinishNodeOpen(int fd)
     {
         ClearNonBlocking(fd);
 
@@ -1560,8 +1566,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
 
         return CapResult<OpenedNode>.Ok(isDirectory
-            ? new OpenedNode(new SafeDirHandle(fd, ownsHandle: true, CapAccess.Read))
-            : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true)));
+            ? new OpenedNode(new SafeDirHandle(fd, this, CapAccess.Read))
+            : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true), this));
     }
 
     /// <summary>
@@ -1664,7 +1670,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         }
     }
 
-    private static CapResult<SafeDirHandle> OpenDirectoryDescriptor(
+    private CapResult<SafeDirHandle> OpenDirectoryDescriptor(
         int directoryFd,
         in UnixPathBuffer encoded,
         int flags,
@@ -1685,7 +1691,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         return fd < 0
             ? CapResult<SafeDirHandle>.Fail(
                 TranslateOpenFailure(directoryFd, encoded.Bytes, errno, noFollow))
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, ownsHandle: true, access));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, this, access));
     }
 
     /// <summary>

@@ -30,7 +30,7 @@ public sealed class DirectoryReaderTests : IDisposable
 
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
-    private static IPlatformOps Ops => PlatformOps.Current;
+    private static IPlatformOps Ops => PlatformOps.Host;
 
     /// <summary>
     /// The tag of an application execution alias: something that redirects, by a mechanism

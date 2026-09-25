@@ -27,7 +27,6 @@ namespace Cap.Primitives.Tests;
 /// not exist. That is not an edge case; it is what a create is.
 /// </para>
 /// </remarks>
-[Collection(PlatformOpsTestGroup.Name)]
 public sealed class ResolveParentTests
 {
     /// <summary>A single name is looked up in the directory the caller already holds.</summary>
@@ -280,14 +279,11 @@ public sealed class ResolveParentTests
     private static void Run(FakeFileSystem fs, Action<FakePlatformOps, SafeDirHandle> body)
     {
         FakePlatformOps ops = new(fs);
-        using (PlatformOps.Substitute(ops))
-        {
-            CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
-            Assert.True(root.IsSuccess, root.Error.FailureDescription);
+        CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
+        Assert.True(root.IsSuccess, root.Error.FailureDescription);
 
-            using SafeDirHandle handle = root.Value!;
-            body(ops, handle);
-        }
+        using SafeDirHandle handle = root.Value!;
+        body(ops, handle);
     }
 
     private static ResolvedParent Resolve(

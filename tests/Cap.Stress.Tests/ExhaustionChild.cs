@@ -191,7 +191,7 @@ internal static class ExhaustionChild
                 $"{after - before} more descriptor(s) were open after the handles were given back than before");
 
             // Running out must not have been read as the kernel lacking the confined open.
-            if (OperatingSystem.IsLinux() && backend == Backends.ConfinedOpen && PlatformOps.Current is LinuxPlatformOps linux)
+            if (OperatingSystem.IsLinux() && backend == Backends.ConfinedOpen && PlatformOps.Host is LinuxPlatformOps linux)
             {
                 long attempts = linux.ConfinedOpenAttempts;
                 Require(linux.Capabilities.SupportsConfinedOpen, "running out of descriptors demoted the confined open");
