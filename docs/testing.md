@@ -50,6 +50,33 @@ calls themselves. The interfaces do not carry the containment guarantee, which b
 `Dir`. A component that takes `IDir` in production is confined only if it is handed a `Dir`. The
 [threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee) has the detail.
 
+### Values for stubs to return
+
+`CapMetadata`, `CapFileId` and `DirEntry` have no public constructors, so production code can
+only get them from a handle. An identity is worth comparing only because the filesystem issued
+it, and `IsSameFileAs` relies on that. For stubs, `Cap.Std.Testing` makes these values:
+
+```csharp
+Mock<IDir> reports = new();
+reports.Setup(dir => dir.EnumerateEntries()).Returns(
+[
+    TestEntries.Create("a.json", CapFileType.File, TestFileIds.Next(), reports.Object),
+]);
+reports.Setup(dir => dir.GetMetadata("a.json", false)).Returns(
+    new CapMetadataBuilder().WithLength(900).WithLastWriteTime(yesterday).Build());
+```
+
+- `CapMetadataBuilder` has a setter for each field. It defaults to an empty regular file with
+  one name, a fresh identity, and the permissions a new file gets on the running platform.
+  `WithUnixMode` and `WithWindowsAttributes` each clear the other, because a real description
+  never holds both.
+- `TestFileIds.Create(volume, node)` makes a given identity, and `TestFileIds.Next()` makes an
+  unused one. To describe one object reached under two names, give two descriptions the same
+  identity.
+- `TestEntries.Create(name, type, fileId, owner)` makes an `IDirEntry` that opens and describes
+  itself by calling `owner` with its name, the same way `DirEntry` does. Pass the stub as
+  `owner`, and the entry's opens become calls on the stub that the test can check.
+
 ## What is real and what is simulated
 
 A handle from `OpenRoot` is the same `Dir` type that `Dir.Open` returns, and every call through
