@@ -356,7 +356,7 @@ public readonly struct DirEntry
     /// Refused as a misuse rather than reported as a missing file, because it is one: the
     /// value never came from a directory.
     /// </remarks>
-    private Dir Owner =>
+    internal Dir Owner =>
         _directory ??
         throw new InvalidOperationException(
             "This entry did not come from reading a directory, so there is no handle to " +

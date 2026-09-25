@@ -8,6 +8,8 @@
 #
 #   - Cap.Primitives travels inside Cap.Std, and there is no package of its own to depend on;
 #   - the analyzer is in Cap.Std, and every other package passes it on rather than excluding it;
+#   - Cap.Std.Testing depends on exactly the Cap.Std it was built with, since it implements a
+#     contract inside Cap.Std that can change in any release;
 #   - each package carries its licence, notice and readme, and records the commit it was built
 #     from, which is what SourceLink resolves sources against.
 #
@@ -18,7 +20,7 @@ repo="$(cd "$(dirname "$0")/../.." && pwd)"
 out="${1:?usage: pack.sh <output-dir> <version>}"
 version="${2:?usage: pack.sh <output-dir> <version>}"
 
-packages=(Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories)
+packages=(Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories Cap.Std.Testing)
 
 mkdir -p "$out"
 rm -f "$out"/*.nupkg
@@ -69,9 +71,15 @@ for id in "${packages[@]}"; do
     fail "$id depends on a Cap.Primitives package, which is not published"
   fi
 
-  if [[ "$id" != Cap.Std ]]; then
+  if [[ "$id" == Cap.Std.Testing ]]; then
+    grep -qF "<dependency id=\"Cap.Std\" version=\"[$version]\" include=\"All\" />" <<<"$spec" \
+      || fail "$id does not depend on exactly Cap.Std $version with every asset"
+  elif [[ "$id" != Cap.Std ]]; then
     grep -qE "<dependency id=\"Cap.Std\" version=\"$version\" include=\"All\" />" <<<"$spec" \
       || fail "$id does not depend on Cap.Std $version with every asset, so the analyzer would not reach its consumers"
+  fi
+
+  if [[ "$id" != Cap.Std ]]; then
     if has "$id" lib/net10.0/Cap.Primitives.dll; then
       fail "$id carries its own copy of Cap.Primitives"
     fi

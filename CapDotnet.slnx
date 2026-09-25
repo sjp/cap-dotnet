@@ -7,11 +7,13 @@
     <Project Path="src/Cap.Time/Cap.Time.csproj" />
     <Project Path="src/Cap.Rand/Cap.Rand.csproj" />
     <Project Path="src/Cap.Directories/Cap.Directories.csproj" />
+    <Project Path="src/Cap.Std.Testing/Cap.Std.Testing.csproj" />
     <Project Path="src/Cap.Analyzers/Cap.Analyzers.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Cap.Primitives.Tests/Cap.Primitives.Tests.csproj" />
     <Project Path="tests/Cap.Std.Tests/Cap.Std.Tests.csproj" />
+    <Project Path="tests/Cap.Std.Testing.Tests/Cap.Std.Testing.Tests.csproj" />
     <Project Path="tests/Cap.Fs.Ext.Tests/Cap.Fs.Ext.Tests.csproj" />
     <Project Path="tests/Cap.Net.Tests/Cap.Net.Tests.csproj" />
     <Project Path="tests/Cap.Time.Tests/Cap.Time.Tests.csproj" />

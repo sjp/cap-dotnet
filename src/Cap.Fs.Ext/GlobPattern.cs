@@ -95,11 +95,22 @@ public sealed class GlobPattern
     /// <exception cref="ArgumentException">
     /// The pattern names no level, begins at a root, or contains a piece that climbs.
     /// </exception>
-    public static GlobPattern Parse(string pattern, bool ignoreCase = false)
+    public static GlobPattern Parse(string pattern, bool ignoreCase = false) =>
+        Parse(pattern, ignoreCase, CapPath.HostSyntax);
+
+    /// <summary>
+    /// Reads a pattern whose levels are divided as <paramref name="syntax"/> divides a path.
+    /// </summary>
+    /// <remarks>
+    /// For a pattern given as text to a search beneath a handle, which is divided as that
+    /// handle divides a path. A handle on a filesystem held in memory may read paths as
+    /// another platform does, and a pattern divided by the running platform's rules instead
+    /// would search for names the handle cannot hold.
+    /// </remarks>
+    internal static GlobPattern Parse(string pattern, bool ignoreCase, CapPathSyntax syntax)
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        CapPathSyntax syntax = CapPath.HostSyntax;
         if (pattern.Length > 0 && CapPath.IsSeparator(pattern[0], syntax))
         {
             throw new ArgumentException(
@@ -148,7 +159,7 @@ public sealed class GlobPattern
     }
 
     /// <summary>The pattern as it was written.</summary>
-    /// <returns>The text given to <see cref="Parse"/>, unchanged.</returns>
+    /// <returns>The text given to <see cref="Parse(string, bool)"/>, unchanged.</returns>
     /// <remarks>Safe to call from any thread.</remarks>
     public override string ToString() => _text;
 

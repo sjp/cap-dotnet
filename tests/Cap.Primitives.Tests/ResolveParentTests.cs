@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
 
@@ -36,7 +37,7 @@ public sealed class ResolveParentTests
     public void A_single_name_belongs_to_the_root_itself(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode root = fs.Find("sandbox")!;
+        MemoryNode root = fs.Find("sandbox")!;
 
         Run(fs, (ops, handle) =>
         {
@@ -54,7 +55,7 @@ public sealed class ResolveParentTests
     public void A_nested_path_resolves_to_the_directory_holding_the_last_name(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode holder = fs.AddDirectory("sandbox/a/b");
+        MemoryNode holder = fs.AddDirectory("sandbox/a/b");
 
         Run(fs, (ops, handle) =>
         {
@@ -79,7 +80,7 @@ public sealed class ResolveParentTests
     public void The_last_component_need_not_exist(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode holder = fs.AddDirectory("sandbox/a");
+        MemoryNode holder = fs.AddDirectory("sandbox/a");
 
         Run(fs, (ops, handle) =>
         {
@@ -97,7 +98,7 @@ public sealed class ResolveParentTests
     public void A_trailing_separator_does_not_move_the_last_name(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode holder = fs.AddDirectory("sandbox/a");
+        MemoryNode holder = fs.AddDirectory("sandbox/a");
 
         Run(fs, (ops, handle) =>
         {
@@ -115,7 +116,7 @@ public sealed class ResolveParentTests
     public void Redundant_separators_and_dot_components_are_ignored(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode holder = fs.AddDirectory("sandbox/a/b");
+        MemoryNode holder = fs.AddDirectory("sandbox/a/b");
 
         Run(fs, (ops, handle) =>
         {
@@ -135,7 +136,7 @@ public sealed class ResolveParentTests
     public void A_link_used_as_a_directory_component_is_followed(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode holder = fs.AddDirectory("sandbox/real");
+        MemoryNode holder = fs.AddDirectory("sandbox/real");
         _ = fs.AddSymbolicLink("sandbox/door", "real");
 
         Run(fs, (ops, handle) =>
@@ -245,7 +246,7 @@ public sealed class ResolveParentTests
     public void Disposing_the_resolution_leaves_the_root_usable(bool atomic)
     {
         FakeFileSystem fs = Sandbox(atomic);
-        FakeNode root = fs.Find("sandbox")!;
+        MemoryNode root = fs.Find("sandbox")!;
 
         Run(fs, (ops, handle) =>
         {
@@ -308,7 +309,7 @@ public sealed class ResolveParentTests
         Assert.Equal(expected, result.Error.Category);
     }
 
-    private static void AssertIs(FakePlatformOps ops, FakeNode expected, SafeDirHandle handle)
+    private static void AssertIs(FakePlatformOps ops, MemoryNode expected, SafeDirHandle handle)
     {
         Assert.True(ops.StatHandle(handle, out CapNodeInfo info).IsSuccess);
         Assert.True(info.IsSameNodeAs(expected.Info), "The resolution reached a different object.");

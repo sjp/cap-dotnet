@@ -6,6 +6,7 @@ using Cap.Fs.Ext;
 using Cap.Net;
 using Cap.Primitives.Interop;
 using Cap.Rand;
+using Cap.Std.Testing;
 using Cap.Time;
 
 namespace Cap.Std.Tests;
@@ -47,6 +48,7 @@ public sealed class HostBackendAuditTests
         typeof(ProjectDirs).Assembly,
         typeof(CapClock).Assembly,
         typeof(CapRandom).Assembly,
+        typeof(InMemoryFileSystem).Assembly,
     ];
 
     /// <summary>

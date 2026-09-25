@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
 
@@ -23,8 +24,8 @@ public sealed class PortableWalkNodeTests
     public void Each_kind_is_opened_as_what_it_is()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode file = fs.AddFile("sandbox/a/data");
-        FakeNode directory = fs.AddDirectory("sandbox/a/dir");
+        MemoryNode file = fs.AddFile("sandbox/a/data");
+        MemoryNode directory = fs.AddDirectory("sandbox/a/dir");
 
         Run(fs, (ops, root) =>
         {
@@ -51,7 +52,7 @@ public sealed class PortableWalkNodeTests
     public void The_last_name_is_looked_up_once_and_a_later_swap_changes_nothing()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode file = fs.AddFile("sandbox/entry");
+        MemoryNode file = fs.AddFile("sandbox/entry");
 
         int lookups = 0;
         fs.BeforeLookup = (_, name) =>
@@ -86,8 +87,8 @@ public sealed class PortableWalkNodeTests
     public void A_final_link_is_followed_unless_the_request_refuses_it()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode directory = fs.AddDirectory("sandbox/dir");
-        FakeNode file = fs.AddFile("sandbox/data");
+        MemoryNode directory = fs.AddDirectory("sandbox/dir");
+        MemoryNode file = fs.AddFile("sandbox/data");
         _ = fs.AddSymbolicLink("sandbox/to-dir", "dir");
         _ = fs.AddSymbolicLink("sandbox/to-file", "data");
 
@@ -119,7 +120,7 @@ public sealed class PortableWalkNodeTests
     {
         FakeFileSystem fs = Sandbox();
         _ = fs.AddFile("sandbox/data");
-        FakeNode directory = fs.AddDirectory("sandbox/dir");
+        MemoryNode directory = fs.AddDirectory("sandbox/dir");
         _ = fs.AddDirectory("sandbox/dir/inner");
 
         Run(fs, (ops, root) =>
@@ -239,7 +240,7 @@ public sealed class PortableWalkNodeTests
         Assert.Equal(expected, result.Error.Category);
     }
 
-    private static void AssertIs(FakePlatformOps ops, FakeNode expected, SafeHandle handle)
+    private static void AssertIs(FakePlatformOps ops, MemoryNode expected, SafeHandle handle)
     {
         Assert.True(ops.DescribeHandle(handle, out CapNodeStat stat).IsSuccess);
         Assert.Equal(expected.NodeId, stat.NodeId);

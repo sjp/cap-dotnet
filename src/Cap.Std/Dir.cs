@@ -1507,6 +1507,37 @@ public sealed partial class Dir : IDisposable
         return CapError.Success;
     }
 
+    /// <summary>
+    /// Wraps a directory handle that a filesystem held in memory issued for one of its own
+    /// directories, as the root of a tree under <paramref name="policy"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No <see cref="AmbientAuthority"/> token is asked for, which is what separates this from
+    /// <see cref="OpenRootCore"/>. The token marks the point where authority over the host
+    /// enters the capability graph, and a tree held in memory is not the host's: whoever holds
+    /// it already has all of it, and a handle on part of it grants nothing over anything else.
+    /// Asking for a token here would put a test's scaffolding in the ambient authority log
+    /// beside the places a program really reaches outside itself.
+    /// </para>
+    /// <para>
+    /// Refuses a handle from a backend that issues kernel handles, so that this cannot become
+    /// a way round the token for the host's filesystem.
+    /// </para>
+    /// </remarks>
+    internal static Dir FromInMemoryRoot(SafeDirHandle handle, SymlinkPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(handle);
+        if (handle.Backend.IssuesKernelHandles)
+        {
+            throw new ArgumentException(
+                "Only a handle on a filesystem held in memory can become a root without an ambient-authority token.",
+                nameof(handle));
+        }
+
+        return new Dir(handle, Demand(policy));
+    }
+
     /// <summary>The policy this handle resolves under, for a handle derived from it to copy.</summary>
     internal ConfinedResolveOptions Options => _options;
 
@@ -2092,9 +2123,21 @@ public sealed partial class Dir : IDisposable
     /// same walk under the same root test, so the confinement a written-out <c>..</c> is held
     /// to is the one every link is already held to.
     /// </para>
+    /// <para>
+    /// Read under the rules of the filesystem this handle is on, which for every handle on
+    /// the host's filesystem are the running platform's. A filesystem held in memory can be
+    /// told to read paths as another platform does, and the path has to be split where that
+    /// filesystem splits it, or a name it would refuse could reach it.
+    /// </para>
     /// </remarks>
-    private static bool TryParseCallerPath(string path, out CapPath parsed, out CapPathError error) =>
-        CapPath.TryParse(path, CapPath.HostSyntax, ParentLinkPolicy.Preserve, out parsed, out error);
+    private bool TryParseCallerPath(string path, out CapPath parsed, out CapPathError error) =>
+        CapPath.TryParse(path, PathSyntax, ParentLinkPolicy.Preserve, out parsed, out error);
+
+    /// <summary>
+    /// The rules a path handed to this handle is read under: the running platform's, unless
+    /// the handle is on a filesystem that chose others.
+    /// </summary>
+    internal CapPathSyntax PathSyntax => Ops.Capabilities.PathSyntax;
 
     /// <summary>Turns a core's outcome into a handle or the exception explaining its absence.</summary>
     private static Dir Produce(CapPathError pathError, string path, Dir? dir, CapError error, ExpectedTarget expected)
@@ -2326,7 +2369,7 @@ public sealed partial class Dir : IDisposable
             // reading of "rooted" that resolution applies when it meets one. Resolution beneath
             // a handle would refuse to follow it anyway; the link is refused here because
             // other programs reading the same tree would not.
-            if (CapPath.IsRooted(target, CapPath.HostSyntax))
+            if (CapPath.IsRooted(target, PathSyntax))
             {
                 rootedTarget = true;
                 error = CapError.FromCategory(CapErrorCategory.Escaped);

@@ -1,6 +1,7 @@
 using Cap.Fuzz.Targets;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 using CsCheck;
 using Microsoft.Win32.SafeHandles;
@@ -93,8 +94,8 @@ public sealed class ResolutionPropertyTests
                     return;
                 }
 
-                (FakeFileSystem fs, FakeNode sandbox, _) = ResolutionWalkTarget.Build(entries);
-                FakeNode? expected = ReadAsText(sandbox, path);
+                (FakeFileSystem fs, MemoryNode sandbox, _) = ResolutionWalkTarget.Build(entries);
+                MemoryNode? expected = ReadAsText(sandbox, path);
 
                 FakePlatformOps ops = new(fs);
                 using SafeDirHandle root = ops.OpenAmbientDirectory(ResolutionScenario.SandboxName, CapAccess.Read).Value!;
@@ -120,15 +121,15 @@ public sealed class ResolutionPropertyTests
     /// the directory the step down came from. Nothing when a name is missing or not a
     /// directory, or when a step up would leave the starting directory.
     /// </summary>
-    private static FakeNode? ReadAsText(FakeNode start, CapPath path)
+    private static MemoryNode? ReadAsText(MemoryNode start, CapPath path)
     {
-        Stack<FakeNode> above = new();
-        FakeNode current = start;
+        Stack<MemoryNode> above = new();
+        MemoryNode current = start;
         foreach (ReadOnlySpan<char> component in path.EnumerateComponents())
         {
             if (component.SequenceEqual(".."))
             {
-                if (!above.TryPop(out FakeNode? parent))
+                if (!above.TryPop(out MemoryNode? parent))
                 {
                     return null;
                 }
@@ -137,7 +138,7 @@ public sealed class ResolutionPropertyTests
                 continue;
             }
 
-            if (!current.Entries.TryGetValue(component.ToString(), out FakeNode? next) || next.Type != CapNodeType.Directory)
+            if (!current.Entries.TryGetValue(component.ToString(), out MemoryNode? next) || next.Type != CapNodeType.Directory)
             {
                 return null;
             }

@@ -409,7 +409,9 @@ public static partial class DirExtensions
         /// is asked for only where a platform records one, and only for the names the dot did
         /// not already answer — an entry that has gone since the directory was read is not
         /// hidden, it is absent, and the walk reports it rather than inventing a reason to
-        /// leave it out.
+        /// leave it out. Whether the platform records one is the handle's to say rather than the
+        /// running machine's, since a filesystem held in memory can keep Windows attributes on
+        /// a machine that is not Windows.
         /// </remarks>
         private static bool IsHidden(DirEntry entry)
         {
@@ -418,7 +420,7 @@ public static partial class DirExtensions
                 return true;
             }
 
-            if (!OperatingSystem.IsWindows() || !entry.TryGetMetadata(out CapMetadata metadata))
+            if (entry.Owner.PathSyntax != CapPathSyntax.Windows || !entry.TryGetMetadata(out CapMetadata metadata))
             {
                 return false;
             }

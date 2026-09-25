@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Std.Testing</RootNamespace>
+    <Description>An in-memory filesystem for tests that hands out real Dir handles: every path still goes through Cap.Std's own parsing, resolution and link policy, and only the storage beneath it is simulated.</Description>
+    <PackageTags>$(PackageTags);testing;in-memory</PackageTags>
+    <!--
+      This assembly resolves names beneath a handle like the layers it sits under, so it is
+      held to the same ban on System.IO.Path.
+    -->
+    <CapBanSystemIoPath>true</CapBanSystemIoPath>
+  </PropertyGroup>
+
+  <!--
+    The backend implemented here is an internal contract of Cap.Primitives that can change in
+    any release, so this package is only ever correct against the Cap.Std it was built with.
+    Cap.Std is therefore a dependency on that exact version, not a minimum: a newer Cap.Std
+    beside an older copy of this package would compile and then fail at run time.
+    Cap.Primitives ships inside Cap.Std, as for the other packages; see Cap.Std.csproj.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../Cap.Std/Cap.Std.csproj" PrivateAssets="none" />
+    <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="PinCapStdToThisVersion" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+                                      ProjectVersion="[%(_ProjectReferencesWithVersions.ProjectVersion)]" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    The test fake in tests/Fakes shares this assembly's node tree and confined resolution, so
+    the suites that compile it are given access to both.
+  -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cap.Primitives.Tests" />
+    <InternalsVisibleTo Include="Cap.Std.Tests" />
+    <InternalsVisibleTo Include="Cap.Fs.Ext.Tests" />
+    <InternalsVisibleTo Include="Cap.Fuzz" />
+    <InternalsVisibleTo Include="Cap.Fuzz.Tests" />
+  </ItemGroup>
+
+</Project>

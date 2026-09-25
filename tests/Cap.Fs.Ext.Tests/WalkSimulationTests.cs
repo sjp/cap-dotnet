@@ -1,6 +1,7 @@
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Std;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 
 namespace Cap.Fs.Ext.Tests;
@@ -80,7 +81,7 @@ public sealed class WalkSimulationTests
     {
         FakeFileSystem fs = new();
         _ = fs.AddFile("/tree/real/inside.txt");
-        FakeNode link = fs.AddSymbolicLink("/tree/link", "real");
+        MemoryNode link = fs.AddSymbolicLink("/tree/link", "real");
         link.HidesKindFromDirectoryRead = true;
         link.EntryType = CapFileType.Unknown;
         return fs;

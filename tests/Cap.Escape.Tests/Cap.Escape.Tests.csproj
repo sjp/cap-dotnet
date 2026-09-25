@@ -13,6 +13,7 @@
     <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
     <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
     <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+    <ProjectReference Include="../../src/Cap.Std.Testing/Cap.Std.Testing.csproj" />
   </ItemGroup>
 
   <!--

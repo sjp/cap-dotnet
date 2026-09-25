@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Tests.Fakes;
@@ -47,16 +48,13 @@ internal sealed class FakePlatformOps : IPlatformOps
     private const int FirstHandleValue = 0x7000;
 
     private readonly FakeFileSystem _fileSystem;
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, FakeNode> _open = [];
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, MemoryNode> _open = [];
     private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, OpenFile> _files = [];
     private readonly List<SafeHandle> _issued = [];
     private nint _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
     private long _componentOpens;
     private int _handleLookups;
-
-    /// <summary>How many times a link may be followed before resolution gives up.</summary>
-    private const int LinkBudget = 8;
 
     public FakePlatformOps(FakeFileSystem fileSystem) => _fileSystem = fileSystem;
 
@@ -131,7 +129,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        FakeNode? node = _fileSystem.Find(path);
+        MemoryNode? node = _fileSystem.Find(path);
         if (node is null)
         {
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotFound));
@@ -154,7 +152,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         _componentOpens++;
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return CapResult<SafeDirHandle>.Fail(error);
@@ -182,7 +180,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         in FileOpenRequest request)
     {
         _componentOpens++;
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
 
         if (error.Category == CapErrorCategory.NotFound && request.Creates)
         {
@@ -220,7 +218,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         in FileOpenRequest request)
     {
         _componentOpens++;
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return CapResult<OpenedNode>.Fail(error);
@@ -238,13 +236,13 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <summary>Adds a file to the simulation and hands back a handle on it.</summary>
     private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, FileAccess access)
     {
-        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        CapError error = ResolveDirectory(parent, out MemoryNode? directory);
         if (error.IsFailure)
         {
             return CapResult<SafeFileHandle>.Fail(error);
         }
 
-        FakeNode created = new()
+        MemoryNode created = new()
         {
             Type = CapNodeType.File,
             VolumeId = directory!.VolumeId,
@@ -256,7 +254,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <summary>Hands back a handle on a file that exists, emptying it first if the open says to.</summary>
-    private SafeFileHandle OpenExistingFile(FakeNode node, in FileOpenRequest request)
+    private SafeFileHandle OpenExistingFile(MemoryNode node, in FileOpenRequest request)
     {
         if (request.Truncates)
         {
@@ -279,7 +277,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        CapError error = ResolveConfined(root, path, options, out FakeNode? node);
+        CapError error = ResolveConfined(root, path, options, followFinalLink, out MemoryNode? node);
         if (error.IsFailure)
         {
             return CapResult<SafeDirHandle>.Fail(error);
@@ -297,7 +295,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         in FileOpenRequest request,
         ConfinedResolveOptions options)
     {
-        CapError error = ResolveConfined(root, path, options, out FakeNode? node);
+        CapError error = ResolveConfined(root, path, options, request.FollowsFinalLink, out MemoryNode? node);
         if (error.IsFailure)
         {
             return CapResult<SafeFileHandle>.Fail(error);
@@ -315,7 +313,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         in FileOpenRequest request,
         ConfinedResolveOptions options)
     {
-        CapError error = ResolveConfined(root, path, options, out FakeNode? node);
+        CapError error = ResolveConfined(root, path, options, request.FollowsFinalLink, out MemoryNode? node);
         if (error.IsFailure)
         {
             return CapResult<OpenedNode>.Fail(error);
@@ -334,16 +332,16 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<DirectoryReader>.Fail(CapError.FromCategory(CapErrorCategory.PermissionDenied));
         }
 
-        CapError error = ResolveDirectory(directory, out FakeNode? node);
+        CapError error = ResolveDirectory(directory, out MemoryNode? node);
         return error.IsFailure
             ? CapResult<DirectoryReader>.Fail(error)
-            : CapResult<DirectoryReader>.Ok(new FakeDirectoryReader(node!));
+            : CapResult<DirectoryReader>.Ok(new MemoryDirectoryReader(node!));
     }
 
     /// <inheritdoc/>
     public CapResult<string> ReadChildLink(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return CapResult<string>.Fail(error);
@@ -358,7 +356,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapError StatChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeInfo info)
     {
         info = default;
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
@@ -372,7 +370,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapError StatHandle(SafeDirHandle handle, out CapNodeInfo info)
     {
         info = default;
-        if (!TryResolveHandle(handle, out FakeNode? node))
+        if (!TryResolveHandle(handle, out MemoryNode? node))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -385,7 +383,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapError DescribeChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeStat stat)
     {
         stat = default;
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
@@ -399,7 +397,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     public CapError DescribeHandle(SafeHandle handle, out CapNodeStat stat)
     {
         stat = default;
-        if (!TryResolveHandle(handle, out FakeNode? node))
+        if (!TryResolveHandle(handle, out MemoryNode? node))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -459,7 +457,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         UnixFileMode? unixMode,
         FileAttributes? windowsAttributes)
     {
-        FakeNode? node;
+        MemoryNode? node;
         if (handle is SafeDirHandle directory)
         {
             if (!TryResolveHandle(directory, out node))
@@ -496,7 +494,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite)
     {
-        if (!TryResolveHandle(handle, out FakeNode? node))
+        if (!TryResolveHandle(handle, out MemoryNode? node))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -512,7 +510,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         CapFileTime lastAccess,
         CapFileTime lastWrite)
     {
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
@@ -522,7 +520,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         return CapError.Success;
     }
 
-    private void ApplyTimes(FakeNode node, CapFileTime lastAccess, CapFileTime lastWrite)
+    private void ApplyTimes(MemoryNode node, CapFileTime lastAccess, CapFileTime lastWrite)
     {
         node.LastAccessTime = Resolve(lastAccess, node.LastAccessTime);
         node.LastWriteTime = Resolve(lastWrite, node.LastWriteTime);
@@ -534,7 +532,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
     {
-        if (!TryResolveHandle(handle, out FakeNode? node))
+        if (!TryResolveHandle(handle, out MemoryNode? node))
         {
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
@@ -554,7 +552,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     private CapResult<SafeFileHandle> Duplicate(SafeFileHandle handle, bool appendOnly)
     {
-        if (!TryResolveFile(handle, out FakeNode? node, out OpenFile file))
+        if (!TryResolveFile(handle, out MemoryNode? node, out OpenFile file))
         {
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
@@ -572,7 +570,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapError WriteAppending(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
     {
-        if (!TryResolveFile(handle, out FakeNode? node, out OpenFile file))
+        if (!TryResolveFile(handle, out MemoryNode? node, out OpenFile file))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -590,7 +588,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public int ReadFile(SafeFileHandle handle, Span<byte> buffer, long fileOffset)
     {
-        FakeNode node = DemandFile(handle, FileAccess.Read, out _);
+        MemoryNode node = DemandFile(handle, FileAccess.Read, out _);
         return node.ReadAt(buffer, fileOffset);
     }
 
@@ -601,7 +599,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// </remarks>
     public void WriteFile(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset)
     {
-        FakeNode node = DemandFile(handle, FileAccess.Write, out OpenFile file);
+        MemoryNode node = DemandFile(handle, FileAccess.Write, out OpenFile file);
         if (file.AppendOnly)
         {
             node.Append(buffer);
@@ -667,7 +665,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public void SetFileLength(SafeFileHandle handle, long length)
     {
-        FakeNode node = DemandFile(handle, FileAccess.Write, out _);
+        MemoryNode node = DemandFile(handle, FileAccess.Write, out _);
         node.SetLength(length);
         node.LastWriteTime = _fileSystem.Now;
     }
@@ -698,11 +696,11 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <param name="handle">The handle a content operation was given.</param>
     /// <param name="needed">The access the operation needs, or none to need nothing.</param>
     /// <param name="file">How the handle was opened.</param>
-    private FakeNode DemandFile(SafeFileHandle handle, FileAccess needed, out OpenFile file)
+    private MemoryNode DemandFile(SafeFileHandle handle, FileAccess needed, out OpenFile file)
     {
         ObjectDisposedException.ThrowIf(handle.IsClosed, handle);
 
-        if (!TryResolveFile(handle, out FakeNode? node, out file))
+        if (!TryResolveFile(handle, out MemoryNode? node, out file))
         {
             throw new ArgumentException(
                 "The handle is not one this simulated filesystem issued for a file.", nameof(handle));
@@ -719,7 +717,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         return node;
     }
 
-    private bool TryResolveFile(SafeFileHandle handle, out FakeNode? node, out OpenFile file)
+    private bool TryResolveFile(SafeFileHandle handle, out MemoryNode? node, out OpenFile file)
     {
         file = default;
         if (!TryResolveHandle(handle, out node))
@@ -736,7 +734,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         ReadOnlySpan<char> name,
         CreationVisibility visibility)
     {
-        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        CapError error = ResolveDirectory(parent, out MemoryNode? directory);
         if (error.IsFailure)
         {
             return error;
@@ -748,7 +746,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.AlreadyExists);
         }
 
-        directory!.Entries[entry] = new FakeNode
+        directory!.Entries[entry] = new MemoryNode
         {
             Type = CapNodeType.Directory,
             VolumeId = directory.VolumeId,
@@ -794,13 +792,13 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
-        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        CapError error = ResolveDirectory(parent, out MemoryNode? directory);
         if (error.IsFailure)
         {
             return CapResult<SafeFileHandle>.Fail(error);
         }
 
-        FakeNode created = new()
+        MemoryNode created = new()
         {
             Type = CapNodeType.File,
             VolumeId = directory!.VolumeId,
@@ -818,7 +816,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// </remarks>
     public CapError ClearChildRemovalBlock(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
@@ -843,7 +841,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
@@ -870,7 +868,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
@@ -903,13 +901,13 @@ internal sealed class FakePlatformOps : IPlatformOps
         ReadOnlySpan<char> toName,
         bool replaceExisting)
     {
-        CapError error = ResolveChild(fromParent, fromName, out FakeNode? node);
+        CapError error = ResolveChild(fromParent, fromName, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
         }
 
-        error = ResolveDirectory(toParent, out FakeNode? destination);
+        error = ResolveDirectory(toParent, out MemoryNode? destination);
         if (error.IsFailure)
         {
             return error;
@@ -942,7 +940,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         ReadOnlySpan<char> target,
         bool targetIsDirectory)
     {
-        CapError error = ResolveDirectory(parent, out FakeNode? directory);
+        CapError error = ResolveDirectory(parent, out MemoryNode? directory);
         if (error.IsFailure)
         {
             return error;
@@ -954,7 +952,7 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.AlreadyExists);
         }
 
-        directory!.Entries[entry] = new FakeNode
+        directory!.Entries[entry] = new MemoryNode
         {
             Type = CapNodeType.SymbolicLink,
             VolumeId = directory.VolumeId,
@@ -977,13 +975,13 @@ internal sealed class FakePlatformOps : IPlatformOps
         SafeDirHandle toParent,
         ReadOnlySpan<char> toName)
     {
-        CapError error = ResolveChild(parent, name, out FakeNode? node);
+        CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
             return error;
         }
 
-        error = ResolveDirectory(toParent, out FakeNode? destination);
+        error = ResolveDirectory(toParent, out MemoryNode? destination);
         if (error.IsFailure)
         {
             return error;
@@ -1001,10 +999,10 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <summary>Resolves a handle to the directory it refers to.</summary>
-    private CapError ResolveDirectory(SafeDirHandle handle, out FakeNode? directory)
+    private CapError ResolveDirectory(SafeDirHandle handle, out MemoryNode? directory)
     {
         directory = null;
-        if (!TryResolveHandle(handle, out FakeNode? node))
+        if (!TryResolveHandle(handle, out MemoryNode? node))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -1026,8 +1024,8 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <summary>
     /// The directory a handle refers to, for a caller that has already established it is one.
     /// </summary>
-    private FakeNode Parent(SafeDirHandle handle) =>
-        TryResolveHandle(handle, out FakeNode? node)
+    private MemoryNode Parent(SafeDirHandle handle) =>
+        TryResolveHandle(handle, out MemoryNode? node)
             ? node!
             : throw new InvalidOperationException("The handle was resolved a moment ago and is not now.");
 
@@ -1043,10 +1041,10 @@ internal sealed class FakePlatformOps : IPlatformOps
     private static bool IsDirectoryAccess(CapAccess access) =>
         access is CapAccess.None or CapAccess.Read;
 
-    private SafeDirHandle Register(FakeNode node, CapAccess access) =>
+    private SafeDirHandle Register(MemoryNode node, CapAccess access) =>
         Track(new SafeDirHandle(NextHandle(node), this, access));
 
-    private SafeFileHandle RegisterFile(FakeNode node, FileAccess access, bool appendOnly = false)
+    private SafeFileHandle RegisterFile(MemoryNode node, FileAccess access, bool appendOnly = false)
     {
         nint value = NextHandle(node);
         _files[value] = new OpenFile(access, appendOnly);
@@ -1066,14 +1064,14 @@ internal sealed class FakePlatformOps : IPlatformOps
         return handle;
     }
 
-    private nint NextHandle(FakeNode node)
+    private nint NextHandle(MemoryNode node)
     {
         nint value = _nextHandle++;
         _open[value] = node;
         return value;
     }
 
-    private bool TryResolveHandle(SafeHandle handle, out FakeNode? node)
+    private bool TryResolveHandle(SafeHandle handle, out MemoryNode? node)
     {
         _ = Interlocked.Increment(ref _handleLookups);
         node = null;
@@ -1093,10 +1091,10 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <summary>Resolves one name in the directory a handle refers to, without following links.</summary>
-    private CapError ResolveChild(SafeDirHandle parent, ReadOnlySpan<char> name, out FakeNode? node)
+    private CapError ResolveChild(SafeDirHandle parent, ReadOnlySpan<char> name, out MemoryNode? node)
     {
         node = null;
-        if (!TryResolveHandle(parent, out FakeNode? directory))
+        if (!TryResolveHandle(parent, out MemoryNode? directory))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
@@ -1119,15 +1117,16 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// Resolves a whole path, following links and refusing to leave the starting subtree.
     /// </summary>
     /// <remarks>
-    /// Upward movement is modelled the way the kernel confines it: a step above the starting
-    /// directory is refused outright rather than clamped, so a path that tries to escape is
-    /// reported as an escape and not quietly turned into one that stays inside.
+    /// The same resolution the in-memory filesystem uses for its confined open, run over this
+    /// simulation's tree with its lookup hook, so that a swap sprung from the hook lands in the
+    /// middle of a confined resolution as it would in the middle of a walk.
     /// </remarks>
     private CapError ResolveConfined(
         SafeDirHandle root,
         ReadOnlySpan<char> path,
         ConfinedResolveOptions options,
-        out FakeNode? node)
+        bool followFinalLink,
+        out MemoryNode? node)
     {
         node = null;
         _confinedOpenAttempts++;
@@ -1137,125 +1136,14 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.NotSupported);
         }
 
-        if (!TryResolveHandle(root, out FakeNode? start))
+        if (!TryResolveHandle(root, out MemoryNode? start))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
         }
 
-        return Descend(start!, path.ToString(), options, out node);
-    }
-
-    /// <summary>
-    /// Resolves a path from a starting directory, following links and refusing to leave the
-    /// subtree that directory roots.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Written as one loop over a queue of components rather than as a recursion, because a
-    /// link's target has to be resolved in the same walk as the path that reached it. A
-    /// recursion that started a fresh walk at the link would lose how far above the starting
-    /// point resolution already was, and would report a link such as <c>../sibling</c> — from
-    /// a subdirectory, and entirely inside the subtree — as an escape.
-    /// </para>
-    /// <para>
-    /// A step above the starting directory is refused rather than clamped, so a path that
-    /// tries to leave is reported as having tried, and not quietly rewritten into one that
-    /// stays.
-    /// </para>
-    /// </remarks>
-    private CapError Descend(
-        FakeNode start,
-        string path,
-        ConfinedResolveOptions options,
-        out FakeNode? node)
-    {
-        node = null;
-
-        List<FakeNode> stack = [start];
-        Queue<string> pending = new(path.Split('/', StringSplitOptions.RemoveEmptyEntries));
-        int budget = LinkBudget;
-
-        while (pending.Count > 0)
-        {
-            string component = pending.Dequeue();
-            if (component == ".")
-            {
-                continue;
-            }
-
-            if (component == "..")
-            {
-                if (stack.Count == 1)
-                {
-                    return CapError.FromCategory(CapErrorCategory.Escaped);
-                }
-
-                stack.RemoveAt(stack.Count - 1);
-                continue;
-            }
-
-            FakeNode current = stack[^1];
-            if (current.Type != CapNodeType.Directory)
-            {
-                return CapError.FromCategory(CapErrorCategory.NotADirectory);
-            }
-
-            FakeNode? next = _fileSystem.Lookup(current, component);
-            if (next is null)
-            {
-                return CapError.FromCategory(CapErrorCategory.NotFound);
-            }
-
-            if (next.Type == CapNodeType.UnknownReparsePoint)
-            {
-                return CapError.FromCategory(CapErrorCategory.Reparse);
-            }
-
-            if (next.Type == CapNodeType.SymbolicLink)
-            {
-                if ((options & ConfinedResolveOptions.RefuseSymlinks) != 0)
-                {
-                    return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
-                }
-
-                if (--budget < 0)
-                {
-                    return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
-                }
-
-                string target = next.LinkTarget ?? string.Empty;
-                if (target.StartsWith('/'))
-                {
-                    return CapError.FromCategory(CapErrorCategory.Escaped);
-                }
-
-                // The target's components are resolved before whatever was left of the
-                // original path, from the directory the link lives in.
-                string[] remainder = [.. pending];
-                pending.Clear();
-                foreach (string part in target.Split('/', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    pending.Enqueue(part);
-                }
-
-                foreach (string part in remainder)
-                {
-                    pending.Enqueue(part);
-                }
-
-                continue;
-            }
-
-            if ((options & ConfinedResolveOptions.RefuseMountCrossing) != 0 &&
-                next.VolumeId != current.VolumeId)
-            {
-                return CapError.FromCategory(CapErrorCategory.CrossDevice);
-            }
-
-            stack.Add(next);
-        }
-
-        node = stack[^1];
-        return CapError.Success;
+        CapError error = MemoryPathWalk.Resolve(
+            start!, path, Capabilities.PathSyntax, options, followFinalLink, _fileSystem.Lookup, out MemoryWalkResult found);
+        node = found.Node;
+        return error;
     }
 }

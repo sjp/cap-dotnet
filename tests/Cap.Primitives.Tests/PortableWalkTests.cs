@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
 
@@ -30,7 +31,7 @@ public sealed class PortableWalkTests
     public void A_path_of_several_components_reaches_what_it_names()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode target = fs.AddDirectory("sandbox/a/b/c");
+        MemoryNode target = fs.AddDirectory("sandbox/a/b/c");
 
         Run(fs, (ops, root) =>
         {
@@ -47,7 +48,7 @@ public sealed class PortableWalkTests
     {
         FakeFileSystem fs = Sandbox();
         _ = fs.AddDirectory("sandbox/a/b");
-        FakeNode target = fs.AddDirectory("sandbox/a/c");
+        MemoryNode target = fs.AddDirectory("sandbox/a/c");
 
         Run(fs, (ops, root) =>
         {
@@ -100,7 +101,7 @@ public sealed class PortableWalkTests
         FakeFileSystem fs = Sandbox();
         string[] levels = [.. Enumerable.Range(1, depth).Select(level => $"d{level}")];
         _ = fs.AddDirectory("sandbox/" + string.Join('/', levels));
-        FakeNode sandbox = fs.Find("sandbox")!;
+        MemoryNode sandbox = fs.Find("sandbox")!;
 
         Run(fs, (ops, root) =>
         {
@@ -111,7 +112,7 @@ public sealed class PortableWalkTests
             for (int up = 1; up <= depth; up++)
             {
                 string path = descent + string.Concat(Enumerable.Repeat("/..", up));
-                FakeNode expected = up == depth
+                MemoryNode expected = up == depth
                     ? sandbox
                     : fs.Find("sandbox/" + string.Join('/', levels[..(depth - up)]))!;
 
@@ -137,7 +138,7 @@ public sealed class PortableWalkTests
     public void A_step_up_is_taken_from_where_the_walk_actually_is()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode x = fs.AddDirectory("sandbox/x");
+        MemoryNode x = fs.AddDirectory("sandbox/x");
         _ = fs.AddDirectory("sandbox/x/y");
         _ = fs.AddSymbolicLink("sandbox/link", "x/y");
 
@@ -157,7 +158,7 @@ public sealed class PortableWalkTests
     public void A_link_inside_the_sandbox_is_followed()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode target = fs.AddDirectory("sandbox/real/inner");
+        MemoryNode target = fs.AddDirectory("sandbox/real/inner");
         _ = fs.AddSymbolicLink("sandbox/link", "real");
 
         Run(fs, (ops, root) =>
@@ -174,7 +175,7 @@ public sealed class PortableWalkTests
     public void A_links_target_is_resolved_from_where_the_link_lives()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode target = fs.AddDirectory("sandbox/a/sibling");
+        MemoryNode target = fs.AddDirectory("sandbox/a/sibling");
         _ = fs.AddDirectory("sandbox/a/b");
         _ = fs.AddSymbolicLink("sandbox/a/b/up", "../sibling");
 
@@ -243,7 +244,7 @@ public sealed class PortableWalkTests
         static void AssertChain(int length, bool expectSuccess)
         {
             FakeFileSystem fs = Sandbox();
-            FakeNode target = fs.AddDirectory("sandbox/end");
+            MemoryNode target = fs.AddDirectory("sandbox/end");
             for (int i = 0; i < length; i++)
             {
                 _ = fs.AddSymbolicLink($"sandbox/link{i}", i == length - 1 ? "end" : $"link{i + 1}");
@@ -327,7 +328,7 @@ public sealed class PortableWalkTests
         FakeFileSystem fs = Sandbox();
         _ = fs.AddDirectory("secret");
         _ = fs.AddDirectory("sandbox/a/b/c");
-        FakeNode a = fs.Find("sandbox/a")!;
+        MemoryNode a = fs.Find("sandbox/a")!;
 
         fs.BeforeLookup = (directory, name) =>
         {
@@ -355,9 +356,9 @@ public sealed class PortableWalkTests
     {
         FakeFileSystem fs = Sandbox();
         _ = fs.AddDirectory("sandbox/elsewhere");
-        FakeNode a = fs.AddDirectory("sandbox/a");
-        FakeNode directory = fs.AddDirectory("sandbox/a/b");
-        FakeNode c = fs.AddDirectory("sandbox/a/b/c");
+        MemoryNode a = fs.AddDirectory("sandbox/a");
+        MemoryNode directory = fs.AddDirectory("sandbox/a/b");
+        MemoryNode c = fs.AddDirectory("sandbox/a/b/c");
         fs.Replace("sandbox/a/b", LinkNode(fs, "../elsewhere"));
 
         int lookups = 0;
@@ -391,9 +392,9 @@ public sealed class PortableWalkTests
     public void A_name_that_keeps_changing_is_given_up_on_after_the_link_budget()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode a = fs.AddDirectory("sandbox/a");
-        FakeNode directory = fs.AddDirectory("sandbox/a/b");
-        FakeNode link = LinkNode(fs, "../a");
+        MemoryNode a = fs.AddDirectory("sandbox/a");
+        MemoryNode directory = fs.AddDirectory("sandbox/a/b");
+        MemoryNode link = LinkNode(fs, "../a");
 
         int lookups = 0;
         fs.BeforeLookup = (parent, name) =>
@@ -425,9 +426,9 @@ public sealed class PortableWalkTests
     {
         FakeFileSystem fs = Sandbox();
         _ = fs.AddDirectory("sandbox/a");
-        FakeNode a = fs.Find("sandbox/a")!;
-        FakeNode b = fs.AddDirectory("sandbox/a/b");
-        FakeNode decoy = fs.AddDirectory("decoy");
+        MemoryNode a = fs.Find("sandbox/a")!;
+        MemoryNode b = fs.AddDirectory("sandbox/a/b");
+        MemoryNode decoy = fs.AddDirectory("decoy");
         _ = fs.AddDirectory("decoy/b");
 
         fs.BeforeLookup = (directory, name) =>
@@ -511,7 +512,7 @@ public sealed class PortableWalkTests
     public void Resolving_to_the_parent_does_not_look_at_the_final_name()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode parent = fs.AddDirectory("sandbox/a/b");
+        MemoryNode parent = fs.AddDirectory("sandbox/a/b");
 
         Run(fs, (ops, root) =>
         {
@@ -533,7 +534,7 @@ public sealed class PortableWalkTests
     public void Resolving_to_the_parent_does_not_follow_a_final_link()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode sandbox = fs.Find("sandbox")!;
+        MemoryNode sandbox = fs.Find("sandbox")!;
         _ = fs.AddDirectory("sandbox/real");
         _ = fs.AddSymbolicLink("sandbox/link", "real");
 
@@ -609,7 +610,7 @@ public sealed class PortableWalkTests
     {
         FakeFileSystem fs = Sandbox();
         _ = fs.AddFile("sandbox/data");
-        FakeNode dir = fs.AddDirectory("sandbox/dir");
+        MemoryNode dir = fs.AddDirectory("sandbox/dir");
         _ = fs.AddSymbolicLink("sandbox/plain", "data");
         _ = fs.AddSymbolicLink("sandbox/slashed", "data/");
         _ = fs.AddSymbolicLink("sandbox/through", "slashed");
@@ -646,8 +647,8 @@ public sealed class PortableWalkTests
     public void A_link_to_dot_names_the_directory_holding_it()
     {
         FakeFileSystem fs = Sandbox();
-        FakeNode holder = fs.AddDirectory("sandbox/a");
-        FakeNode inner = fs.AddDirectory("sandbox/a/inner");
+        MemoryNode holder = fs.AddDirectory("sandbox/a");
+        MemoryNode inner = fs.AddDirectory("sandbox/a/inner");
         _ = fs.AddSymbolicLink("sandbox/a/self", ".");
         _ = fs.AddSymbolicLink("sandbox/a/self-again", "./.");
 
@@ -735,7 +736,7 @@ public sealed class PortableWalkTests
         return fs;
     }
 
-    private static FakeNode LinkNode(FakeFileSystem fs, string target) => new()
+    private static MemoryNode LinkNode(FakeFileSystem fs, string target) => new()
     {
         Type = CapNodeType.SymbolicLink,
         VolumeId = 1,
@@ -798,7 +799,7 @@ public sealed class PortableWalkTests
     /// Asserts a handle refers to a given object by identity rather than by the name it was
     /// opened under, since the name is the one thing an attacker can reassign.
     /// </summary>
-    private static void AssertIs(FakePlatformOps ops, FakeNode expected, SafeDirHandle handle)
+    private static void AssertIs(FakePlatformOps ops, MemoryNode expected, SafeDirHandle handle)
     {
         Assert.True(ops.StatHandle(handle, out CapNodeInfo info).IsSuccess);
         Assert.True(info.IsSameNodeAs(expected.Info), "The walk reached a different object.");

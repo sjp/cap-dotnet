@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
 using static Cap.Fuzz.Targets.InvariantViolation;
@@ -57,7 +58,7 @@ internal static class ResolutionWalkTarget
             return null;
         }
 
-        (FakeFileSystem fs, FakeNode sandbox, FakeNode outside) = Build(scenario.Entries);
+        (FakeFileSystem fs, MemoryNode sandbox, MemoryNode outside) = Build(scenario.Entries);
         string shown = $"{Show(scenario.Path)} ({scenario.Operation}, {scenario.Options})";
 
         FakePlatformOps ops = new(fs);
@@ -65,7 +66,7 @@ internal static class ResolutionWalkTarget
         Require(opened.IsSuccess, "The simulated sandbox could not be opened.");
         using SafeDirHandle root = opened.Value!;
 
-        HashSet<FakeNode> inside = Beneath(sandbox);
+        HashSet<MemoryNode> inside = Beneath(sandbox);
         string outsideBefore = Describe(outside);
         int handlesBefore = ops.OpenHandleCount;
 
@@ -101,7 +102,7 @@ internal static class ResolutionWalkTarget
         SafeDirHandle root,
         CapPath path,
         ResolutionScenario scenario,
-        FakeNode sandbox,
+        MemoryNode sandbox,
         string shown)
     {
         switch (scenario.Operation)
@@ -169,7 +170,7 @@ internal static class ResolutionWalkTarget
     /// Requires the object reached to be one of those in the sandbox now. Now rather than
     /// before, because a create adds a file and that file is what is handed back.
     /// </summary>
-    private static void RequireInside(FakeNode sandbox, ulong volumeId, ulong nodeId, string shown) =>
+    private static void RequireInside(MemoryNode sandbox, ulong volumeId, ulong nodeId, string shown) =>
         Require(
             Beneath(sandbox).Any(node => node.VolumeId == volumeId && node.NodeId == nodeId),
             $"{shown} reached something that is not inside the sandbox.");
@@ -196,17 +197,17 @@ internal static class ResolutionWalkTarget
     /// Builds the simulated filesystem: a root holding the sandbox and the directory beside
     /// it, each with a little in it, and then the entries.
     /// </summary>
-    internal static (FakeFileSystem Fs, FakeNode Sandbox, FakeNode Outside) Build(IReadOnlyList<TopologyEntry> entries)
+    internal static (FakeFileSystem Fs, MemoryNode Sandbox, MemoryNode Outside) Build(IReadOnlyList<TopologyEntry> entries)
     {
         FakeFileSystem fs = new();
-        FakeNode sandbox = fs.AddDirectory(ResolutionScenario.SandboxName);
-        FakeNode outside = fs.AddDirectory(ResolutionScenario.OutsideName);
+        MemoryNode sandbox = fs.AddDirectory(ResolutionScenario.SandboxName);
+        MemoryNode outside = fs.AddDirectory(ResolutionScenario.OutsideName);
         _ = fs.AddFile($"{ResolutionScenario.OutsideName}/{ResolutionScenario.OutsideFileName}");
-        FakeNode outsideSub = fs.AddDirectory($"{ResolutionScenario.OutsideName}/{ResolutionScenario.OutsideSubdirectoryName}");
-        FakeNode plain = fs.AddDirectory($"{ResolutionScenario.SandboxName}/{ResolutionScenario.PlainDirectoryName}");
+        MemoryNode outsideSub = fs.AddDirectory($"{ResolutionScenario.OutsideName}/{ResolutionScenario.OutsideSubdirectoryName}");
+        MemoryNode plain = fs.AddDirectory($"{ResolutionScenario.SandboxName}/{ResolutionScenario.PlainDirectoryName}");
         _ = fs.AddFile($"{ResolutionScenario.SandboxName}/{ResolutionScenario.PlainDirectoryName}/{ResolutionScenario.PlainFileName}");
 
-        List<FakeNode> directories = [sandbox, outside, outsideSub, plain];
+        List<MemoryNode> directories = [sandbox, outside, outsideSub, plain];
         ulong nextVolume = 2;
 
         foreach (TopologyEntry entry in entries)
@@ -216,8 +217,8 @@ internal static class ResolutionWalkTarget
                 continue;
             }
 
-            FakeNode parent = directories[entry.Parent % directories.Count];
-            FakeNode node = new()
+            MemoryNode parent = directories[entry.Parent % directories.Count];
+            MemoryNode node = new()
             {
                 Type = entry.Kind switch
                 {
@@ -252,15 +253,15 @@ internal static class ResolutionWalkTarget
     /// Everything reachable from <paramref name="top"/> by entries alone, without following
     /// a link: what is inside it.
     /// </summary>
-    internal static HashSet<FakeNode> Beneath(FakeNode top)
+    internal static HashSet<MemoryNode> Beneath(MemoryNode top)
     {
-        HashSet<FakeNode> found = new(ReferenceEqualityComparer.Instance);
-        Stack<FakeNode> pending = new([top]);
-        while (pending.TryPop(out FakeNode? node))
+        HashSet<MemoryNode> found = new(ReferenceEqualityComparer.Instance);
+        Stack<MemoryNode> pending = new([top]);
+        while (pending.TryPop(out MemoryNode? node))
         {
             if (found.Add(node))
             {
-                foreach (FakeNode child in node.Entries.Values)
+                foreach (MemoryNode child in node.Entries.Values)
                 {
                     pending.Push(child);
                 }
@@ -274,12 +275,12 @@ internal static class ResolutionWalkTarget
     /// A description of everything beneath a directory — each name, what it is and which
     /// object it is — that changes if anything there is added, removed, replaced or retargeted.
     /// </summary>
-    private static string Describe(FakeNode top)
+    private static string Describe(MemoryNode top)
     {
         System.Text.StringBuilder description = new();
-        Stack<(string Name, FakeNode Node)> pending = new([("", top)]);
-        HashSet<FakeNode> seen = new(ReferenceEqualityComparer.Instance);
-        while (pending.TryPop(out (string Name, FakeNode Node) item))
+        Stack<(string Name, MemoryNode Node)> pending = new([("", top)]);
+        HashSet<MemoryNode> seen = new(ReferenceEqualityComparer.Instance);
+        while (pending.TryPop(out (string Name, MemoryNode Node) item))
         {
             if (!seen.Add(item.Node))
             {
@@ -288,7 +289,7 @@ internal static class ResolutionWalkTarget
 
             _ = description.Append(item.Name).Append('|').Append(item.Node.Type).Append('|')
                 .Append(item.Node.NodeId).Append('|').Append(item.Node.LinkTarget).Append('\n');
-            foreach (KeyValuePair<string, FakeNode> child in item.Node.Entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            foreach (KeyValuePair<string, MemoryNode> child in item.Node.Entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
             {
                 pending.Push(($"{item.Name}/{child.Key}", child.Value));
             }

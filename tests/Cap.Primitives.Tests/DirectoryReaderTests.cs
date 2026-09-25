@@ -1,5 +1,6 @@
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 
 namespace Cap.Primitives.Tests;
@@ -309,7 +310,7 @@ public sealed class DirectoryReaderTests : IDisposable
             ("block-device", CapFileType.BlockDevice),
         })
         {
-            FakeNode node = fs.AddFile(name);
+            MemoryNode node = fs.AddFile(name);
             node.Type = CapNodeType.Other;
             node.EntryType = kind;
         }

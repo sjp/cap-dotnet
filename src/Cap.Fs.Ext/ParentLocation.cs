@@ -72,7 +72,7 @@ internal readonly struct ParentLocation : IDisposable
 
         // Parsed as the handle parses it, with `..` carried through, so that a path means the
         // same thing to these operations as it does to the handle's own members.
-        if (!CapPath.TryParse(path, CapPath.HostSyntax, ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError parseError))
+        if (!CapPath.TryParse(path, dir.PathSyntax, ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError parseError))
         {
             throw FailureTranslation.ToException(parseError, path, parameterName);
         }

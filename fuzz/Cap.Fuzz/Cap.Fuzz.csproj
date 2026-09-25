@@ -16,9 +16,13 @@
     <PackageReference Include="SharpFuzz" />
   </ItemGroup>
 
-  <!-- The simulated filesystem the resolution target builds its trees in. -->
+  <!--
+    The simulated filesystem the resolution target builds its trees in, and the node tree and
+    confined resolution in Cap.Std.Testing that it is built on.
+  -->
   <ItemGroup>
     <Compile Include="../../tests/Fakes/*.cs" Link="Fakes/%(Filename)%(Extension)" />
+    <ProjectReference Include="../../src/Cap.Std.Testing/Cap.Std.Testing.csproj" />
   </ItemGroup>
 
 </Project>

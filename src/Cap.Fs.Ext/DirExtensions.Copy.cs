@@ -437,7 +437,7 @@ public static partial class DirExtensions
         {
             string target = level.Source.ReadLink(entry.Name);
 
-            if (CapPath.IsRooted(target, CapPath.HostSyntax))
+            if (CapPath.IsRooted(target, level.Destination.PathSyntax))
             {
                 throw new SandboxEscapeException(
                     $"'{entry.Name}' is a symbolic link to '{target}', which is rooted, and a link " +

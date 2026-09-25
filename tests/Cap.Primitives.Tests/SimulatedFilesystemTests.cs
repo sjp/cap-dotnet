@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 
 namespace Cap.Primitives.Tests;
@@ -107,7 +108,7 @@ public sealed class SimulatedFilesystemTests
         {
             if (name == "b")
             {
-                fs.Replace("a/b", new FakeNode
+                fs.Replace("a/b", new MemoryNode
                 {
                     Type = CapNodeType.SymbolicLink,
                     LinkTarget = "/elsewhere",

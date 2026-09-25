@@ -29,6 +29,7 @@ byte[] contents = uploads.ReadAllBytes(userPath);
 | `Cap.Time` | The system clock as a `TimeProvider`, handed out against an `AmbientAuthority` token. |
 | `Cap.Rand` | The operating system's random generator behind a token, and a seeded stream for tests. |
 | `Cap.Directories` | Configuration, data, cache and state directories as `Dir` handles. |
+| `Cap.Std.Testing` | An in-memory filesystem that hands out real `Dir` handles, for tests. It depends on exactly the `Cap.Std` it was built with. |
 
 Every package depends on `Cap.Std`, so referencing any one of them also brings the analyzer.
 

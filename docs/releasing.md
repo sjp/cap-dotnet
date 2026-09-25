@@ -16,6 +16,7 @@ package you have downloaded.
 | `Cap.Time` | `Cap.Time.dll`; depends on `Cap.Std` |
 | `Cap.Rand` | `Cap.Rand.dll`; depends on `Cap.Std` |
 | `Cap.Directories` | `Cap.Directories.dll`; depends on `Cap.Std` |
+| `Cap.Std.Testing` | `Cap.Std.Testing.dll`; depends on exactly the `Cap.Std` of the same version |
 
 There is no `Cap.Primitives` package. The assembly holds the few public types every package
 shares, such as `AmbientAuthority`, `CapPath` and `SymlinkPolicy`, together with the
@@ -23,6 +24,11 @@ resolution code behind them. It ships inside `Cap.Std`, so nobody takes a depend
 a separate thing with its own version. The analyzer is not a package of its own either. Every
 other package depends on `Cap.Std` with all of its assets, so the analyzer reaches a project
 that installs only `Cap.Time`, say, as well as one that installs `Cap.Std` directly.
+
+`Cap.Std.Testing` is the one package whose dependency on `Cap.Std` is an exact version rather
+than a minimum. It implements a contract inside `Cap.Std` that is not public and can change in
+any release, so it is correct only beside the `Cap.Std` it was built with, and NuGet refuses a
+combination of the two that would compile and then fail at run time.
 
 Each package carries `LICENSE` (MIT), `NOTICE` and a readme. Each assembly embeds its PDB,
 with SourceLink pointing at the commit it was built from, so a debugger can step into the

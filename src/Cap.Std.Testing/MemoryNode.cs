@@ -1,30 +1,54 @@
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 
-namespace Cap.Tests.Fakes;
+namespace Cap.Std.Testing;
 
 /// <summary>
-/// One object in a simulated filesystem.
+/// One object in a filesystem held in memory: a file, a directory, a symbolic link, or
+/// something a test has made to stand for another kind.
 /// </summary>
 /// <remarks>
-/// Deliberately mutable and reachable from a test while a resolution is in flight. That is
-/// the whole point of the simulation: the interesting failures in a path walk are the ones
-/// where a component is one thing when it is looked at and another when it is opened, and
-/// against a real kernel those can only be provoked by running an attack in a loop and
-/// hoping to land in the window.
+/// <para>
+/// Shared by <see cref="InMemoryFileSystem"/> and by the simulation the library's own tests
+/// attack the resolver with, so that the two describe objects the same way. It is deliberately
+/// mutable and reachable while a resolution is in flight. The interesting failures in a path
+/// walk are the ones where a component is one thing when it is looked at and another when it
+/// is opened, and a simulation can only produce those if a test can change a node at will.
+/// </para>
+/// <para>
+/// Nothing here takes the filesystem's lock. A backend that is used from several threads
+/// guards the tree itself; the contents alone are guarded here, because a file handle promises
+/// reads and writes from several threads at once and a simulation that has no tree lock must
+/// still keep that promise.
+/// </para>
 /// </remarks>
-internal sealed class FakeNode
+internal sealed class MemoryNode
 {
-    // The contents are guarded because a file handle promises reads and writes from several
-    // threads at once, and a test of that promise must not be defeated by the simulation.
     private readonly object _contentLock = new();
     private byte[] _content = [];
     private long _length;
 
+    /// <summary>Creates a node whose entries, if it is a directory, compare names exactly.</summary>
+    public MemoryNode()
+        : this(StringComparer.Ordinal)
+    {
+    }
+
+    /// <summary>Creates a node whose entries compare names as <paramref name="names"/> does.</summary>
+    /// <param name="names">
+    /// How two names are decided to be the same one. A filesystem that ignores case gives every
+    /// directory a comparer that does, so a lookup, a creation and a rename all agree on it.
+    /// </param>
+    public MemoryNode(StringComparer names)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        Entries = new Dictionary<string, MemoryNode>(names);
+    }
+
     /// <summary>What this object is.</summary>
     public CapNodeType Type { get; set; } = CapNodeType.Directory;
 
-    /// <summary>Which simulated filesystem it lives on.</summary>
+    /// <summary>Which filesystem it lives on.</summary>
     public ulong VolumeId { get; set; }
 
     /// <summary>Its identity within that filesystem.</summary>
@@ -33,14 +57,20 @@ internal sealed class FakeNode
     /// <summary>The stored target, when this is a link.</summary>
     public string? LinkTarget { get; set; }
 
+    /// <summary>
+    /// Whether a link was made as a link to a directory, which Windows records and the other
+    /// platforms do not.
+    /// </summary>
+    public bool LinkIsDirectory { get; set; }
+
     /// <summary>The reparse tag, for modelling a Windows link that is not a filesystem link.</summary>
     public uint ReparseTag { get; set; }
 
-    /// <summary>True when every operation on this object should be refused.</summary>
+    /// <summary>True when every operation on this object, and every lookup inside it, is refused.</summary>
     public bool Unreadable { get; set; }
 
     /// <summary>
-    /// True when removing this object's name should be refused until the refusal is cleared.
+    /// True when removing this object's name is refused until the refusal is cleared.
     /// </summary>
     /// <remarks>
     /// Models the Windows read-only attribute, which lives on the object rather than in its
@@ -49,6 +79,26 @@ internal sealed class FakeNode
     /// simulating it is the only way to exercise that on a machine that is not Windows.
     /// </remarks>
     public bool RefusesRemoval { get; set; }
+
+    /// <summary>
+    /// True when removing or replacing this object's name is refused, and clearing the
+    /// removal block does not help.
+    /// </summary>
+    /// <remarks>
+    /// A fault a test injects, standing for a name the filesystem will not give up for a reason
+    /// no retry fixes: an immutable file, or a directory whose permissions deny the removal.
+    /// </remarks>
+    public bool Undeletable { get; set; }
+
+    /// <summary>
+    /// True once the object has no name left in any directory: a directory that was removed,
+    /// or a file whose last name was removed while something still held it open.
+    /// </summary>
+    /// <remarks>
+    /// A handle on such an object keeps working for what can be done without a name, and a
+    /// directory in this state is empty and can be given nothing new, as on a real system.
+    /// </remarks>
+    public bool Detached { get; set; }
 
     /// <summary>
     /// True when a read of the directory holding this entry should decline to say what it
@@ -133,30 +183,29 @@ internal sealed class FakeNode
 
     /// <summary>How many directory entries refer to this object.</summary>
     /// <remarks>
-    /// Kept up to date by the simulation's hard-link creation and file removal, which are the
-    /// operations a test of the count exercises. A rename that replaces a name is not counted
-    /// against what it replaced.
+    /// Kept up to date by whichever backend creates and removes names. A directory's count is
+    /// the backend's to report, since the platforms disagree about what it counts.
     /// </remarks>
     public long LinkCount { get; set; } = 1;
 
     /// <summary>
-    /// The Unix mode bits, when the simulation is standing in for a Unix platform.
+    /// The Unix mode bits, when the filesystem is standing in for a Unix platform.
     /// </summary>
     /// <remarks>
-    /// Set by default so that the common case needs no arranging. A test that wants the
-    /// other kind of platform clears this and sets <see cref="WindowsAttributes"/>; the two
-    /// are never both reported, because no real platform reports both.
+    /// Set by default so that the common case needs no arranging. A filesystem standing in for
+    /// the other kind of platform clears this and sets <see cref="WindowsAttributes"/>; the
+    /// two are never both reported, because no real platform reports both.
     /// </remarks>
     public UnixFileMode? UnixMode { get; set; } =
         UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
     /// <summary>
-    /// The Windows attribute bits, when the simulation is standing in for Windows.
+    /// The Windows attribute bits, when the filesystem is standing in for Windows.
     /// </summary>
     public FileAttributes? WindowsAttributes { get; set; }
 
     /// <summary>Entries, when this is a directory.</summary>
-    public Dictionary<string, FakeNode> Entries { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, MemoryNode> Entries { get; }
 
     /// <summary>Copies contents from a position into a buffer.</summary>
     /// <returns>How many bytes were copied. Zero at or beyond the end.</returns>
@@ -225,7 +274,7 @@ internal sealed class FakeNode
     {
         if (length > Array.MaxLength)
         {
-            throw new IOException("The simulated file cannot hold that much.");
+            throw new IOException("A file held in memory cannot hold that much.");
         }
 
         if (length > _content.Length)
@@ -238,7 +287,10 @@ internal sealed class FakeNode
     public CapNodeInfo Info => new(Type, VolumeId, NodeId, ReparseTag);
 
     /// <summary>Its full description, as the metadata layer would report it.</summary>
-    public CapNodeStat Stat => new(
+    public CapNodeStat Stat => Describe(LinkCount);
+
+    /// <summary>Its full description, with a link count the caller worked out.</summary>
+    public CapNodeStat Describe(long linkCount) => new(
         FileType,
         VolumeId,
         NodeId,
@@ -247,7 +299,7 @@ internal sealed class FakeNode
         LastWriteTime,
         CreationTime,
         ChangeTime,
-        LinkCount,
+        linkCount,
         UnixMode,
         UnixMode is null ? WindowsAttributes : null);
 

@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 
 namespace Cap.Std.Tests;
@@ -52,7 +53,7 @@ public sealed class TemporaryHelperSimulationTests
         FakePlatformOps ops = new(fs);
         using CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
 
-        FakeNode? created = fs.Find(Inside(temp.Name));
+        MemoryNode? created = fs.Find(Inside(temp.Name));
 
         Assert.NotNull(created);
         Assert.Equal(
@@ -75,7 +76,7 @@ public sealed class TemporaryHelperSimulationTests
         using Dir root = Dir.OpenThrough(ops, TemporaryLocation, AmbientAuthority.Acquire());
         using Dir made = root.CreateDir("ordinary");
 
-        FakeNode? created = fs.Find(Inside("ordinary"));
+        MemoryNode? created = fs.Find(Inside("ordinary"));
 
         Assert.NotNull(created);
         Assert.True(created!.UnixMode!.Value.HasFlag(UnixFileMode.OtherRead));
@@ -130,7 +131,7 @@ public sealed class TemporaryHelperSimulationTests
         string name = temp.Name;
 
         temp.Directory.CreateFile("immovable").Dispose();
-        FakeNode file = fs.Find(Inside($"{name}/immovable"))!;
+        MemoryNode file = fs.Find(Inside($"{name}/immovable"))!;
         file.RefusesRemoval = true;
         file.Unreadable = true;
 
@@ -255,8 +256,8 @@ public sealed class TemporaryHelperSimulationTests
         temp.Directory.CreateDir("target").Dispose();
         temp.Directory.CreateFile("target/survivor").Dispose();
 
-        FakeNode tree = fs.Find(Inside(name))!;
-        FakeNode target = fs.Find(Inside($"{name}/target"))!;
+        MemoryNode tree = fs.Find(Inside(name))!;
+        MemoryNode target = fs.Find(Inside($"{name}/target"))!;
         bool swapped = false;
         bool intact = true;
         fs.BeforeLookup = (directory, entry) =>
@@ -269,7 +270,7 @@ public sealed class TemporaryHelperSimulationTests
             if (!swapped)
             {
                 swapped = true;
-                fs.Replace(Inside($"{name}/swapped"), new FakeNode
+                fs.Replace(Inside($"{name}/swapped"), new MemoryNode
                 {
                     Type = CapNodeType.SymbolicLink,
                     LinkTarget = "target",

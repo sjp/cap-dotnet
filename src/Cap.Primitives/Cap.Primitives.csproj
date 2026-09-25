@@ -21,6 +21,7 @@
     <InternalsVisibleTo Include="Cap.Time" />
     <InternalsVisibleTo Include="Cap.Rand" />
     <InternalsVisibleTo Include="Cap.Directories" />
+    <InternalsVisibleTo Include="Cap.Std.Testing" />
     <InternalsVisibleTo Include="Cap.Primitives.Tests" />
     <InternalsVisibleTo Include="Cap.Std.Tests" />
     <InternalsVisibleTo Include="Cap.Escape.Tests" />

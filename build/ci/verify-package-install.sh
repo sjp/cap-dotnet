@@ -6,7 +6,7 @@
 # restoring from a feed that holds only the packages under test, into a package cache of
 # their own:
 #
-#   1. one that references all six packages and calls into each, which shows that they
+#   1. one that references all seven packages and calls into each, which shows that they
 #      restore together, that Cap.Primitives arrives with Cap.Std, and that the assemblies
 #      load and work on this platform;
 #   2. one that references only Cap.Time, which shows that the analyzer reaches a consumer
@@ -64,7 +64,7 @@ echo "== Every package, in one consumer"
 consumer="$work/all"
 write_nuget_config "$consumer"
 references=""
-for id in Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories; do
+for id in Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories Cap.Std.Testing; do
   references+="    <PackageReference Include=\"$id\" Version=\"$version\" />"$'\n'
 done
 write_project "$consumer" "$references" true
@@ -77,6 +77,7 @@ using Cap.Net;
 using Cap.Primitives;
 using Cap.Rand;
 using Cap.Std;
+using Cap.Std.Testing;
 using Cap.Time;
 
 AmbientAuthority authority = AmbientAuthority.Acquire();
@@ -101,6 +102,25 @@ catch (SandboxEscapeException)
 if (escaped)
 {
     throw new InvalidOperationException("A parent link was not refused.");
+}
+
+InMemoryFileSystem memory = new();
+memory.AddFile("inside/file.txt", "in memory");
+using (Dir inMemory = memory.OpenRoot("inside"))
+{
+    if (inMemory.ReadAllText("file.txt") != "in memory")
+    {
+        throw new InvalidOperationException("Cap.Std.Testing did not hand out a working root.");
+    }
+
+    try
+    {
+        _ = inMemory.ReadAllText("../outside.txt");
+        throw new InvalidOperationException("A parent link was not refused in memory.");
+    }
+    catch (SandboxEscapeException)
+    {
+    }
 }
 
 Pool pool = new PoolBuilder()

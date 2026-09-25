@@ -66,7 +66,14 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IEnumerable<WalkEntry> Glob(this Dir dir, string pattern, WalkOptions? options = null) =>
-        Glob(dir, GlobPattern.Parse(pattern), options);
+        Glob(dir, ParsePattern(dir, pattern), options);
+
+    /// <summary>Reads a pattern given as text as the handle it will search beneath reads a path.</summary>
+    private static GlobPattern ParsePattern(Dir dir, string pattern)
+    {
+        ArgumentNullException.ThrowIfNull(dir);
+        return GlobPattern.Parse(pattern, ignoreCase: false, dir.PathSyntax);
+    }
 
     /// <summary>
     /// Finds everything beneath this handle whose name a pattern read in advance describes.

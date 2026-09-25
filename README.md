@@ -139,6 +139,7 @@ reviewed to know that — it was never given anything else.
 | [Ambient authority](docs/ambient-authority.md) | The one way authority enters, and how to list every place it did. |
 | [The analyzer](docs/analyzers.md) | The build-time rules shipped in `Cap.Std`, and the one line that makes ambient `System.IO` an error. |
 | [NativeAOT and trimming](docs/aot.md) | What an application can rely on, and the size of a native binary. |
+| [Testing](docs/testing.md) | An in-memory filesystem that hands out real `Dir` handles, for testing code that takes one. |
 
 **Other capabilities**
 
@@ -174,6 +175,7 @@ src/Cap.Net/           capability sockets: a Pool of permitted endpoints
 src/Cap.Time/          the system clock as a TimeProvider, behind a token
 src/Cap.Rand/          OS entropy behind a token, and a seeded stream for tests
 src/Cap.Directories/   well-known project directories as Dir handles
+src/Cap.Std.Testing/   an in-memory filesystem that hands out real Dir handles, for tests
 src/Cap.Analyzers/     Roslyn analyzer shipped in Cap.Std: ambient IO, clock and entropy
 samples/               runnable programs, each built and run in CI
 tests/                 unit, adversarial escape corpus, TOCTOU stress, property tests

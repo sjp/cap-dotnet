@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Std.Testing;
 
 namespace Cap.Tests.Fakes;
 
@@ -29,12 +30,12 @@ internal sealed class FakeFileSystem
     private ulong _nextNodeId = 1;
 
     /// <summary>The root of the simulated filesystem.</summary>
-    public FakeNode Root { get; }
+    public MemoryNode Root { get; }
 
     /// <summary>Creates a simulated filesystem with an empty root directory.</summary>
     public FakeFileSystem()
     {
-        Root = new FakeNode { Type = CapNodeType.Directory, VolumeId = 1, NodeId = _nextNodeId++ };
+        Root = new MemoryNode { Type = CapNodeType.Directory, VolumeId = 1, NodeId = _nextNodeId++ };
     }
 
     /// <summary>
@@ -46,7 +47,7 @@ internal sealed class FakeFileSystem
     /// or replaces an entry here is doing exactly what a concurrent attacker does, at the one
     /// instant where doing it matters.
     /// </remarks>
-    public Action<FakeNode, string>? BeforeLookup { get; set; }
+    public Action<MemoryNode, string>? BeforeLookup { get; set; }
 
     /// <summary>Whether the simulated platform offers a confined, atomic open.</summary>
     /// <remarks>
@@ -78,39 +79,39 @@ internal sealed class FakeFileSystem
     public DateTimeOffset Now { get; set; } = new(2001, 2, 3, 4, 5, 6, TimeSpan.Zero);
 
     /// <summary>Creates a directory, and any missing directories above it.</summary>
-    public FakeNode AddDirectory(string path) => Create(path, CapNodeType.Directory, null, 0);
+    public MemoryNode AddDirectory(string path) => Create(path, CapNodeType.Directory, null, 0);
 
     /// <summary>Creates a file, and any missing directories above it.</summary>
-    public FakeNode AddFile(string path) => Create(path, CapNodeType.File, null, 0);
+    public MemoryNode AddFile(string path) => Create(path, CapNodeType.File, null, 0);
 
     /// <summary>Creates a symbolic link with the given stored target.</summary>
-    public FakeNode AddSymbolicLink(string path, string target) =>
+    public MemoryNode AddSymbolicLink(string path, string target) =>
         Create(path, CapNodeType.SymbolicLink, target, 0);
 
     /// <summary>
     /// Creates a reparse point whose tag is not a filesystem link, which resolution must
     /// refuse rather than interpret.
     /// </summary>
-    public FakeNode AddOpaqueReparsePoint(string path, uint tag) =>
+    public MemoryNode AddOpaqueReparsePoint(string path, uint tag) =>
         Create(path, CapNodeType.UnknownReparsePoint, null, tag);
 
     /// <summary>
     /// Creates a directory on a different simulated volume, as a mount point would be.
     /// </summary>
-    public FakeNode AddMountPoint(string path, ulong volumeId)
+    public MemoryNode AddMountPoint(string path, ulong volumeId)
     {
-        FakeNode node = AddDirectory(path);
+        MemoryNode node = AddDirectory(path);
         node.VolumeId = volumeId;
         return node;
     }
 
     /// <summary>Finds an existing node, or returns null.</summary>
-    public FakeNode? Find(string path)
+    public MemoryNode? Find(string path)
     {
-        FakeNode current = Root;
+        MemoryNode current = Root;
         foreach (string component in Split(path))
         {
-            if (!current.Entries.TryGetValue(component, out FakeNode? next))
+            if (!current.Entries.TryGetValue(component, out MemoryNode? next))
             {
                 return null;
             }
@@ -125,16 +126,16 @@ internal sealed class FakeFileSystem
     public void Remove(string path)
     {
         string[] components = Split(path);
-        FakeNode parent = Walk(components[..^1], create: false)
+        MemoryNode parent = Walk(components[..^1], create: false)
             ?? throw new InvalidOperationException($"No directory above '{path}'.");
         _ = parent.Entries.Remove(components[^1]);
     }
 
     /// <summary>Replaces an entry, keeping its name. Used to spring a swap from a lookup hook.</summary>
-    public void Replace(string path, FakeNode node)
+    public void Replace(string path, MemoryNode node)
     {
         string[] components = Split(path);
-        FakeNode parent = Walk(components[..^1], create: false)
+        MemoryNode parent = Walk(components[..^1], create: false)
             ?? throw new InvalidOperationException($"No directory above '{path}'.");
         parent.Entries[components[^1]] = node;
     }
@@ -143,13 +144,13 @@ internal sealed class FakeFileSystem
     public ulong NextNodeId() => _nextNodeId++;
 
     /// <summary>Looks one name up in one directory, announcing it first.</summary>
-    internal FakeNode? Lookup(FakeNode directory, string name)
+    internal MemoryNode? Lookup(MemoryNode directory, string name)
     {
         BeforeLookup?.Invoke(directory, name);
-        return directory.Entries.TryGetValue(name, out FakeNode? node) ? node : null;
+        return directory.Entries.TryGetValue(name, out MemoryNode? node) ? node : null;
     }
 
-    private FakeNode Create(string path, CapNodeType type, string? target, uint tag)
+    private MemoryNode Create(string path, CapNodeType type, string? target, uint tag)
     {
         string[] components = Split(path);
         if (components.Length == 0)
@@ -157,8 +158,8 @@ internal sealed class FakeFileSystem
             throw new ArgumentException("A path must name something.", nameof(path));
         }
 
-        FakeNode parent = Walk(components[..^1], create: true)!;
-        FakeNode node = new()
+        MemoryNode parent = Walk(components[..^1], create: true)!;
+        MemoryNode node = new()
         {
             Type = type,
             VolumeId = parent.VolumeId,
@@ -171,19 +172,19 @@ internal sealed class FakeFileSystem
         return node;
     }
 
-    private FakeNode? Walk(string[] components, bool create)
+    private MemoryNode? Walk(string[] components, bool create)
     {
-        FakeNode current = Root;
+        MemoryNode current = Root;
         foreach (string component in components)
         {
-            if (!current.Entries.TryGetValue(component, out FakeNode? next))
+            if (!current.Entries.TryGetValue(component, out MemoryNode? next))
             {
                 if (!create)
                 {
                     return null;
                 }
 
-                next = new FakeNode
+                next = new MemoryNode
                 {
                     Type = CapNodeType.Directory,
                     VolumeId = current.VolumeId,

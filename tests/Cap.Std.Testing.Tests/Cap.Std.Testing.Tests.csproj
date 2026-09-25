@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The in-memory filesystem, used as a consumer of the package uses it. None of the libraries
+    grants this assembly access to its internals, so everything here goes through the public
+    surface of Cap.Std.Testing, Dir and CapFile, as a test in another repository would.
+  -->
+  <PropertyGroup>
+    <RootNamespace>Cap.Std.Testing.Tests</RootNamespace>
+    <AssemblyName>Cap.Std.Testing.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.Std.Testing/Cap.Std.Testing.csproj" />
+    <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+</Project>

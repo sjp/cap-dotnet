@@ -12,11 +12,38 @@ namespace Cap.Primitives.Interop;
 /// </remarks>
 internal readonly struct PlatformCapabilities
 {
-    /// <summary>Creates a capability description.</summary>
+    /// <summary>Creates a capability description for a backend over the host.</summary>
+    /// <remarks>
+    /// The confined open is offered exactly when it is the backend's name for itself, and
+    /// paths are read under the running platform's rules, because a backend over the host
+    /// resolves them through the host's kernel.
+    /// </remarks>
     public PlatformCapabilities(ResolutionBackend backend, bool overlappedFileHandles)
+        : this(backend, overlappedFileHandles, backend == ResolutionBackend.ConfinedOpen, CapPath.HostSyntax)
+    {
+    }
+
+    /// <summary>Creates a capability description for a backend that says everything itself.</summary>
+    /// <param name="backend">What the backend reports itself as.</param>
+    /// <param name="overlappedFileHandles">Whether its file handles can be overlapped.</param>
+    /// <param name="confinedOpen">Whether its confined-open members may be called.</param>
+    /// <param name="pathSyntax">The rules a path beneath one of its handles is read under.</param>
+    /// <remarks>
+    /// For a filesystem that is not the host's, which chooses the answers the host would
+    /// otherwise impose. An in-memory filesystem reports itself as in memory whichever way it
+    /// resolves, and can be told to read paths as Windows does on a machine that is not
+    /// Windows, so that code bound for one platform can be tested on another.
+    /// </remarks>
+    public PlatformCapabilities(
+        ResolutionBackend backend,
+        bool overlappedFileHandles,
+        bool confinedOpen,
+        CapPathSyntax pathSyntax)
     {
         Backend = backend;
         SupportsOverlappedFileHandles = overlappedFileHandles;
+        SupportsConfinedOpen = confinedOpen;
+        PathSyntax = pathSyntax;
     }
 
     /// <summary>The backend resolution will use.</summary>
@@ -27,7 +54,19 @@ internal readonly struct PlatformCapabilities
     /// kernel-atomic operation, and the confined-open members of
     /// <see cref="IPlatformOps"/> may be called.
     /// </summary>
-    public bool SupportsConfinedOpen => Backend == ResolutionBackend.ConfinedOpen;
+    public bool SupportsConfinedOpen { get; }
+
+    /// <summary>
+    /// The rules a path handed to a handle from this backend is read under: which characters
+    /// separate components, and which names are refused.
+    /// </summary>
+    /// <remarks>
+    /// The running platform's for every backend over the host. A path is parsed before any
+    /// backend sees it, so this has to be settled by the backend rather than by the parser:
+    /// a name that one platform's rules accept and another's refuse would otherwise be
+    /// accepted by the parser and then mean something different to the filesystem.
+    /// </remarks>
+    public CapPathSyntax PathSyntax { get; }
 
     /// <summary>
     /// True when a file handle can be opened so that the operating system itself completes
