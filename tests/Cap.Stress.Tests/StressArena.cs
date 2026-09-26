@@ -120,29 +120,6 @@ internal sealed class StressArena : IDisposable
     }
 
     /// <summary>
-    /// The identity of everything in the sandbox now, links aside.
-    /// </summary>
-    /// <remarks>
-    /// For a race whose operation can itself create an object — an open that creates the file
-    /// when the name is momentarily missing — whose identity nobody could have taken in advance.
-    /// Nothing in the races deletes what an operation created, so whatever it made is still
-    /// there to be identified once the race is over.
-    /// </remarks>
-    public HashSet<CapFileId> IdentitiesInside()
-    {
-        HashSet<CapFileId> identities = [];
-        foreach (string path in Directory.EnumerateFileSystemEntries(SandboxPath, "*", SearchOption.AllDirectories))
-        {
-            if (new FileInfo(path).LinkTarget is null)
-            {
-                identities.Add(IdentityOf(path));
-            }
-        }
-
-        return identities;
-    }
-
-    /// <summary>
     /// The identity of whatever a path names, following nothing but what the host's own
     /// resolution follows, opened with the process's own authority.
     /// </summary>

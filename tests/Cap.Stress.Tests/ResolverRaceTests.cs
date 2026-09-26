@@ -255,15 +255,26 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
     /// <para>
     /// The race that matters most for a write: an operation that looks at <c>d/target</c>, sees
     /// a plain file, and then opens it for writing after it has become a link to a file outside
-    /// has written outside. Every attempt opens for writing, one in three truncating, and writes
-    /// through the handle it got — so an escape here is not only seen in the identity reached but
-    /// in the file outside being changed, which the race checks afterwards byte for byte.
+    /// has written outside. Every attempt opens for writing, one in two emptying the file first,
+    /// and writes through the handle it got — so an escape here is not only seen in the identity
+    /// reached but in the file outside being changed, which the race checks afterwards byte for
+    /// byte.
     /// </para>
     /// <para>
-    /// The two modes that may create or empty the file refuse a link at the name without reading
-    /// it, so an attempt that meets the link in place answers with that refusal rather than as an
-    /// escape. Only the open of an existing file follows the link and is refused for where it
-    /// leads.
+    /// The two modes differ in what they do with a link at the name. Opening what is there
+    /// follows it, and is the mode that could be written through to somewhere else, so it must
+    /// be refused for where the link leads. Emptying what is there refuses the link without
+    /// reading it, so an attempt that meets the link in place answers with that refusal rather
+    /// than as an escape.
+    /// </para>
+    /// <para>
+    /// Both modes need the file to be there already, and that is deliberate. Where the host
+    /// swaps two names in three renames rather than one, the name is briefly missing; a mode
+    /// that created a file there would leave behind an object that the attacker's next rename
+    /// removes from the sandbox before the race is over, so nothing could say afterwards what
+    /// had been reached — and for a check of containment, an object that cannot be vouched for
+    /// is as bad as one outside. A mode that only opens what it finds is turned away instead,
+    /// and the turning away is counted.
     /// </para>
     /// </remarks>
     [Theory]
@@ -280,20 +291,13 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
         File.CreateSymbolicLink(link, arena.Outside(StressArena.FileName));
         CapFileId file = StressArena.IdentityOf(target);
 
-        // Where the swap is three renames rather than one, the name is briefly missing, and an
-        // open that creates will make a new file there. That file is inside and is legitimate;
-        // it is identified once the race is over, when it can be.
-        Lazy<HashSet<CapFileId>> createdInside = new(arena.IdentitiesInside);
         byte[] written = Encoding.UTF8.GetBytes("written from inside the sandbox");
 
         CapFileId WriteThrough(Dir root, int i)
         {
-            (FileMode mode, FileAccess access) = (i % 3) switch
-            {
-                0 => (FileMode.Open, FileAccess.ReadWrite),
-                1 => (FileMode.Create, FileAccess.Write),
-                _ => (FileMode.OpenOrCreate, FileAccess.ReadWrite),
-            };
+            (FileMode mode, FileAccess access) = i % 2 == 0
+                ? (FileMode.Open, FileAccess.ReadWrite)
+                : (FileMode.Truncate, FileAccess.Write);
 
             using CapFile opened = root.OpenFile("d/target", mode, access);
             opened.Write(written, 0);
@@ -309,7 +313,6 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
             WriteThrough,
             identity => identity == file ? Outcome.Consistent
                 : arena.IsOutside(identity) ? Outcome.Escaped
-                : createdInside.Value.Contains(identity) ? Outcome.Consistent
                 : Outcome.Unidentified,
             StressSettings.Iterations);
 
