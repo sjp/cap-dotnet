@@ -114,15 +114,56 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     }
 
     /// <summary>
+    /// A path that ends on a climb gives back a directory with the access asked for, which can
+    /// be committed like one opened by its name.
+    /// </summary>
+    /// <remarks>
+    /// The walk holds the directories it passes through with no access beyond passing through
+    /// them, and a path such as <c>inside/deeper/..</c> ends on one of those. Handed back as it
+    /// was, it cannot be committed or listed, so an operation that publishes a file there and
+    /// then commits the directory fails only when the path happened to climb.
+    /// </remarks>
+    [Fact]
+    public void A_path_ending_on_a_climb_gives_back_the_access_asked_for()
+    {
+        if (!SupportsSymbolicLinks)
+        {
+            return;
+        }
+
+        Build();
+
+        using SafeDirHandle root = OpenSandbox();
+        CapResult<SafeDirHandle> result = PortableResolver.OpenDirectory(
+            root, Parse("inside/deeper/.."), CapAccess.Read, ConfinedResolveOptions.None);
+
+        Assert.True(result.IsSuccess, result.Error.FailureDescription);
+        using SafeDirHandle directory = result.Value!;
+        Assert.Equal(CapAccess.Read, directory.Access);
+
+        CapError synced = PlatformOps.Host.SyncDirectory(directory);
+        Assert.True(
+            synced.IsSuccess || synced.Category == CapErrorCategory.NotSupported,
+            synced.FailureDescription);
+    }
+
+    /// <summary>
     /// Repeatedly failing to resolve leaves the process holding no more descriptors than it
     /// started with.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Counted from the kernel's own list rather than from anything this library keeps, so
     /// that a leak the library is unaware of — a handle opened by a platform call and dropped
     /// on an error path before it was ever wrapped — still shows up. The failing paths are the
     /// ones worth repeating: they are the ones a hostile caller controls, and each of them
     /// leaves the walk partway down a tree with handles to unwind.
+    /// </para>
+    /// <para>
+    /// Only descriptors on this test's own tree are counted. Tests outside this collection run
+    /// alongside it, and a file one of them holds open while the count is taken would read as
+    /// a leak here.
+    /// </para>
     /// </remarks>
     [Fact]
     public void Failing_to_resolve_leaks_no_descriptors()
@@ -156,6 +197,9 @@ public sealed class PortableWalkOnDiskTests : IDisposable
         }
 
         int before = OpenDescriptorCount();
+        Assert.True(
+            before > 0,
+            "The count did not see the sandbox's own handle, so it would not see a leak either.");
 
         for (int round = 0; round < 50; round++)
         {
@@ -268,7 +312,35 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     /// <summary>
     /// How many descriptors this process holds, read from the kernel's own list.
     /// </summary>
-    private static int OpenDescriptorCount() => Directory.GetFileSystemEntries("/proc/self/fd").Length;
+    /// <summary>
+    /// The descriptors this process holds on anything in this test's tree, by what the kernel
+    /// says each refers to.
+    /// </summary>
+    private int OpenDescriptorCount()
+    {
+        int held = 0;
+        foreach (string descriptor in Directory.GetFileSystemEntries("/proc/self/fd"))
+        {
+            string? target;
+            try
+            {
+                target = new FileInfo(descriptor).LinkTarget;
+            }
+            catch (IOException)
+            {
+                // Closed between the listing and the read, which is the listing's own
+                // descriptor more often than not.
+                continue;
+            }
+
+            if (target is not null && target.StartsWith(_root, StringComparison.Ordinal))
+            {
+                held++;
+            }
+        }
+
+        return held;
+    }
 
     /// <summary>
     /// Whether symbolic links can be created here. On Windows that needs either an elevated

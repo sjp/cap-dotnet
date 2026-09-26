@@ -792,6 +792,29 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>An open of <c>.</c> beneath the handle.</remarks>
+    public CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access)
+    {
+        if (!IsDirectoryAccess(access))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        using HandleLease lease = handle.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer encoded = UnixPathBuffer.Create(".", scratch);
+
+        int flags = DarwinConstants.O_RDONLY | DarwinConstants.O_DIRECTORY |
+                    DarwinConstants.O_NOFOLLOW | DarwinConstants.O_CLOEXEC;
+        return OpenDirectoryDescriptor(lease.Descriptor, encoded, flags, noFollow: true, access);
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
     {
         using HandleLease lease = new(handle);

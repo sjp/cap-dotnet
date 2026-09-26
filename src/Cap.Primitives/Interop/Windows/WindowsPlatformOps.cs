@@ -920,7 +920,19 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle)
+    /// <remarks>
+    /// Re-opening is what gives the copy an independent position for enumeration, and it is
+    /// also why the access has to be asked for again explicitly. The rights a re-open is
+    /// granted come from the directory's own permissions, not from the handle it started at,
+    /// so copying a handle opened for traversal alone without restating that would hand back
+    /// a handle that could list the directory. A copy must carry the authority of its original
+    /// and not the authority its original could have had.
+    /// </remarks>
+    public CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle) =>
+        ReopenDirectory(handle, handle.Access);
+
+    /// <inheritdoc/>
+    public CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access)
     {
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
@@ -931,14 +943,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // The empty name with the handle as the resolution root re-opens the object the
         // handle already refers to. Nothing is named a second time, so nothing a concurrent
         // rename could do changes what comes back.
-        //
-        // Re-opening is what gives the copy an independent position for enumeration, and it
-        // is also why the access has to be asked for again explicitly. The rights a re-open
-        // is granted come from the directory's own permissions, not from the handle it
-        // started at, so copying a handle opened for traversal alone without restating that
-        // would hand back a handle that could list the directory. A copy must carry the
-        // authority of its original and not the authority its original could have had.
-        if (!TryDirectoryAccessMask(handle.Access, out uint mask))
+        if (!TryDirectoryAccessMask(access, out uint mask))
         {
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
@@ -953,7 +958,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
-            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, this, handle.Access));
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, this, access));
     }
 
     /// <inheritdoc/>

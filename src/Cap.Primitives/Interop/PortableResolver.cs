@@ -290,7 +290,7 @@ internal static class PortableResolver
             // directory holding it, since every other component either returns or leaves
             // something pending. The walk is standing on the directory the path named, and
             // there is no final name for an operation to act on.
-            return FinishAtStack(ops, ref stack, target, out outcome);
+            return FinishAtStack(ops, ref stack, target, access, out outcome);
         }
         finally
         {
@@ -539,10 +539,17 @@ internal static class PortableResolver
     /// Produces the result for a path that ended on a directory already held, such as
     /// <c>a/..</c>, or a link storing <c>.</c>.
     /// </summary>
+    /// <remarks>
+    /// The held handle was opened only to pass through, and on some systems cannot list or
+    /// commit the directory, so unless it already has the access asked for it is reopened with
+    /// that access. Handing it back as it is would give the caller a directory that fails the
+    /// first time it is read, and only when the path happened to end on a climb.
+    /// </remarks>
     private static CapError FinishAtStack(
         IPlatformOps ops,
         scoped ref DirectoryStack stack,
         ResolutionTarget target,
+        CapAccess access,
         out Outcome outcome)
     {
         outcome = default;
@@ -551,13 +558,26 @@ internal static class PortableResolver
         {
             case ResolutionTarget.Directory:
             case ResolutionTarget.Node:
-                CapResult<SafeDirHandle> directory = stack.DetachTop(ops);
-                if (!directory.IsSuccess)
+                CapResult<SafeDirHandle> held = stack.DetachTop(ops);
+                if (!held.IsSuccess)
                 {
-                    return directory.Error;
+                    return held.Error;
                 }
 
-                outcome = new Outcome(directory.Value, null, null);
+                SafeDirHandle directory = held.Value!;
+                if (directory.Access != access)
+                {
+                    CapResult<SafeDirHandle> reopened = ops.ReopenDirectory(directory, access);
+                    directory.Dispose();
+                    if (!reopened.IsSuccess)
+                    {
+                        return reopened.Error;
+                    }
+
+                    directory = reopened.Value!;
+                }
+
+                outcome = new Outcome(directory, null, null);
                 return CapError.Success;
 
             case ResolutionTarget.File:

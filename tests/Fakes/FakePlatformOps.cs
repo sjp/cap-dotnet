@@ -541,6 +541,17 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access)
+    {
+        if (!IsDirectoryAccess(access) || !TryResolveHandle(handle, out MemoryNode? node))
+        {
+            return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
+        return CapResult<SafeDirHandle>.Ok(Register(node!, access));
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: false);
 
     /// <inheritdoc/>

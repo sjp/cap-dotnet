@@ -609,6 +609,29 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>Refused on a directory that cannot be read, as an open of it by name is.</remarks>
+    public CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access)
+    {
+        if (!IsDirectoryAccess(access))
+        {
+            return Fail<SafeDirHandle>(CapErrorCategory.InvalidArgument);
+        }
+
+        lock (_fs.Gate)
+        {
+            CapError error = Directory(handle, out MemoryNode? node);
+            if (error.IsFailure)
+            {
+                return CapResult<SafeDirHandle>.Fail(error);
+            }
+
+            return node!.Unreadable
+                ? Fail<SafeDirHandle>(CapErrorCategory.PermissionDenied)
+                : CapResult<SafeDirHandle>.Ok(OpenDirectoryHandle(node, access));
+        }
+    }
+
+    /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: false);
 
     /// <inheritdoc/>

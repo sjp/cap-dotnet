@@ -528,6 +528,25 @@ internal interface IPlatformOps
     CapResult<SafeDirHandle> DuplicateDirectory(SafeDirHandle handle);
 
     /// <summary>
+    /// Opens the directory a handle refers to a second time, with the access asked for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a walk that ends on a directory it passed through, as <c>a/b/..</c> does. The
+    /// handles a walk keeps are opened only to be passed through, which on some systems leaves
+    /// them unable to list the directory or commit it, so the one handed back has to be opened
+    /// again as the caller asked. The object is reopened through the handle and never named, so
+    /// a concurrent rename cannot change what comes back.
+    /// </para>
+    /// <para>
+    /// The access granted is what the directory's own permissions allow, as for any other open
+    /// beneath a handle, not what the handle was opened with. A directory the process could not
+    /// open for reading by its name is refused here in the same terms.
+    /// </para>
+    /// </remarks>
+    CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access);
+
+    /// <summary>
     /// Produces a second, independent handle to the same open file.
     /// </summary>
     /// <remarks>
