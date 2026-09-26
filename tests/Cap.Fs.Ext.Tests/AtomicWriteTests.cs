@@ -101,7 +101,7 @@ public sealed class AtomicWriteTests : IDisposable
         HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), oldText);
 
         using CancellationTokenSource stop = new();
-        Task<List<string>> reader = Task.Run(() => ReadUntilStopped(stop.Token));
+        Task<List<string>> reader = Observing(() => ReadUntilStopped(stop.Token));
 
         for (int i = 0; i < 20; i++)
         {
@@ -157,7 +157,7 @@ public sealed class AtomicWriteTests : IDisposable
         HostDirectory.CreateDirectory(nested);
 
         using CancellationTokenSource stop = new();
-        Task<bool> watcher = Task.Run(() => SawScratchIn(nested, stop.Token));
+        Task<bool> watcher = Observing(() => SawScratchIn(nested, stop.Token));
 
         for (int i = 0; i < 40; i++)
         {
@@ -437,6 +437,47 @@ public sealed class AtomicWriteTests : IDisposable
         }
 
         return seen;
+    }
+
+    /// <summary>
+    /// Starts an observer, and returns once it is running rather than once it is queued.
+    /// </summary>
+    /// <remarks>
+    /// What these tests are about is only there to be seen while a publish is in flight, so an
+    /// observer that has not started looking by the time the publishing loop ends sees nothing
+    /// — and an observer that saw nothing is indistinguishable from one that never looked, so
+    /// the test fails for a reason that has nothing to do with the code under test. Handing the
+    /// work to the thread pool invites exactly that: the rest of the suite is running at the
+    /// same time, and a pool with nothing free will start it whenever it can. A thread of its
+    /// own, waited for, is the observer the assertions assume.
+    /// </remarks>
+    private static Task<T> Observing<T>(Func<T> observe)
+    {
+        TaskCompletionSource<T> observed = new();
+        TaskCompletionSource running = new();
+
+        Thread thread = new(() =>
+        {
+            running.SetResult();
+
+            try
+            {
+                observed.SetResult(observe());
+            }
+            catch (Exception exception)
+            {
+                observed.SetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "atomic write observer",
+        };
+
+        thread.Start();
+        running.Task.GetAwaiter().GetResult();
+
+        return observed.Task;
     }
 
     /// <summary>Watches a directory for a scratch file appearing in it.</summary>

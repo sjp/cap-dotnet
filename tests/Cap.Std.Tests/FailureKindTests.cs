@@ -67,16 +67,21 @@ public sealed class FailureKindTests : IDisposable
         Assert.Equal(CapErrorKind.NotADirectory, KindOf(() => root.OpenDir("file").Dispose()));
     }
 
+    /// <summary>
+    /// The answer is the same everywhere, although the platforms do not word it the same way.
+    /// </summary>
+    /// <remarks>
+    /// One of them refuses the removal of a directory under this call as a permission failure,
+    /// which would send a caller looking for a permissions problem over a directory it can read
+    /// perfectly well.
+    /// </remarks>
     [Fact]
     public void A_file_removal_that_names_a_directory_is_reported_as_one()
     {
         HostDirectory.CreateDirectory(Host("dir"));
         using Dir root = OpenRoot();
 
-        // macOS refuses unlink on a directory as a permission failure, which is what it reports.
-        CapErrorKind kind = KindOf(() => root.DeleteFile("dir"));
-
-        Assert.Contains(kind, new[] { CapErrorKind.IsADirectory, CapErrorKind.PermissionDenied });
+        Assert.Equal(CapErrorKind.IsADirectory, KindOf(() => root.DeleteFile("dir")));
     }
 
     [Fact]

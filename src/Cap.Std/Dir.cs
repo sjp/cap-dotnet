@@ -2336,6 +2336,27 @@ public sealed partial class Dir : IDir
                 ? Ops.RemoveChildDirectory(lookup.Directory, lookup.Name)
                 : Ops.RemoveChildFile(lookup.Directory, lookup.Name);
 
+            // Asking the call that removes a name to remove a directory is refused everywhere,
+            // but not in the same words: one platform answers that the name is a directory and
+            // another that permission was denied. The second would send a caller looking for a
+            // permissions problem that is not there, over a directory it can read perfectly
+            // well, and it would stop a removal of a whole tree from noticing that its guess
+            // about the kind was wrong and trying the other call. So the refusal is
+            // reclassified afterwards by what the name holds, rather than anticipated by a
+            // look before the removal, which would cost every successful removal a second call
+            // and still leave the window between the two.
+            //
+            // The name is examined without following it, so a link to a directory is not
+            // mistaken for one: removing a link is removing a name, which is what this call
+            // does, and it would have succeeded.
+            if (!directory &&
+                error.Category == CapErrorCategory.PermissionDenied &&
+                Ops.StatChild(lookup.Directory, lookup.Name, out CapNodeInfo refused).IsSuccess &&
+                refused.Type == CapNodeType.Directory)
+            {
+                error = CapError.FromCategory(CapErrorCategory.IsADirectory);
+            }
+
             return CapPathError.None;
         }
     }
