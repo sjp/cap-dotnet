@@ -190,6 +190,11 @@ public sealed class HostBackendAuditTests
 
         foreach (Type type in assembly.GetTypes())
         {
+            if (IsAddedByTooling(type))
+            {
+                continue;
+            }
+
             IEnumerable<MethodBase> methods = [.. type.GetMethods(Everything), .. type.GetConstructors(Everything)];
             foreach (MethodBase method in methods)
             {
@@ -200,6 +205,21 @@ public sealed class HostBackendAuditTests
             }
         }
     }
+
+    /// <summary>
+    /// Whether a type was put into the assembly after it was compiled, rather than written
+    /// here.
+    /// </summary>
+    /// <remarks>
+    /// Measuring which instructions run means rewriting each assembly measured, and what the
+    /// rewriting adds is a counter table and the code that flushes it to a file of its own.
+    /// That code is nobody's here: it does not ship, it holds no handle this library issued,
+    /// and the file it writes is its own. Leaving it out by name keeps the audit narrow — an
+    /// assembly nothing has rewritten is still read whole, and a name that stops matching
+    /// fails the audit rather than quietly passing it.
+    /// </remarks>
+    private static bool IsAddedByTooling(Type type) =>
+        type.FullName?.StartsWith("Microsoft.CodeCoverage.", StringComparison.Ordinal) == true;
 
     /// <summary>
     /// Whether a method is one of the entry points, or code the compiler generated on its
