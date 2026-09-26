@@ -65,12 +65,6 @@ public sealed class ProjectDirsTests : IDisposable
                 () => HomePath,
                 _ => null));
 
-    private static string HostPath(Dir dir)
-    {
-        Assert.True(dir.TryGetPath(AmbientAuthority.Acquire(), out string? path));
-        return path!;
-    }
-
     private const string NoModeBits = "This platform records no mode bits, and decides access another way.";
 
     /// <summary>A default value is not a token, and finds nobody any directories.</summary>
@@ -106,7 +100,13 @@ public sealed class ProjectDirsTests : IDisposable
 
         string expected = Path.Join(HomePath, ".local", "share", "myapp");
         Assert.True(Directory.Exists(expected));
-        Assert.Equal(new FileInfo(expected).FullName, new FileInfo(HostPath(data)).FullName);
+
+        // That the handle is on that directory is checked by identity rather than by name.
+        // The two would not spell the same path anyway on a system that reaches its temporary
+        // location through a symbolic link, and the question being asked is about the object
+        // the handle refers to rather than about any of the names it answers to.
+        using Dir named = Dir.Open(expected, AmbientAuthority.Acquire());
+        Assert.True(data.GetMetadata().IsSameFileAs(named.GetMetadata()));
 
         // Only the kind that was asked for.
         Assert.False(Directory.Exists(Path.Join(HomePath, ".config")));

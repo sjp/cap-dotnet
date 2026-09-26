@@ -179,10 +179,16 @@ public sealed class WalkTests : IDisposable
     /// <para>
     /// The limit is what does the work: the walk stops at it rather than descending until it
     /// runs out of handles, and it stops the same way whether the tree is one level past the
-    /// limit or a thousand. Two thousand is as deep as the set-up can build here, because the
-    /// path it would have to name grows by a level each time and the platform will not accept
-    /// one much longer — which is itself a reason the walk cannot rely on paths to notice how
-    /// deep it has gone.
+    /// limit or a thousand.
+    /// </para>
+    /// <para>
+    /// How deep the set-up gets is the platform's business rather than this test's. The path it
+    /// has to name grows by a level each time, and the longest path a platform accepts varies
+    /// several-fold between the ones supported here, so it builds towards a depth well past the
+    /// limit and stops early if the name is refused — then checks that what it managed is past
+    /// the limit at all, since a tree no deeper than that would be walked to its end. That a
+    /// tree can be deeper than any path leading to it is itself a reason the walk cannot rely
+    /// on paths to notice how deep it has gone.
     /// </para>
     /// <para>
     /// The tree is taken apart from the bottom up afterwards. It is deeper than anything the
@@ -195,15 +201,29 @@ public sealed class WalkTests : IDisposable
     {
         List<string> levels = [];
         string path = _tree.HostPath;
-        for (int i = 0; i < 2000; i++)
+        for (int i = 0; i < WalkOptions.DefaultMaxDepth * 4; i++)
         {
-            path = Path.Combine(path, "d");
-            HostDirectory.CreateDirectory(path);
+            string level = Path.Combine(path, "d");
+            try
+            {
+                HostDirectory.CreateDirectory(level);
+            }
+            catch (PathTooLongException)
+            {
+                break;
+            }
+
+            path = level;
             levels.Add(path);
         }
 
         try
         {
+            Assert.True(
+                levels.Count > WalkOptions.DefaultMaxDepth,
+                $"The platform accepted only {levels.Count} levels, which does not reach past " +
+                $"the limit of {WalkOptions.DefaultMaxDepth} this test is about.");
+
             Assert.Throws<CapIOException>(() => _tree.Directory.Walk().ToList());
         }
         finally
