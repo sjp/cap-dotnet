@@ -22,13 +22,20 @@ namespace Cap.Benchmarks;
 /// than as two functions doing different things.
 /// </para>
 /// <para>
-/// Without a <c>System.IO</c> row there is no ratio to hold time to, so the regression gate
-/// watches this class for allocation and for each row's time relative to the single-component
-/// parse. The allocation is the part that matters: any byte at all fails it.
+/// Without a <c>System.IO</c> row there is no ratio worth holding time to, so the regression
+/// gate watches this class for allocation only: any byte at all fails it. Each row's time
+/// relative to the single-component parse is still reported, but not gated. These operations
+/// take tens of nanoseconds and are divided by one that takes about ten, so the ratio moves by
+/// far more than the gate's tolerance between two runs of the same code on the same machine,
+/// and by more again between one processor and another.
+/// </para>
+/// <para>
+/// Parsing never touches the filesystem, so the class runs under a single backend job rather
+/// than once per backend.
 /// </para>
 /// </remarks>
 [MemoryDiagnoser]
-[BenchmarkCategory(Categories.HotPath)]
+[BenchmarkCategory(Categories.HotPath, Categories.BackendIndependent)]
 public class CapPathBenchmarks
 {
     private const string SingleComponent = "config.json";

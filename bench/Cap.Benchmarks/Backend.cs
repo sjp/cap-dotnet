@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Running;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
@@ -66,6 +67,20 @@ internal static class Backend
         jobs.Add(Named(template.WithEnvironmentVariable(Openat2Probe.DisableVariableName, "1"), Walk));
         return jobs;
     }
+
+    /// <summary>
+    /// Whether <paramref name="benchmark"/> should run under <paramref name="jobs"/>' job of its
+    /// name: every job for a benchmark that resolves names, only the last for one marked
+    /// <see cref="Categories.BackendIndependent"/>.
+    /// </summary>
+    /// <remarks>
+    /// The last job is the walk on Linux and macOS and the relative open on Windows, the one
+    /// job each platform always has, so a backend-independent row keeps the same name on a
+    /// Linux host with the confined open and on one without it.
+    /// </remarks>
+    public static bool Runs(BenchmarkCase benchmark, IReadOnlyList<Job> jobs) =>
+        !benchmark.Descriptor.HasCategory(Categories.BackendIndependent)
+        || benchmark.Job.Id == jobs[^1].Id;
 
     /// <summary>
     /// Throws unless this process resolves through the backend its job was named after.

@@ -42,12 +42,13 @@ static int RunGate(string[] args)
 static IConfig Configure(Job template)
 {
     ManualConfig config = ManualConfig.Create(DefaultConfig.Instance);
-    foreach (Job job in Backend.Jobs(template, Console.WriteLine))
+    IReadOnlyList<Job> jobs = Backend.Jobs(template, Console.WriteLine);
+    foreach (Job job in jobs)
     {
         config.AddJob(job);
     }
 
-    return config;
+    return config.AddFilter(new BenchmarkDotNet.Filters.SimpleFilter(benchmark => Backend.Runs(benchmark, jobs)));
 }
 
 static string? Option(string[] args, string name)

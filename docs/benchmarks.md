@@ -29,7 +29,7 @@ suite to take the better part of an hour.
 
 ## One job per backend
 
-On Linux every benchmark runs twice, as two BenchmarkDotNet jobs:
+On Linux every benchmark that reaches the filesystem runs twice, as two BenchmarkDotNet jobs:
 
 | Job | What it measures |
 |---|---|
@@ -38,6 +38,9 @@ On Linux every benchmark runs twice, as two BenchmarkDotNet jobs:
 
 macOS has only the walk, and Windows only its relative native open, so each runs a single job
 named `walk` or `windows`.
+
+Path parsing never touches the filesystem, so it measures the same thing under every backend and
+runs under one job only: `walk` on Linux and macOS, `windows` on Windows.
 
 The walk is a separate job, in a separate process, so that the cost of not having the confined
 open is a row of its own that can be quoted rather than a guess. Each benchmark checks before it
@@ -91,13 +94,19 @@ when any row has become more than 10% worse.
 run to the next by more than the 10% being guarded, so a gate on absolute time would fail at
 random. Every gated operation is measured in the same run, on the same machine, as its
 `System.IO` baseline, and what the gate holds steady is the ratio between the two. That ratio
-moves when this library gets slower and mostly does not when the machine does. The parser has no
-`System.IO` row, so its rows are held to their ratio against the single-component parse. Medians
+moves when this library gets slower and mostly does not when the machine does. Medians
 are used rather than means, so that one iteration interrupted by the runner doing something else
 does not decide the verdict.
 
 **Allocation is compared as bytes per operation**, which does not depend on the machine. A row
 whose committed allocation is zero fails on its first byte.
+
+**The parser is gated on allocation only.** It has no `System.IO` row, so its time can only be
+expressed against its own single-component parse, and that ratio is reported but not gated. The
+operations take tens of nanoseconds and are divided by one that takes about ten, so the ratio
+moves by more than 10% between two runs of unchanged code on the same machine, and further
+between one processor and another. What the parser rows exist to show is an allocation of zero,
+and that is held exactly.
 
 The `System.IO` rows themselves are not gated: what the runtime allocates, or how its speed
 moves between versions, is not a regression in this library.

@@ -18,7 +18,11 @@ namespace Cap.Benchmarks;
 /// absolute time would fail at random. Every hot-path operation is measured in the same run,
 /// on the same machine, as its <c>System.IO</c> baseline, and what is compared is the ratio
 /// between the two: that moves when this library gets slower, and mostly does not when the
-/// machine does. Where a class's baseline is itself a cap-dotnet method, the ratio is to that.
+/// machine does. Only a ratio to a <c>System.IO</c> baseline is gated. Where a class's baseline
+/// is itself a cap-dotnet method, as for path parsing, the ratio is recorded and reported but
+/// not gated: those are operations of tens of nanoseconds divided by one of about ten, and
+/// the quotient moves by more than the tolerance between two runs of unchanged code, and moves
+/// again with the processor, so gating it would fail at random.
 /// </para>
 /// <para>
 /// <strong>Allocation is gated as bytes per operation.</strong> It does not depend on the
@@ -96,7 +100,8 @@ internal static class Gate
         report.AppendLine();
         report.AppendLine(CultureInfo.InvariantCulture,
             $"Baseline: `{Path.GetFileName(baselinePath)}`, measured on {committed.MeasuredOn ?? "(none committed)"}. " +
-            $"A row fails when its time ratio or its allocation grows more than {Tolerance:P0}.");
+            $"A row fails when its time ratio to `System.IO` or its allocation grows more than {Tolerance:P0}; " +
+            $"a row marked allocation only is held to its allocation alone.");
         report.AppendLine();
         report.AppendLine("| Benchmark | Ratio | Baseline ratio | Allocated | Baseline allocated | Verdict |");
         report.AppendLine("|---|---:|---:|---:|---:|---|");
@@ -113,7 +118,7 @@ internal static class Gate
             }
 
             List<string> problems = [];
-            if (row.Figures.Ratio is double ratio && expected.Ratio is double expectedRatio
+            if (row.TimeGated && row.Figures.Ratio is double ratio && expected.Ratio is double expectedRatio
                 && ratio > expectedRatio * (1 + Tolerance))
             {
                 problems.Add($"time ratio {ratio:F3} against {expectedRatio:F3}");
@@ -133,7 +138,7 @@ internal static class Gate
             report.AppendLine(CultureInfo.InvariantCulture,
                 $"| {row.Key} | {Format(row.Figures.Ratio)} | {Format(expected.Ratio)} | " +
                 $"{row.Figures.AllocatedBytes} B | {expected.AllocatedBytes} B | " +
-                $"{(problems.Count == 0 ? "ok" : "**regressed**")} |");
+                $"{(problems.Count > 0 ? "**regressed**" : row.TimeGated ? "ok" : "ok (allocation only)")} |");
         }
 
         report.AppendLine();
@@ -180,6 +185,7 @@ internal static class Gate
             }
 
             double? ratio = null;
+            bool timeGated = false;
             if (!benchmark.Descriptor.Baseline)
             {
                 BenchmarkReport? yardstick = summary.Reports.FirstOrDefault(other =>
@@ -191,11 +197,12 @@ internal static class Gate
                 if (yardstick?.ResultStatistics is { } baseline)
                 {
                     ratio = Math.Round(report.ResultStatistics.Median / baseline.Median, 4);
+                    timeGated = yardstick.BenchmarkCase.Descriptor.WorkloadMethod.Name == Categories.SystemIOMethod;
                 }
             }
 
             long allocated = report.GcStats.GetBytesAllocatedPerOperation(benchmark) ?? 0;
-            rows.Add(new Row(key, new Figures(ratio, allocated)));
+            rows.Add(new Row(key, new Figures(ratio, allocated), timeGated));
         }
     }
 
@@ -218,7 +225,10 @@ internal static class Gate
     private static string Format(double? ratio) =>
         ratio is double value ? value.ToString("F3", CultureInfo.InvariantCulture) : "–";
 
-    private sealed record Row(string Key, Figures Figures);
+    /// <param name="Key">The row's name in the baseline file.</param>
+    /// <param name="Figures">What this run measured.</param>
+    /// <param name="TimeGated">Whether the ratio is to a <c>System.IO</c> baseline, and so held to the tolerance.</param>
+    private sealed record Row(string Key, Figures Figures, bool TimeGated);
 
     /// <summary>One row of a baseline file.</summary>
     /// <param name="Ratio">Median time over the class's baseline's median time, or none for a baseline row.</param>
