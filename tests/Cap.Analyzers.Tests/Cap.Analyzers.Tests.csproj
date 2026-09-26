@@ -17,6 +17,17 @@
     <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
   </ItemGroup>
 
+  <!--
+    The filesystem abstractions whose ambient implementations CAP0001 lists, and the adapter it
+    points to instead. Handed to the compiler only by the tests that use them, so that every
+    other test compiles the way a project that references neither library does.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../src/Cap.IO.Abstractions/Cap.IO.Abstractions.csproj" />
+    <PackageReference Include="TestableIO.System.IO.Abstractions.Wrappers" />
+    <PackageReference Include="Testably.Abstractions" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
   </ItemGroup>

@@ -2,7 +2,7 @@
 # Installs the packed packages into projects created from nothing, builds them with every
 # warning an error, and runs them.
 #
-# Two consumers, both outside the repository so that none of its build settings reach them,
+# Three consumers, all outside the repository so that none of its build settings reach them,
 # restoring from a feed that holds only the packages under test, into a package cache of
 # their own:
 #
@@ -10,7 +10,9 @@
 #      restore together, that Cap.Primitives arrives with Cap.Std, and that the assemblies
 #      load and work on this platform;
 #   2. one that references only Cap.Time, which shows that the analyzer reaches a consumer
-#      through a dependency on Cap.Std and not only through a direct reference.
+#      through a dependency on Cap.Std and not only through a direct reference;
+#   3. one that references only Cap.Std.Testing, which shows that the package warns a project
+#      that is not a test project, and stops once the project says it is one.
 #
 # The packages hold no platform-specific assets, so the same feed is installed on every
 # platform; that is what a release publishes.
@@ -26,8 +28,8 @@ version="${2:?usage: verify-package-install.sh <feed-dir> <version> [work-dir]}"
 work="${3:-$(mktemp -d)}"
 export NUGET_PACKAGES="$work/packages"
 
-rm -rf "$work/all" "$work/time-only" "$NUGET_PACKAGES"
-mkdir -p "$work/all" "$work/time-only"
+rm -rf "$work/all" "$work/time-only" "$work/testing-only" "$NUGET_PACKAGES"
+mkdir -p "$work/all" "$work/time-only" "$work/testing-only"
 
 # $1 = consumer directory
 write_nuget_config() {
@@ -42,7 +44,8 @@ write_nuget_config() {
 EOF
 }
 
-# $1 = consumer directory, $2 = PackageReference items, $3 = whether warnings are errors
+# $1 = consumer directory, $2 = PackageReference items, $3 = whether warnings are errors,
+# $4 = any further properties
 write_project() {
   cat > "$1/Consumer.csproj" <<EOF
 <Project Sdk="Microsoft.NET.Sdk">
@@ -52,6 +55,8 @@ write_project() {
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>$3</TreatWarningsAsErrors>
+    <MSBuildTreatWarningsAsErrors>$3</MSBuildTreatWarningsAsErrors>
+${4:-}
   </PropertyGroup>
   <ItemGroup>
 $2
@@ -67,7 +72,9 @@ references=""
 for id in Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories Cap.Std.Testing; do
   references+="    <PackageReference Include=\"$id\" Version=\"$version\" />"$'\n'
 done
-write_project "$consumer" "$references" true
+# Not a test project, but it uses Cap.Std.Testing on purpose, and says so.
+write_project "$consumer" "$references" true \
+  "    <CapAllowStdTestingOutsideTests>true</CapAllowStdTestingOutsideTests>"
 
 cat > "$consumer/Program.cs" <<'EOF'
 using System.Net;
@@ -166,5 +173,40 @@ if ! grep -qE 'Program\.cs\(8,[0-9]+\): warning CAP0003' <<<"$output"; then
   echo "$output" >&2
   exit 1
 fi
+
+echo "== Cap.Std.Testing alone, in a project that is not a test project"
+consumer="$work/testing-only"
+write_nuget_config "$consumer"
+write_project "$consumer" "    <PackageReference Include=\"Cap.Std.Testing\" Version=\"$version\" />" false
+
+cat > "$consumer/Program.cs" <<'EOF'
+using Cap.Std.Testing;
+
+Console.WriteLine(new InMemoryFileSystem());
+EOF
+
+output="$(dotnet build "$consumer" -nologo -v normal 2>&1)" || {
+  echo "FAILED: a consumer of Cap.Std.Testing alone does not build" >&2
+  echo "$output" >&2
+  exit 1
+}
+if ! grep -q 'warning CAPTESTING001' <<<"$output"; then
+  echo "FAILED: Cap.Std.Testing does not warn a project that is not a test project" >&2
+  echo "$output" >&2
+  exit 1
+fi
+
+for marker in IsTestProject IsTestingPlatformApplication CapAllowStdTestingOutsideTests; do
+  output="$(dotnet build "$consumer" -nologo -v normal "-p:$marker=true" 2>&1)" || {
+    echo "FAILED: a consumer of Cap.Std.Testing that sets $marker does not build" >&2
+    echo "$output" >&2
+    exit 1
+  }
+  if grep -q 'CAPTESTING001' <<<"$output"; then
+    echo "FAILED: Cap.Std.Testing warns a project that sets $marker" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+done
 
 echo "The packages install, build and run in fresh consumers."

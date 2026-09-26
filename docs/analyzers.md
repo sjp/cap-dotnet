@@ -18,7 +18,7 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 
 | ID | Reports | Default |
 |---|---|---|
-| `CAP0001` | The filesystem reached by path: `File`, `Directory`, `FileInfo`, `DirectoryInfo`, `FileSystemWatcher`, `DriveInfo`, `ZipFile`, the path constructors of `FileStream`, `StreamReader` and `StreamWriter`, `Environment.CurrentDirectory`, `Path.GetFullPath(string)`, `Path.GetTempPath`, `Path.GetTempFileName` | off |
+| `CAP0001` | The filesystem reached by path: `File`, `Directory`, `FileInfo`, `DirectoryInfo`, `FileSystemWatcher`, `DriveInfo`, `ZipFile`, the path constructors of `FileStream`, `StreamReader` and `StreamWriter`, `Environment.CurrentDirectory`, `Path.GetFullPath(string)`, `Path.GetTempPath`, `Path.GetTempFileName`, and the constructors of the ambient `IFileSystem` implementations: System.IO.Abstractions' `FileSystem`, `FileWrapper`, `DirectoryWrapper`, `FileInfoWrapper`, `DirectoryInfoWrapper`, `DriveInfoWrapper`, `PathWrapper`, `FileSystemWatcherWrapper` and `FileSystemWatcherFactory`, and Testably's `RealFileSystem` | off |
 | `CAP0002` | The network reached by address: `Socket.Bind`, `Connect`, `ConnectAsync`, `SendTo`, `SendToAsync`, `TcpListener`, `TcpClient`, `UdpClient`, and `Dns` | off |
 | `CAP0003` | `AmbientAuthority.Acquire()` called outside a composition root | warning |
 | `CAP0004` | A raw handle taken out of a capability: `Dir.UnsafeGetHandle()`, `CapFile.UnsafeGetHandle()` | info |
@@ -30,6 +30,17 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 The exact lists behind `CAP0001`, `CAP0002`, `CAP0006` and `CAP0007` are in
 [`src/Cap.Analyzers/Lists`](../src/Cap.Analyzers/Lists), and each diagnostic's message says
 what to use instead.
+
+### `IFileSystem`
+
+System.IO.Abstractions' `FileSystem` and Testably's `RealFileSystem` pass every call straight
+to `File`, `Directory` and the rest, so `new FileSystem()` is the whole filesystem behind an
+interface, and `CAP0001` reports it as it would report `File`. The same goes for the wrappers
+`FileSystem` is assembled from. Taking an `IFileSystem` is not reported: what it reaches
+depends on what the caller passed in, and a
+[`DirFileSystem`](io-abstractions.md) from `Cap.IO.Abstractions` confines it to a `Dir`. The
+entries name their types by metadata name, so they apply whether or not a project references
+either library, and report nothing in a project that does not.
 
 ### Why the ambient rules start off
 

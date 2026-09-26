@@ -16,7 +16,7 @@ package you have downloaded.
 | `Cap.Time` | `Cap.Time.dll`; depends on `Cap.Std` |
 | `Cap.Rand` | `Cap.Rand.dll`; depends on `Cap.Std` |
 | `Cap.Directories` | `Cap.Directories.dll`; depends on `Cap.Std` |
-| `Cap.Std.Testing` | `Cap.Std.Testing.dll`; depends on exactly the `Cap.Std` of the same version |
+| `Cap.Std.Testing` | `Cap.Std.Testing.dll`, and `buildTransitive/Cap.Std.Testing.targets`, which warns a project that is not a test project; depends on exactly the `Cap.Std` of the same version |
 | `Cap.IO.Abstractions` | `Cap.IO.Abstractions.dll`; depends on `Cap.Std`, `Cap.Fs.Ext`, and on `TestableIO.System.IO.Abstractions` and `Testably.Abstractions.FileSystem.Interface` pinned to one minor version each |
 
 There is no `Cap.Primitives` package. The assembly holds the few public types every package

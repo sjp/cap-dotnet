@@ -31,6 +31,11 @@ System.IO.Abstractions on its own does not confine, and does not claim to. See t
 [comparison](../README.md#how-it-compares). This package gives code written against it both
 testability and confinement.
 
+Once the composition root builds a `DirFileSystem`, nothing else needs to construct the
+ambient `FileSystem`. With `CAP0001` turned on, the [analyzer](analyzers.md#ifilesystem)
+reports `new FileSystem()`, its wrappers and Testably's `RealFileSystem`, and leaves code that
+takes an `IFileSystem` alone.
+
 ## The virtual namespace
 
 `IFileSystem` callers pass absolute paths, work relative to a current directory, and expect

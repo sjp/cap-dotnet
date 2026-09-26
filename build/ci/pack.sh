@@ -10,6 +10,8 @@
 #   - the analyzer is in Cap.Std, and every other package passes it on rather than excluding it;
 #   - Cap.Std.Testing depends on exactly the Cap.Std it was built with, since it implements a
 #     contract inside Cap.Std that can change in any release;
+#   - Cap.Std.Testing carries the build file that warns a project installing it that is not a
+#     test project;
 #   - each package carries its licence, notice and readme, and records the commit it was built
 #     from, which is what SourceLink resolves sources against.
 #
@@ -85,6 +87,9 @@ for id in "${packages[@]}"; do
     fi
   fi
 done
+
+has Cap.Std.Testing buildTransitive/Cap.Std.Testing.targets \
+  || fail "Cap.Std.Testing does not carry buildTransitive/Cap.Std.Testing.targets"
 
 for file in lib/net10.0/Cap.Primitives.dll lib/net10.0/Cap.Primitives.xml analyzers/dotnet/cs/Cap.Analyzers.dll; do
   has Cap.Std "$file" || fail "Cap.Std does not carry $file"

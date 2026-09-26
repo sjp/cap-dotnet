@@ -1,0 +1,27 @@
+<Project>
+
+  <!--
+    Imported into every project that installs Cap.Std.Testing, directly or through another
+    package, and warns when that project is not a test project.
+
+    The in-memory filesystem confers no ambient authority, so nothing here is a security
+    check. What it guards against is a production Dir that is backed by memory by mistake: every
+    read and write works, and everything written is gone when the process exits, with no error
+    at any point to say so. The warning is raised at build time, in the project that took the
+    reference, which is where that mistake is made and can be undone.
+
+    A project counts as a test project when it sets IsTestProject, as Microsoft.NET.Test.Sdk
+    and the test SDKs built on it do, or IsTestingPlatformApplication, as test projects on
+    Microsoft.Testing.Platform do without Microsoft.NET.Test.Sdk. A library of shared test
+    helpers is neither, and says so by setting CapAllowStdTestingOutsideTests to true. The
+    warning carries the code CAPTESTING001, so NoWarn silences it and WarningsAsErrors makes it
+    an error. TreatWarningsAsErrors does not: it covers compiler warnings, not MSBuild ones.
+  -->
+  <Target Name="CapWarnStdTestingOutsideTests"
+          BeforeTargets="CoreCompile"
+          Condition="'$(IsTestProject)' != 'true' and '$(IsTestingPlatformApplication)' != 'true' and '$(CapAllowStdTestingOutsideTests)' != 'true'">
+    <Warning Code="CAPTESTING001"
+             Text="$(MSBuildProjectName) references Cap.Std.Testing but is not a test project. A Dir backed by its in-memory filesystem loses everything written to it when the process exits. Reference Cap.Std.Testing from test projects only, or set CapAllowStdTestingOutsideTests to true in a library of shared test helpers." />
+  </Target>
+
+</Project>

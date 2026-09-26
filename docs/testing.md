@@ -24,7 +24,22 @@ Assert.Equal("""{ "x": 2 }""", fs.ReadAllText("config/app.json"));
 ```
 
 Reference it from test projects only. It lives in its own package so that production code
-cannot pick up an in-memory backend without depending on a test package.
+cannot pick up an in-memory backend without depending on a test package. A `Dir` backed by
+memory in production would fail silently: every read and write works, and everything written
+is lost when the process exits. So the package warns (`CAPTESTING001`) at build time in any
+project that installs it, directly or through another package, and is not a test project.
+A project counts as one when it sets `IsTestProject`, as `Microsoft.NET.Test.Sdk` does, or
+`IsTestingPlatformApplication`, as a Microsoft.Testing.Platform test project does. A library
+of shared test helpers is neither, and opts out:
+
+```xml
+<PropertyGroup>
+  <CapAllowStdTestingOutsideTests>true</CapAllowStdTestingOutsideTests>
+</PropertyGroup>
+```
+
+The warning comes from MSBuild rather than the compiler, so `TreatWarningsAsErrors` leaves it
+a warning. List it in `WarningsAsErrors` to make it an error.
 
 Code written against System.IO.Abstractions' `IFileSystem` rather than a `Dir` can be tested
 the same way: wrap the in-memory root in a `DirFileSystem` from `Cap.IO.Abstractions`. See

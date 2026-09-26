@@ -36,3 +36,22 @@ P:System.Environment.CurrentDirectory;The process's working directory is reachab
 M:System.IO.Path.GetFullPath(System.String);Resolves against the process's working directory and collapses `..` without looking at the filesystem, which is the wrong answer whenever the component before it is a symbolic link.
 M:System.IO.Path.GetTempPath;Names the system's scratch directory, reachable from anywhere in the process. Use Cap.Std.CapTempDir.
 M:System.IO.Path.GetTempFileName;Creates a file in the system's scratch directory by path, and hands back a name another process can race. Use Cap.Std.CapTempFile.
+
+# System.IO.Abstractions' FileSystem, and the wrappers it is assembled from, pass every call
+# straight to System.IO: they are the whole filesystem behind an interface. Only construction
+# is reported. Code that takes an IFileSystem reaches whatever it was handed, which is the
+# point of taking one, and a DirFileSystem hands it a Dir. The same holds for Testably's
+# RealFileSystem. Each entry names its type by metadata name, so the list applies whether or
+# not a project references either library, and reports nothing in one that does not.
+# FileVersionInfoWrapper is left out: it wraps version data that has already been read, and
+# reaches nothing itself.
+M:System.IO.Abstractions.FileSystem.#ctor;The whole filesystem behind IFileSystem, reached by path. Construct a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.
+M:System.IO.Abstractions.FileWrapper.#ctor;Calls System.IO.File, against the whole filesystem. Take IFileSystem.File from a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.
+M:System.IO.Abstractions.DirectoryWrapper.#ctor;Calls System.IO.Directory, against the whole filesystem. Take IFileSystem.Directory from a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.
+M:System.IO.Abstractions.FileInfoWrapper.#ctor;Wraps a FileInfo, which names a file by path against the whole filesystem. Use IFileSystem.FileInfo from a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.
+M:System.IO.Abstractions.DirectoryInfoWrapper.#ctor;Wraps a DirectoryInfo, which names a directory by path against the whole filesystem. Use IFileSystem.DirectoryInfo from a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.
+M:System.IO.Abstractions.DriveInfoWrapper.#ctor;Wraps a DriveInfo, one of the machine's volumes, which is not something a capability grants.
+M:System.IO.Abstractions.PathWrapper.#ctor;Calls System.IO.Path, whose GetFullPath and GetTempPath consult the process's working and scratch directories. Take IFileSystem.Path from a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.
+M:System.IO.Abstractions.FileSystemWatcherWrapper.#ctor;Watches by path rather than through a handle.
+M:System.IO.Abstractions.FileSystemWatcherFactory.#ctor;Creates watchers that watch by path rather than through a handle.
+M:Testably.Abstractions.RealFileSystem.#ctor;The whole filesystem behind IFileSystem, reached by path. Construct a Cap.IO.Abstractions.DirFileSystem over a Cap.Std.Dir instead.

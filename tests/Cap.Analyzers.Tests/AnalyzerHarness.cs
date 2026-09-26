@@ -20,14 +20,24 @@ internal static class AnalyzerHarness
 {
     private static readonly ImmutableArray<MetadataReference> References = LoadReferences();
 
+    private static readonly ImmutableArray<MetadataReference> ReferencesWithFileSystemAbstractions =
+        [.. References, .. LoadFileSystemAbstractions()];
+
     public static ImmutableArray<MetadataReference> FrameworkAndLibrary => References;
+
+    /// <summary>
+    /// <see cref="FrameworkAndLibrary"/>, plus System.IO.Abstractions, Testably.Abstractions and
+    /// Cap.IO.Abstractions.
+    /// </summary>
+    public static ImmutableArray<MetadataReference> WithFileSystemAbstractions => ReferencesWithFileSystemAbstractions;
 
     public static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(
         string source,
         OutputKind outputKind = OutputKind.DynamicallyLinkedLibrary,
         IReadOnlyDictionary<string, ReportDiagnostic>? severities = null,
         IReadOnlyDictionary<string, string>? editorConfig = null,
-        IReadOnlyList<(string Path, string Text)>? additionalFiles = null)
+        IReadOnlyList<(string Path, string Text)>? additionalFiles = null,
+        ImmutableArray<MetadataReference>? references = null)
     {
         SyntaxTree tree = CSharpSyntaxTree.ParseText(
             source,
@@ -39,7 +49,7 @@ internal static class AnalyzerHarness
             nullableContextOptions: NullableContextOptions.Enable,
             specificDiagnosticOptions: severities);
 
-        CSharpCompilation compilation = CSharpCompilation.Create("Consumer", [tree], References, options);
+        CSharpCompilation compilation = CSharpCompilation.Create("Consumer", [tree], references ?? References, options);
 
         ImmutableArray<Diagnostic> errors = [.. compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)];
@@ -81,6 +91,26 @@ internal static class AnalyzerHarness
             MetadataReference.CreateFromFile(typeof(AmbientAuthority).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(Dir).Assembly.Location),
         ];
+    }
+
+    private static IEnumerable<MetadataReference> LoadFileSystemAbstractions()
+    {
+        Type[] fromEach =
+        [
+            typeof(System.IO.Abstractions.FileSystem),
+            typeof(System.IO.Abstractions.IFileSystem),
+            typeof(Testably.Abstractions.RealFileSystem),
+            typeof(Testably.Abstractions.ITimeSystem),
+            typeof(Cap.IO.Abstractions.DirFileSystem),
+        ];
+
+        // TestableIO.System.IO.Abstractions holds no types of its own to name, only forwards
+        // to the assemblies above, so it is found beside them.
+        return fromEach
+            .Select(type => type.Assembly.Location)
+            .Append(Path.Combine(AppContext.BaseDirectory, "TestableIO.System.IO.Abstractions.dll"))
+            .Distinct(StringComparer.Ordinal)
+            .Select(path => MetadataReference.CreateFromFile(path));
     }
 
     private static bool IsManagedAssembly(string path)

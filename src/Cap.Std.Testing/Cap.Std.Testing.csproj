@@ -31,6 +31,15 @@
   </Target>
 
   <!--
+    Warns a project that installs this package without being a test project; the reasons are
+    in the file. buildTransitive, so that a production project that picks the package up
+    through a helper library is warned as well.
+  -->
+  <ItemGroup>
+    <None Include="buildTransitive/Cap.Std.Testing.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
+  <!--
     The test fake in tests/Fakes shares this assembly's node tree and confined resolution, so
     the suites that compile it are given access to both. The suites that can run with this
     filesystem in place of the host (tests/InMemory) arrange their trees in its node tree

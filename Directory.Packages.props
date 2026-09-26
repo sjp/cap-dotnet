@@ -29,6 +29,8 @@
     <PackageVersion Include="CsCheck" Version="4.9.1" />
     <PackageVersion Include="Moq" Version="4.21.0" />
     <PackageVersion Include="TestableIO.System.IO.Abstractions.TestingHelpers" Version="22.2.0" />
+    <PackageVersion Include="TestableIO.System.IO.Abstractions.Wrappers" Version="22.2.0" />
+    <PackageVersion Include="Testably.Abstractions" Version="10.3.0" />
   </ItemGroup>
 
   <ItemGroup Label="Fuzzing">

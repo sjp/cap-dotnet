@@ -162,7 +162,7 @@ public sealed class AmbientApiTests
     public async Task Every_entry_in_the_built_in_lists_names_something_that_exists()
     {
         var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
-            "Probe", references: AnalyzerHarness.FrameworkAndLibrary);
+            "Probe", references: AnalyzerHarness.WithFileSystemAbstractions);
 
         string[] unresolved =
         [
