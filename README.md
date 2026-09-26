@@ -139,8 +139,8 @@ reviewed to know that — it was never given anything else.
 | [Ambient authority](docs/ambient-authority.md) | The one way authority enters, and how to list every place it did. |
 | [The analyzer](docs/analyzers.md) | The build-time rules shipped in `Cap.Std`, and the one line that makes ambient `System.IO` an error. |
 | [NativeAOT and trimming](docs/aot.md) | What an application can rely on, and the size of a native binary. |
-| [Testing](docs/testing.md) | An in-memory filesystem that hands out real `Dir` handles, for testing code that takes one. |
-| [`IFileSystem` over a `Dir`](docs/io-abstractions.md) | Confining code written against System.IO.Abstractions without changing it, and every difference from `System.IO` and `MockFileSystem`. |
+| [Testing](docs/testing.md) | Three ways to test code that takes a `Dir`: an in-memory filesystem that hands out real handles, a stubbed `IDir`, and a scratch directory on disk. |
+| [`IFileSystem` over a `Dir`](docs/io-abstractions.md) | Confining code written against System.IO.Abstractions without changing it, every difference from `System.IO` and `MockFileSystem`, and moving such code onto `Dir` member by member. |
 
 **Other capabilities**
 
@@ -164,7 +164,9 @@ reviewed to know that — it was never given anything else.
 **Samples** — see [samples/README.md](samples/README.md): the demonstration above, a
 static file server, a plugin host that gives each plugin its own directory, a zip extractor
 that cannot be made to write outside its destination, an audit of where a process took
-authority, and a WebAssembly host whose guests' preopened directories are `Dir` handles.
+authority, a WebAssembly host whose guests' preopened directories are `Dir` handles, and a
+component tested three ways beside an `IFileSystem` component confined by its composition
+root.
 
 ## Repository layout
 

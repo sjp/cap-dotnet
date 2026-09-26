@@ -49,6 +49,35 @@ The guarantee constrains what is reachable. It does not promise that reachable o
 succeed, that they are atomic, or that the sandbox contents are consistent between two
 calls. It is a containment property, not a transactional one.
 
+### 2.2 Which handles it covers
+
+The guarantee is about the filesystem a `Dir` was opened on.
+
+- **A `Dir` on the host**, from `Dir.Open`, `CapTempDir`, `ProjectDirs` or anything derived
+  from one of those, is what the guarantee is written for. *D* is a directory on the host,
+  and the objects it constrains are the host's.
+- **A `Dir` on an `InMemoryFileSystem`**, from the `Cap.Std.Testing` package, is outside the
+  claim about the host, because it has no host objects to reach or protect: every object it
+  can name is in the process's memory. Inside its own tree the guarantee holds as written,
+  with *D* the directory the root was opened on. A root opened on `tenants/a` reaches nothing
+  above `tenants/a`. The path parsing, resolution and link policy are the same code that runs
+  against the disk, and the escape corpus runs against this backend in CI. A way out of an
+  in-memory root is therefore treated as an escape and reported as one, since the same flaw
+  is likely to be reachable on disk.
+- **`IDir`, `ICapFile`, `IDirEntry` and `ICapOpened`** guarantee only what the instance behind
+  them guarantees. A `Dir` behind one is confined; a stub is not. §5.7 has the detail.
+- **`DirFileSystem`**, from the `Cap.IO.Abstractions` package, is an `IFileSystem` that hands
+  every path it is given to the `Dir` it was built on, which resolves it. Before that it only
+  joins a relative path to its own current directory and removes one leading root. It
+  inherits that `Dir`'s guarantee exactly. It adds no check on the text that containment depends on, and it
+  takes a `Dir` rather than an `IDir`, so it cannot be built over something weaker. The full
+  names it reports (`FullName`, `Path.GetFullPath`, `Directory.GetCurrentDirectory`,
+  `Path.GetTempPath`) are paths in its own virtual namespace, rooted at `/` or at a virtual
+  drive, and are not host paths. Handed to `System.IO`, one names a different object on the host, and that access is
+  ambient and outside the guarantee, like any other call to `System.IO` (§5.1). The
+  `FileSystem` and `MockFileSystem` that System.IO.Abstractions itself provides confine
+  nothing and are not covered.
+
 ## 3. Trust boundaries and actors
 
 cap-dotnet sits between **calling code** and **the filesystem**. Three actors matter:

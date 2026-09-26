@@ -165,3 +165,43 @@ source as well, so a guest reaches nothing the host did not give it. Its tests r
 corpus through WASI calls made by a guest, and the WebAssembly WASI test suite's filesystem
 programs. The sample's [README](WasiHost/README.md) lists what the library does not yet offer
 that WASI asks for.
+
+## `TestableComponent`
+
+Two components and their tests: one written against `IDir` and tested three ways, and one
+written against System.IO.Abstractions' `IFileSystem` and confined without changing it.
+
+```bash
+dotnet run --project samples/TestableComponent/App
+dotnet test --project samples/TestableComponent/Tests
+```
+
+`ReportStore` keeps one JSON file per day in the directory it is given. It takes `IDir`, so
+that a test can hand it a stub, which is safe because every name it touches is one it made
+from a date. A component that resolves names someone else chose takes `Dir`. Its tests show
+the three styles in [Testing](../docs/testing.md): a `Dir` on an `InMemoryFileSystem`, with a
+failed write injected; a stubbed `IDir` from Moq, checking which calls it makes; and a
+`CapTempDir` on disk, for what only the host has.
+
+`UploadStore` stores uploads under whatever names their senders gave, through an
+`IFileSystem`. The composition root hands it a `DirFileSystem` over the uploads directory in
+place of the ambient `FileSystem`, and that is the only change. Its tests run it against
+`MockFileSystem`, as before, and against a `DirFileSystem` over memory. `DirUploadStore` is
+the same component moved onto `Dir`, as
+[`IFileSystem` over a `Dir`](../docs/io-abstractions.md#moving-a-component-onto-dir) describes.
+
+The demonstration plants a link to a private directory inside the uploads directory, then
+saves and lists reports and tries to read and write through the link and above the root:
+
+```
+reports:  2026-09-01, 2026-09-02; 2026-09-01 holds { "total": 3 }
+upload:   avatar.png stored, 4 bytes
+upload:   load shared/secret.txt: refused: 'shared/secret.txt' resolved outside the directory the handle grants authority over.
+upload:   save shared/planted.txt: refused: 'shared/planted.txt' resolved outside the directory the handle grants authority over.
+upload:   save ../../escaped.txt: refused: '../../escaped.txt' resolved outside the directory the handle grants authority over.
+
+private directory: untouched
+```
+
+The code blocks in both guides are regions of this sample, checked verbatim by a test, so
+the pages show only code that is built and run.

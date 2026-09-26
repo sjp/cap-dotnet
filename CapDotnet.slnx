@@ -46,6 +46,10 @@
     <Project Path="samples/PluginHost/Plugins/Snoop/Snoop.csproj" />
     <Project Path="samples/PluginHost/Plugins/Notes/Notes.csproj" />
   </Folder>
+  <Folder Name="/samples/TestableComponent/">
+    <Project Path="samples/TestableComponent/App/TestableComponent.csproj" />
+    <Project Path="samples/TestableComponent/Tests/TestableComponent.Tests.csproj" />
+  </Folder>
   <Folder Name="/samples/WasiHost/">
     <Project Path="samples/WasiHost/Preview1/WasiHost.Preview1.csproj" />
     <Project Path="samples/WasiHost/Host/WasiHost.csproj" />

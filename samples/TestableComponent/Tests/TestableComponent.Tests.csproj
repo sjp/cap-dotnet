@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The sample's tests, in the three styles the testing guide describes: an in-memory Dir, a
+    stubbed IDir, and a scratch directory on disk. xunit v3 test projects run themselves on
+    Microsoft.Testing.Platform, which is what makes this a test project, and so a project in
+    which Cap.Std.Testing is expected.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>TestableComponent.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../App/TestableComponent.csproj" />
+    <ProjectReference Include="../../../src/Cap.Std.Testing/Cap.Std.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="TestableIO.System.IO.Abstractions.TestingHelpers" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>

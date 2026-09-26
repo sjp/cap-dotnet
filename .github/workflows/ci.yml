@@ -119,7 +119,8 @@ jobs:
         run: |
           set -euo pipefail
           for project in samples/ContainmentCheck samples/StaticFileServer samples/PluginHost/Host \
-                         samples/ArchiveExtractor samples/AmbientAudit samples/WasiHost/Host; do
+                         samples/ArchiveExtractor samples/AmbientAudit samples/WasiHost/Host \
+                         samples/TestableComponent/App; do
             echo "::group::$project"
             dotnet run --project "$project" --configuration Release --no-build
             echo "::endgroup::"

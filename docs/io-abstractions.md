@@ -7,15 +7,32 @@ code makes file access testable. A component takes an `IFileSystem`, production 
 
 The `Cap.IO.Abstractions` package adds `DirFileSystem`, an `IFileSystem` that resolves every
 path beneath a `Dir`. Code already written against `IFileSystem` is confined by changing the
-composition root, and the component itself stays as it is:
+composition root, and the component itself stays as it is. `UploadStore` in
+[`samples/TestableComponent`](../samples/TestableComponent) stores uploads under the names
+their senders chose, and checks none of them:
 
 ```csharp
-using Cap.IO.Abstractions;
-using Cap.Primitives;
-using Cap.Std;
+public sealed class UploadStore(IFileSystem fileSystem, string directory)
+{
+    public void Save(string fileName, byte[] contents) =>
+        fileSystem.File.WriteAllBytes(fileSystem.Path.Combine(directory, fileName), contents);
 
-using Dir uploads = Dir.Open("/srv/app/uploads", AmbientAuthority.Acquire());
-services.AddSingleton<IFileSystem>(new DirFileSystem(uploads));
+    public byte[] Load(string fileName) =>
+        fileSystem.File.ReadAllBytes(fileSystem.Path.Combine(directory, fileName));
+}
+```
+
+It used to be built with `new UploadStore(new FileSystem(), "/srv/app/data/uploads")`. Its
+composition root now opens the uploads directory once and hands it a `DirFileSystem` whose
+root is that directory:
+
+```csharp
+using Dir data = Dir.Open(dataPath, AmbientAuthority.Acquire());
+using Dir reportsDir = data.OpenOrCreateDir("reports");
+using Dir uploadsDir = data.OpenDir("uploads");
+
+var reports = new ReportStore(reportsDir);
+var uploads = new UploadStore(new DirFileSystem(uploadsDir), "/");
 ```
 
 The component's tests can keep using `MockFileSystem`. They can also switch to a
@@ -23,8 +40,15 @@ The component's tests can keep using `MockFileSystem`. They can also switch to a
 containment behaviour in tests too:
 
 ```csharp
-using Dir root = new InMemoryFileSystem().OpenRoot();
-var component = new UploadStore(new DirFileSystem(root));
+var fs = new InMemoryFileSystem();
+fs.AddFile("private/secret.txt", "not for uploaders");
+fs.AddSymbolicLink("uploads/shared", "../private", targetIsDirectory: true);
+using Dir uploads = fs.OpenRoot("uploads");
+var store = new UploadStore(new DirFileSystem(uploads), "/");
+
+Assert.Throws<SandboxEscapeException>(() => store.Load("shared/secret.txt"));
+Assert.Throws<SandboxEscapeException>(() => store.Save("../private/planted.txt", [1]));
+Assert.Equal(["secret.txt"], fs.GetEntries("private"));
 ```
 
 System.IO.Abstractions on its own does not confine, and does not claim to. See the
@@ -144,6 +168,88 @@ A test that passes on `MockFileSystem` because of one of these can fail against
 `DirFileSystem`. Beyond these, `MockFileSystem` does not confine anything, and the
 [differences from `System.IO`](#differences-from-systemio) above apply to it as they do to
 `System.IO`.
+
+## Moving a component onto `Dir`
+
+`DirFileSystem` confines a component without changing it. Moving the component onto `Dir`
+itself goes further: it drops the directory string, the virtual full names and the
+[differences](#differences-from-systemio) above, and it gets the whole of `Dir`, including the
+atomic writes, walks and copies in [`Cap.Fs.Ext`](convenience-layer.md). The two can be done
+one component at a time, since a `DirFileSystem` and a component on `Dir` can share one
+handle.
+
+Here is `UploadStore` from the top of this page, moved:
+
+```csharp
+public sealed class DirUploadStore(Dir uploads)
+{
+    public void Save(string fileName, byte[] contents) => uploads.WriteAllBytes(fileName, contents);
+
+    public byte[] Load(string fileName) => uploads.ReadAllBytes(fileName);
+}
+```
+
+The steps are the same for any component:
+
+1. **Replace the `IFileSystem` parameter, and the directory string that went with it, with a
+   `Dir`.** Take `IDir` instead only when every path the component touches is one it made
+   itself, so that a test can hand it a stub. A component that resolves names someone else
+   chose takes `Dir`, because the containment guarantee belongs to that type and not to the
+   interface ([threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee)).
+2. **Remove the path building.** `fileSystem.Path.Combine(directory, name)` becomes `name`,
+   relative to the handle. A subdirectory the component works in becomes a `Dir` of its own,
+   from `OpenDir` or `OpenOrCreateDir`.
+3. **Replace each member.** `fileSystem.File`, `fileSystem.Directory` and `fileSystem.Path`
+   have the members of `System.IO`'s `File`, `Directory` and `Path`, and
+   [Migrating from `System.IO`](migration.md) gives the replacement for each. The members that
+   exist only on `IFileSystem` are below.
+4. **Move the tests** from `MockFileSystem` to `InMemoryFileSystem`, using the second table
+   below.
+
+| `IFileSystem` | Replacement | Notes |
+|---|---|---|
+| `IFileSystem` constructor parameter | `Dir`, or `IDir` | See step 1. |
+| `new FileSystem()` in the composition root | `Dir.Open(path, AmbientAuthority.Acquire())` | Once, for the directory the component needs. |
+| `fileSystem.Path.Combine(directory, p)` | `p` | Relative to the handle. |
+| `fileSystem.File.X(p, …)`, `fileSystem.Directory.X(p, …)` | as for `File.X` and `Directory.X` in [Migrating from `System.IO`](migration.md) | |
+| `fileSystem.FileInfo.New(p)`, `IFileInfo` | `dir.GetMetadata(p)` to describe it, `dir.OpenFile(p)` to use it | A `CapMetadata` describes the object as it was when asked; there is no object that re-reads a path. |
+| `fileSystem.DirectoryInfo.New(p)`, `IDirectoryInfo` | `dir.OpenDir(p)` | A handle on the directory rather than a description of a path. |
+| `IDirectoryInfo.EnumerateFiles()`, `GetDirectories()` and the rest | `dir.EnumerateEntries()`, filtered by `Type` | **Ext** `Glob` for a pattern, **Ext** `Walk` for a whole tree. |
+| `fileSystem.FileStream.New(p, mode, access)` | `dir.OpenFile(p, mode, access).AsStream()` | Dispose the `CapFile` as well as the stream. |
+| `IFileSystemInfo.FullName`, `fileSystem.Path.GetFullPath(p)` | none | A `Dir` has no full name. See [Why there is no `Dir.FullName`](no-full-name.md). |
+| `fileSystem.Directory.GetCurrentDirectory()`, `SetCurrentDirectory` | none | Pass the `Dir` for the directory instead. |
+| `fileSystem.Path.GetTempPath()`, `GetTempFileName()` | `CapTempDir.NewIn(dir)`, `CapTempFile.New(dir)` | Scratch space beneath a directory the component was given. |
+| `fileSystem.FileSystemWatcher`, `fileSystem.DriveInfo` | none | As for `System.IO`. |
+
+In tests:
+
+| `MockFileSystem` | `InMemoryFileSystem` | Notes |
+|---|---|---|
+| `new MockFileSystem()` | `new InMemoryFileSystem()`, then `OpenRoot()` for the handle | Paths are relative to the root, with `/` between names on every platform. There is no drive to spell. |
+| `new MockFileSystem(files)`, `AddFile(p, new MockFileData(text))` | `AddFile(p, text)` | Missing directories are created on the way. |
+| `AddEmptyFile(p)` | `AddFile(p)` | |
+| `AddDirectory(p)` | `AddDirectory(p)` | |
+| `GetFile(p).TextContents`, `.Contents` | `ReadAllText(p)`, `ReadAllBytes(p)` | |
+| `FileExists(p)` | `Exists(p)` | True for anything at the name. |
+| `AllFiles`, `AllPaths` | `GetEntries(p)` | One directory at a time. |
+| No equivalent | `AddSymbolicLink(p, target)` | Including a link that leads outside, to test that it is refused. |
+| No equivalent | `FailNextWrites`, `Capacity`, `SetUnreadable`, `SetUndeletable` | See [Faults](testing.md#faults). |
+
+The tests for `DirUploadStore` in the sample build the same tree as those for `UploadStore`,
+and check the same refusals:
+
+```csharp
+var fs = new InMemoryFileSystem();
+fs.AddFile("private/secret.txt", "not for uploaders");
+fs.AddSymbolicLink("uploads/shared", "../private", targetIsDirectory: true);
+using Dir uploads = fs.OpenRoot("uploads");
+var store = new DirUploadStore(uploads);
+
+store.Save("avatar.png", [1, 2, 3]);
+
+Assert.Equal([1, 2, 3], fs.ReadAllBytes("uploads/avatar.png"));
+Assert.Throws<SandboxEscapeException>(() => store.Load("shared/secret.txt"));
+```
 
 ## Ownership and threads
 

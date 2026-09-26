@@ -1,27 +1,39 @@
 # Testing code that takes a `Dir`
 
-Code written against a `Dir` can be tested against the disk: open a `CapTempDir`, build a
-tree in it, and hand the code a handle. That works, but it is slow, it behaves differently on
-each platform, and it cannot produce on demand the awkward states a unit test often wants: a
-full disk, a permission failure, a name that refuses to be removed.
+A component that takes a `Dir` or an `IDir` can be tested in three ways.
+
+| | Use it for | What runs |
+|---|---|---|
+| [An in-memory `Dir`](#an-in-memory-dir) from `Cap.Std.Testing` | Almost everything. It is the default. | This library's path parsing, resolution and link policy, over a tree held in memory. Containment is tested for real, and failures can be injected. |
+| [A stubbed `IDir`](#a-stubbed-idir) from a mocking library | Checking which calls the component makes, and how it handles a failure from one of them. | Nothing but the stub. No name is resolved. |
+| [A `CapTempDir` on disk](#a-scratch-directory-on-disk) | What only a real filesystem has: the host's resolution backend, flushing to storage, raw handles, files other programs write. | Everything, on the platform the test runs on. |
+
+The examples below come from [`samples/TestableComponent`](../samples/TestableComponent),
+whose tests use all three. `ReportStore` there takes an `IDir` and keeps one JSON file per day
+in it: `Save` replaces a day's report with an atomic write, `Load` reads one, `ListDays`
+enumerates the directory, and `Prune` removes reports older than a given day.
+
+## An in-memory `Dir`
 
 The `Cap.Std.Testing` package holds a filesystem in memory that hands out real `Dir` handles.
+It needs `using Cap.Std.Testing;`.
 
 ```csharp
-using Cap.Std;
-using Cap.Std.Testing;
-
 var fs = new InMemoryFileSystem();
-fs.AddFile("config/app.json", """{ "x": 1 }""");
-fs.AddDirectory("data");
-fs.AddSymbolicLink("data/latest", "../config");
+fs.AddFile("reports/notes.txt", "not a report");
 
-using Dir root = fs.OpenRoot();
-var loader = new ConfigLoader(root.OpenDir("config"));
+using Dir reports = fs.OpenRoot("reports");
+var store = new ReportStore(reports);
 
-loader.Save();
-Assert.Equal("""{ "x": 2 }""", fs.ReadAllText("config/app.json"));
+store.Save(new DateOnly(2026, 9, 1), """{ "total": 3 }""");
+
+Assert.Equal("""{ "total": 3 }""", fs.ReadAllText("reports/2026-09-01.json"));
+Assert.Equal([new DateOnly(2026, 9, 1)], store.ListDays());
 ```
+
+Testing against the disk works too, but it is slow, it behaves differently on each platform,
+and it cannot produce on demand the awkward states a unit test often wants: a full disk, a
+permission failure, a name that refuses to be removed. The in-memory filesystem can.
 
 Reference it from test projects only. It lives in its own package so that production code
 cannot pick up an in-memory backend without depending on a test package. A `Dir` backed by
@@ -41,66 +53,7 @@ of shared test helpers is neither, and opts out:
 The warning comes from MSBuild rather than the compiler, so `TreatWarningsAsErrors` leaves it
 a warning. List it in `WarningsAsErrors` to make it an error.
 
-Code written against System.IO.Abstractions' `IFileSystem` rather than a `Dir` can be tested
-the same way: wrap the in-memory root in a `DirFileSystem` from `Cap.IO.Abstractions`. See
-[`IFileSystem` over a `Dir`](io-abstractions.md).
-
-## Stubbing the interfaces
-
-Some tests want a stub rather than a filesystem: one that fails the third write, or checks that
-a file was read exactly once. `Dir`, `CapFile`, `DirEntry` and `CapOpened` implement `IDir`,
-`ICapFile`, `IDirEntry` and `ICapOpened`, which have the same members. A component that takes
-the interface can be handed a stub from any mocking library:
-
-```csharp
-IDirEntry report = Mock.Of<IDirEntry>(entry => entry.Name == "a.json" && entry.Type == CapFileType.File);
-
-Mock<IDir> reports = new();
-reports.Setup(dir => dir.EnumerateEntries()).Returns([report]);
-reports.Setup(dir => dir.ReadAllText("a.json")).Returns("""{ "total": 3 }""");
-
-new ReportIndex(reports.Object).Load();
-reports.Verify(dir => dir.ReadAllText("a.json"), Times.Once);
-```
-
-The helpers in `Cap.Fs.Ext` (`Walk`, `Glob`, `CopyTo`, the atomic writes, `DeleteTree` and
-the rest) are extension methods on `IDir`, so a component that takes the interface keeps them,
-and a stub or a wrapper sees the individual calls each helper makes through it.
-
-A stub runs none of this library's resolution, so it cannot show that the component stays
-inside its directory. The in-memory filesystem can, so prefer it unless the test is about the
-calls themselves. The interfaces do not carry the containment guarantee, which belongs to
-`Dir`. A component that takes `IDir` in production is confined only if it is handed a `Dir`. The
-[threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee) has the detail.
-
-### Values for stubs to return
-
-`CapMetadata`, `CapFileId` and `DirEntry` have no public constructors, so production code can
-only get them from a handle. An identity is worth comparing only because the filesystem issued
-it, and `IsSameFileAs` relies on that. For stubs, `Cap.Std.Testing` makes these values:
-
-```csharp
-Mock<IDir> reports = new();
-reports.Setup(dir => dir.EnumerateEntries()).Returns(
-[
-    TestEntries.Create("a.json", CapFileType.File, TestFileIds.Next(), reports.Object),
-]);
-reports.Setup(dir => dir.GetMetadata("a.json", false)).Returns(
-    new CapMetadataBuilder().WithLength(900).WithLastWriteTime(yesterday).Build());
-```
-
-- `CapMetadataBuilder` has a setter for each field. It defaults to an empty regular file with
-  one name, a fresh identity, and the permissions a new file gets on the running platform.
-  `WithUnixMode` and `WithWindowsAttributes` each clear the other, because a real description
-  never holds both.
-- `TestFileIds.Create(volume, node)` makes a given identity, and `TestFileIds.Next()` makes an
-  unused one. To describe one object reached under two names, give two descriptions the same
-  identity.
-- `TestEntries.Create(name, type, fileId, owner)` makes an `IDirEntry` that opens and describes
-  itself by calling `owner` with its name, the same way `DirEntry` does. Pass the stub as
-  `owner`, and the entry's opens become calls on the stub that the test can check.
-
-## What is real and what is simulated
+### What is real and what is simulated
 
 A handle from `OpenRoot` is the same `Dir` type that `Dir.Open` returns, and every call through
 it runs this library's own path parsing, resolution, symbolic-link policy, and translation of
@@ -136,7 +89,7 @@ Creating something stamps all four of its times. A write stamps the write and ch
 any other change stamps the change time. Adding, removing or renaming an entry stamps the
 directory that holds it.
 
-## Building and inspecting a tree
+### Building and inspecting a tree
 
 `AddFile`, `AddDirectory`, `AddSymbolicLink` and `AddHardLink` build the tree before the test
 runs. `SetTimes`, `SetUnixMode` and `SetAttributes` adjust it. `Exists`, `ReadAllBytes`,
@@ -155,7 +108,7 @@ Opening one needs no `AmbientAuthority` token, because the filesystem is not the
 handle on it grants nothing outside it. Those roots therefore never appear in the
 [ambient authority log](ambient-authority.md).
 
-## Options
+### Options
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -168,7 +121,7 @@ Every handle reports `ResolutionBackend.InMemory` as its `Backend`. Its handles 
 operating-system objects, so `UnsafeGetHandle` throws `NotSupportedException`, and `AsStream`
 returns a stream of the filesystem's own rather than a `FileStream`.
 
-## Faults
+### Faults
 
 | Member | Effect |
 |---|---|
@@ -177,9 +130,116 @@ returns a stream of the filesystem's own rather than a `FileStream`.
 | `FailNextWrites(count, kind)` | The next `count` writes, appends or length changes through any handle fail with the exception the framework throws for `kind`, so `CapIOException.KindOf` reports `kind`. `CapErrorKind.Other` is what a full disk reports. |
 | `Capacity` | Once the files with a name hold this many bytes between them, a write that would grow them fails as a full disk does. `UsedBytes` reports the current total. |
 
-## Threads
+A test that injects a fault checks what the component leaves behind afterwards.
+`ReportStore.Save` writes a new report to a scratch name and renames it over the old one, so a
+write that fails leaves the old report untouched:
 
-Every member, and every operation through a handle, may be called from any number of threads.
-One lock guards the whole tree, so operations do not run in parallel within one filesystem.
-Separate filesystems share nothing, so tests that each build their own run in parallel with
-each other and with tests on disk.
+```csharp
+var fs = new InMemoryFileSystem();
+fs.AddFile("2026-09-01.json", """{ "total": 3 }""");
+using Dir root = fs.OpenRoot();
+var store = new ReportStore(root);
+
+fs.FailNextWrites(1, CapErrorKind.Other);   // what a full disk reports
+
+IOException e = Assert.ThrowsAny<IOException>(() => store.Save(new DateOnly(2026, 9, 1), """{ "total": 4 }"""));
+Assert.Equal(CapErrorKind.Other, CapIOException.KindOf(e));
+Assert.Equal("""{ "total": 3 }""", fs.ReadAllText("2026-09-01.json"));
+Assert.Equal(["2026-09-01.json"], fs.GetEntries());   // no half-written scratch file left behind
+```
+
+## A stubbed `IDir`
+
+Some tests want a stub rather than a filesystem: one that fails the third write, or checks that
+a file was read exactly once. `Dir`, `CapFile`, `DirEntry` and `CapOpened` implement `IDir`,
+`ICapFile`, `IDirEntry` and `ICapOpened`, which have the same members. A component that takes
+the interface can be handed a stub from any mocking library. This one uses Moq:
+
+```csharp
+Mock<IDir> reports = new();
+reports.Setup(dir => dir.EnumerateEntries()).Returns(
+[
+    TestEntries.Create("2026-09-01.json", CapFileType.File, TestFileIds.Next(), reports.Object),
+    TestEntries.Create("2026-09-02.json", CapFileType.Directory, TestFileIds.Next(), reports.Object),
+    TestEntries.Create("notes.json", CapFileType.File, TestFileIds.Next(), reports.Object),
+]);
+
+IReadOnlyList<DateOnly> days = new ReportStore(reports.Object).ListDays();
+
+Assert.Equal([new DateOnly(2026, 9, 1)], days);
+reports.Verify(dir => dir.ReadAllText(It.IsAny<string>()), Times.Never);
+```
+
+The helpers in `Cap.Fs.Ext` (`Walk`, `Glob`, `CopyTo`, the atomic writes, `DeleteTree` and
+the rest) are extension methods on `IDir`, so a component that takes the interface keeps them,
+and a stub or a wrapper sees the individual calls each helper makes through it.
+
+A stub runs none of this library's resolution, so it cannot show that the component stays
+inside its directory. The in-memory filesystem can, so prefer it unless the test is about the
+calls themselves. The interfaces do not carry the containment guarantee, which belongs to
+`Dir`. A component that takes `IDir` in production is confined only if it is handed a `Dir`. The
+[threat model](threat-model.md#57-the-handle-interfaces-carry-no-guarantee) has the detail.
+
+### Values for stubs to return
+
+`CapMetadata`, `CapFileId` and `DirEntry` have no public constructors, so production code can
+only get them from a handle. An identity is worth comparing only because the filesystem issued
+it, and `IsSameFileAs` relies on that. For stubs, `Cap.Std.Testing` makes these values, two of
+which the stub above uses:
+
+- `CapMetadataBuilder` has a setter for each field. It defaults to an empty regular file with
+  one name, a fresh identity, and the permissions a new file gets on the running platform.
+  `WithUnixMode` and `WithWindowsAttributes` each clear the other, because a real description
+  never holds both.
+- `TestFileIds.Create(volume, node)` makes a given identity, and `TestFileIds.Next()` makes an
+  unused one. To describe one object reached under two names, give two descriptions the same
+  identity.
+- `TestEntries.Create(name, type, fileId, owner)` makes an `IDirEntry` that opens and describes
+  itself by calling `owner` with its name, the same way `DirEntry` does. Pass the stub as
+  `owner`, and the entry's opens become calls on the stub that the test can check.
+
+## A scratch directory on disk
+
+Some behaviour exists only on a real filesystem: which [resolution backend](backends.md) the
+host has, whether a flush reaches storage, what `UnsafeGetHandle` returns, and how the
+component copes with files another program wrote. For those, `CapTempDir.New` makes a
+directory of the test's own in the system's temporary location, and removes it and everything
+in it on disposal:
+
+```csharp
+using CapTempDir scratch = CapTempDir.New(AmbientAuthority.Acquire());
+var store = new ReportStore(scratch.Directory);
+
+store.Save(new DateOnly(2026, 9, 1), """{ "total": 3 }""");   // flushed to storage by default
+
+Assert.Equal("""{ "total": 3 }""", store.Load(new DateOnly(2026, 9, 1)));
+Assert.Equal(Dir.ResolutionBackend, scratch.Directory.Backend);
+```
+
+`CapTempDir.New` takes an `AmbientAuthority` token, because it opens a place on the host. Set
+`CAPDOTNET_PERSIST_TEMPORARY=1` to keep the directories after a run, to inspect what a failing
+test left.
+
+Keep these tests few. Each answers as the platform it runs on answers, which is the point of
+having it, and also why it can pass on Linux and fail on Windows.
+
+## Code written against `IFileSystem`
+
+Code written against System.IO.Abstractions' `IFileSystem` rather than a `Dir` can be tested
+the same way: wrap the in-memory root in a `DirFileSystem` from `Cap.IO.Abstractions`. See
+[`IFileSystem` over a `Dir`](io-abstractions.md), which also covers moving such a component
+onto `Dir`.
+
+## Running tests in parallel
+
+Each handle carries the backend that opened it. So one test process can hold handles on
+several in-memory filesystems and on the disk at the same time, and tests in all three styles
+run in parallel without any of them switching a global setting.
+
+Every member of `InMemoryFileSystem`, and every operation through one of its handles, may be
+called from any number of threads. One lock guards the whole tree, so operations do not run in
+parallel within one filesystem. Separate filesystems share nothing, so give each test its own:
+build it in the test, as above, rather than sharing one through a fixture. A test that does
+share one sees what every other test wrote to it.
+
+Each `CapTempDir.New` draws a directory of its own, so tests on disk do not collide either.

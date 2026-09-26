@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>TestableComponent</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Cap.Std/Cap.Std.csproj" />
+    <ProjectReference Include="../../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../../src/Cap.Fs.Ext/Cap.Fs.Ext.csproj" />
+    <ProjectReference Include="../../../src/Cap.IO.Abstractions/Cap.IO.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>
