@@ -267,18 +267,22 @@ jobs:
       - name: Build
         run: dotnet build CapDotnet.slnx --configuration Release
 
+      # PowerShell rather than bash. On Windows bash is the MSYS2 runtime, which enables the
+      # backup and restore privileges in an administrator's token, and every test process it
+      # starts inherits them -- which the suite refuses to run with, since a process that can
+      # bypass file permissions passes negative containment tests for the wrong reason.
       - name: Run the suites with the in-memory backend in place of the host
-        shell: bash
+        shell: pwsh
         env:
           # Read by tests/InMemory before the first test.
           CAPDOTNET_TEST_BACKEND: ${{ matrix.leg }}
         run: |
-          set -euo pipefail
-          for project in Cap.Std.Tests Cap.Fs.Ext.Tests Cap.Escape.Tests; do
-            echo "::group::$project"
+          foreach ($project in 'Cap.Std.Tests', 'Cap.Fs.Ext.Tests', 'Cap.Escape.Tests') {
+            "::group::$project"
             dotnet test "tests/$project/$project.csproj" --configuration Release --no-build
-            echo "::endgroup::"
-          done
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            "::endgroup::"
+          }
 
       - name: List the tests not run in memory
         if: ${{ !cancelled() }}

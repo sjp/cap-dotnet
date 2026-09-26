@@ -234,4 +234,26 @@ public sealed class WindowsRulesTests
 
         Assert.Equal(["a.log", "b.log"], found);
     }
+
+    /// <summary>
+    /// A time before Windows file times begin is refused as an argument, and changes nothing,
+    /// as it is on Windows.
+    /// </summary>
+    [Fact]
+    public void An_instant_before_1601_is_refused_and_changes_nothing()
+    {
+        InMemoryFileSystem fs = Windows();
+        fs.AddFile("file", "x");
+        CapFileTime tooEarly = CapFileTime.At(new DateTimeOffset(1500, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        DateTimeOffset written = new(2020, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        using Dir root = fs.OpenRoot();
+        root.SetTimes("file", lastWrite: CapFileTime.At(written));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => root.SetTimes("file", CapFileTime.At(written), tooEarly));
+        Assert.Throws<ArgumentOutOfRangeException>(() => root.SetTimes("file", lastAccess: tooEarly));
+        Assert.Equal(written, root.GetMetadata("file").LastWriteTime);
+
+        root.SetTimes("file", lastWrite: CapFileTime.At(new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+    }
 }

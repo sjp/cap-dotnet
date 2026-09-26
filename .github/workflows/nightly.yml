@@ -67,13 +67,17 @@ jobs:
       - name: Build
         run: dotnet build tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj --configuration Release
 
+      # PowerShell rather than bash. On Windows bash is the MSYS2 runtime, which enables the
+      # backup and restore privileges in an administrator's token, and the test process
+      # inherits them -- which every test assembly refuses to run with.
       - name: Run the races at full size
-        shell: bash
+        shell: pwsh
         env:
           CAPDOTNET_STRESS_ITERATIONS: ${{ inputs.iterations || '1000000' }}
         run: |
-          export CAPDOTNET_STRESS_REPORT="$GITHUB_STEP_SUMMARY"
+          $env:CAPDOTNET_STRESS_REPORT = $env:GITHUB_STEP_SUMMARY
           dotnet test tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj --configuration Release --no-build
+          exit $LASTEXITCODE
 
   # -------------------------------------------------------------------------------------
   # The fuzz targets in fuzz/Cap.Fuzz, each under libFuzzer for an hour: path parsing, the

@@ -55,6 +55,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <summary>The code a full disk carries on Windows: ERROR_DISK_FULL as an HRESULT.</summary>
     private const int DiskFullHResult = unchecked((int)0x80070070);
 
+    /// <summary>The earliest instant a Windows file time can express.</summary>
+    private static readonly DateTimeOffset WindowsEpoch = new(1601, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
     private readonly InMemoryFileSystem _fs;
     private readonly ConcurrentDictionary<nint, MemoryNode> _directories = new();
     private readonly ConditionalWeakTable<SafeFileHandle, OpenFile> _files = new();
@@ -574,8 +577,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
-            ApplyTimes(node!, lastAccess, lastWrite);
-            return CapError.Success;
+            return ApplyTimes(node!, lastAccess, lastWrite);
         }
     }
 
@@ -590,8 +592,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
-            ApplyTimes(node!, lastAccess, lastWrite);
-            return CapError.Success;
+            return ApplyTimes(node!, lastAccess, lastWrite);
         }
     }
 
@@ -1470,16 +1471,31 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         return node.Describe((node.Detached ? 0 : 2) + subdirectories);
     }
 
-    private void ApplyTimes(MemoryNode node, CapFileTime lastAccess, CapFileTime lastWrite)
+    /// <remarks>
+    /// Under Windows rules an instant before the start of 1601 is refused, as Windows refuses
+    /// it: its file times count from then and cannot express anything earlier. The refusal
+    /// comes before either time is changed, so a request that cannot be stored changes nothing.
+    /// </remarks>
+    private CapError ApplyTimes(MemoryNode node, CapFileTime lastAccess, CapFileTime lastWrite)
     {
+        if (_fs.WindowsRules && (BeforeWindowsEpoch(lastAccess) || BeforeWindowsEpoch(lastWrite)))
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
         DateTimeOffset now = _fs.Now();
         node.LastAccessTime = Resolve(lastAccess, node.LastAccessTime);
         node.LastWriteTime = Resolve(lastWrite, node.LastWriteTime);
         node.ChangeTime = now;
 
+        return CapError.Success;
+
         DateTimeOffset Resolve(CapFileTime time, DateTimeOffset current) =>
             time.IsNow ? now : time.TryGetValue(out DateTimeOffset value) ? value : current;
     }
+
+    private static bool BeforeWindowsEpoch(CapFileTime time) =>
+        time.TryGetValue(out DateTimeOffset value) && value < WindowsEpoch;
 
     /// <summary>Stamps a change to a file's contents.</summary>
     private void Written(MemoryNode node)
