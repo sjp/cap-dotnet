@@ -186,9 +186,11 @@ internal static partial class HostOps
         }
         finally
         {
-            if (new FileInfo(probe).LinkTarget is not null)
+            // Made as a directory link, which on Windows is a directory entry and is removed
+            // as one; removing it as a file there is refused.
+            if (new DirectoryInfo(probe).LinkTarget is not null)
             {
-                File.Delete(probe);
+                Directory.Delete(probe);
             }
         }
     }

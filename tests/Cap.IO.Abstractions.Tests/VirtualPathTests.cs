@@ -141,4 +141,28 @@ public sealed class VirtualPathTests
     {
         Assert.Equal(name, Posix.LastName(path));
     }
+
+    [Fact]
+    public void Combining_writes_the_namespace_separator_whatever_the_host()
+    {
+        Assert.Equal("/a/b", WindowsSlash.Combine(["/", "a", "b"]));
+        Assert.Equal("/a/b", Posix.Combine(["/", "a", "b"]));
+        Assert.Equal(@"C:\a\b", WindowsDrive.Combine([@"C:\", "a", "b"]));
+    }
+
+    [Fact]
+    public void Combining_restarts_at_a_rooted_part_and_skips_an_empty_one()
+    {
+        Assert.Equal("/b/c", WindowsSlash.Combine(["/a", "/b", "", "c"]));
+        Assert.Equal(@"D:\x", WindowsSlash.Combine(["/a", @"D:\x"]));
+        Assert.Throws<ArgumentNullException>(() => WindowsSlash.Combine(["/a", null!]));
+    }
+
+    [Fact]
+    public void Joining_keeps_a_rooted_part_and_skips_null_and_empty_ones()
+    {
+        Assert.Equal("/a/b/c", WindowsSlash.JoinAll(["/a", null, "", "/b", "c"]));
+        Assert.Equal(@"a\b", WindowsSlash.JoinAll([@"a\", "b"]));
+        Assert.Equal(string.Empty, WindowsSlash.JoinAll([null, ""]));
+    }
 }

@@ -289,78 +289,44 @@ public sealed class AtomicWriteTests : IDisposable
     }
 
     /// <summary>
-    /// Outside Windows, a link to a directory at the name is replaced like any other link, and
-    /// the directory it pointed at is left as it was.
+    /// A link to a directory at the name is replaced like any other link, and the directory it
+    /// pointed at is left as it was.
     /// </summary>
     /// <remarks>
     /// A link is not a directory, whatever it points at, so moving a file onto its name is an
-    /// ordinary replacement of one name by another.
+    /// ordinary replacement of one name by another. On Windows such a link is a directory
+    /// entry, which a rename that did not treat it as a name would refuse to move a file over;
+    /// the replacing rename used there does treat it as one.
     /// </remarks>
     [Fact]
-    public void A_directory_link_at_the_name_is_replaced_outside_windows()
-    {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("A directory link on this platform is a directory entry, and is covered by its own test.");
-        }
+    public void A_directory_link_at_the_name_is_replaced() =>
+        AssertADirectoryLinkIsReplaced(link => HostDirectory.CreateSymbolicLink(link, "elsewhere"));
 
-        string elsewhere = Path.Combine(_tree.HostPath, "elsewhere");
-        HostDirectory.CreateDirectory(elsewhere);
-        HostFile.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
-        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "elsewhere");
-
-        _tree.Directory.WriteAllTextAtomic("report", "new");
-
-        string published = Path.Combine(_tree.HostPath, "report");
-        Assert.Null(HostEntry.LinkTarget(published));
-        Assert.Equal("new", HostFile.ReadAllText(published));
-        Assert.Equal(["inner"], HostDirectory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
-        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(elsewhere, "inner")));
-        Assert.Equal(["elsewhere", "report"], Names());
-    }
-
-    /// <summary>
-    /// On Windows, a directory symbolic link or a junction at the name makes the publish fail
-    /// with a failure that names the link as the obstacle, and leaves the link, the directory
-    /// it points at and the rest of the tree as they were.
-    /// </summary>
-    /// <remarks>
-    /// Both kinds of link are directory entries there, and the filesystem refuses to move a
-    /// file over a directory. Removing the link first and then moving the file would leave a
-    /// moment in which the name holds nothing, which is the one thing the operation promises
-    /// never to do, so the refusal is reported rather than worked around. It is reported as a
-    /// link rather than as access denied, so a caller does not go looking for a permissions
-    /// problem that is not there.
-    /// </remarks>
-    [Fact]
-    public void On_windows_a_directory_symbolic_link_at_the_name_refuses_the_publish() =>
-        AssertADirectoryLinkRefusesThePublish(link => HostDirectory.CreateSymbolicLink(link, "elsewhere"));
-
-    /// <summary>The same, for a junction.</summary>
+    /// <summary>On Windows, the same for a junction.</summary>
     [Fact]
     [NotInMemory("A junction is a Windows reparse point that only the host's filesystem holds.")]
-    public void On_windows_a_junction_at_the_name_refuses_the_publish() =>
-        AssertADirectoryLinkRefusesThePublish(
-            link => CreateJunction(link, Path.Combine(_tree.HostPath, "elsewhere")));
-
-    private void AssertADirectoryLinkRefusesThePublish(Action<string> makeLink)
+    public void On_windows_a_junction_at_the_name_is_replaced()
     {
         if (!OperatingSystem.IsWindows())
         {
-            Assert.Skip("Only Windows records a link to a directory as a directory entry.");
+            Assert.Skip("Junctions exist only on Windows.");
         }
 
+        AssertADirectoryLinkIsReplaced(link => CreateJunction(link, Path.Combine(_tree.HostPath, "elsewhere")));
+    }
+
+    private void AssertADirectoryLinkIsReplaced(Action<string> makeLink)
+    {
         string elsewhere = Path.Combine(_tree.HostPath, "elsewhere");
-        string link = Path.Combine(_tree.HostPath, "report");
+        string published = Path.Combine(_tree.HostPath, "report");
         HostDirectory.CreateDirectory(elsewhere);
         HostFile.WriteAllText(Path.Combine(elsewhere, "inner"), "untouched");
-        makeLink(link);
+        makeLink(published);
 
-        CapIOException thrown = Assert.Throws<CapIOException>(
-            () => _tree.Directory.WriteAllTextAtomic("report", "new"));
+        _tree.Directory.WriteAllTextAtomic("report", "new");
 
-        Assert.Equal(CapErrorKind.SymbolicLink, thrown.Kind);
-        Assert.NotNull(HostEntry.LinkTarget(link));
+        Assert.Null(HostEntry.LinkTarget(published));
+        Assert.Equal("new", HostFile.ReadAllText(published));
         Assert.Equal(["inner"], HostDirectory.GetFileSystemEntries(elsewhere).Select(Path.GetFileName));
         Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(elsewhere, "inner")));
         Assert.Equal(["elsewhere", "report"], Names());

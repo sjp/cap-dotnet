@@ -1405,9 +1405,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                     replaceExisting ? 1u : 0u);
             }
 
-            bool refused = renamed.Category is CapErrorCategory.PermissionDenied or CapErrorCategory.IsADirectory;
-            return replaceExisting && refused
-                ? ExplainRefusedReplacement(renamed, toParent, toName)
+            return renamed.Category is CapErrorCategory.PermissionDenied or CapErrorCategory.IsADirectory
+                ? ExplainRefusedRename(renamed, raw, toParent, toName, replaceExisting)
                 : renamed;
         }
         finally
@@ -1417,19 +1416,43 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <summary>
-    /// Reports a replacement refused because a directory link holds the destination as the
-    /// link it is, and passes any other refusal through unchanged.
+    /// Reports a refused rename by what stood in its way, where that can be told apart from a
+    /// refusal of permission, and passes any other refusal through unchanged.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The filesystem answers several different obstacles as access denied, and a caller
+    /// reading that goes looking for a permissions problem that is not there. So the names
+    /// involved are looked at, and three obstacles are named as what they are: a directory
+    /// moved to a name beneath itself, which is not a request any filesystem can carry out; a
+    /// link to a directory at the destination, which is a directory entry here and is not
+    /// replaced by a file on systems whose rename lacks the replacing form that treats it as a
+    /// name; and an ordinary directory at the destination, which a file cannot replace.
+    /// </para>
+    /// <para>
     /// Only the category changes. The status the filesystem returned stays as the raw code,
-    /// so the refusal as the filesystem made it is still there to read. Any failure to look
-    /// at the destination leaves the original report as it was.
+    /// so the refusal as the filesystem made it is still there to read. Looking happens after
+    /// the refusal and decides nothing but the wording, so a name that changes in between can
+    /// at worst leave the original report as it was. Any failure to look does the same.
+    /// </para>
     /// </remarks>
-    private static CapError ExplainRefusedReplacement(
+    private static CapError ExplainRefusedRename(
         CapError refusal,
+        nint source,
         SafeDirHandle toParent,
-        ReadOnlySpan<char> toName)
+        ReadOnlySpan<char> toName,
+        bool replaceExisting)
     {
+        if (MovesBeneathItself(source, toParent))
+        {
+            return CapError.Create(CapErrorCategory.InvalidArgument, refusal.Source, refusal.RawCode);
+        }
+
+        if (!replaceExisting)
+        {
+            return refusal;
+        }
+
         CapError error = OpenRelative(
             toParent,
             toName,
@@ -1444,16 +1467,18 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         try
         {
-            if (QueryAttributeTag(raw, out FileAttributeTagInformation info).IsFailure)
+            if (QueryAttributeTag(raw, out FileAttributeTagInformation info).IsFailure ||
+                (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) == 0)
             {
                 return refusal;
             }
 
-            const uint directoryReparsePoint =
-                NtConstants.FILE_ATTRIBUTE_DIRECTORY | NtConstants.FILE_ATTRIBUTE_REPARSE_POINT;
+            if ((info.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) == 0)
+            {
+                return CapError.Create(CapErrorCategory.IsADirectory, refusal.Source, refusal.RawCode);
+            }
 
-            return (info.FileAttributes & directoryReparsePoint) == directoryReparsePoint &&
-                ReparseTags.IsFilesystemLink(info.ReparseTag)
+            return ReparseTags.IsFilesystemLink(info.ReparseTag)
                 ? CapError.Create(CapErrorCategory.SymbolicLink, refusal.Source, refusal.RawCode)
                 : refusal;
         }
@@ -1461,6 +1486,48 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         {
             _ = NtNative.NtClose(raw);
         }
+    }
+
+    /// <summary>Whether an open object is a directory.</summary>
+    private static CapError IsDirectory(nint handle, out bool directory)
+    {
+        directory = false;
+        CapError error = QueryAttributeTag(handle, out FileAttributeTagInformation info);
+        if (error.IsSuccess)
+        {
+            directory = (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0;
+        }
+
+        return error;
+    }
+
+    /// <summary>
+    /// Whether the object being moved is a directory that the destination directory is, or is
+    /// beneath.
+    /// </summary>
+    /// <remarks>
+    /// Compared by the names both objects report for themselves, from the root of their
+    /// volume, with every component in its stored spelling, so neither case nor a short alias
+    /// can make one directory look like two.
+    /// </remarks>
+    private static bool MovesBeneathItself(nint source, SafeDirHandle toParent)
+    {
+        if (IsDirectory(source, out bool directory).IsFailure || !directory)
+        {
+            return false;
+        }
+
+        using HandleLease lease = toParent.Lease();
+        if (!lease.IsValid ||
+            QueryNormalizedName(source, out string moved).IsFailure ||
+            QueryNormalizedName(lease.Raw, out string destination).IsFailure)
+        {
+            return false;
+        }
+
+        return destination.Length >= moved.Length &&
+            destination.StartsWith(moved, StringComparison.OrdinalIgnoreCase) &&
+            (destination.Length == moved.Length || destination[moved.Length] == '\\');
     }
 
     /// <inheritdoc/>
@@ -1478,9 +1545,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// exist in between: for an instant the name is a zero-length object rather than a link.
     /// </para>
     /// <para>
-    /// The link records which kind it is, and the wrong kind cannot be traversed, which is
-    /// why the kind is asked for rather than guessed from what the target happens to be
-    /// today. It also records separately whether its target is rooted, and the filesystem
+    /// The link records which kind it is, and the rest of the system will not traverse the
+    /// wrong kind, which is why the kind is asked for rather than guessed from what the target
+    /// happens to be today. It also records separately whether its target is rooted, and the filesystem
     /// acts on that flag rather than on the spelling — so the flag is set from the same
     /// reading of the text that resolution uses, and a rooted target is additionally stored
     /// in the syntax the object manager resolves, which is what the system's own call
@@ -1564,11 +1631,20 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// Creates a name as an entry of an already-open directory.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The creating twin of <see cref="OpenRelative"/>, with the same counted name and the
     /// same directory handle as the resolution root, and the same refusal of anything that
     /// is not a filesystem object. It does not ask whether the name reached its object
     /// through an alias, because there was no object: a create either takes a free name or
     /// fails.
+    /// </para>
+    /// <para>
+    /// A reparse point at the name is never processed. Without that, a create aimed at a name
+    /// that holds a link whose target does not exist is redirected to the target and makes the
+    /// new entry there, wherever the link points — outside the directory handle included. With
+    /// it, a link at the name is an entry like any other, so the name is taken and the create
+    /// fails as one that collided.
+    /// </para>
     /// </remarks>
     private static unsafe CapError CreateRelative(
         SafeDirHandle parent,
@@ -1628,7 +1704,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 fileAttributes,
                 NtConstants.FILE_SHARE_ALL,
                 NtConstants.FILE_CREATE,
-                createOptions,
+                createOptions | NtConstants.FILE_OPEN_REPARSE_POINT,
                 eaBuffer: null,
                 eaLength: 0);
 
@@ -1737,7 +1813,13 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         int lengthOffset = rootOffset + sizeof(nint);
         int nameOffset = lengthOffset + sizeof(uint);
         int nameBytes = destinationName.Length * sizeof(char);
-        int total = nameOffset + nameBytes;
+
+        // Never shorter than the declared structure, whose one-character name array is padded
+        // out to pointer alignment. The system checks the length it is given against that size
+        // before it looks at the name, so a destination of a single character, which fits in
+        // fewer bytes, would otherwise be refused as a buffer of the wrong length.
+        int declaredSize = (nameOffset + sizeof(char) + sizeof(nint) - 1) & ~(sizeof(nint) - 1);
+        int total = Math.Max(nameOffset + nameBytes, declaredSize);
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(total);
         try
@@ -1998,7 +2080,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
             if (NtStatusCodes.IsFailure(result))
             {
-                return NtStatusCodes.ToError(result);
+                return ExplainKindMismatch(parent, name, result);
             }
 
             CapError kind = RefuseUnlessFilesystemObject(opened);
@@ -2245,7 +2327,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
             if (NtStatusCodes.IsFailure(result))
             {
-                return NtStatusCodes.ToError(result);
+                return (openOptions & NtConstants.FILE_OPEN_REPARSE_POINT) != 0
+                    ? ExplainKindMismatch(lease.Raw, name, result)
+                    : NtStatusCodes.ToError(result);
             }
 
             // Asked first, and of every handle this backend produces. It is the cheaper of
@@ -2271,6 +2355,85 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <summary>
+    /// Reports an open refused for being the wrong kind of object as the link the name holds,
+    /// when it holds one, and as the refusal it was otherwise.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A link on this platform is made as either the file kind or the directory kind, and an
+    /// open that asks for one kind and names a link made as the other is refused for the
+    /// mismatch before the link itself is reported — even though the open asked for the
+    /// reparse point and not for what it leads to. Left as it is, that answer hides the link:
+    /// resolution never reads its target, so a link leading out of the subtree is reported as
+    /// the wrong kind of object rather than as the attempt to leave that it is, and one leading
+    /// somewhere inside is not followed where every other platform follows it.
+    /// </para>
+    /// <para>
+    /// So the name is opened once more with no kind asked for, still as the reparse point, and
+    /// asked what it is. A link is reported as a link, which hands its target to resolution to
+    /// be judged by the same rules as any other; a reparse point of another kind is refused as
+    /// one. Anything else was a real mismatch and keeps the original answer. Nothing is handed
+    /// back from the second open, which only ever has the right to read attributes.
+    /// </para>
+    /// </remarks>
+    private static unsafe CapError ExplainKindMismatch(nint parent, ReadOnlySpan<char> name, int status)
+    {
+        CapError refusal = NtStatusCodes.ToError(status);
+        if (name.IsEmpty ||
+            status is not (NtStatusCodes.STATUS_NOT_A_DIRECTORY or NtStatusCodes.STATUS_FILE_IS_A_DIRECTORY))
+        {
+            return refusal;
+        }
+
+        fixed (char* characters = name)
+        {
+            UnicodeString objectName = new()
+            {
+                Length = (ushort)(name.Length * sizeof(char)),
+                MaximumLength = (ushort)(name.Length * sizeof(char)),
+                Buffer = (nint)characters,
+            };
+
+            ObjectAttributes attributes = new()
+            {
+                Length = (uint)ObjectAttributes.StructSize,
+                RootDirectory = parent,
+                ObjectName = (nint)(&objectName),
+                Attributes = (uint)ObjectAttributeFlags.CaseInsensitive,
+                SecurityDescriptor = 0,
+                SecurityQualityOfService = 0,
+            };
+
+            IoStatusBlock ioStatus = default;
+            nint probe = 0;
+            int result = NtNative.NtOpenFile(
+                &probe,
+                NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
+                &attributes,
+                &ioStatus,
+                NtConstants.FILE_SHARE_ALL,
+                NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT);
+
+            if (NtStatusCodes.IsFailure(result))
+            {
+                return refusal;
+            }
+
+            try
+            {
+                CapError kind = RefuseIfReparsePoint(probe);
+                return kind.Category is CapErrorCategory.SymbolicLink or CapErrorCategory.Reparse
+                    ? kind
+                    : refusal;
+            }
+            finally
+            {
+                _ = NtNative.NtClose(probe);
+            }
+        }
+    }
+
+    /// <summary>
     /// Refuses a handle that was reached by a name that is not the object's own.
     /// </summary>
     /// <remarks>
@@ -2290,21 +2453,50 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// comparison and not a refusal of the character.
     /// </para>
     /// <para>
+    /// The name is asked for in its normalised form, in which every component is the one the
+    /// filesystem stores; the plain form repeats the spelling the object was opened by, alias
+    /// and all. A filesystem that cannot answer the normalised query fails the open rather
+    /// than having the check skipped, since a check that stood aside there would stand aside
+    /// silently.
+    /// </para>
+    /// <para>
     /// The comparison ignores case because the filesystem does, and a name differing from the
     /// stored one only in case is the same name by the only definition that matters here.
     /// </para>
     /// </remarks>
-    private static unsafe CapError RefuseAliasedName(nint handle, ReadOnlySpan<char> requested)
+    private static CapError RefuseAliasedName(nint handle, ReadOnlySpan<char> requested)
     {
         if (!requested.Contains('~'))
         {
             return CapError.Success;
         }
 
+        CapError error = QueryNormalizedName(handle, out string full);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        int separator = full.LastIndexOf('\\');
+        ReadOnlySpan<char> stored = separator < 0 ? full : full.AsSpan(separator + 1);
+
+        return stored.Equals(requested, StringComparison.OrdinalIgnoreCase)
+            ? CapError.Success
+            : CapError.FromCategory(CapErrorCategory.AliasedName);
+    }
+
+    /// <summary>
+    /// The name of an open object as a path from the root of its volume, with every component
+    /// spelled as the filesystem stores it.
+    /// </summary>
+    private static unsafe CapError QueryNormalizedName(nint handle, out string name)
+    {
+        name = string.Empty;
+
         // The reply is a path from the volume root, so its length is bounded by the depth of
-        // the object rather than by the component asked about. Rented rather than stacked
-        // for that reason, and affordable because this runs only for a name that could be an
-        // alias.
+        // the object rather than by any one component. Rented rather than stacked for that
+        // reason, and affordable because it is asked only when a component could be an alias
+        // or a refusal needs explaining.
         byte[] buffer = ArrayPool<byte>.Shared.Rent(1024);
         try
         {
@@ -2315,17 +2507,16 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 fixed (byte* raw = buffer)
                 {
                     nt = NtNative.NtQueryInformationFile(
-                        handle, &status, raw, (uint)buffer.Length, NtConstants.FileNameInformationClass);
+                        handle, &status, raw, (uint)buffer.Length, NtConstants.FileNormalizedNameInformationClass);
                 }
 
                 if (nt == NtStatusCodes.STATUS_BUFFER_OVERFLOW && attempt == 0)
                 {
                     // The length is written even when the characters did not fit, and it is
-                    // the end of the name — the part being compared — that was lost, so the
-                    // reply cannot be used as it stands. One retry at the stated size is
-                    // enough; a second overflow would mean the filesystem is answering
-                    // inconsistently, and guessing at a third size would be worse than
-                    // refusing.
+                    // the end of the name that was lost, so the reply cannot be used as it
+                    // stands. One retry at the stated size is enough; a second overflow would
+                    // mean the filesystem is answering inconsistently, and guessing at a third
+                    // size would be worse than refusing.
                     uint needed = BinaryPrimitives.ReadUInt32LittleEndian(buffer);
                     if (needed > NameReplyLimit)
                     {
@@ -2354,15 +2545,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                         CapErrorCategory.Unknown, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_PARAMETER);
                 }
 
-                ReadOnlySpan<char> full = MemoryMarshal.Cast<byte, char>(
-                    buffer.AsSpan(sizeof(uint), (int)nameBytes));
-
-                int separator = full.LastIndexOf('\\');
-                ReadOnlySpan<char> stored = separator < 0 ? full : full[(separator + 1)..];
-
-                return stored.Equals(requested, StringComparison.OrdinalIgnoreCase)
-                    ? CapError.Success
-                    : CapError.FromCategory(CapErrorCategory.AliasedName);
+                name = new string(MemoryMarshal.Cast<byte, char>(buffer.AsSpan(sizeof(uint), (int)nameBytes)));
+                return CapError.Success;
             }
         }
         finally

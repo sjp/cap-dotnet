@@ -62,11 +62,12 @@ public static partial class DirExtensions
     /// or refused as for any other operation. The last component is never followed: the move
     /// replaces the name, so a link already holding it is replaced by the new file and what it
     /// pointed at is neither written nor removed, wherever it points and whether or not its
-    /// target exists. The exception is a link to a directory on Windows — a directory symbolic
-    /// link or a junction — which is a directory entry there and cannot be moved over: the
-    /// publish fails with a <see cref="CapIOException"/> whose kind is
-    /// <see cref="CapErrorKind.SymbolicLink"/>, and the link and what it points at are left as
-    /// they were. The scratch
+    /// target exists. That includes a link to a directory on Windows — a directory symbolic
+    /// link or a junction — which is replaced as the name it is. Only on a Windows version
+    /// whose rename lacks the form that replaces such a link is the publish refused instead,
+    /// with a <see cref="CapIOException"/> whose kind is
+    /// <see cref="CapErrorKind.SymbolicLink"/>, leaving the link and what it points at as they
+    /// were. The scratch
     /// file is created exclusively, so a link planted at its name makes the creation fail
     /// rather than redirecting it.
     /// </para>
@@ -193,11 +194,12 @@ public static partial class DirExtensions
     /// or refused as for any other operation. The last component is never followed: the move
     /// replaces the name, so a link already holding it is replaced by the new file and what it
     /// pointed at is neither written nor removed, wherever it points and whether or not its
-    /// target exists. The exception is a link to a directory on Windows — a directory symbolic
-    /// link or a junction — which is a directory entry there and cannot be moved over: the
-    /// publish fails with a <see cref="CapIOException"/> whose kind is
-    /// <see cref="CapErrorKind.SymbolicLink"/>, and the link and what it points at are left as
-    /// they were. The scratch
+    /// target exists. That includes a link to a directory on Windows — a directory symbolic
+    /// link or a junction — which is replaced as the name it is. Only on a Windows version
+    /// whose rename lacks the form that replaces such a link is the publish refused instead,
+    /// with a <see cref="CapIOException"/> whose kind is
+    /// <see cref="CapErrorKind.SymbolicLink"/>, leaving the link and what it points at as they
+    /// were. The scratch
     /// file is created exclusively, so a link planted at its name makes the creation fail
     /// rather than redirecting it.
     /// </para>

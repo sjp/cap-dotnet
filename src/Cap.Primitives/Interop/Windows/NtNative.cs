@@ -464,15 +464,18 @@ internal static class NtConstants
     // --- Information classes ------------------------------------------------------------------
 
     /// <summary>
-    /// Asks for the name of an open object, as a path from the root of its volume.
+    /// Asks for the name of an open object, as a path from the root of its volume, with every
+    /// component spelled as the name the filesystem stores for it.
     /// </summary>
     /// <remarks>
-    /// The filesystem answers with the name it stores, which is the long one. That is what
-    /// makes the reply worth having: a name generated as a short alias for a longer one opens
-    /// the same object, and asking the object what it is called is the only way to notice
-    /// that the name used to reach it was not its own.
+    /// The normalised form is the one worth having. The plain name query answers with the path
+    /// the object was opened by, so a component reached through a generated short alias comes
+    /// back as that alias, and comparing it with the name that was asked for proves nothing.
+    /// The normalised query expands each component to its long name, and asking the object
+    /// what it is called in that form is the only way to notice that the name used to reach
+    /// it was not its own.
     /// </remarks>
-    public const uint FileNameInformationClass = 9;
+    public const uint FileNormalizedNameInformationClass = 48;
 
     /// <summary>Asks for the access rights a handle was granted.</summary>
     public const uint FileAccessInformationClass = 8;

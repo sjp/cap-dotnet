@@ -6,8 +6,10 @@ namespace Cap.IO.Abstractions;
 /// <summary><see cref="IPath"/> in a <see cref="DirFileSystem"/>'s virtual namespace.</summary>
 /// <remarks>
 /// <para>
-/// The members that are string functions, such as <c>Combine</c>, <c>GetFileName</c> and
-/// <c>GetExtension</c>, are the platform's own. The members that depend on where the root
+/// The members that are string functions, such as <c>GetFileName</c> and
+/// <c>GetExtension</c>, are the platform's own. <c>Combine</c> and <c>Join</c> follow the
+/// platform's rules but write the namespace's separator, so that a path built with them is
+/// spelled the way the paths the adapter hands back are. The members that depend on where the root
 /// is, such as <c>IsPathFullyQualified</c>, <c>GetPathRoot</c>, <c>GetFullPath</c> and
 /// <c>GetRelativePath</c>, answer for the virtual namespace, and never consult the host's
 /// working directory.
@@ -35,16 +37,20 @@ internal sealed class PathAdapter(DirFileSystem fs) : IPath
 
     public string? ChangeExtension(string? path, string? extension) => Path.ChangeExtension(path, extension);
 
-    public string Combine(string path1, string path2) => Path.Combine(path1, path2);
+    public string Combine(string path1, string path2) => fs.Paths.Combine([path1, path2]);
 
-    public string Combine(string path1, string path2, string path3) => Path.Combine(path1, path2, path3);
+    public string Combine(string path1, string path2, string path3) => fs.Paths.Combine([path1, path2, path3]);
 
     public string Combine(string path1, string path2, string path3, string path4) =>
-        Path.Combine(path1, path2, path3, path4);
+        fs.Paths.Combine([path1, path2, path3, path4]);
 
-    public string Combine(params string[] paths) => Path.Combine(paths);
+    public string Combine(params string[] paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return fs.Paths.Combine(paths);
+    }
 
-    public string Combine(params ReadOnlySpan<string> paths) => Path.Combine(paths);
+    public string Combine(params ReadOnlySpan<string> paths) => fs.Paths.Combine(paths);
 
     public bool EndsInDirectorySeparator(ReadOnlySpan<char> path) => Path.EndsInDirectorySeparator(path);
 
@@ -75,24 +81,29 @@ internal sealed class PathAdapter(DirFileSystem fs) : IPath
 
     public bool HasExtension(string? path) => Path.HasExtension(path);
 
-    public string Join(ReadOnlySpan<char> path1, ReadOnlySpan<char> path2) => Path.Join(path1, path2);
+    public string Join(ReadOnlySpan<char> path1, ReadOnlySpan<char> path2) =>
+        fs.Paths.JoinAll([path1.ToString(), path2.ToString()]);
 
     public string Join(ReadOnlySpan<char> path1, ReadOnlySpan<char> path2, ReadOnlySpan<char> path3) =>
-        Path.Join(path1, path2, path3);
+        fs.Paths.JoinAll([path1.ToString(), path2.ToString(), path3.ToString()]);
 
     public string Join(ReadOnlySpan<char> path1, ReadOnlySpan<char> path2, ReadOnlySpan<char> path3, ReadOnlySpan<char> path4) =>
-        Path.Join(path1, path2, path3, path4);
+        fs.Paths.JoinAll([path1.ToString(), path2.ToString(), path3.ToString(), path4.ToString()]);
 
-    public string Join(string? path1, string? path2) => Path.Join(path1, path2);
+    public string Join(string? path1, string? path2) => fs.Paths.JoinAll([path1, path2]);
 
-    public string Join(string? path1, string? path2, string? path3) => Path.Join(path1, path2, path3);
+    public string Join(string? path1, string? path2, string? path3) => fs.Paths.JoinAll([path1, path2, path3]);
 
     public string Join(string? path1, string? path2, string? path3, string? path4) =>
-        Path.Join(path1, path2, path3, path4);
+        fs.Paths.JoinAll([path1, path2, path3, path4]);
 
-    public string Join(params string?[] paths) => Path.Join(paths);
+    public string Join(params string?[] paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return fs.Paths.JoinAll(paths);
+    }
 
-    public string Join(params ReadOnlySpan<string?> paths) => Path.Join(paths);
+    public string Join(params ReadOnlySpan<string?> paths) => fs.Paths.JoinAll(paths);
 
     public ReadOnlySpan<char> TrimEndingDirectorySeparator(ReadOnlySpan<char> path) =>
         Path.TrimEndingDirectorySeparator(path);
@@ -100,7 +111,7 @@ internal sealed class PathAdapter(DirFileSystem fs) : IPath
     public string TrimEndingDirectorySeparator(string path) => Path.TrimEndingDirectorySeparator(path);
 
     public bool TryJoin(ReadOnlySpan<char> path1, ReadOnlySpan<char> path2, Span<char> destination, out int charsWritten) =>
-        Path.TryJoin(path1, path2, destination, out charsWritten);
+        TryCopy(Join(path1, path2), destination, out charsWritten);
 
     public bool TryJoin(
         ReadOnlySpan<char> path1,
@@ -108,7 +119,13 @@ internal sealed class PathAdapter(DirFileSystem fs) : IPath
         ReadOnlySpan<char> path3,
         Span<char> destination,
         out int charsWritten) =>
-        Path.TryJoin(path1, path2, path3, destination, out charsWritten);
+        TryCopy(Join(path1, path2, path3), destination, out charsWritten);
+
+    private static bool TryCopy(string joined, Span<char> destination, out int charsWritten)
+    {
+        charsWritten = joined.TryCopyTo(destination) ? joined.Length : 0;
+        return charsWritten == joined.Length;
+    }
 
     // --- The virtual namespace --------------------------------------------------------------
 

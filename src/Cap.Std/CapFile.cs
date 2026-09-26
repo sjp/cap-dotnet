@@ -27,8 +27,9 @@ namespace Cap.Std;
 /// <para>
 /// <strong>Disposing this closes the file.</strong> A stream taken from it is given a
 /// separate handle to the same open file, so the two are disposed independently and in
-/// either order; the exception is a stream asked for with ownership, which takes this one's
-/// handle and leaves it spent.
+/// either order; the exceptions are a stream asked for with ownership, which takes this one's
+/// handle and leaves it spent, and a borrowed stream over an asynchronous file, which reads
+/// and writes through this object and stops working when it is disposed.
 /// </para>
 /// <para>
 /// <strong>Symbolic links.</strong> A handle never refers to a link. Any link on the path it
@@ -554,6 +555,16 @@ public sealed class CapFile : ICapFile
     /// asked again.
     /// </para>
     /// <para>
+    /// <strong>Asynchronous files.</strong> Where <see cref="IsAsync"/> is true the stream is
+    /// not a <see cref="FileStream"/>. Such a file can be attached to the thread pool only
+    /// once, and a copy of its handle cannot be attached again, so a second framework stream
+    /// over it would fail. The stream returned instead reads and writes through this object's
+    /// own members, at a position of its own and without a buffer, so
+    /// <paramref name="bufferSize"/> is not used and any number of streams can be taken. A
+    /// borrowed one therefore stops working when this handle is disposed; one given ownership
+    /// takes this handle with it, as a <see cref="FileStream"/> would.
+    /// </para>
+    /// <para>
     /// <strong>Appending.</strong> A stream writes at its own position, through the system's
     /// positioned write, so while <see cref="IsAppending"/> is on it appends wherever the
     /// system puts such a write on a file that appends. Linux puts it at the end. On Windows
@@ -572,8 +583,8 @@ public sealed class CapFile : ICapFile
     /// </para>
     /// <para>
     /// <strong>Thread safety.</strong> The borrowing form is safe to call from any thread.
-    /// The stream it returns is not: like any <see cref="FileStream"/>, it has a position and
-    /// a buffer that belong to one caller at a time, so a thread that wants one
+    /// The stream it returns is not: like any <see cref="FileStream"/>, it has a position,
+    /// and usually a buffer, that belong to one caller at a time, so a thread that wants one
     /// of its own should take one of its own. Handing the handle over with
     /// <paramref name="leaveOpen"/> false must not race any other call on this object, since
     /// those calls can no longer tell that the handle has changed owner.
@@ -590,6 +601,23 @@ public sealed class CapFile : ICapFile
     {
         ArgumentOutOfRangeException.ThrowIfNegative(bufferSize);
         Demand();
+
+        if (_isAsync)
+        {
+            // A handle the system completes work on can back only one framework stream, and a
+            // copy of it cannot back another, so every stream over such a file reads and writes
+            // through this object's own members. Ownership moves this handle into a new object
+            // the stream owns, so this one is spent exactly as it is when a stream takes the
+            // handle itself.
+            if (leaveOpen)
+            {
+                return new CapFileStream(this, ownsFile: false);
+            }
+
+            CapFile owner = new(_handle, _backend, _access, _isAsync, _appending);
+            _given = true;
+            return new CapFileStream(owner, ownsFile: true);
+        }
 
         bool appending = AppendsWrites;
 

@@ -68,14 +68,18 @@ not atomic, and was the point.
 
 A symbolic link at the target name is replaced, not followed: the move acts on the name, so
 the link is swapped for the new file and whatever it pointed at — another file in the tree,
-something outside it, or nothing — is neither written nor removed. On Windows a link to a
-directory, whether a directory symbolic link or a junction, is a directory entry, and the
-filesystem will not move a file over one. There the publish fails and leaves the link and
-its target as they were. Removing the link first would leave a moment when the name holds
-nothing, which the operation promises never to do. The failure is a `CapIOException` whose
-`Kind` is `SymbolicLink` rather than an access-denied error, so a caller can tell a link in
-the way from a permissions problem. `Dir.Rename` with `replaceExisting` reports the same case
-the same way.
+something outside it, or nothing — is neither written nor removed. That includes a link to
+a directory on Windows, whether a directory symbolic link or a junction: it is a directory
+entry there, but the replacing rename used treats it as a name and replaces it like any
+other link.
+
+On a Windows version whose rename lacks that replacing form, the filesystem will not move a
+file over such a link. There the publish fails and leaves the link and its target as they
+were. Removing the link first would leave a moment when the name holds nothing, which the
+operation promises never to do. The failure is a `CapIOException` whose `Kind` is
+`SymbolicLink` rather than an access-denied error, so a caller can tell a link in the way
+from a permissions problem. `Dir.Rename` with `replaceExisting` reports the same case the
+same way.
 
 ### Durability
 

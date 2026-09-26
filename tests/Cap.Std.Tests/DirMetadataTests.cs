@@ -418,7 +418,11 @@ public sealed class DirMetadataTests : IDisposable
         HostFile.WriteAllBytes(Host("original"), new byte[10]);
 
         using Dir root = OpenRoot();
-        using CapFile file = root.OpenFile("original");
+
+        // Shared for deletion, which on Windows is what lets the name be moved while the file
+        // is open; without it the rename below is refused before the property can be tested.
+        using CapFile file = root.OpenFile(
+            "original", FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
 
         CapFileId before = file.GetMetadata().FileId;
 

@@ -242,7 +242,17 @@ internal sealed partial class DiskTree : IHostTree
 
     public void WriteAllBytes(string path, byte[] contents) => File.WriteAllBytes(path, contents);
 
-    public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
+    public byte[] ReadAllBytes(string path)
+    {
+        // Shares every kind of access, because a test reads back what a handle it still holds
+        // has written. The framework's own read denies other writers, and on Windows a file
+        // already open for writing then cannot be opened by it at all.
+        using FileStream stream = new(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using MemoryStream contents = new();
+        stream.CopyTo(contents);
+        return contents.ToArray();
+    }
 
     public void CreateSymbolicLink(string path, string target, bool directory)
     {

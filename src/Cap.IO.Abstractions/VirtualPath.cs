@@ -131,6 +131,57 @@ internal sealed class VirtualPath
     }
 
     /// <summary>
+    /// Combines paths as <see cref="Path.Combine(string[])"/> does, writing this namespace's
+    /// separator between them.
+    /// </summary>
+    /// <remarks>
+    /// A rooted part discards everything before it, and an empty one is skipped. Delegating to
+    /// the platform's own combine would write the host's separator, which is not this
+    /// namespace's when the root is <c>/</c> on Windows, and the result would then disagree
+    /// with every path the adapter hands back.
+    /// </remarks>
+    public string Combine(ReadOnlySpan<string> paths)
+    {
+        foreach (string path in paths)
+        {
+            ArgumentNullException.ThrowIfNull(path, nameof(paths));
+        }
+
+        string combined = string.Empty;
+        foreach (string path in paths)
+        {
+            if (path.Length > 0)
+            {
+                combined = IsRooted(path) ? path : Join(combined, path);
+            }
+        }
+
+        return combined;
+    }
+
+    /// <summary>
+    /// Joins paths as <see cref="Path.Join(string?[])"/> does, writing this namespace's
+    /// separator between them.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="Combine"/>, a rooted part is joined on like any other, and null or
+    /// empty parts are skipped.
+    /// </remarks>
+    public string JoinAll(ReadOnlySpan<string?> paths)
+    {
+        string joined = string.Empty;
+        foreach (string? path in paths)
+        {
+            if (!string.IsNullOrEmpty(path))
+            {
+                joined = Join(joined, path);
+            }
+        }
+
+        return joined;
+    }
+
+    /// <summary>
     /// Every leading portion of a <see cref="Cap.Std.Dir"/>-relative path that ends in an
     /// ordinary name, shortest first, each a slice of the caller's own string.
     /// </summary>

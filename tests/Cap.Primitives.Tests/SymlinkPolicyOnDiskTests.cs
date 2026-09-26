@@ -172,10 +172,11 @@ public sealed class SymlinkPolicyOnDiskTests : IDisposable
             string full = Inside(path);
             Directory.CreateDirectory(Path.GetDirectoryName(full)!);
 
-            // Created as a file link rather than a directory link even where the target is a
-            // directory. On Unix there is no difference; on Windows there is, and the cases
-            // that care about the difference are the junction cases, which live with the rest
-            // of the Windows reparse tests.
+            // Created as a file link even where the target is a directory, and even where the
+            // case walks through it as one. On Unix there is no difference. On Windows the rest
+            // of the system would refuse to traverse such a link, but resolution here reads a
+            // link's target whatever kind it was made as, so the table's answers hold for it
+            // unchanged -- which is what these cases, run on Windows, check.
             File.CreateSymbolicLink(full, target);
         }
 

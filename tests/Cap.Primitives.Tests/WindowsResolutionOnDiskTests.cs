@@ -31,7 +31,39 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("cap-win-").FullName;
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    public void Dispose()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            RemoveDirectoryLinks(_root);
+        }
+
+        Directory.Delete(_root, recursive: true);
+    }
+
+    /// <summary>
+    /// Removes every directory link and junction beneath a directory, as the links themselves.
+    /// </summary>
+    /// <remarks>
+    /// Done before the recursive removal rather than left to it. The framework's recursive
+    /// removal takes a junction for a volume mount point and asks the system to unmount it
+    /// first, which fails for a junction to an ordinary directory, and the whole removal
+    /// fails with it. Removed on its own, a link is just a name.
+    /// </remarks>
+    private static void RemoveDirectoryLinks(string directory)
+    {
+        foreach (string entry in Directory.EnumerateDirectories(directory))
+        {
+            if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+            {
+                Directory.Delete(entry);
+            }
+            else
+            {
+                RemoveDirectoryLinks(entry);
+            }
+        }
+    }
 
     /// <summary>
     /// Two spellings that differ only in case are one file, and resolution agrees with the

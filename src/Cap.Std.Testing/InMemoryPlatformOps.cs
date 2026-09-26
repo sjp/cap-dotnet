@@ -1387,9 +1387,12 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         bool movingDirectory = node.Type == CapNodeType.Directory;
         bool replacingDirectory = existing.Type == CapNodeType.Directory;
 
+        // Windows never replaces a directory by a rename, and the host backend reports the
+        // refusal by what stands at the destination rather than as the access denial the
+        // filesystem gives, so the same category is given here.
         if (replacingDirectory && _fs.WindowsRules)
         {
-            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+            return CapError.FromCategory(CapErrorCategory.IsADirectory);
         }
 
         if (movingDirectory && !replacingDirectory)

@@ -374,41 +374,39 @@ public sealed class DirMutationTests : IDisposable
     }
 
     /// <summary>
-    /// On Windows, replacing a directory symbolic link fails as a link in the way, and leaves
-    /// the link and what it points at alone.
+    /// A link to a directory at the destination is replaced as the name it is, and what it
+    /// points at is left alone.
     /// </summary>
     /// <remarks>
-    /// A link to a directory is a directory entry there, and the filesystem will not move a
-    /// file over a directory. What it reports for that reads as a permissions problem, which
-    /// would send a caller looking in the wrong place, so the link is named as the obstacle.
+    /// On Windows such a link is a directory entry, and a rename that did not treat it as a
+    /// name would refuse to move a file over it; the replacing rename used there does.
     /// </remarks>
     [Fact]
-    public void On_windows_replacing_a_directory_link_is_refused_as_a_link()
+    public void Replacing_a_directory_link_replaces_the_link_and_not_its_target()
     {
-        if (!OperatingSystem.IsWindows())
-        {
-            Assert.Skip("Only Windows records a link to a directory as a directory entry.");
-        }
-
         HostDirectory.CreateDirectory(Host("elsewhere"));
         HostFile.WriteAllText(Host("elsewhere", "inner"), "untouched");
         HostDirectory.CreateSymbolicLink(Host("destination"), "elsewhere");
         HostFile.WriteAllText(Host("source"), "new");
 
         using Dir root = OpenRoot();
+        root.Rename("source", root, "destination", replaceExisting: true);
 
-        CapIOException thrown = Assert.Throws<CapIOException>(
-            () => root.Rename("source", root, "destination", replaceExisting: true));
-
-        Assert.Equal(CapErrorKind.SymbolicLink, thrown.Kind);
-        Assert.NotNull(HostEntry.LinkTarget(Host("destination")));
+        Assert.Null(HostEntry.LinkTarget(Host("destination")));
+        Assert.Equal("new", HostFile.ReadAllText(Host("destination")));
+        Assert.False(HostEntry.Exists(Host("source")));
+        Assert.Equal(["inner"], HostDirectory.GetFileSystemEntries(Host("elsewhere")).Select(Path.GetFileName));
         Assert.Equal("untouched", HostFile.ReadAllText(Host("elsewhere", "inner")));
-        Assert.Equal("new", HostFile.ReadAllText(Host("source")));
     }
 
     /// <summary>
-    /// On Windows, replacing a real directory is not reported as a link, since there is none.
+    /// On Windows, replacing a real directory is refused as a directory in the way, and not as
+    /// a link, since there is none.
     /// </summary>
+    /// <remarks>
+    /// The filesystem answers this as access denied, which would send a caller looking for a
+    /// permissions problem, so the directory is named as the obstacle.
+    /// </remarks>
     [Fact]
     public void On_windows_replacing_a_directory_is_not_reported_as_a_link()
     {
@@ -422,12 +420,10 @@ public sealed class DirMutationTests : IDisposable
 
         using Dir root = OpenRoot();
 
-        Exception thrown = Assert.ThrowsAny<Exception>(
+        CapIOException thrown = Assert.Throws<CapIOException>(
             () => root.Rename("source", root, "destination", replaceExisting: true));
 
-        Assert.False(
-            thrown is CapIOException { Kind: CapErrorKind.SymbolicLink },
-            $"A plain directory was reported as a link: {thrown.Message}");
+        Assert.Equal(CapErrorKind.IsADirectory, thrown.Kind);
         Assert.True(HostDirectory.Exists(Host("destination")));
     }
 

@@ -52,8 +52,13 @@ Windows does. Every containment decision is taken from an open handle rather tha
 comparing strings, so changing the case of a refused name gets nowhere.
 
 **Symbolic links and junctions.** A link to a directory and a link to a file are different
-kinds on Windows and will not be traversed as the wrong one: use `CreateDirSymlink` for
-directories. Creating either needs the privilege Windows grants to administrators and to
+kinds on Windows, and Windows itself will not traverse a link as the wrong kind. Resolution
+here does not rely on that: when an open is refused because the name is a link of the other
+kind, the link is reported as the link it is and its target is read and judged like any
+other, so one leading out of the subtree is refused as an escape rather than as the wrong
+kind of object, and one staying inside is followed as it would be on Linux or macOS. Other
+programs on the machine still go by the kind, so use `CreateDirSymlink` for directories.
+Creating either needs the privilege Windows grants to administrators and to
 Developer Mode. Junctions always store an absolute target, so they are always refused on
 the way through, whatever the symbolic-link policy says — but `ReadLink` still reports what one
 holds, since reading a link is not following it, and what comes back is the target the

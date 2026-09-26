@@ -742,11 +742,12 @@ public sealed partial class Dir : IDir
     /// policy: a link at <paramref name="from"/> is moved as itself, and a link already
     /// holding <paramref name="to"/> is a name like any other — it makes the destination
     /// taken, or is replaced when replacement is asked for, and what it points at is not
-    /// touched. On Windows a link to a directory, whether a directory symbolic link or a
-    /// junction, is a directory entry that the filesystem will not move anything over, so
-    /// replacing one fails with a <see cref="CapIOException"/> whose kind is
-    /// <see cref="CapErrorKind.SymbolicLink"/>. It is not moved aside to make room: that would
-    /// leave a moment in which the name holds nothing. A link met before the last component of either path is followed or refused
+    /// touched. That holds on Windows for a link to a directory too, whether a directory
+    /// symbolic link or a junction, even though it is a directory entry there. Only on a
+    /// Windows version whose rename lacks the form that replaces such a link is the
+    /// replacement refused, with a <see cref="CapIOException"/> whose kind is
+    /// <see cref="CapErrorKind.SymbolicLink"/>; the link is not moved aside to make room,
+    /// because that would leave a moment in which the name holds nothing. A link met before the last component of either path is followed or refused
     /// under the policy of the handle that path is resolved against, exactly as
     /// <see cref="OpenDir"/> describes — refused with <see cref="SandboxEscapeException"/> if
     /// its target leaves that handle's subtree, and with <see cref="CapIOException"/> under
@@ -767,9 +768,9 @@ public sealed partial class Dir : IDir
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the move.</exception>
     /// <exception cref="CapIOException">
     /// The destination is taken and replacement was not asked for, the two names are on
-    /// different filesystems or <paramref name="toDir"/> is not a <see cref="Dir"/>, on
-    /// Windows a link to a directory holds the destination, or the
-    /// move failed otherwise.
+    /// different filesystems or <paramref name="toDir"/> is not a <see cref="Dir"/>, a
+    /// directory is moved beneath itself or a file onto a directory, on older Windows versions
+    /// a link to a directory holds the destination, or the move failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
     public void Rename(string from, IDir toDir, string to, bool replaceExisting = false)
@@ -850,8 +851,9 @@ public sealed partial class Dir : IDir
     /// </para>
     /// <para>
     /// <strong>Windows records which kind of link this is, and this is the file kind.</strong>
-    /// A link made as the wrong kind there cannot be traversed at all, by this library or by
-    /// anything else, and cannot be corrected in place. Use <see cref="CreateDirSymlink"/>
+    /// A link made as the wrong kind there is not traversed by anything else on the machine,
+    /// and cannot be corrected in place; only this library's own resolution, which reads the
+    /// target whatever the kind, follows it. Use <see cref="CreateDirSymlink"/>
     /// for a link that names a directory. Everywhere else links are untyped and the two
     /// members do the same thing, which is exactly why the choice has to be made in portable
     /// code rather than discovered on the platform that cares.
@@ -927,7 +929,8 @@ public sealed partial class Dir : IDir
     /// The directory-kind counterpart of <see cref="CreateSymlink"/>, and everything said
     /// there about the stored target applies unchanged: a rooted target is refused, and a
     /// relative one is stored as given. The two are separate members because
-    /// Windows records the kind in the link and will not traverse one made as the wrong kind;
+    /// Windows records the kind in the link and nothing else there traverses one made as the
+    /// wrong kind;
     /// on every other platform a link has no kind and these do the same thing. Choosing
     /// between them in portable code is therefore not pedantry — it is the only way the
     /// choice gets made before the platform that cares is reached.

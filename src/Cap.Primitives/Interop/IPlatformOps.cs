@@ -785,7 +785,7 @@ internal interface IPlatformOps
     /// <param name="targetIsDirectory">
     /// Whether the link is to be created as a link to a directory. Ignored where links are
     /// untyped, which is every platform but Windows; there, a link records which kind it is
-    /// and one created as the wrong kind cannot be traversed at all.
+    /// and the rest of the system will not traverse one created as the wrong kind.
     /// </param>
     /// <remarks>
     /// <para>

@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using Cap.Primitives;
 
 namespace Cap.Std.Tests;
@@ -250,24 +251,59 @@ public sealed class CapFileTests : IDisposable
     /// request to be true of, and the handle says so rather than claiming a capability the
     /// platform does not have.
     /// </remarks>
-    [Theory]
-    [InlineData(FileOptions.None)]
-    [InlineData(FileOptions.Asynchronous)]
+    [Fact]
     [NotInMemory("About the FileStream the framework builds over an operating-system handle. A file held in memory has a stream of its own.")]
-    public void A_stream_reports_the_same_asynchrony_as_the_handle(FileOptions options)
+    public void A_synchronous_handle_gives_a_synchronous_file_stream()
     {
         HostFile.WriteAllText(Host("data"), "contents");
 
         using Dir root = OpenRoot();
-        using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Read, FileShare.Read, options);
+        using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None);
 
-        Assert.Equal(OperatingSystem.IsWindows() && options == FileOptions.Asynchronous, file.IsAsync);
+        Assert.False(file.IsAsync);
 
         using FileStream stream = Assert.IsType<FileStream>(file.AsStream());
-        Assert.Equal(file.IsAsync, stream.IsAsync);
+        Assert.False(stream.IsAsync);
 
         using FileStream owned = Assert.IsType<FileStream>(file.AsStream(leaveOpen: false));
-        Assert.Equal(file.IsAsync, owned.IsAsync);
+        Assert.False(owned.IsAsync);
+    }
+
+    /// <summary>
+    /// A handle opened for asynchronous work can back any number of streams, borrowed and
+    /// owned, each with its own position.
+    /// </summary>
+    /// <remarks>
+    /// On Windows such a file is attached to the thread pool once, and a second framework
+    /// stream over it, or over a copy of its handle, cannot be attached again. Taking several
+    /// streams and reading through each asynchronously is what would fail if any of them were
+    /// built that way.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("About the stream built over an operating-system handle. A file held in memory has a stream of its own.")]
+    public async Task An_asynchronous_handle_backs_any_number_of_streams()
+    {
+        HostFile.WriteAllText(Host("data"), "contents");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.Asynchronous);
+
+        Assert.Equal(OperatingSystem.IsWindows(), file.IsAsync);
+
+        byte[] buffer = new byte[8];
+        Assert.Equal(8, await file.ReadAsync(buffer, 0, TestContext.Current.CancellationToken));
+
+        await using Stream first = file.AsStream();
+        await using Stream second = file.AsStream();
+        Assert.Equal(8, await first.ReadAsync(buffer, TestContext.Current.CancellationToken));
+        Assert.Equal(4, await second.ReadAsync(buffer.AsMemory(0, 4), TestContext.Current.CancellationToken));
+        Assert.Equal(4, second.Position);
+        Assert.Equal(8, first.Position);
+
+        await using Stream owned = file.AsStream(leaveOpen: false);
+        Assert.Equal(8, await owned.ReadAsync(buffer, TestContext.Current.CancellationToken));
+        Assert.Equal("contents", Encoding.UTF8.GetString(buffer));
+        Assert.Throws<ObjectDisposedException>(() => file.Length);
     }
 
     /// <summary>Disposing closes the file, and everything afterwards says so.</summary>
