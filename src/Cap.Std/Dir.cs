@@ -1022,7 +1022,10 @@ public sealed partial class Dir : IDir
     /// This never replaces anything: a second name for an object is always a new name, so
     /// there is no option to overwrite and a destination already in use is a failure.
     /// Directories cannot be linked on any filesystem this runs on, and filesystems that do
-    /// not support hard links at all report so.
+    /// not support hard links at all report so. On Windows that reaches one step further: a
+    /// symbolic link made as the directory kind, and a junction, are directory entries there,
+    /// so giving the link itself a second name is refused as naming a directory — where on
+    /// Unix, links being untyped, the link gets one.
     /// </para>
     /// <para>
     /// <strong>Symbolic links.</strong> Neither last component is followed unless

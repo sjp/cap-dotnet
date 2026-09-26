@@ -1070,7 +1070,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <remarks>
     /// The new entry refers to the very same node, which is what a hard link is: one object
     /// with two names, telling apart from a copy by its identity. A directory cannot be given a
-    /// second name, and the refusal is the one Linux gives.
+    /// second name, and the refusal is the one Linux gives. Under Windows rules that reaches a
+    /// link made as the directory kind too, since such a link is a directory entry there; under
+    /// Unix rules links are untyped and the link itself gets the name.
     /// </remarks>
     public CapError CreateChildHardLink(
         SafeDirHandle parent,
@@ -1102,6 +1104,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
             }
 
+            if (_fs.WindowsRules && node.LinkIsDirectory)
+            {
+                return CapError.FromCategory(CapErrorCategory.IsADirectory);
+            }
+
             if (destination.VolumeId != node.VolumeId)
             {
                 return CapError.FromCategory(CapErrorCategory.CrossDevice);
@@ -1131,8 +1138,13 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         }
 
         // The kernel takes the whole path in one piece, and refuses one longer than its limit
-        // before looking anything up.
-        if (!_fs.WindowsRules && PathEncoding.GetByteCount(path) >= LinuxPathMax)
+        // before looking anything up. The limit belongs to the call being modelled rather than
+        // to the path rules a test chose, so it applies under either, measured as that syntax
+        // measures a name: bytes where the kernel counts bytes, characters where it counts
+        // UTF-16 units. A walk has no such limit, because it never hands over more than one
+        // name at a time -- which is the difference the corpus records between the two.
+        int length = _fs.WindowsRules ? path.Length : PathEncoding.GetByteCount(path);
+        if (length >= LinuxPathMax)
         {
             return CapError.FromCategory(CapErrorCategory.NameTooLong);
         }

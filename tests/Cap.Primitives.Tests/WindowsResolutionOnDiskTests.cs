@@ -101,9 +101,12 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     /// Two things are being checked at once. That the object manager did not follow it before
     /// this code saw it — every open here asks for the reparse point itself, and without that
     /// the junction's target would have been resolved by the system and the walk would have
-    /// continued outside without ever learning a link existed. And that reading it reports the
-    /// containment refusal: a junction's target is recorded as a path from a volume root, so
-    /// there is no reading of it that stays beneath the handle.
+    /// continued outside without ever learning a link existed. And that what the junction
+    /// stores is what makes it unfollowable: its target is recorded as a path from a volume
+    /// root, so it comes back spelled as one, and the path parser refuses every such spelling
+    /// wherever a link is followed. Reading it is not following it, so the text itself is
+    /// handed back — a caller auditing the links in a subtree has to be able to see the ones
+    /// that lead out of it.
     /// </remarks>
     [Fact]
     public void A_junction_is_refused_rather_than_followed()
@@ -121,8 +124,11 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
         AssertFails(CapErrorCategory.Escaped, root, "Jn");
 
         CapResult<string> read = PlatformOps.Host.ReadChildLink(root, "Jn");
-        Assert.False(read.IsSuccess, "a junction's target was handed back as though it could be followed.");
-        Assert.Equal(CapErrorCategory.Escaped, read.Error.Category);
+        Assert.True(read.IsSuccess, $"a junction's target could not be read: {read.Error}.");
+        Assert.True(
+            CapPath.IsRooted(read.Value, CapPathSyntax.Windows),
+            $"a junction's target came back as '{read.Value}', which does not name a location " +
+            "from a root -- so nothing in resolution would refuse following it.");
     }
 
     /// <summary>

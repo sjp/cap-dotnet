@@ -14,10 +14,12 @@ namespace Cap.Std.Testing;
 /// above the starting directory is refused as an escape rather than clamped, so a path that
 /// tries to leave is reported as having tried and not quietly rewritten into one that stays.
 /// A link's target is resolved in the same walk as the path that reached it, from the
-/// directory the link is in, and one with a rooted target is refused as an escape. A path
-/// that ends in a separator follows a final link whatever the caller asked, and insists on
-/// finding a directory. A name longer than the kernel looks up is refused as too long, as it
-/// is by <c>openat2</c>, whether it came from the path or from a link's target.
+/// directory the link is in, and is read under the same path rules as a caller's own string:
+/// one that is rooted, or that names something those rules do not allow, is refused exactly as
+/// a caller passing it would be. A path that ends in a separator follows a final link whatever
+/// the caller asked, and insists on finding a directory. A name longer than the kernel looks up
+/// is refused as too long, as it is by <c>openat2</c>, whether it came from the path or from a
+/// link's target.
 /// </para>
 /// <para>
 /// Written as one loop over a stack of components rather than as a recursion, because a
@@ -143,6 +145,18 @@ internal static class MemoryPathWalk
                 if (CapPath.IsRooted(target, syntax))
                 {
                     return CapError.FromCategory(CapErrorCategory.Escaped);
+                }
+
+                // The rest of the target is read under the same rules as a caller's own path,
+                // and refused for the same reasons: under Windows rules a component naming a
+                // character device leads out of the subtree wherever it appears, and one the
+                // platform would rewrite is a name resolution cannot use. A target spelling
+                // nothing but the directory it sits in -- `.` -- is not a refusal at all, and
+                // the components that follow take the link's place as they do below.
+                if (!CapPath.TryParse(target, syntax, ParentLinkPolicy.Preserve, out _, out CapPathError unusable) &&
+                    unusable != CapPathError.Empty)
+                {
+                    return PortableResolver.TranslateLinkTarget(unusable);
                 }
 
                 // The target takes the link's place: its components are resolved before

@@ -407,7 +407,13 @@ internal static class EscapeCorpus
     private static void WindowsNames(List<EscapeCase> cases)
     {
         Expectation escape = Uniform(Outcome.Escape);
-        Expectation malformed = Uniform(Outcome.Malformed);
+
+        // Stored in a link, a name Windows would rewrite or reinterpret is data like any other:
+        // nothing about it stops the link being made, and the refusal comes when the link is
+        // followed and the target turns out not to be a name resolution can use. A name routed
+        // to a character device is the exception, and is the escape it is wherever it appears,
+        // so the cases expecting one say so on their own.
+        Expectation malformed = Uniform(Outcome.Malformed).With(Operation.CreateSymlinkTo, Outcome.Refused);
         Expectation ordinaryName = Absent();
 
         // Reserved device names, in every disguise the Win32 layer sees through. Each reaches
@@ -477,9 +483,10 @@ internal static class EscapeCorpus
             ("junction-to-inside", $"jn/{PlainFile}", Through(Uniform(Outcome.Escape)), "{sandbox}/plain"),
         })
         {
-            cases.Add(new(name, ["S8"], path, null, expected)
+            SetupStep[] setup = [new(SetupKind.Junction, "jn", target)];
+            cases.Add(new(name, ["S8"], path, null, WindowsHalf(expected, path, setup))
             {
-                Setup = [new(SetupKind.Junction, "jn", target)],
+                Setup = setup,
                 Requires = HostFeature.Junctions,
             });
         }
@@ -551,11 +558,34 @@ internal static class EscapeCorpus
     /// </remarks>
     private static EscapeCase Link(
         string name, string[] threats, string path, Expectation expected, params SetupStep[] setup) =>
-        new(name, [.. threats, expected.Role == LinkRole.Final ? "S13" : "S14"], path, expected, expected)
+        new(
+            name,
+            [.. threats, expected.Role == LinkRole.Final ? "S13" : "S14"],
+            path,
+            expected,
+            WindowsHalf(expected, path, setup))
         {
             Setup = setup,
             Requires = HostFeature.Symlinks,
         };
+
+    /// <summary>
+    /// The Windows half of a link case: the same expectation, minus the one thing that platform
+    /// cannot do.
+    /// </summary>
+    /// <remarks>
+    /// A link recorded as naming a directory, and a junction, are directory entries on Windows,
+    /// and the platform has no second names for directories — so giving the link itself one is
+    /// refused there, exactly as it is for the directory the link names. Nothing else about such
+    /// a case changes: the link is still removed, moved, described and read as the link it is,
+    /// and following it still leads wherever it leads. Written down as the expectation rather
+    /// than skipped, so that the refusal is asserted too.
+    /// </remarks>
+    private static Expectation WindowsHalf(Expectation expected, string path, SetupStep[] setup) =>
+        expected.Role == LinkRole.Final &&
+        setup.Any(step => step.Path == path && step.Kind is SetupKind.DirectoryLink or SetupKind.Junction)
+            ? expected.With(Operation.HardLinkFrom, Outcome.Refused)
+            : expected;
 
     private static SetupStep File(string path, string target) => new(SetupKind.FileLink, path, target);
 

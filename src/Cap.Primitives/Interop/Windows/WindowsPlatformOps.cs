@@ -505,20 +505,21 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                     NtStatusCodes.STATUS_IO_REPARSE_TAG_NOT_HANDLED));
             }
 
-            if (!isRelative)
+            if (!isRelative && !CapPath.IsRooted(target, CapPathSyntax.Windows))
             {
                 // The link says of itself that its target starts from a filesystem root, and
-                // that is the reading the filesystem will act on. A target anchored at a root
-                // cannot be beneath a directory handle whatever it spells, so it is refused
-                // here rather than handed back to be re-resolved.
+                // that is the reading the filesystem will act on; the characters say it starts
+                // from where the link sits. Only one of them decides, and a name stored as an
+                // ordinary relative path but flagged as rooted would be walked as though it
+                // were relative — which the one reading the filesystem itself would never do.
+                // A target whose two readings disagree is therefore not handed back at all,
+                // because neither reading of it can be trusted.
                 //
-                // Taken from the structure's flag and not from the spelling of the stored
-                // name, because the two can disagree and only one of them decides. A name
-                // stored as an ordinary relative path but flagged as rooted would otherwise
-                // be walked as though it were relative — the one reading the filesystem
-                // itself would never give it. Both readings therefore fail closed: this
-                // refuses what declares itself rooted, and the path parser refuses every
-                // rooted spelling of what declares itself relative.
+                // A target that declares itself rooted and is spelled that way needs no such
+                // refusal. It is handed back as stored, where the same path parser that
+                // refuses a caller's rooted path refuses it as an attempt to leave, wherever
+                // it is followed — and where the member that reads a link rather than
+                // following one can still say what the link holds.
                 return CapResult<string>.Fail(CapError.Create(
                     CapErrorCategory.Escaped,
                     CapErrorSource.NtStatus,

@@ -358,11 +358,15 @@ destination, so anything unrecognised is refused instead.
 
 Within a symbolic link, whether the target is relative is taken from the structure's own flag
 and never inferred from how the stored name is spelled, because the flag is what the
-filesystem acts on and the two can disagree. Both readings fail closed: a link declaring
-itself rooted is refused whatever it spells, and for one declaring itself relative the path
-parser refuses every rooted spelling. A junction has no such flag and is never relative — its
-target is recorded as a path from a volume root, which is why one can never be followed while
-staying beneath a directory handle.
+filesystem acts on and the two can disagree. A target is handed back as stored, as it is on
+every other platform, and the path parser then refuses every rooted spelling of it wherever a
+link is followed — so reading a link still reports what it holds, which is what a caller
+auditing a subtree needs, and following one is refused by the same rule as everywhere else.
+Only a target whose two readings disagree, declaring itself rooted while spelled as an
+ordinary relative name, is refused on the spot instead of handed on: it would otherwise be
+walked as relative, which the filesystem reading it would never do. A junction has no such
+flag and is never relative — its target is recorded as a path from a volume root, which is why
+one can never be followed while staying beneath a directory handle.
 
 Every offset and length inside a reparse point is checked against the bytes actually returned
 rather than against the length the structure claims for itself. Inside a sandbox that data is

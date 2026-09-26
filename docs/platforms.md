@@ -55,7 +55,11 @@ comparing strings, so changing the case of a refused name gets nowhere.
 kinds on Windows and will not be traversed as the wrong one: use `CreateDirSymlink` for
 directories. Creating either needs the privilege Windows grants to administrators and to
 Developer Mode. Junctions always store an absolute target, so they are always refused on
-the way through, whatever the symbolic-link policy says.
+the way through, whatever the symbolic-link policy says — but `ReadLink` still reports what one
+holds, since reading a link is not following it, and what comes back is the target the
+filesystem acts on, which for a rooted one is spelled the way the filesystem stores it
+(`\??\C:\...`) rather than the way it is displayed. A directory-kind link and a junction are
+directory entries here, so `CreateHardLink` cannot give one a second name, as it can on Unix.
 
 **Opening a name without saying which kind takes two opens.** A directory and a file are
 opened with different options, so `OpenAny` opens the name once with the right to ask what it

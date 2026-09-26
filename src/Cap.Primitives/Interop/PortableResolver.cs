@@ -722,10 +722,19 @@ internal static class PortableResolver
     /// Reads a refusal of a link's target as a resolution failure.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Every rooted shape means the same thing here: the link names somewhere by starting
     /// from a root this handle confers no authority over, so following it would leave the
     /// sandbox. That is the containment refusal, reported as one, whichever spelling of
     /// "rooted" the target used.
+    /// </para>
+    /// <para>
+    /// A component naming a character device is the same refusal for the same reason. Such a
+    /// name is routed to the device wherever it appears, so it never names anything beneath
+    /// this handle, and a target that holds one leads out of the sandbox as surely as an
+    /// absolute one — which is how a caller's own path holding one is answered, and a target
+    /// read off the disk deserves it no less.
+    /// </para>
     /// </remarks>
     internal static CapError TranslateLinkTarget(CapPathError error) => error switch
     {
@@ -733,7 +742,8 @@ internal static class PortableResolver
         CapPathError.RootRelative or
         CapPathError.DriveRelative or
         CapPathError.Unc or
-        CapPathError.DeviceNamespace => CapError.FromCategory(CapErrorCategory.Escaped),
+        CapPathError.DeviceNamespace or
+        CapPathError.ReservedName => CapError.FromCategory(CapErrorCategory.Escaped),
 
         // A link whose target names nothing points nowhere, which is the same situation as
         // a link to a name that does not exist.
@@ -741,10 +751,10 @@ internal static class PortableResolver
 
         CapPathError.TooLong => CapError.FromCategory(CapErrorCategory.NameTooLong),
 
-        // A reserved device name, a character the platform will reinterpret, or a trailing
-        // dot the filesystem would strip. Refused for the same reasons a caller's path
-        // containing one is refused; that it arrived through a link makes it more suspect,
-        // not less.
+        // A character the platform will reinterpret, or a trailing dot the filesystem would
+        // strip. Refused for the same reasons a caller's path containing one is refused; that
+        // it arrived through a link makes it more suspect, not less. Not an escape: the name
+        // is unusable rather than elsewhere, so the link is one resolution will not follow.
         _ => CapError.FromCategory(CapErrorCategory.InvalidArgument),
     };
 

@@ -458,11 +458,12 @@ public readonly struct CapPath
     /// location, or the device namespace.
     /// </summary>
     /// <remarks>
-    /// The same reading of a prefix that parsing uses, exposed on its own for the one caller
-    /// that has to classify a string it is not going to resolve — a symbolic link's stored
+    /// The same reading of a prefix that parsing uses, exposed on its own for the callers that
+    /// have to classify a string they are not going to resolve — a symbolic link's stored
     /// target, on a platform that records whether a link is rooted as a flag beside the text
-    /// rather than inferring it from the text. Answering that from a second, private notion
-    /// of what "rooted" means is how the flag and the characters come to disagree, and a
+    /// rather than inferring it from the text. Such a link is written with the flag this
+    /// answers, and one read back is checked against it. Answering that from a second, private
+    /// notion of what "rooted" means is how the flag and the characters come to disagree, and a
     /// link whose flag says one thing and whose spelling says another resolves by the flag.
     /// </remarks>
     internal static bool IsRooted(ReadOnlySpan<char> raw, CapPathSyntax syntax) =>

@@ -199,6 +199,18 @@ public sealed class WasiEscapeCorpusTests
             return ([Outcome.Refused, Outcome.Malformed], "readlink reports a name that holds no link as EINVAL");
         }
 
+        // Following a link whose stored target is not a name resolution can use is refused as a
+        // request that cannot be carried out as asked, and the adapter answers EINVAL -- again
+        // the code a malformed path gets. Only where links are followed at all: the policy that
+        // refuses every one of them answers before any target is read, and that refusal has a
+        // code of its own.
+        if (operation == Operation.CreateSymlinkTo && direct == Outcome.Refused && !deny)
+        {
+            return (
+                [Outcome.Refused, Outcome.Malformed],
+                "a link target that is not a usable name is reported as EINVAL");
+        }
+
         return ([direct], why);
     }
 

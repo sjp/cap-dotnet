@@ -71,6 +71,42 @@ public sealed class WindowsRulesTests
         Assert.Throws<SandboxEscapeException>(() => root.CreateDirSymlink("again", @"D:\data"));
     }
 
+    /// <summary>
+    /// A link whose target names a character device is refused as an escape when it is
+    /// followed, and one whose target is merely a name the platform would not keep as written
+    /// is refused as a link that cannot be followed.
+    /// </summary>
+    /// <remarks>
+    /// Both targets are stored, because what a link holds is data and a link can be made by
+    /// anything able to write in the subtree. The difference is where each one leads. A device
+    /// name reaches the device wherever it appears, so following it leaves the subtree just as
+    /// surely as an absolute target does, and it is reported and logged as the escape it is. A
+    /// trailing dot or a character the platform reinterprets leads nowhere at all: the name is
+    /// unusable rather than elsewhere, so it is an ordinary refusal — and not a complaint about
+    /// the caller's own argument, which named the link and was perfectly good.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_link_whose_target_windows_reads_as_something_else_is_refused_when_followed(
+        ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("plain/marker", "x");
+        fs.AddSymbolicLink("to-a-device", "COM9");
+        fs.AddSymbolicLink("to-a-stripped-name", @"plain\marker.");
+        fs.AddSymbolicLink("to-a-pattern", "pl*n");
+
+        using Dir root = fs.OpenRoot();
+
+        Assert.Throws<SandboxEscapeException>(() => root.ReadAllBytes("to-a-device"));
+
+        foreach (string link in new[] { "to-a-stripped-name", "to-a-pattern" })
+        {
+            CapIOException refused = Assert.ThrowsAny<CapIOException>(() => root.ReadAllBytes(link));
+            Assert.NotEqual(CapErrorKind.Escaped, refused.Kind);
+        }
+    }
+
     [Fact]
     public void Names_are_found_under_any_case_and_keep_the_case_they_were_made_with()
     {
