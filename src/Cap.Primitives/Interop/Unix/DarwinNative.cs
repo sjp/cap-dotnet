@@ -6,12 +6,21 @@ namespace Cap.Primitives.Interop.Unix;
 /// The macOS syscalls confined resolution is built from.
 /// </summary>
 /// <remarks>
-/// The stat entry points are declared twice. Apple's Intel platform still resolves the
-/// undecorated names to the original structure layout, with a 32-bit inode number, and
-/// reaches the 64-bit layout only through decorated ones; Apple silicon has only the 64-bit
-/// layout and only the undecorated names. Which pair is live is decided at run time, because
-/// an import's entry point is fixed when the assembly is compiled and one build has to serve
-/// both.
+/// <para>
+/// Several entry points are declared twice, and which of each pair is live is decided at run
+/// time, because an import's entry point and argument list are fixed when the assembly is
+/// compiled and one build has to serve both of Apple's 64-bit architectures.
+/// </para>
+/// <para>
+/// The stat entry points are doubled because their names differ. Apple's Intel platform still
+/// resolves the undecorated names to the original structure layout, with a 32-bit inode
+/// number, and reaches the 64-bit layout only through decorated ones; Apple silicon has only
+/// the 64-bit layout and only the undecorated names.
+/// </para>
+/// <para>
+/// The two variadic entry points are doubled because their argument lists differ. See
+/// <see cref="PassesVariadicArgumentsOnStack"/>.
+/// </para>
 /// </remarks>
 internal static unsafe partial class DarwinNative
 {
@@ -24,34 +33,54 @@ internal static unsafe partial class DarwinNative
     internal static partial int Close(int fd);
 
     /// <summary>Opens a name relative to a directory descriptor.</summary>
+    /// <remarks>
+    /// Hands over no mode, so the flags must not ask for creation. Nothing is read with
+    /// <c>va_arg</c>, and this form is therefore the same on both architectures.
+    /// </remarks>
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
     internal static partial int OpenAt(int directoryFd, byte* path, int flags);
+
+    /// <summary>The creating open, where the mode is read out of an argument register.</summary>
+    [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
+    private static partial int OpenAtWithModeInRegister(
+        int directoryFd, byte* path, int flags, nint mode);
+
+    /// <summary>The creating open, where the mode is read off the stack.</summary>
+    /// <remarks>
+    /// The five padding arguments are never looked at. They are there to take up the
+    /// remaining argument registers, so that the mode is the ninth argument and is therefore
+    /// placed in the first stack slot — which is where this architecture's <c>va_arg</c>
+    /// looks. See <see cref="PassesVariadicArgumentsOnStack"/>.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
+    private static partial int OpenAtWithModeOnStack(
+        int directoryFd,
+        byte* path,
+        int flags,
+        nint padding4,
+        nint padding5,
+        nint padding6,
+        nint padding7,
+        nint padding8,
+        nint mode);
 
     /// <summary>
     /// Opens a name relative to a directory descriptor, creating it with
     /// <paramref name="mode"/> if the flags ask for creation.
     /// </summary>
     /// <remarks>
-    /// A separate import of the same entry point, because the C function is variadic and
-    /// reads the mode off the call stack only when the flags say creation was asked for. An
-    /// import that always passed one would be describing a different function, and the
-    /// three-argument form used with a creating flag hands the kernel whatever happened to
-    /// be in the register the mode is read from.
+    /// A separate entry point from <see cref="OpenAt"/>, because the C function reads the
+    /// mode only when the flags say creation was asked for; a form that always passed one
+    /// would be describing a different function.
     /// </remarks>
-    [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
-    internal static partial int OpenAtWithMode(int directoryFd, byte* path, int flags, uint mode);
-
-    /// <summary>Manipulates a descriptor with a structure argument, for the reservation call.</summary>
-    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
-    internal static partial int FcntlStore(int fd, int command, FileStore* store);
+    internal static int OpenAtWithMode(int directoryFd, byte* path, int flags, uint mode) =>
+        PassesVariadicArgumentsOnStack
+            ? OpenAtWithModeOnStack(directoryFd, path, flags, 0, 0, 0, 0, 0, (nint)mode)
+            : OpenAtWithModeInRegister(directoryFd, path, flags, (nint)mode);
 
     /// <summary>Reads a symbolic link relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "readlinkat", SetLastError = true)]
     internal static partial nint ReadLinkAt(int directoryFd, byte* path, byte* buffer, nuint bufferSize);
-
-    /// <summary>Manipulates a descriptor.</summary>
-    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
-    internal static partial int Fcntl(int fd, int command, int argument);
 
     /// <summary>
     /// Writes at the descriptor's position, which on a descriptor that appends is the end of
@@ -141,16 +170,52 @@ internal static unsafe partial class DarwinNative
     [LibraryImport("libc", EntryPoint = "futimens", SetLastError = true)]
     internal static partial int FUtimens(int fd, UnixTimespec* times);
 
-    /// <summary>
-    /// The same call, for the commands whose argument is a buffer rather than a number.
-    /// </summary>
+    /// <summary>The descriptor call, where its argument is read out of an argument register.</summary>
+    [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
+    private static partial int FcntlInRegister(int fd, int command, nint argument);
+
+    /// <summary>The descriptor call, where its argument is read off the stack.</summary>
     /// <remarks>
-    /// Declared separately because the C function is variadic and this platform passes a
-    /// pointer and an integer differently; one declaration serving both would put the wrong
-    /// kind of value in the register the kernel reads.
+    /// Padded for the reason <see cref="OpenAtWithModeOnStack"/> is, with one more padding
+    /// argument because this function has one fewer fixed one.
     /// </remarks>
     [LibraryImport("libc", EntryPoint = "fcntl", SetLastError = true)]
-    internal static partial int FcntlBuffer(int fd, int command, byte* buffer);
+    private static partial int FcntlOnStack(
+        int fd,
+        int command,
+        nint padding3,
+        nint padding4,
+        nint padding5,
+        nint padding6,
+        nint padding7,
+        nint padding8,
+        nint argument);
+
+    /// <summary>
+    /// Manipulates a descriptor, handing the command the one further argument it takes.
+    /// </summary>
+    /// <remarks>
+    /// One form serves every command whose argument fits in a machine word, a pointer
+    /// included: the argument occupies a whole slot whatever its declared type, and a command
+    /// that reads a number back takes the low half of that slot. A command that takes no
+    /// further argument is passed zero, which it never looks at.
+    /// </remarks>
+    private static int FcntlCore(int fd, int command, nint argument) =>
+        PassesVariadicArgumentsOnStack
+            ? FcntlOnStack(fd, command, 0, 0, 0, 0, 0, 0, argument)
+            : FcntlInRegister(fd, command, argument);
+
+    /// <summary>Manipulates a descriptor with a number, or with no argument at all.</summary>
+    internal static int Fcntl(int fd, int command, int argument) =>
+        FcntlCore(fd, command, (nint)argument);
+
+    /// <summary>Manipulates a descriptor with a structure argument, for the reservation call.</summary>
+    internal static int FcntlStore(int fd, int command, FileStore* store) =>
+        FcntlCore(fd, command, (nint)store);
+
+    /// <summary>The same call, for the commands whose argument is a buffer rather than a number.</summary>
+    internal static int FcntlBuffer(int fd, int command, byte* buffer) =>
+        FcntlCore(fd, command, (nint)buffer);
 
     /// <summary>
     /// Closes a directory stream, and the descriptor it was built on.
@@ -222,6 +287,32 @@ internal static unsafe partial class DarwinNative
 
     /// <summary>True when the undecorated stat symbols already mean the 64-bit-inode layout.</summary>
     private static readonly bool UsesPlainStatSymbols =
+        RuntimeInformation.ProcessArchitecture != Architecture.X64;
+
+    /// <summary>
+    /// True when this architecture hands a function its variadic arguments on the stack
+    /// rather than in the argument registers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>openat</c> and <c>fcntl</c> are both declared in C as taking a fixed prefix and
+    /// then <c>...</c>, and pick the remaining argument up with <c>va_arg</c>. Apple's two
+    /// 64-bit architectures disagree about where that argument is, and the disagreement is
+    /// invisible at the call site. On the Intel one it is read out of the register an
+    /// ordinary argument would have arrived in, so an import declaring it as a plain
+    /// parameter is passing it correctly. On Apple silicon every variadic argument is read
+    /// from the stack instead, the register the import filled is never looked at, and the
+    /// function is handed whatever happened to be in that stack slot. A creation mode taken
+    /// from there leaves new files with arbitrary permissions; a pointer taken from there is
+    /// an address the kernel then writes through.
+    /// </para>
+    /// <para>
+    /// So each of the two is imported twice: once as it is, and once padded out to nine
+    /// arguments. The first eight travel in registers, which leaves the ninth in the first
+    /// stack slot — exactly where the stack form reads its first variadic argument from.
+    /// </para>
+    /// </remarks>
+    private static readonly bool PassesVariadicArgumentsOnStack =
         RuntimeInformation.ProcessArchitecture != Architecture.X64;
 
     /// <summary>Reports on a name relative to a directory descriptor.</summary>
