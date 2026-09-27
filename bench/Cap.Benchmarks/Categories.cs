@@ -17,6 +17,13 @@ internal static class Categories
     public const string BackendIndependent = "BackendIndependent";
 
     /// <summary>
+    /// Hot-path benchmarks the regression gate holds to their allocation alone. Their time ratio
+    /// to <c>System.IO</c> is still reported, but it moves between hosted runners by more than the
+    /// gate's tolerance on unchanged code, so gating it would fail at random.
+    /// </summary>
+    public const string AllocationOnly = "AllocationOnly";
+
+    /// <summary>
     /// The name every <c>System.IO</c> baseline method has. The gate holds a baseline's
     /// time as the yardstick and does not gate it: what <c>System.IO</c> allocates, or how its
     /// speed moves between runtimes, is not a regression in this library.

@@ -117,11 +117,20 @@ public class PositionalRead
 
 /// <summary>Ask when a file named by one component last changed.</summary>
 /// <remarks>
+/// <para>
 /// The cap-dotnet side reads every field of the file's metadata at once and takes one, which
 /// is what the baseline does beneath its API too.
+/// </para>
+/// <para>
+/// The regression gate holds this class to its allocation only. Each side is a single metadata
+/// syscall of about a microsecond, one looking up a full path and the other one name beside a
+/// directory handle, so the ratio between them is mostly the kernel's per-component lookup
+/// cost. On hosted runners that moves by a fifth from one run to the next on unchanged code,
+/// while within a run it holds to under one percent: it measures the machine, not this library.
+/// </para>
 /// </remarks>
 [MemoryDiagnoser]
-[BenchmarkCategory(Categories.HotPath)]
+[BenchmarkCategory(Categories.HotPath, Categories.AllocationOnly)]
 public class StatFile
 {
     private const string Name = "small.bin";

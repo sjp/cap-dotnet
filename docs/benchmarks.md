@@ -108,6 +108,13 @@ moves by more than 10% between two runs of unchanged code on the same machine, a
 between one processor and another. What the parser rows exist to show is an allocation of zero,
 and that is held exactly.
 
+**`StatFile` is gated on allocation only, too.** Both sides are one metadata syscall of about a
+microsecond, so the ratio between them is mostly the kernel's cost of looking up one path
+component against several. That moves by a fifth between hosted runners on unchanged code,
+while holding to under 1% within a single run, so it measures the runner rather than the
+library. The ratio is still reported. A class opts into this with the `AllocationOnly`
+benchmark category.
+
 The `System.IO` rows themselves are not gated: what the runtime allocates, or how its speed
 moves between versions, is not a regression in this library.
 

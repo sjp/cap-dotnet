@@ -22,7 +22,8 @@ namespace Cap.Benchmarks;
 /// is itself a cap-dotnet method, as for path parsing, the ratio is recorded and reported but
 /// not gated: those are operations of tens of nanoseconds divided by one of about ten, and
 /// the quotient moves by more than the tolerance between two runs of unchanged code, and moves
-/// again with the processor, so gating it would fail at random.
+/// again with the processor, so gating it would fail at random. A class marked
+/// <see cref="Categories.AllocationOnly"/> is reported the same way, for the same reason.
 /// </para>
 /// <para>
 /// <strong>Allocation is gated as bytes per operation.</strong> It does not depend on the
@@ -197,7 +198,8 @@ internal static class Gate
                 if (yardstick?.ResultStatistics is { } baseline)
                 {
                     ratio = Math.Round(report.ResultStatistics.Median / baseline.Median, 4);
-                    timeGated = yardstick.BenchmarkCase.Descriptor.WorkloadMethod.Name == Categories.SystemIOMethod;
+                    timeGated = yardstick.BenchmarkCase.Descriptor.WorkloadMethod.Name == Categories.SystemIOMethod
+                        && !benchmark.Descriptor.HasCategory(Categories.AllocationOnly);
                 }
             }
 
@@ -227,7 +229,10 @@ internal static class Gate
 
     /// <param name="Key">The row's name in the baseline file.</param>
     /// <param name="Figures">What this run measured.</param>
-    /// <param name="TimeGated">Whether the ratio is to a <c>System.IO</c> baseline, and so held to the tolerance.</param>
+    /// <param name="TimeGated">
+    /// Whether the ratio is to a <c>System.IO</c> baseline in a class not marked allocation-only,
+    /// and so held to the tolerance.
+    /// </param>
     private sealed record Row(string Key, Figures Figures, bool TimeGated);
 
     /// <summary>One row of a baseline file.</summary>
