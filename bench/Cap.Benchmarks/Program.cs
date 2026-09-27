@@ -3,6 +3,7 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using Cap.Benchmarks;
+using Perfolizer.Horology;
 
 // Every cap-dotnet operation is measured against its System.IO baseline where the two do the
 // same thing, one job per resolution backend this host has.
@@ -30,12 +31,34 @@ static int RunGate(string[] args)
         ?? Path.Join(Environment.CurrentDirectory, "BenchmarkDotNet.Artifacts", "gate", Gate.Platform + ".json");
 
     // Shorter than the default job, which would take the gate the better part of an hour across
-    // two backends; long enough that the median of a microsecond operation settles. The time
-    // is gated as a ratio, so a slow machine does not need more iterations to pass.
-    Job template = Job.Default.WithWarmupCount(4).WithIterationCount(20);
+    // two backends; long enough that the median of a microsecond operation settles. Each
+    // iteration still runs tens of thousands of operations, so a fifth of the default
+    // iteration time costs the median nothing. The time is gated as a ratio, so a slow machine
+    // does not need more iterations to pass.
+    Job timed = Job.Default
+        .WithWarmupCount(4)
+        .WithIterationCount(20)
+        .WithIterationTime(TimeInterval.FromMilliseconds(100));
 
-    IConfig config = Configure(template).AddFilter(new BenchmarkDotNet.Filters.AnyCategoriesFilter([Categories.HotPath]));
-    Summary[] summaries = BenchmarkRunner.Run(typeof(Program).Assembly, config);
+    // A class held to its allocation alone needs its figure only once: bytes per operation do
+    // not settle over iterations the way time does. Its ratio is still reported, and is noisier
+    // for the shorter run, but it is not gated.
+    Job allocationOnly = Job.Default
+        .WithWarmupCount(1)
+        .WithIterationCount(3)
+        .WithIterationTime(TimeInterval.FromMilliseconds(50));
+
+    IConfig timedConfig = Configure(timed)
+        .AddFilter(new BenchmarkDotNet.Filters.AnyCategoriesFilter([Categories.HotPath]))
+        .AddFilter(new BenchmarkDotNet.Filters.SimpleFilter(b => !b.Descriptor.HasCategory(Categories.AllocationOnly)));
+    IConfig allocationConfig = Configure(allocationOnly)
+        .AddFilter(new BenchmarkDotNet.Filters.AllCategoriesFilter([Categories.HotPath, Categories.AllocationOnly]));
+
+    Summary[] summaries =
+    [
+        .. BenchmarkRunner.Run(typeof(Program).Assembly, timedConfig),
+        .. BenchmarkRunner.Run(typeof(Program).Assembly, allocationConfig),
+    ];
     return Gate.Evaluate(summaries, baselines, measured, update);
 }
 

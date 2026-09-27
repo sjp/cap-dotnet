@@ -19,7 +19,9 @@ internal static class Categories
     /// <summary>
     /// Hot-path benchmarks the regression gate holds to their allocation alone. Their time ratio
     /// to <c>System.IO</c> is still reported, but it moves between hosted runners by more than the
-    /// gate's tolerance on unchanged code, so gating it would fail at random.
+    /// gate's tolerance on unchanged code, so gating it would fail at random. The gate runs
+    /// them with a far shorter job than the timed classes, since allocation does not need
+    /// iterations to settle.
     /// </summary>
     public const string AllocationOnly = "AllocationOnly";
 

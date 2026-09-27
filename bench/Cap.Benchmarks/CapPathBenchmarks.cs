@@ -35,7 +35,7 @@ namespace Cap.Benchmarks;
 /// </para>
 /// </remarks>
 [MemoryDiagnoser]
-[BenchmarkCategory(Categories.HotPath, Categories.BackendIndependent)]
+[BenchmarkCategory(Categories.HotPath, Categories.BackendIndependent, Categories.AllocationOnly)]
 public class CapPathBenchmarks
 {
     private const string SingleComponent = "config.json";
