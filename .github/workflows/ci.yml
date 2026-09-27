@@ -29,6 +29,9 @@ jobs:
         include:
           - name: linux-x64 (openat2)
             os: ubuntu-latest
+          - name: linux-x64 (openat2 denied, in memory)
+            os: ubuntu-latest
+            passes_only: true
             deny_openat2: EPERM
             in_memory: [in-memory-walk]
           - name: linux-x64 (forced fallback)
@@ -46,6 +49,9 @@ jobs:
             # fallback -- tests still pass, and the fast path is never exercised again.
           - name: windows-x64
             os: windows-latest
+          - name: windows-x64 (in memory)
+            os: windows-latest
+            passes_only: true
             in_memory: [in-memory-walk, in-memory-confined]
           - name: macos-arm64
             os: macos-latest
@@ -133,7 +139,7 @@ jobs:
       # untested on every leg.
       # ---------------------------------------------------------------------------------
       - name: Enable 8.3 short-name generation on the volume the tests run on
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Windows' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Windows' && !matrix.passes_only }}
         shell: pwsh
         run: |
           $volume = (Split-Path -Qualifier ([System.IO.Path]::GetTempPath()))
@@ -142,7 +148,7 @@ jobs:
           "CAPDOTNET_EXPECT_SHORT_NAMES=1" >> $env:GITHUB_ENV
 
       - name: Prepare a bind mount for the escape corpus
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' && !matrix.passes_only }}
         run: |
           echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
@@ -153,13 +159,13 @@ jobs:
       # suite runs on the Linux legs; elsewhere its cases skip.
       # ---------------------------------------------------------------------------------
       - name: Fetch the WASI test suite
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' && !matrix.passes_only }}
         run: |
           echo "CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
           echo "CAPDOTNET_EXPECT_WASI_TESTSUITE=1" >> "$GITHUB_ENV"
 
       - name: Test
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !matrix.passes_only }}
         env:
           CAPDOTNET_DISABLE_OPENAT2: ${{ matrix.disable_openat2 }}
         run: >
@@ -167,7 +173,7 @@ jobs:
           -- --coverage --coverage-output-format cobertura
 
       - name: Run the samples
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && !matrix.passes_only }}
         shell: bash
         run: |
           set -euo pipefail
@@ -180,7 +186,7 @@ jobs:
           done
 
       - name: Upload coverage
-        if: always()
+        if: ${{ always() && !matrix.passes_only }}
         uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.name }}
@@ -253,7 +259,7 @@ jobs:
           --configuration Release
 
   nativeaot:
-    name: NativeAOT and trimming (${{ matrix.name }})
+    name: NativeAOT and trimming (${{ matrix.name }}${{ matrix.shard && format(', {0}', matrix.shard) || '' }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -261,10 +267,18 @@ jobs:
         include:
           - name: linux-x64
             os: ubuntu-latest
+            parts: [native, single-file, sample]
           - name: windows-x64
+            shard: native
             os: windows-latest
+            parts: [native]
+          - name: windows-x64
+            shard: single file
+            os: windows-latest
+            parts: [single-file, sample]
           - name: macos-arm64
             os: macos-latest
+            parts: [native, single-file, sample]
     defaults:
       run:
         shell: pwsh
@@ -296,24 +310,29 @@ jobs:
           echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
 
       - name: Publish the escape corpus as a NativeAOT executable
+        if: contains(matrix.parts, 'native')
         run: >
           dotnet publish tests/Cap.Escape.Aot.Tests/Cap.Escape.Aot.Tests.csproj
           --configuration Release --use-current-runtime -p:CapPublishAs=native
           --output "${{ runner.temp }}/corpus-native"
 
       - name: Run the escape corpus as a NativeAOT executable
+        if: contains(matrix.parts, 'native')
         run: '& "${{ runner.temp }}/corpus-native/Cap.Escape.Aot.Tests"'
 
       - name: Publish the escape corpus trimmed, as a single file
+        if: contains(matrix.parts, 'single-file')
         run: >
           dotnet publish tests/Cap.Escape.Aot.Tests/Cap.Escape.Aot.Tests.csproj
           --configuration Release --use-current-runtime -p:CapPublishAs=single-file
           --output "${{ runner.temp }}/corpus-single-file"
 
       - name: Run the escape corpus trimmed, as a single file
+        if: contains(matrix.parts, 'single-file')
         run: '& "${{ runner.temp }}/corpus-single-file/Cap.Escape.Aot.Tests"'
 
       - name: Publish the archive extractor sample as a NativeAOT executable
+        if: contains(matrix.parts, 'sample')
         run: >
           dotnet publish samples/ArchiveExtractor/ArchiveExtractor.csproj
           --configuration Release --use-current-runtime
@@ -322,9 +341,11 @@ jobs:
       # With no arguments the sample extracts a hostile archive of its own and fails if
       # anything was written outside the destination.
       - name: Run the archive extractor sample
+        if: contains(matrix.parts, 'sample')
         run: '& "${{ runner.temp }}/sample/ArchiveExtractor"'
 
       - name: Record the sample's size
+        if: contains(matrix.parts, 'sample')
         run: |
           $binary = Get-ChildItem "${{ runner.temp }}/sample" |
             Where-Object { $_.BaseName -eq 'ArchiveExtractor' -and $_.Extension -in '', '.exe' }
