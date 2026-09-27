@@ -1,4 +1,5 @@
 using System.Text;
+using Cap.Escape.Tests;
 using Cap.Primitives;
 using Cap.Rand;
 using Cap.Std;
@@ -23,7 +24,13 @@ namespace WasiHost.Tests;
 /// the reason. Each of those is asserted to fail, so that closing a gap turns its entry red
 /// until the entry is removed, and the list cannot outlive what it describes.
 /// </para>
+/// <para>
+/// Each program's root is opened by path, through the host, so the class runs in the corpus's
+/// group: a corpus case replaces the host for its duration, and a root opened meanwhile would
+/// resolve through whichever backend that case had installed.
+/// </para>
 /// </remarks>
+[Collection(CorpusGroup.Name)]
 public sealed class WasiTestsuiteTests
 {
     /// <summary>

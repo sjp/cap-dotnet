@@ -25,9 +25,11 @@ namespace Cap.Primitives.Tests;
 /// </para>
 /// <para>
 /// All of it is the platform's own behaviour, so none of it can be asserted anywhere but on
-/// the platform itself.
+/// the platform itself. The directories are opened through the host, so the class runs in
+/// the group that keeps it apart from the tests that replace it.
 /// </para>
 /// </remarks>
+[Collection(PlatformOpsTestGroup.Name)]
 public sealed class WindowsDeviceHandleTests
 {
     /// <summary>

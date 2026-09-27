@@ -13,10 +13,13 @@ namespace Cap.Primitives.Tests;
 /// number to the kernel, an index to the simulation. So each handle records its backend, every
 /// handle produced from it records the same one, and resolution goes through that backend
 /// rather than through whatever the process's host happens to be. These tests use the
-/// simulation and a real directory side by side. They replace nothing process-wide, and so
-/// they run in parallel with everything else.
+/// simulation and a real directory side by side. They replace nothing process-wide, but the
+/// real directory is opened through the host, so they run in the group that keeps them apart
+/// from the tests that replace it: a host replaced mid-test would hand them a simulated
+/// directory where a real one was meant.
 /// </para>
 /// </remarks>
+[Collection(PlatformOpsTestGroup.Name)]
 public sealed class HandleBackendTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("cap-backend-").FullName;
