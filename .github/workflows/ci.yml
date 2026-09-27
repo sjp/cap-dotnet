@@ -386,6 +386,11 @@ jobs:
   # or a parse decision, so a silent drop in coverage there means an untested path through
   # the part of the tree that the whole guarantee rests on. The other assemblies are thin
   # by comparison and are not gated.
+  #
+  # The reports from every leg of build-test are merged first, because each platform
+  # backend is reached only on its own platform. The floors sit just under the rates a
+  # single Linux leg reaches on its own, so the merged figure the step prints is the one to
+  # raise them towards. The job stays advisory: a drop shows red without failing the run.
   # ---------------------------------------------------------------------------------
   coverage-gate:
     name: coverage gate (Cap.Primitives)
@@ -400,12 +405,8 @@ jobs:
           path: coverage
           merge-multiple: true
       - name: Fail on a coverage drop in Cap.Primitives
-        run: |
-          echo "TODO: read the cobertura reports under coverage/, take the line and branch"
-          echo "rate for Cap.Primitives, and fail if either falls below the committed"
-          echo "threshold. Blocked until Cap.Primitives has code: a rate computed over an"
-          echo "empty assembly is not a number worth gating on."
-          exit 1
+        # Arguments: report directory, package, minimum line rate, minimum branch rate.
+        run: build/ci/check-coverage.sh coverage Cap.Primitives 0.47 0.45
 
   # ---------------------------------------------------------------------------------
   # The analyzer reaches consumers inside the Cap.Std package, not through a project
