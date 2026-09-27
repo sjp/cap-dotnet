@@ -51,13 +51,13 @@ jobs:
             os: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.name }}
           path: "**/*.cobertura.xml"
@@ -196,11 +196,11 @@ jobs:
         fs: [tmpfs, ext4, overlayfs, vfat-case-insensitive]
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
@@ -270,12 +270,12 @@ jobs:
         shell: pwsh
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
@@ -339,8 +339,8 @@ jobs:
     needs: build-test
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           path: coverage
@@ -352,8 +352,8 @@ jobs:
     name: analyzer ships in Cap.Std
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Pack, install into a fresh consumer, and check the diagnostics
@@ -363,11 +363,11 @@ jobs:
     name: pack and check reproducibility
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
@@ -376,7 +376,7 @@ jobs:
         run: build/ci/pack.sh "$RUNNER_TEMP/feed" "0.0.0-ci.${{ github.run_number }}"
       - name: Build again from another directory and compare the assemblies
         run: build/ci/check-reproducible.sh "$RUNNER_TEMP/reproducible"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages
           path: ${{ runner.temp }}/feed/*.nupkg
@@ -397,11 +397,11 @@ jobs:
           - name: macos-arm64
             os: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: ${{ runner.temp }}/feed
@@ -426,11 +426,11 @@ jobs:
           - name: macos-arm64
             os: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
@@ -439,7 +439,7 @@ jobs:
         run: dotnet run --configuration Release --project bench/Cap.Benchmarks -- gate
       - name: Upload the figures
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: benchmark-gate-${{ matrix.name }}
           path: BenchmarkDotNet.Artifacts/
@@ -450,11 +450,11 @@ jobs:
     name: format + analyzers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
