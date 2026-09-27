@@ -39,8 +39,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -74,13 +74,13 @@ jobs:
             unzip -q "$nupkg" '*.dll' -d "$RUNNER_TEMP/assemblies/$(basename "$nupkg" .nupkg)"
           done
 
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             ${{ runner.temp }}/feed/*.nupkg
             ${{ runner.temp }}/assemblies/**/*.dll
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: packages
           path: ${{ runner.temp }}/feed/*.nupkg
@@ -100,11 +100,11 @@ jobs:
           - name: macos-arm64
             os: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: ${{ runner.temp }}/feed
@@ -123,10 +123,10 @@ jobs:
       contents: write
       id-token: write
     steps:
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: packages
           path: ${{ runner.temp }}/feed
