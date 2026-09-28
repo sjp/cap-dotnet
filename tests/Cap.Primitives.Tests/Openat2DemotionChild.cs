@@ -27,10 +27,19 @@ namespace Cap.Primitives.Tests;
 internal static class Openat2DemotionChild
 {
     /// <summary>
-    /// Set to <c>EPERM</c> or <c>ENOSYS</c> to make this process a probe report rather than
-    /// a test run.
+    /// Set to <c>EPERM</c>, <c>EACCES</c> or <c>ENOSYS</c> to make this process a probe
+    /// report rather than a test run, or to one of the working-directory requests below.
     /// </summary>
     public const string RequestVariable = "CAPDOTNET_TEST_PROBE_CHILD";
+
+    /// <summary>
+    /// Probe with no filter, from whatever working directory the parent started this process
+    /// in — which the parent makes one this process may search but not list.
+    /// </summary>
+    public const string UnreadableWorkingDirectory = "CWD-0111";
+
+    /// <summary>Probe with no filter, after removing this process's own working directory.</summary>
+    public const string RemovedWorkingDirectory = "CWD-REMOVED";
 
     /// <summary>Marks the one line of output the parent reads.</summary>
     public const string ReportPrefix = "probe-report ";
@@ -58,10 +67,27 @@ internal static class Openat2DemotionChild
     [SupportedOSPlatform("linux")]
     private static string Describe(string requested)
     {
-        if (!SeccompFilter.TryParseErrno(requested, out int errno) ||
+        string filter;
+        if (requested is UnreadableWorkingDirectory)
+        {
+            filter = "none";
+        }
+        else if (requested is RemovedWorkingDirectory)
+        {
+            string doomed = Path.Combine(Path.GetTempPath(), "cap-probe-cwd-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(doomed);
+            Directory.SetCurrentDirectory(doomed);
+            Directory.Delete(doomed);
+            filter = "none";
+        }
+        else if (!SeccompFilter.TryParseErrno(requested, out int errno) ||
             !SeccompFilter.TryDenyOpenat2(errno))
         {
             return "filter=" + FilterUnavailable;
+        }
+        else
+        {
+            filter = "installed";
         }
 
         LinuxPlatformOps ops = new();
@@ -75,7 +101,7 @@ internal static class Openat2DemotionChild
 
         return string.Create(
             CultureInfo.InvariantCulture,
-            $"filter=installed backend={ops.Capabilities.Backend} errno={ops.ConfinedOpenProbeErrno} " +
+            $"filter={filter} backend={ops.Capabilities.Backend} errno={ops.ConfinedOpenProbeErrno} " +
             $"attempts={ops.ConfinedOpenAttempts} first={first} second={second} " +
             $"reason={ops.ConfinedOpenUnavailableReason}");
     }
@@ -83,8 +109,10 @@ internal static class Openat2DemotionChild
     [SupportedOSPlatform("linux")]
     private static CapErrorCategory AttemptConfinedOpen(LinuxPlatformOps ops)
     {
+        // Not the working directory: some runs start this process in one it may not list, or
+        // remove it from under itself, and the attempts must not fail for that reason.
         CapResult<SafeDirHandle> root = ops.OpenAmbientDirectory(
-            Environment.CurrentDirectory, CapAccess.Read);
+            Path.GetTempPath(), CapAccess.Read);
         if (!root.IsSuccess)
         {
             return root.Error.Category;

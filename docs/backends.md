@@ -181,6 +181,15 @@ its own right. So:
 - The capability probe runs once at startup and caches its result, including **both**
   `ENOSYS` (kernel too old) and `EPERM` (seccomp). Retrying per call would be a syscall
   storm in exactly the deployments that can least afford it.
+- The probe asks only whether the syscall can be made: it issues an `O_PATH` open of `/`
+  beneath itself with `RESOLVE_BENEATH | RESOLVE_NO_MAGICLINKS`, which needs no permission
+  on any directory and does not depend on the working directory. Exactly four answers
+  demote to the walk: `ENOSYS` (kernel too old), `EPERM` or `EACCES` (a seccomp filter;
+  runtimes use either), and `EINVAL` (a malformed `open_how`, which is a library bug and
+  is reported as one). Any other failure is retried once against the working directory,
+  and if that too fails for another reason the probe throws `PlatformNotSupportedException`
+  (surfacing as a `TypeInitializationException` from the platform layer) rather than
+  running the process on a weaker backend without saying why.
 - The selected backend is reportable at runtime (see [below](#which-backend-is-running)),
   and the CI fallback leg asserts the `openat2` call count is zero. A forced-fallback job that quietly keeps using `openat2`
   tests nothing at all.

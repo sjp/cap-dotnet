@@ -128,6 +128,10 @@ internal static unsafe partial class SeccompFilter
                 errno = 1;
                 return true;
 
+            case "EACCES":
+                errno = 13;
+                return true;
+
             case "ENOSYS":
                 errno = 38;
                 return true;

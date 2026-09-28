@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
 using Cap.Tests;
@@ -30,6 +31,7 @@ public sealed class Openat2DemotionTests
 {
     [Theory]
     [InlineData("EPERM", 1)]
+    [InlineData("EACCES", 13)]
     [InlineData("ENOSYS", 38)]
     public void A_refused_confined_open_demotes_to_the_walk(string denial, int expectedErrno)
     {
@@ -69,6 +71,7 @@ public sealed class Openat2DemotionTests
     /// </remarks>
     [Theory]
     [InlineData("EPERM")]
+    [InlineData("EACCES")]
     [InlineData("ENOSYS")]
     public void A_demoted_process_stops_asking_the_kernel(string denial)
     {
@@ -93,10 +96,91 @@ public sealed class Openat2DemotionTests
     }
 
     /// <summary>
+    /// A working directory the process may search but not list does not cost it the
+    /// confined open.
+    /// </summary>
+    /// <remarks>
+    /// Service and chroot layouts start processes in exactly such a directory. The probe
+    /// once opened the working directory for reading to ask its question, so a refusal to
+    /// list it was read as a kernel without the syscall, and the whole process ran on the
+    /// walk without anything being wrong with the kernel.
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_working_directory_does_not_demote()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        RequireConfinedOpenOnThisHost();
+
+        string gate = Path.Combine(Path.GetTempPath(), "cap-probe-gate-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(gate);
+        try
+        {
+            File.SetUnixFileMode(gate, UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
+            string report = RunProbeChild(Openat2DemotionChild.UnreadableWorkingDirectory, gate);
+            AssertConfinedOpenKept(report);
+        }
+        finally
+        {
+            File.SetUnixFileMode(gate, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            Directory.Delete(gate);
+        }
+    }
+
+    /// <summary>
+    /// Nor does a working directory that no longer exists.
+    /// </summary>
+    [Fact]
+    public void A_removed_working_directory_does_not_demote()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        RequireConfinedOpenOnThisHost();
+
+        string report = RunProbeChild(Openat2DemotionChild.RemovedWorkingDirectory);
+        AssertConfinedOpenKept(report);
+    }
+
+    /// <summary>
+    /// The working-directory cases can only show the confined open was kept on a host whose
+    /// kernel serves it to the child.
+    /// </summary>
+    /// <remarks>
+    /// Judged by the kernel's answer rather than the backend: a run with the confined open
+    /// switched off still has a kernel that serves it, and the child is started without the
+    /// switch. A run under an installed filter does not, because the child inherits it.
+    /// </remarks>
+    [SupportedOSPlatform("linux")]
+    private static void RequireConfinedOpenOnThisHost()
+    {
+        LinuxPlatformOps ops = new();
+        if (ops.ConfinedOpenProbeErrno != 0)
+        {
+            Assert.Skip(
+                "The kernel refuses the confined open to this process (" +
+                ops.ConfinedOpenUnavailableReason + "), and a child would inherit the " +
+                "refusal, so there is nothing a working directory could take away from it.");
+        }
+    }
+
+    private static void AssertConfinedOpenKept(string report)
+    {
+        Assert.Contains("backend=" + ResolutionBackend.ConfinedOpen, report, StringComparison.Ordinal);
+        Assert.Contains("errno=0", report, StringComparison.Ordinal);
+        Assert.Contains("attempts=2", report, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Starts this same test program as a child, with the confined open denied, and returns
     /// the one line it reports.
     /// </summary>
-    private static string RunProbeChild(string denial)
+    private static string RunProbeChild(string denial, string? workingDirectory = null)
     {
         ProcessStartInfo start = new()
         {
@@ -104,6 +188,11 @@ public sealed class Openat2DemotionTests
             RedirectStandardError = true,
             UseShellExecute = false,
         };
+
+        if (workingDirectory is not null)
+        {
+            start.WorkingDirectory = workingDirectory;
+        }
 
         // The test program may have been started through its own launcher or through the
         // shared host, and only the first can be re-run by path alone.
