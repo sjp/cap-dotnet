@@ -27,6 +27,10 @@ on:
         description: Seconds per fuzz target
         default: "3600"
 
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
