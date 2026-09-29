@@ -496,7 +496,100 @@ public sealed class CopyTests : IDisposable
         using Dir source = _tree.Directory.OpenDir("source");
         using Dir destination = source.OpenDir("destination");
 
-        Assert.Throws<CapIOException>(() => source.CopyTo(destination));
+        CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination));
+        Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
+    }
+
+    /// <summary>
+    /// A destination deeper inside the source is refused when the copy reaches it, and what
+    /// was copied on the way down is left behind.
+    /// </summary>
+    /// <remarks>
+    /// The residue is pinned because the documentation promises it: the directories above the
+    /// destination have been recreated inside it by the time the copy finds out where it is.
+    /// The source holds nothing else, so what is left does not depend on listing order.
+    /// </remarks>
+    [Fact]
+    public void A_destination_deep_inside_the_source_leaves_the_directories_above_it_behind()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "outer", "destination"));
+
+        using Dir source = _tree.Directory.OpenDir("source");
+        using Dir destination = source.OpenDir(Path.Combine("outer", "destination"));
+
+        CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination));
+
+        Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
+        string left = Path.Combine(_tree.HostPath, "source", "outer", "destination");
+        Assert.Equal(["outer"], HostDirectory.GetFileSystemEntries(left).Select(Path.GetFileName));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(Path.Combine(left, "outer")));
+    }
+
+    /// <summary>
+    /// Two handles on one directory are refused before anything is read or written, whether
+    /// or not files may be replaced.
+    /// </summary>
+    /// <remarks>
+    /// Without the refusal, a copy that may not replace stops at the first directory with a
+    /// name it did not expect to find taken, and one that may replace rewrites every file onto
+    /// itself as a new file while listing the directory it is changing, then reports success.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_copy_onto_itself_is_refused_before_anything_is_written(bool overwrite)
+    {
+        Make("source", "a.txt");
+        Make("source", "sub", "b.txt");
+        DateTime written = new(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
+        HostFile.SetLastWriteTimeUtc(Path.Combine(_tree.HostPath, "source", "a.txt"), written);
+        HostFile.SetLastWriteTimeUtc(Path.Combine(_tree.HostPath, "source", "sub", "b.txt"), written);
+
+        using Dir source = _tree.Directory.OpenDir("source");
+        using Dir same = _tree.Directory.OpenDir("source");
+        CapFileId a = source.GetMetadata("a.txt").FileId;
+        CapFileId b = source.GetMetadata(Path.Combine("sub", "b.txt")).FileId;
+
+        CapIOException refused = Assert.Throws<CapIOException>(
+            () => source.CopyTo(same, new CopyOptions { Overwrite = overwrite }));
+
+        Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
+        Assert.Equal(a, source.GetMetadata("a.txt").FileId);
+        Assert.Equal(b, source.GetMetadata(Path.Combine("sub", "b.txt")).FileId);
+        Assert.Equal(written, HostFile.GetLastWriteTimeUtc(Path.Combine(_tree.HostPath, "source", "a.txt")));
+        Assert.Equal(written, HostFile.GetLastWriteTimeUtc(Path.Combine(_tree.HostPath, "source", "sub", "b.txt")));
+        Assert.Equal(
+            ["a.txt", "sub"],
+            HostDirectory.GetFileSystemEntries(Path.Combine(_tree.HostPath, "source")).Select(Path.GetFileName).Order());
+        Assert.Equal(
+            ["b.txt"],
+            HostDirectory.GetFileSystemEntries(Path.Combine(_tree.HostPath, "source", "sub")).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// A copy onto itself through handles that are not a <see cref="Dir"/> is refused having
+    /// done nothing but ask each handle what it is.
+    /// </summary>
+    /// <remarks>
+    /// Two wrappers compare identities only when both report a backend on the host's own
+    /// filesystem, which a filesystem held in memory is not.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("Identities of handles that are not a Dir are compared only on the host's filesystem.")]
+    public void A_copy_onto_itself_through_the_interface_is_refused_without_reading_or_writing()
+    {
+        Make("source", "a.txt");
+        Make("source", "sub", "b.txt");
+
+        List<string> log = [];
+        using RecordingDir source = new(_tree.Directory.OpenDir("source"), log, "src");
+        using RecordingDir same = new(_tree.Directory.OpenDir("source"), log, "same");
+
+        CapIOException refused = Assert.Throws<CapIOException>(
+            () => source.CopyTo(same, new CopyOptions { Overwrite = true }));
+
+        Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
+        Assert.Equal(["same: GetMetadata()", "src: GetMetadata()"], log);
     }
 
     /// <summary>A source deeper than the limit stops the copy.</summary>

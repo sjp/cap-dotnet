@@ -61,10 +61,14 @@ public static partial class DirExtensions
     /// creates that directory and passes a handle on it.
     /// </para>
     /// <para>
-    /// <strong>The destination must not be inside the source.</strong> A copy into its own
-    /// subtree would copy what it had just written, without end, so it is refused as soon as
-    /// the copy reaches the directory in question rather than being allowed to run. The
-    /// reverse — a source inside the destination — is an ordinary copy and is allowed.
+    /// <strong>The destination must not be the source or inside it.</strong> A destination
+    /// that is the source directory itself is refused before anything is read or written. A
+    /// copy into its own subtree would copy what it had just written, without end, so it is
+    /// refused as soon as the copy reaches the directory in question rather than being allowed
+    /// to run; whatever the copy had reached before it — the directories above it, and
+    /// anything listed ahead of them — has by then been copied into the destination and is
+    /// left there. The reverse — a source inside the destination — is an ordinary copy and is
+    /// allowed.
     /// </para>
     /// <para>
     /// <strong>It is not atomic and it is not a snapshot.</strong> A source that is being
@@ -124,7 +128,7 @@ public static partial class DirExtensions
     /// <exception cref="FileNotFoundException">An entry went away while it was being copied.</exception>
     /// <exception cref="CapIOException">
     /// The source holds something the options say to refuse, a destination name is already
-    /// taken, the destination lies inside the source, permissions were to be preserved and the
+    /// taken, the destination is the source or lies inside it, permissions were to be preserved and the
     /// destination would not take them, or the copy failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
@@ -210,9 +214,24 @@ public static partial class DirExtensions
             // one on disk, cannot be inside the source, and the two backends number their
             // objects independently, so an identity from one can equal an identity from the
             // other by coincidence. Comparing them would refuse a copy for no reason.
-            _destinationRoot = Handles.ShareIdentities(source, destination)
-                ? destination.GetMetadata().FileId
-                : null;
+            if (Handles.ShareIdentities(source, destination))
+            {
+                CapFileId destinationRoot = destination.GetMetadata().FileId;
+
+                // Two handles on one directory. Without replacement the copy would stop at the
+                // first directory, finding its own name taken; with it, every file would be
+                // rewritten onto itself while the directory holding it was being read.
+                if (source.GetMetadata().FileId == destinationRoot)
+                {
+                    throw new CapIOException(
+                        CapErrorKind.InvalidArgument,
+                        "The destination is the source directory itself; a copy needs two " +
+                        "different directories.");
+                }
+
+                _destinationRoot = destinationRoot;
+            }
+
             Destination = destination;
         }
 

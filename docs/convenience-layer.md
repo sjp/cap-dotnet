@@ -275,7 +275,12 @@ the source had and the copy's caller did not ask for.
   created for it.
 
 A destination inside the source is refused, noticed by identity rather than by comparing
-names. Left to run it would copy what it had just written, and then copy that.
+names. Left to run it would copy what it had just written, and then copy that. A destination
+that is the source directory itself is refused before anything is read or written. One
+strictly inside it is refused when the copy reaches it, so by then the destination already
+holds whatever came before: the source's directories on the way down to it, recreated inside
+it, and every entry listed ahead of them. That is left in place, as after any other failure
+part of the way through, for the caller to remove.
 
 **Windows: an alternate data stream is not copied.** A file with one arrives at the
 destination holding only its main contents, silently, because there is no portable way to
