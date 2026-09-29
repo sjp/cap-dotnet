@@ -72,6 +72,18 @@ public sealed class BuildingTests
         InMemoryFileSystem unix = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Unix });
         unix.AddFile(@"a\b", "x");
         Assert.Equal([@"a\b"], unix.GetEntries());
+
+        // 200 characters is 400 UTF-8 bytes, past what Linux stores in a name, but only 200
+        // UTF-16 units, which Windows stores.
+        string name = new('é', 200);
+        Assert.Throws<ArgumentException>(() => unix.AddFile(name, "x"));
+        Assert.Throws<ArgumentException>(() => unix.AddDirectory("d/" + name));
+        Assert.Throws<ArgumentException>(() => unix.AddSymbolicLink(name, "a"));
+        Assert.Throws<ArgumentException>(() => unix.AddHardLink(name, @"a\b"));
+        Assert.Equal([@"a\b"], unix.GetEntries());
+
+        windows.AddFile(name, "x");
+        Assert.Equal([name], windows.GetEntries());
     }
 
     [Fact]

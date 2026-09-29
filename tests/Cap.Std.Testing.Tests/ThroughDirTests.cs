@@ -266,6 +266,45 @@ public sealed class ThroughDirTests
 
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_name_longer_than_linux_stores_in_bytes_is_refused_by_every_single_name_operation(ResolutionBackend resolution)
+    {
+        // 200 characters, 400 UTF-8 bytes: within the parser's character limit, past NAME_MAX.
+        string name = new('é', 200);
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("existing", "x");
+        using Dir root = fs.OpenRoot();
+
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.WriteAllBytes(name, [1]))));
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.CreateDir(name))));
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.CreateSymlink(name, "existing"))));
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.CreateHardLink("existing", root, name))));
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.Rename("existing", root, name))));
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.Rename(name, root, "moved"))));
+        Assert.Equal(["existing"], fs.GetEntries());
+
+        // 255 bytes exactly is still a name.
+        string longest = new string('é', 127) + "a";
+        root.WriteAllBytes(longest, [1]);
+        Assert.True(fs.Exists(longest));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void Under_windows_rules_a_name_is_measured_in_utf16_units(ResolutionBackend resolution)
+    {
+        string name = new('é', 200);
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { Resolution = resolution, PathSyntax = CapPathSyntax.Windows });
+        using Dir root = fs.OpenRoot();
+
+        root.WriteAllBytes(name, [1]);
+        root.CreateDir(name + "d").Dispose();
+        root.Rename(name, root, name + "r");
+
+        Assert.Equal([name + "d", name + "r"], fs.GetEntries());
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public void Scratch_directories_and_files_work_beneath_a_root(ResolutionBackend resolution)
     {
         InMemoryFileSystem fs = Resolutions.Create(resolution);

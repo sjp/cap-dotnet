@@ -43,6 +43,14 @@ internal static class MemoryPathWalk
     public const int MaxNameLength = 255;
 
     /// <summary>
+    /// Whether <paramref name="name"/> is longer than <see cref="MaxNameLength"/>, measured as
+    /// <paramref name="syntax"/>'s system measures it: UTF-8 bytes under Unix rules, UTF-16
+    /// units under Windows rules.
+    /// </summary>
+    public static bool NameTooLong(ReadOnlySpan<char> name, CapPathSyntax syntax) =>
+        (syntax == CapPathSyntax.Windows ? name.Length : PathEncoding.GetByteCount(name)) > MaxNameLength;
+
+    /// <summary>
     /// Resolves <paramref name="path"/> beneath <paramref name="start"/>.
     /// </summary>
     /// <param name="start">The directory resolution is confined to.</param>
@@ -105,8 +113,7 @@ internal static class MemoryPathWalk
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
             }
 
-            int length = syntax == CapPathSyntax.Windows ? component.Length : PathEncoding.GetByteCount(component);
-            if (length > MaxNameLength)
+            if (NameTooLong(component, syntax))
             {
                 return CapError.FromCategory(CapErrorCategory.NameTooLong);
             }

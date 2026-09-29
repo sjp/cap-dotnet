@@ -1211,6 +1211,15 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.PermissionDenied);
         }
 
+        // The kernel refuses a name longer than it looks up before the lookup, for every call
+        // that takes one, and after the search permission it needs to get there -- the order
+        // the confined walk keeps too.
+        if (MemoryPathWalk.NameTooLong(name, _fs.PathSyntax))
+        {
+            directory = null;
+            return CapError.FromCategory(CapErrorCategory.NameTooLong);
+        }
+
         node = directory.Entries.GetValueOrDefault(name.ToString());
         if (node is not null)
         {

@@ -851,10 +851,12 @@ public sealed class InMemoryFileSystem
             bool separator = PathSyntax == CapPathSyntax.Windows && component.Contains('\\');
             if (separator ||
                 component is "." or ".." ||
-                CapPath.Validate(component, PathSyntax, ParentLinkPolicy.Reject) != CapPathError.None)
+                CapPath.Validate(component, PathSyntax, ParentLinkPolicy.Reject) != CapPathError.None ||
+                MemoryPathWalk.NameTooLong(component, PathSyntax))
             {
                 throw new ArgumentException(
-                    $"'{component}' in '{path}' is not a name this filesystem's handles could reach under {PathSyntax} rules.",
+                    $"'{component}' in '{path}' is not a name this filesystem's handles could reach under {PathSyntax} rules " +
+                    $"(a name is at most {MemoryPathWalk.MaxNameLength} {(WindowsRules ? "UTF-16 units" : "UTF-8 bytes")}).",
                     nameof(path));
             }
         }
