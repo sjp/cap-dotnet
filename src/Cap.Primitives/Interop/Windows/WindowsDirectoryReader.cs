@@ -69,6 +69,7 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
     private const int FullNameField = 80;
 
     private readonly SafeDirHandle _handle;
+    private readonly bool _extendedQuery;
     private bool _wideIdentifiers = true;
     private byte[]? _buffer;
     private int _filled;
@@ -87,8 +88,22 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
     /// sharing one object would consume each other's entries.
     /// </remarks>
     public WindowsDirectoryReader(SafeDirHandle handle)
+        : this(handle, DirectoryQueryEntryPoint.UsesExtended)
+    {
+    }
+
+    /// <summary>
+    /// Takes ownership of <paramref name="handle"/>, reading it with the query named rather
+    /// than the one this process chose.
+    /// </summary>
+    /// <remarks>
+    /// So that the older query, which only a Windows older than any test agent would
+    /// otherwise reach, can be read with on every Windows run.
+    /// </remarks>
+    internal WindowsDirectoryReader(SafeDirHandle handle, bool extendedQuery)
     {
         _handle = handle;
+        _extendedQuery = extendedQuery;
         _buffer = ArrayPool<byte>.Shared.Rent(BufferBytes);
     }
 
@@ -263,19 +278,34 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
             // would read the first bufferful over and over; leaving it off the first would
             // continue a scan the previous holder of this object started, and this handle was
             // opened for this enumeration alone precisely so there is no such thing.
-            return NtNative.NtQueryDirectoryFileEx(
-                handle,
-                0,
-                0,
-                0,
-                status,
-                buffer,
-                (uint)_buffer!.Length,
-                _wideIdentifiers
-                    ? NtConstants.FileIdExtdDirectoryInformationClass
-                    : NtConstants.FileIdFullDirectoryInformationClass,
-                _restart ? NtConstants.SL_RESTART_SCAN : 0,
-                null);
+            uint informationClass = _wideIdentifiers
+                ? NtConstants.FileIdExtdDirectoryInformationClass
+                : NtConstants.FileIdFullDirectoryInformationClass;
+
+            return _extendedQuery
+                ? NtNative.NtQueryDirectoryFileEx(
+                    handle,
+                    0,
+                    0,
+                    0,
+                    status,
+                    buffer,
+                    (uint)_buffer!.Length,
+                    informationClass,
+                    _restart ? NtConstants.SL_RESTART_SCAN : 0,
+                    null)
+                : NtNative.NtQueryDirectoryFile(
+                    handle,
+                    0,
+                    0,
+                    0,
+                    status,
+                    buffer,
+                    (uint)_buffer!.Length,
+                    informationClass,
+                    returnSingleEntry: 0,
+                    null,
+                    restartScan: _restart ? (byte)1 : (byte)0);
         }
     }
 

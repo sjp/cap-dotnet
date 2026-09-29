@@ -1,5 +1,7 @@
+using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
+using Cap.Primitives.Interop.Windows;
 using Cap.Std.Testing;
 using Cap.Tests.Fakes;
 
@@ -190,6 +192,93 @@ public sealed class DirectoryReaderTests : IDisposable
         }
 
         Assert.Equal(2, seen);
+    }
+
+    /// <summary>
+    /// Where the extended directory query is not exported, the older one is chosen.
+    /// </summary>
+    /// <remarks>
+    /// The case is a Windows older than version 1709, which no test agent is, so the export
+    /// lookup is answered here instead of asked of the host.
+    /// </remarks>
+    [Fact]
+    public void The_older_directory_query_is_chosen_where_the_extended_one_is_not_exported()
+    {
+        Assert.False(DirectoryQueryEntryPoint.Choose(_ => false));
+        Assert.True(DirectoryQueryEntryPoint.Choose(name => name == "NtQueryDirectoryFileEx"));
+        Assert.False(DirectoryQueryEntryPoint.Choose(name => name == "NtQueryDirectoryFile"));
+    }
+
+    /// <summary>
+    /// The export lookup the choice is made from answers both ways on a real ntdll.
+    /// </summary>
+    /// <remarks>
+    /// A lookup that answered yes to everything would keep the extended query on a system
+    /// without it, and the failure would only show there.
+    /// </remarks>
+    [Fact]
+    public void The_export_lookup_tells_a_present_export_from_a_missing_one()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("ntdll exists only on Windows.");
+            return;
+        }
+
+        Assert.True(DirectoryQueryEntryPoint.IsExported("NtQueryDirectoryFile"));
+        Assert.False(DirectoryQueryEntryPoint.IsExported("NtQueryDirectoryFileNoSuchExport"));
+    }
+
+    /// <summary>
+    /// The older directory query reads the same entries, kinds and identities as the extended
+    /// one, across more than one bufferful.
+    /// </summary>
+    /// <remarks>
+    /// The older query is what a Windows before version 1709 reads every directory with, and
+    /// nothing else would call it on a test agent. More than one bufferful, because the restart
+    /// flag moved from a word of flags to a boolean of its own, and passing it on the wrong
+    /// read either repeats the first bufferful or continues a scan that was never started.
+    /// </remarks>
+    [Fact]
+    public void The_older_directory_query_reads_what_the_extended_one_reads()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The choice between the two queries exists only on Windows.");
+            return;
+        }
+
+        Directory.CreateDirectory(Path.Combine(_root, "directory"));
+        for (int i = 0; i < 3000; i++)
+        {
+            File.WriteAllText(Path.Combine(_root, $"entry-with-a-name-of-some-length-{i}"), "x");
+        }
+
+        Dictionary<string, (CapFileType Type, UInt128 NodeId)> extended = ReadWith(extendedQuery: true);
+        Dictionary<string, (CapFileType Type, UInt128 NodeId)> older = ReadWith(extendedQuery: false);
+
+        Assert.Equal(3001, older.Count);
+        Assert.Equal(extended, older);
+        Assert.Equal(CapFileType.Directory, older["directory"].Type);
+    }
+
+    /// <summary>Reads the root with the Windows query named, whatever this process chose.</summary>
+    [SupportedOSPlatform("windows")]
+    private Dictionary<string, (CapFileType Type, UInt128 NodeId)> ReadWith(bool extendedQuery)
+    {
+        Dictionary<string, (CapFileType, UInt128)> entries = new(StringComparer.Ordinal);
+        using DirectoryReader reader = new WindowsDirectoryReader(OpenRoot(CapAccess.Read), extendedQuery);
+        while (true)
+        {
+            CapError error = reader.Read(out bool advanced);
+            Assert.True(error.IsSuccess, error.FailureDescription);
+            if (!advanced)
+            {
+                return entries;
+            }
+
+            entries.Add(reader.CurrentName.ToString(), (reader.CurrentType, reader.CurrentNodeId));
+        }
     }
 
     /// <summary>

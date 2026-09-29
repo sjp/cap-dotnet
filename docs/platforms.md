@@ -29,6 +29,22 @@ what a program moving between Linux, macOS and Windows will notice.
 
 ## Windows
 
+**Minimum version: whatever .NET 10 runs on**, which is Windows 10 version 1607 and Windows
+Server 2016. Where the backend asks for something newer than that, it falls back to the older
+form when a system or filesystem does not offer it:
+
+| Newer form | Falls back to |
+|---|---|
+| `NtQueryDirectoryFileEx` (an ntdll export from Windows 10 1709) | `NtQueryDirectoryFile`, chosen once per process |
+| `FileIdExtdDirectoryInformation` (128-bit identifiers in a directory listing) | `FileIdFullDirectoryInformation` |
+| `FileDispositionInformationEx` (a removed name disappears at once, as on Unix) | `FileDispositionInformation`: the name lingers until the last handle closes |
+| `FileRenameInformationEx` (replacing a name that is open, as on Unix) | `FileRenameInformation` |
+
+Two classes have no fallback yet: `FileIdInformation`, which every metadata call reads, and
+`FileNormalizedNameInformation`, which the check on names containing `~` reads. On a filesystem
+that does not offer one, the calls that read it fail. No hosted CI runner is older than 1709, so the older
+directory query is exercised by forcing it on the Windows leg rather than on an old system.
+
 **Reserved device names are refused, in every disguise.** `CON`, `PRN`, `AUX`, `NUL`,
 `COM0`–`COM9`, `LPT0`–`LPT9`, their superscript-digit forms, `CONIN$` and `CONOUT$` all reach
 a device rather than a file, and so do `CON.txt`, `con`, `CON ` and `CON.tar.gz`. A path

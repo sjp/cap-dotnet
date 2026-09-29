@@ -106,6 +106,10 @@ internal static unsafe partial class NtNative
     /// for blocking IO, so the call returns when the buffer is filled and the event, the
     /// completion routine and its context are all unused.
     /// </para>
+    /// <para>
+    /// Exported only from Windows 10 version 1709 on; <see cref="NtQueryDirectoryFile"/> is
+    /// called in its place where it is missing.
+    /// </para>
     /// </remarks>
     [LibraryImport("ntdll.dll")]
     internal static partial int NtQueryDirectoryFileEx(
@@ -119,6 +123,37 @@ internal static unsafe partial class NtNative
         uint fileInformationClass,
         uint queryFlags,
         UnicodeString* fileName);
+
+    /// <summary>
+    /// Reads a run of directory entries into a buffer: the form of
+    /// <see cref="NtQueryDirectoryFileEx"/> every version of Windows exports.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The extended call is an export of Windows 10 version 1709 and later; before it, this
+    /// is the only one there is. The two differ only in how the options are passed — two
+    /// booleans here where the extended call has a word of flags — and the one option this
+    /// library uses, restarting the scan, is one of the two booleans. See
+    /// <see cref="DirectoryQueryEntryPoint"/> for which of them a process calls.
+    /// </para>
+    /// <para>
+    /// The booleans are the native one-byte kind, and are declared as bytes so that nothing
+    /// marshals them as the four-byte Win32 one.
+    /// </para>
+    /// </remarks>
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtQueryDirectoryFile(
+        nint fileHandle,
+        nint completionEvent,
+        nint completionRoutine,
+        nint completionContext,
+        IoStatusBlock* ioStatusBlock,
+        void* fileInformation,
+        uint length,
+        uint fileInformationClass,
+        byte returnSingleEntry,
+        UnicodeString* fileName,
+        byte restartScan);
 
     /// <summary>Reads one class of information about an open file.</summary>
     [LibraryImport("ntdll.dll")]
