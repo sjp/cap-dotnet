@@ -250,13 +250,33 @@ put it at 0.58 s of 4.5 s total analyzer time, spread across the compiler's thre
 SDK's own analyzers took the rest. Wall-clock build times with and without it were within
 run-to-run noise.
 
+## Compiler floor
+
+The analyzer needs .NET SDK 10.0.100 or later, which is also the oldest SDK that can build
+against the `net10.0` packages. A compiler loads an analyzer only if the analyzer was built
+against a compiler version no newer than its own. An older compiler reports `CS9057` and
+builds without the analyzer, so every `CAP` rule goes quiet, `[assembly: CapabilityStrict]`
+included, and a warning is the only sign. So the analyzer is built against the compiler in SDK
+10.0.100 (`Microsoft.CodeAnalysis.CSharp` 5.0.0), not the one this repository builds with.
+Dependabot does not raise that pin, because a newer pin raises the floor. `Directory.Packages.props`
+says what else has to move with it.
+
+The floor cannot fail quietly. `Cap.Std` carries `buildTransitive/Cap.Std.targets`, which adds
+`CS9057` to `WarningsAsErrors` in every project that installs the package, directly or through
+another package here. A compiler too old to load the analyzer then fails the build instead of
+skipping the analyzer. `CS9057` is not specific to this analyzer, so the error applies to any
+analyzer the compiler cannot load. A project that accepts that can add `CS9057` to `NoWarn`.
+
 ## Verifying the package
 
 [`build/ci/verify-analyzer-package.sh`](../build/ci/verify-analyzer-package.sh) packs
 `Cap.Std`, installs it into a project created outside the repository, and checks the
 promised defaults in a real build. With nothing configured, `CAP0003` and `CAP0005` report
 and `File.*` is left alone. With `[assembly: CapabilityStrict]`, `File.*` and the rest are
-errors and the build fails. CI runs it on every change.
+errors and the build fails. No build may report `CS9057`, and the package must make it an
+error. CI runs the script on every change twice, once with the SDK in `global.json` and once
+with SDK 10.0.100 building the consumer (`CAP_CONSUMER_SDK`), so the floor is exercised
+instead of only stated.
 
 [`build/ci/verify-package-install.sh`](../build/ci/verify-package-install.sh) covers the
 other way in. The other packages depend on `Cap.Std` with all of its assets, so a project that

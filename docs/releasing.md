@@ -10,7 +10,7 @@ package you have downloaded.
 
 | Package | Contents |
 |---|---|
-| `Cap.Std` | `Cap.Std.dll`, `Cap.Primitives.dll`, and the analyzer under `analyzers/dotnet/cs` |
+| `Cap.Std` | `Cap.Std.dll`, `Cap.Primitives.dll`, the analyzer under `analyzers/dotnet/cs`, and `buildTransitive/Cap.Std.targets`, which makes a compiler too old to load the analyzer (`CS9057`) an error |
 | `Cap.Fs.Ext` | `Cap.Fs.Ext.dll`; depends on `Cap.Std` |
 | `Cap.Net` | `Cap.Net.dll`; depends on `Cap.Std` |
 | `Cap.Time` | `Cap.Time.dll`; depends on `Cap.Std` |

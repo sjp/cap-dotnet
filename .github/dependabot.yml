@@ -8,6 +8,10 @@ updates:
     groups:
       nuget:
         patterns: ["*"]
+    # The compiler API Cap.Analyzers is built against is the oldest compiler it loads in, so
+    # it is raised by hand together with that floor; see Directory.Packages.props.
+    ignore:
+      - dependency-name: Microsoft.CodeAnalysis.CSharp
 
   - package-ecosystem: dotnet-sdk
     directory: /

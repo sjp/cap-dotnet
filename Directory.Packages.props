@@ -5,8 +5,20 @@
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
+  <!--
+    Microsoft.CodeAnalysis.CSharp is the compiler API Cap.Analyzers.dll is built against, and a
+    compiler loads an analyzer only when the version it references is no newer than its own;
+    otherwise it reports CS9057 and runs the build without it. So this is the oldest compiler the
+    analyzer supports, not the newest one available: 5.0.0 is the Roslyn in SDK 10.0.100, the
+    first SDK that can consume a net10.0 package. Raise it only together with the floor stated
+    in docs/analyzers.md and the oldest SDK the analyzer-package CI job builds a consumer with;
+    dependabot is told to leave it alone (.github/dependabot.yml). The analyzer tests compile
+    against the same version, so they also show the analyzer works on that API.
+    Microsoft.CodeAnalysis.Analyzers checks the analyzer's source at build time and is not
+    referenced by the shipped assembly, so it can stay current.
+  -->
   <ItemGroup Label="Analyzer authoring and testing (Cap.Analyzers)">
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
   </ItemGroup>
 

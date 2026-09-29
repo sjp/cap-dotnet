@@ -1,0 +1,22 @@
+<Project>
+
+  <!--
+    Imported into every project that installs Cap.Std, directly or through another package,
+    and makes CS9057 an error there.
+
+    A compiler loads an analyzer only when the compiler version the analyzer was built against
+    is no newer than its own. When it is newer, the compiler reports warning CS9057 and builds
+    without the analyzer, so every CAP rule, [assembly: CapabilityStrict] included, stops
+    reporting and the build still succeeds. The analyzer in this package is built against the
+    oldest compiler it supports (docs/analyzers.md gives the floor), so this should never fire;
+    if it does, the project is on a compiler older than that floor, and it is better told so
+    than left less contained than it believes.
+
+    CS9057 is not specific to one analyzer, so this also fails a build for any other analyzer
+    the project's compiler is too old to load. NoWarn with CS9057 turns the check off.
+  -->
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);CS9057</WarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

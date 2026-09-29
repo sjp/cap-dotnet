@@ -63,6 +63,15 @@
     </ItemGroup>
   </Target>
 
+  <!--
+    Makes a compiler too old to load the analyzer fail the build rather than skip the analyzer;
+    the reasons are in the file. buildTransitive, so that a project that has Cap.Std only
+    through Cap.Fs.Ext or another package here is covered as well.
+  -->
+  <ItemGroup>
+    <None Include="buildTransitive/Cap.Std.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Cap.Fs.Ext" />
     <InternalsVisibleTo Include="Cap.Net" />

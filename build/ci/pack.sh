@@ -159,7 +159,7 @@ done
 has Cap.Std.Testing buildTransitive/Cap.Std.Testing.targets \
   || fail "Cap.Std.Testing does not carry buildTransitive/Cap.Std.Testing.targets"
 
-for file in lib/net10.0/Cap.Primitives.dll lib/net10.0/Cap.Primitives.xml analyzers/dotnet/cs/Cap.Analyzers.dll; do
+for file in lib/net10.0/Cap.Primitives.dll lib/net10.0/Cap.Primitives.xml analyzers/dotnet/cs/Cap.Analyzers.dll buildTransitive/Cap.Std.targets; do
   has Cap.Std "$file" || fail "Cap.Std does not carry $file"
 done
 

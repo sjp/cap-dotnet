@@ -475,14 +475,33 @@ jobs:
         run: dotnet test tests/Cap.IO.Abstractions.Tests/Cap.IO.Abstractions.Tests.csproj --configuration Release
 
   analyzer-package:
-    name: analyzer ships in Cap.Std
+    name: analyzer ships in Cap.Std (consumer on ${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The SDK global.json names, which the package is always packed with.
+          - name: current SDK
+            consumer-sdk: ""
+          # The oldest SDK the analyzer is built to load in (docs/analyzers.md, "Compiler
+          # floor"). Raise it together with Microsoft.CodeAnalysis.CSharp in
+          # Directory.Packages.props.
+          - name: SDK 10.0.100
+            consumer-sdk: "10.0.100"
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        if: matrix.consumer-sdk != ''
+        with:
+          dotnet-version: ${{ matrix.consumer-sdk }}
+      # Last, so that it is the dotnet on PATH; both SDKs land in the same install.
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
       - name: Pack, install into a fresh consumer, and check the diagnostics
+        env:
+          CAP_CONSUMER_SDK: ${{ matrix.consumer-sdk }}
         run: build/ci/verify-analyzer-package.sh "$RUNNER_TEMP/analyzer-package"
 
   packages:
