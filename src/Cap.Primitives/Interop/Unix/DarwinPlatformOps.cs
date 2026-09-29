@@ -385,8 +385,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<DirectoryReader>.Fail(error);
         }
 
-        return CapResult<DirectoryReader>.Ok(new DarwinDirectoryReader(
-            stream, new SafeDirHandle(fd, this, CapAccess.Read, ownsHandle: false)));
+        return CapResult<DirectoryReader>.Ok(
+            new DarwinDirectoryReader(new DarwinDirectoryStreamHandle(stream, fd)));
     }
 
     /// <inheritdoc/>

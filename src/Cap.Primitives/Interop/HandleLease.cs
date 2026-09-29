@@ -18,7 +18,10 @@ namespace Cap.Primitives.Interop;
 /// <para>
 /// A lease that could not be taken reports <see cref="IsValid"/> as false rather than
 /// throwing, because every caller is already returning a <see cref="CapError"/> and has a
-/// natural place to put the failure.
+/// natural place to put the failure. That holds for a handle found closed at any point
+/// before it was pinned, one disposed on another thread while the lease was being taken
+/// included, so a disposal reaches every caller by the one route: the
+/// <see cref="CapErrorCategory.Closed"/> failure in <see cref="ClosedError"/>.
 /// </para>
 /// </remarks>
 internal readonly ref struct HandleLease
@@ -35,8 +38,19 @@ internal readonly ref struct HandleLease
             return;
         }
 
+        // The check above narrows the window but cannot close it: a disposal on another
+        // thread can land between it and the pin, and the pin then throws rather than
+        // reporting it.
         bool acquired = false;
-        handle.DangerousAddRef(ref acquired);
+        try
+        {
+            handle.DangerousAddRef(ref acquired);
+        }
+        catch (ObjectDisposedException)
+        {
+            acquired = false;
+        }
+
         _acquired = acquired;
     }
 

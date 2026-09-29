@@ -47,12 +47,8 @@ internal sealed class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
     /// refers to.
     /// </param>
     /// <param name="access">The authority the open was granted.</param>
-    /// <param name="ownsHandle">
-    /// Whether disposal should close it. False only where something else has taken the value
-    /// over and will close it itself, such as a directory stream built on the descriptor.
-    /// </param>
-    public SafeDirHandle(nint handle, IPlatformOps backend, CapAccess access, bool ownsHandle = true)
-        : base(ownsHandle)
+    public SafeDirHandle(nint handle, IPlatformOps backend, CapAccess access)
+        : base(ownsHandle: true)
     {
         ArgumentNullException.ThrowIfNull(backend);
 

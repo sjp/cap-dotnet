@@ -48,9 +48,17 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
     private const int KindOffset = 18;
     private const int NameOffset = 19;
 
+    // Whether a read is using the buffer, and whether the reader has been disposed: see
+    // Dispose.
+    private const int Idle = 0;
+    private const int Reading = 1;
+    private const int Disposed = 2;
+    private const int DisposedWhileReading = 3;
+
     private readonly SafeDirHandle _handle;
     private readonly bool _alwaysLookUp = UnixFileTypes.AlwaysLookUpKind;
     private byte[]? _buffer;
+    private int _state;
     private int _filled;
     private int _offset;
     private int _nameOffset;
@@ -73,13 +81,39 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// The buffer goes back to the pool only once no read is using it. A disposal on another
+    /// thread can land while the kernel is writing entries into the buffer or while a name in
+    /// it is being looked up, and handing it back then would give the next renter an array
+    /// this reader is still writing to. So a disposal that finds a read under way leaves the
+    /// buffer to that read, which returns it as it finishes.
+    /// </para>
+    /// <para>
+    /// The descriptor needs none of this: a lease on it defers its close until the read
+    /// holding the lease has let go.
+    /// </para>
+    /// </remarks>
     public override void Dispose()
     {
-        byte[]? buffer = _buffer;
-        _buffer = null;
-        if (buffer is not null)
+        while (true)
         {
-            ArrayPool<byte>.Shared.Return(buffer);
+            int state = Volatile.Read(ref _state);
+            if (state is Disposed or DisposedWhileReading)
+            {
+                break;
+            }
+
+            int next = state == Reading ? DisposedWhileReading : Disposed;
+            if (Interlocked.CompareExchange(ref _state, next, state) == state)
+            {
+                if (next == Disposed)
+                {
+                    ReturnBuffer();
+                }
+
+                break;
+            }
         }
 
         _handle.Dispose();
@@ -90,10 +124,68 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
     {
         advanced = false;
 
-        if (_buffer is null)
+        if (!TryBegin())
         {
             return HandleLease.ClosedError;
         }
+
+        try
+        {
+            return ReadEntry(out advanced);
+        }
+        finally
+        {
+            End();
+        }
+    }
+
+    /// <inheritdoc/>
+    protected override CapFileType Classify()
+    {
+        if (!TryBegin())
+        {
+            return CapFileType.Unknown;
+        }
+
+        try
+        {
+            return LookUp();
+        }
+        finally
+        {
+            End();
+        }
+    }
+
+    /// <summary>Marks the buffer as in use, unless the reader has been disposed.</summary>
+    private bool TryBegin() => Interlocked.CompareExchange(ref _state, Reading, Idle) == Idle;
+
+    /// <summary>
+    /// Marks the buffer as no longer in use, and returns it to the pool if the reader was
+    /// disposed while it was.
+    /// </summary>
+    private void End()
+    {
+        if (Interlocked.CompareExchange(ref _state, Idle, Reading) == DisposedWhileReading)
+        {
+            ReturnBuffer();
+        }
+    }
+
+    private void ReturnBuffer()
+    {
+        byte[]? buffer = _buffer;
+        _buffer = null;
+        if (buffer is not null)
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>Moves to the next record, with the buffer marked as in use.</summary>
+    private CapError ReadEntry(out bool advanced)
+    {
+        advanced = false;
 
         if (_offset >= _filled)
         {
@@ -104,7 +196,7 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
             }
         }
 
-        ReadOnlySpan<byte> remaining = _buffer.AsSpan(_offset, _filled - _offset);
+        ReadOnlySpan<byte> remaining = _buffer!.AsSpan(_offset, _filled - _offset);
 
         // Read as the kernel wrote it, in this machine's own byte order, and bounds-checked
         // against what is actually in the buffer. The kernel does not produce a record that
@@ -142,10 +234,10 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
         return CapError.Success;
     }
 
-    /// <inheritdoc/>
-    protected override CapFileType Classify()
+    /// <summary>Looks the current entry up, with the buffer marked as in use.</summary>
+    private CapFileType LookUp()
     {
-        if (_buffer is null || _nameLength == 0)
+        if (_nameLength == 0)
         {
             return CapFileType.Unknown;
         }
@@ -162,7 +254,7 @@ internal sealed unsafe class LinuxDirectoryReader : DirectoryReader
         // in the buffer and is already terminated. Decoding it and encoding it again would
         // ask about a name reconstructed from the one the kernel gave, which is the same
         // bytes right up until it is not.
-        fixed (byte* name = &_buffer[_nameOffset])
+        fixed (byte* name = &_buffer![_nameOffset])
         {
             long status = LinuxNative.Statx(
                 LinuxConstants.SYS_statx,

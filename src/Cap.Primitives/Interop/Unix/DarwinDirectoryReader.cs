@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Interop.Unix;
 
@@ -31,57 +32,40 @@ namespace Cap.Primitives.Interop.Unix;
 [SupportedOSPlatform("macos")]
 internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
 {
-    private readonly nint _stream;
-
     /// <summary>
-    /// The descriptor the stream was built on, for looking a name up when the directory read
-    /// did not say what it is.
+    /// The stream, and through it the descriptor it was built on.
     /// </summary>
     /// <remarks>
-    /// Wrapped but not owned: the stream owns the descriptor and closing the stream closes
-    /// it. The wrapper is here for what it refuses to do — once it has been disposed a lease
-    /// on it fails, so a lookup arriving after the stream was closed cannot reach a
-    /// descriptor number that something else has since been given.
+    /// Every read of the stream and every lookup through its descriptor is made under a
+    /// lease on this, so a <see cref="Dispose"/> on another thread part-way through one does
+    /// not close either until the call has returned. Closing them straight away would leave
+    /// the read working on memory the C library had freed, and the lookup asking about a name
+    /// relative to whatever had since been given the descriptor's number.
     /// </remarks>
-    private readonly SafeDirHandle _descriptor;
+    private readonly DarwinDirectoryStreamHandle _stream;
     private readonly bool _alwaysLookUp = UnixFileTypes.AlwaysLookUpKind;
 
     private DarwinDirectoryEntry _entry;
-    private bool _closed;
 
     /// <summary>
     /// Takes ownership of <paramref name="stream"/>, and with it of the descriptor it was
     /// built on.
     /// </summary>
-    public DarwinDirectoryReader(nint stream, SafeDirHandle descriptor)
+    public DarwinDirectoryReader(DarwinDirectoryStreamHandle stream)
     {
         _stream = stream;
-        _descriptor = descriptor;
     }
 
     /// <inheritdoc/>
-    public override void Dispose()
-    {
-        if (_closed)
-        {
-            return;
-        }
-
-        _closed = true;
-
-        // The wrapper first, so that nothing can take a lease on the descriptor after the
-        // stream has closed it. It owns nothing, so disposing it closes nothing; what it
-        // does is stop answering.
-        _descriptor.Dispose();
-        DarwinNative.CloseDir(_stream);
-    }
+    public override void Dispose() => _stream.Dispose();
 
     /// <inheritdoc/>
     protected override CapError ReadCore(out bool advanced)
     {
         advanced = false;
 
-        if (_closed)
+        using HandleLease lease = new(_stream);
+        if (!lease.IsValid)
         {
             return HandleLease.ClosedError;
         }
@@ -91,7 +75,7 @@ internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
 
         fixed (DarwinDirectoryEntry* entry = &_entry)
         {
-            status = DarwinNative.ReadDirR(_stream, entry, &result);
+            status = DarwinNative.ReadDirR(lease.Raw, entry, &result);
         }
 
         if (status != 0)
@@ -119,12 +103,12 @@ internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
     /// <inheritdoc/>
     protected override CapFileType Classify()
     {
-        if (_closed || NameLength == 0)
+        if (NameLength == 0)
         {
             return CapFileType.Unknown;
         }
 
-        using HandleLease lease = _descriptor.Lease();
+        using HandleLease lease = new(_stream);
         if (!lease.IsValid)
         {
             return CapFileType.Unknown;
@@ -138,7 +122,7 @@ internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
         fixed (byte* name = _entry.Name)
         {
             int status = DarwinNative.FStatAt(
-                lease.Descriptor, name, &result, DarwinConstants.AT_SYMLINK_NOFOLLOW);
+                _stream.Descriptor, name, &result, DarwinConstants.AT_SYMLINK_NOFOLLOW);
 
             if (status != 0)
             {
@@ -160,6 +144,57 @@ internal sealed unsafe class DarwinDirectoryReader : DirectoryReader
     /// process.
     /// </remarks>
     private int NameLength => Math.Min((int)_entry.NameLength, DarwinDirectoryEntry.NameCapacity);
+}
+
+/// <summary>
+/// A macOS directory stream, owned: disposing or finalizing it closes the stream and the
+/// descriptor the stream was built on.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The handle's value is the stream itself rather than the descriptor, because the stream is
+/// what has to be closed — closing the descriptor under it would leave the C library holding
+/// a stream on a number something else may since have been given, and would leak the
+/// stream's buffer. A <see cref="SafeDirHandle"/> is deliberately not used for this: that
+/// type closes its own value through its backend, and one that closed something else would
+/// mislead the next reader of it.
+/// </para>
+/// <para>
+/// Deriving from <see cref="SafeHandle"/> is what gives the reader both of the guarantees the
+/// other backends' readers have. A disposal is deferred until the last lease is released, so
+/// no read or lookup already under way can find the stream or its descriptor closed beneath
+/// it; and an enumeration that is dropped without being disposed is closed by the finalizer
+/// rather than held until the process ends. Closing a stream allocates nothing, takes no lock
+/// the caller could hold and is not retried, so it is safe on the finalizer thread.
+/// </para>
+/// </remarks>
+[SupportedOSPlatform("macos")]
+internal sealed class DarwinDirectoryStreamHandle : SafeHandleZeroOrMinusOneIsInvalid
+{
+    /// <summary>
+    /// Takes ownership of <paramref name="stream"/>, which was built on
+    /// <paramref name="descriptor"/>.
+    /// </summary>
+    public DarwinDirectoryStreamHandle(nint stream, int descriptor)
+        : base(ownsHandle: true)
+    {
+        Descriptor = descriptor;
+        SetHandle(stream);
+    }
+
+    /// <summary>
+    /// The descriptor the stream was built on, for looking a name up when the directory read
+    /// did not say what it is.
+    /// </summary>
+    /// <remarks>
+    /// Recorded when the stream was built rather than asked of the stream, since it is already
+    /// known then. Meaningful only while a lease on this handle is held: the stream owns the
+    /// descriptor, and closing the stream closes it.
+    /// </remarks>
+    public int Descriptor { get; }
+
+    /// <inheritdoc/>
+    protected override bool ReleaseHandle() => DarwinNative.CloseDir(handle) == 0;
 }
 
 /// <summary>
