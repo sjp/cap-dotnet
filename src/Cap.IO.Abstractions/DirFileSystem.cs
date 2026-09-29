@@ -341,16 +341,26 @@ public sealed class DirFileSystem : IFileSystem
                 append: mode == FileMode.Append);
             try
             {
-                Stream stream = file.AsStream(leaveOpen: false, bufferSize: bufferSize);
+                // A stream over a file the system completes work on only borrows the file,
+                // which costs nothing, so the file stays here to be stored through: the stream
+                // beneath cannot be asked to. Any other stream takes the handle, and on the
+                // host is a FileStream, which can.
+                bool isAsync = (options & FileOptions.Asynchronous) != 0;
+                Stream stream = file.AsStream(leaveOpen: isAsync, bufferSize: bufferSize);
                 if (mode == FileMode.Append && stream.CanSeek)
                 {
                     stream.Seek(0, SeekOrigin.End);
                 }
 
+                Action? sync = isAsync
+                    ? () => file.Flush(toDisk: true)
+                    : stream is FileStream host ? () => host.Flush(flushToDisk: true) : null;
                 return new DirFileSystemStream(
                     stream,
                     Paths.GetFullPath(request.Virtual, CurrentDirectory),
-                    (options & FileOptions.Asynchronous) != 0);
+                    isAsync,
+                    sync,
+                    isAsync ? file : null);
             }
             catch
             {

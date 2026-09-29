@@ -407,6 +407,26 @@ public abstract class FileSystemBehaviourTests : IDisposable
         Assert.False(reading.CanWrite);
     }
 
+    [Theory]
+    [InlineData(FileMode.Create, FileOptions.None)]
+    [InlineData(FileMode.Append, FileOptions.None)]
+    [InlineData(FileMode.Create, FileOptions.Asynchronous)]
+    [InlineData(FileMode.Append, FileOptions.Asynchronous)]
+    public void A_stream_flushed_to_disk_keeps_its_writes(FileMode mode, FileOptions options)
+    {
+        Fs.File.WriteAllBytes(P("a.bin"), [1]);
+
+        using (FileSystemStream stream = Fs.FileStream.New(P("a.bin"), mode, FileAccess.Write, FileShare.None, 4096, options))
+        {
+            stream.Write([2, 3]);
+            stream.Flush(flushToDisk: true);
+            stream.Write([4]);
+            stream.Flush(flushToDisk: true);
+        }
+
+        Assert.Equal(mode == FileMode.Append ? [1, 2, 3, 4] : [2, 3, 4], Fs.File.ReadAllBytes(P("a.bin")));
+    }
+
     [Fact]
     public void Opening_to_create_new_refuses_an_existing_file()
     {
