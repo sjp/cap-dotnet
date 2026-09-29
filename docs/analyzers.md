@@ -22,7 +22,7 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 | ID | Reports | Default |
 |---|---|---|
 | `CAP0001` | The filesystem reached by path: `File`, `Directory`, `FileInfo`, `DirectoryInfo`, `FileSystemWatcher`, `DriveInfo`, `ZipFile`, the path constructors of `FileStream`, `StreamReader` and `StreamWriter`, `Environment.CurrentDirectory`, `Path.GetFullPath(string)`, `Path.GetTempPath`, `Path.GetTempFileName`, `Environment.GetFolderPath`; archives extracted to or filled from a path (`TarFile`, `TarEntry.ExtractToFile`, `ZipFileExtensions.ExtractToDirectory`, `ExtractToFile`, `CreateEntryFromFile` and their async forms); programs and code run or loaded by path (every `Process.Start`, `Assembly.LoadFrom`/`LoadFile`/`UnsafeLoadFrom`, `AssemblyLoadContext.LoadFromAssemblyPath`/`LoadFromNativeImagePath`/`LoadUnmanagedDllFromPath`, `NativeLibrary.Load`/`TryLoad`); the path overloads of `XDocument`, `XElement` and `XStreamingElement` `Load`/`Save`, `XmlReader.Create`, `XmlWriter.Create`, `XmlDocument.Load`/`Save`, `XmlTextReader`, `XmlTextWriter`, `XPathDocument` and `XslCompiledTransform.Load`/`Transform`; the path overloads of `MemoryMappedFile.CreateFromFile`; the name-taking constructors of `NamedPipeClientStream` and `NamedPipeServerStream`, and `NamedPipeServerStreamAcl.Create`; `Socket.SendFile`, `SendFileAsync` and `BeginSendFile`; certificates read by path (`X509CertificateLoader.*FromFile`, the path constructors of `X509Certificate` and `X509Certificate2`, `CreateFromCertFile`, `CreateFromSignedFile`, `CreateFromPemFile`, `CreateFromEncryptedPemFile`, `GetCertContentType(string)`, and the path overloads of `X509Certificate2Collection.Import` and `ImportFromPemFile`); and the constructors of the ambient `IFileSystem` implementations: System.IO.Abstractions' `FileSystem`, `FileWrapper`, `DirectoryWrapper`, `FileInfoWrapper`, `DirectoryInfoWrapper`, `DriveInfoWrapper`, `PathWrapper`, `FileSystemWatcherWrapper` and `FileSystemWatcherFactory`, and Testably's `RealFileSystem` | off |
-| `CAP0002` | The network reached by address: `Socket.Bind`, `Connect`, `ConnectAsync`, `SendTo`, `SendToAsync`, `TcpListener`, `TcpClient`, `UdpClient`, and `Dns` | off |
+| `CAP0002` | The network reached by address or by name: `Socket.Bind`, `Connect`, `ConnectAsync`, `SendTo`, `SendToAsync`, `TcpListener`, `TcpClient`, `UdpClient`, and `Dns`; and the construction of the clients that resolve a name or URL themselves: `new HttpClient()`, `SocketsHttpHandler`, `HttpClientHandler`, `ClientWebSocket`, `SmtpClient`, `Ping`, `HttpListener`, `WebClient`, `WebRequest.Create`/`CreateHttp`/`CreateDefault`, `QuicConnection.ConnectAsync` and `QuicListener.ListenAsync` | off |
 | `CAP0003` | `AmbientAuthority.Acquire()` called outside a composition root | warning |
 | `CAP0004` | A raw handle taken out of a capability: `Dir.UnsafeGetHandle()`, `CapFile.UnsafeGetHandle()` | info |
 | `CAP0005` | A path passed to this library that was built by joining strings at the call | warning |
@@ -54,6 +54,21 @@ depends on what the caller passed in, and a
 [`DirFileSystem`](io-abstractions.md) from `Cap.IO.Abstractions` confines it to a `Dir`. The
 entries name their types by metadata name, so they apply whether or not a project references
 either library, and report nothing in a project that does not.
+
+### `HttpClient` and the other by-name clients
+
+`HttpClient`, `ClientWebSocket`, `SmtpClient` and the rest take a host name or a URL, resolve
+it themselves and connect to the answer, so they reach the network as far as `Dns` and a
+socket together would. `CAP0002` reports them where they are built, not where they are used:
+calling `GetAsync` on an `HttpClient` taken as a parameter is not reported, for the same
+reason taking an `IFileSystem` is not. Construct the client once where the program is
+assembled and pass it down; the suppression there is the one line a reviewer reads.
+
+`new HttpClient(handler)` is not reported, because the handler's own constructor is:
+`new SocketsHttpHandler()` and `new HttpClientHandler()` are, and `new HttpClient()` is
+because it builds a default handler of its own. A `SocketsHttpHandler` whose
+`ConnectCallback` connects through a `Cap.Net.Pool` checks every address the client reaches,
+so it is the one place such a setup needs a suppression.
 
 ### Why the ambient rules start off
 

@@ -84,6 +84,15 @@ is a banned symbol in every assembly of this library, and the analyzer will flag
 consuming code that has opted in — not to forbid it, but to make it appear in the same list
 as every other place authority enters.
 
+The same goes for the clients that resolve a name for you. `HttpClient`, `ClientWebSocket`,
+`SmtpClient`, `Ping` and the like look up the host a URL names and connect to whatever comes
+back, so they are the resolve-then-connect pattern above with the resolution out of sight. The
+analyzer reports them where they are constructed (`new HttpClient()`, `new SocketsHttpHandler()`,
+`new ClientWebSocket()`, …), not where an injected one is used; see
+[analyzers.md](analyzers.md#httpclient-and-the-other-by-name-clients). To hold such a client to
+a pool, give a `SocketsHttpHandler` a `ConnectCallback` that connects through the pool: the
+address checked is then the address reached, whatever the name resolved to.
+
 ## One host, several spellings
 
 An address can be written more than one way, and the spellings are not string variants — they

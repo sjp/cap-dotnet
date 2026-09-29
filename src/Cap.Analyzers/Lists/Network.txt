@@ -17,3 +17,21 @@ T:System.Net.Sockets.TcpListener;Listens on whatever address it is given. Use Ca
 T:System.Net.Sockets.TcpClient;Connects to whatever host it is given. Use Cap.Net.CapTcpStream, which connects through a pool.
 T:System.Net.Sockets.UdpClient;Binds and sends to whatever address it is given. Use Cap.Net.CapUdpSocket, which checks against a pool.
 T:System.Net.Dns;Name resolution is itself an authority, and an answer somebody else controls. Resolve where the step is visible, and grant the addresses, not the name.
+
+# The clients that take a name or a URL, resolve it themselves and connect. Only their
+# construction is listed: a client taken as a parameter reaches what its constructor was
+# given, and that is where the one reviewable suppression belongs. new HttpClient(handler)
+# is not listed because the handler's own constructor already is.
+M:System.Net.Http.HttpClient.#ctor();Reaches whatever host a URL names, resolving the name itself. Construct it once where the program is assembled and pass it down, over a SocketsHttpHandler whose ConnectCallback connects through a Cap.Net.Pool.
+M:System.Net.Http.SocketsHttpHandler.#ctor;Reaches whatever host a URL names, resolving the name itself. Construct it where the program is assembled, with a ConnectCallback that connects through a Cap.Net.Pool.
+M:System.Net.Http.HttpClientHandler.#ctor;Reaches whatever host a URL names, resolving the name itself. Construct a SocketsHttpHandler where the program is assembled, with a ConnectCallback that connects through a Cap.Net.Pool.
+M:System.Net.WebSockets.ClientWebSocket.#ctor;Connects to whatever URL it is given, resolving the name itself. Connect a Cap.Net.CapTcpStream through a pool and use WebSocket.CreateFromStream.
+M:System.Net.Mail.SmtpClient.#ctor;Connects to whatever host it is given or configured with, resolving the name itself. Construct it where the program is assembled and pass it down.
+M:System.Net.NetworkInformation.Ping.#ctor;Reaches whatever host it is given, resolving the name itself. Construct it where the program is assembled and pass it down.
+M:System.Net.Quic.QuicConnection.ConnectAsync;Connects to whatever endpoint it is given, resolving a name itself. Connect where the program is assembled and pass the connection down.
+M:System.Net.Quic.QuicListener.ListenAsync;Listens on whatever address it is given. Listen where the program is assembled and pass the listener down.
+M:System.Net.HttpListener.#ctor;Listens on whatever prefixes it is given. Construct it where the program is assembled and pass it down, or use Cap.Net.CapTcpListener.
+M:System.Net.WebClient.#ctor;Reaches whatever URL it is given, resolving the name itself. Use an HttpClient constructed where the program is assembled.
+M:System.Net.WebRequest.Create;Reaches whatever URL it is given, resolving the name itself. Use an HttpClient constructed where the program is assembled.
+M:System.Net.WebRequest.CreateHttp;Reaches whatever URL it is given, resolving the name itself. Use an HttpClient constructed where the program is assembled.
+M:System.Net.WebRequest.CreateDefault;Reaches whatever URL it is given, resolving the name itself. Use an HttpClient constructed where the program is assembled.

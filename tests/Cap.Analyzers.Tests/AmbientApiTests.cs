@@ -111,6 +111,19 @@ public sealed class AmbientApiTests
     [InlineData("new TcpClient(\"example.com\", 80)", "CAP0002")]
     [InlineData("new TcpListener(IPAddress.Any, 80)", "CAP0002")]
     [InlineData("Dns.GetHostAddresses(\"example.com\")", "CAP0002")]
+    [InlineData("new System.Net.Http.HttpClient()", "CAP0002")]
+    [InlineData("new System.Net.Http.SocketsHttpHandler()", "CAP0002")]
+    [InlineData("new System.Net.Http.HttpClientHandler()", "CAP0002")]
+    [InlineData("new System.Net.WebSockets.ClientWebSocket()", "CAP0002")]
+    [InlineData("new System.Net.Mail.SmtpClient(\"example.com\")", "CAP0002")]
+    [InlineData("new System.Net.NetworkInformation.Ping()", "CAP0002")]
+    [InlineData("System.Net.Quic.QuicConnection.ConnectAsync(null!)", "CAP0002")]
+    [InlineData("System.Net.Quic.QuicListener.ListenAsync(null!)", "CAP0002")]
+    [InlineData("new HttpListener()", "CAP0002")]
+    [InlineData("new WebClient()", "CAP0002")]
+    [InlineData("WebRequest.Create(\"https://example.com\")", "CAP0002")]
+    [InlineData("WebRequest.CreateHttp(\"https://example.com\")", "CAP0002")]
+    [InlineData("WebRequest.CreateDefault(new Uri(\"https://example.com\"))", "CAP0002")]
     [InlineData("DateTimeOffset.Now", "CAP0006")]
     [InlineData("TimeProvider.System", "CAP0006")]
     [InlineData("Task.Delay(10)", "CAP0006")]
@@ -221,6 +234,39 @@ public sealed class AmbientApiTests
     }
 
     [Fact]
+    public async Task A_by_name_client_is_reported_where_it_is_built_and_not_where_it_is_used()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            """
+            using System.Net.Http;
+            using System.Net.WebSockets;
+            using System.Threading;
+            using System.Threading.Tasks;
+
+            public static class Uses
+            {
+                public static HttpClient Build()
+                {
+                    var handler = new SocketsHttpHandler();
+                    return new HttpClient(handler, disposeHandler: true);
+                }
+
+                public static Task<HttpResponseMessage> Get(HttpClient client) => client.GetAsync("https://example.com");
+
+                public static Task Open(ClientWebSocket socket) =>
+                    socket.ConnectAsync(new System.Uri("wss://example.com"), CancellationToken.None);
+
+                public static HttpClient Wrap(HttpMessageHandler handler) => new HttpClient(handler);
+            }
+            """,
+            severities: AllAmbientRulesOn);
+
+        Assert.Collection(
+            diagnostics,
+            d => Assert.Equal(("CAP0002", "new SocketsHttpHandler()"), (d.Id, d.Flagged())));
+    }
+
+    [Fact]
     public async Task A_call_bound_at_run_time_through_dynamic_is_not_seen()
     {
         // Documented as a blind spot in docs/analyzers.md: the overload is chosen by the
@@ -318,7 +364,7 @@ public sealed class AmbientApiTests
         using System.Threading.Tasks;
         using Microsoft.Win32.SafeHandles;
 
-        #pragma warning disable SYSLIB0023
+        #pragma warning disable SYSLIB0014, SYSLIB0023
 
         public static class Uses
         {
