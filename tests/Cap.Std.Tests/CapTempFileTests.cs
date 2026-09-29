@@ -38,6 +38,27 @@ public sealed class CapTempFileTests : IDisposable
         Assert.Equal(28, temp.Name!.Length);
     }
 
+    /// <summary>Nobody else on the machine can read or write a named scratch file.</summary>
+    /// <remarks>
+    /// What <c>mkstemp</c> and <c>Path.GetTempFileName</c> give, and what code moving onto
+    /// this from either would otherwise lose without being told. Unix records permissions
+    /// per object; Windows decides access from a security descriptor the directory hands
+    /// down, so there is nothing of this kind to assert there.
+    /// </remarks>
+    [Fact]
+    public void A_named_scratch_file_is_closed_to_other_accounts()
+    {
+        using CapTempFile temp = CapTempFile.New(_root.Directory);
+
+        if (!temp.File.GetMetadata().Permissions.TryGetUnixMode(out UnixFileMode mode))
+        {
+            Assert.Skip("This platform records no mode bits, and decides access another way.");
+            return;
+        }
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode);
+    }
+
     /// <summary>Two scratch files never share a name.</summary>
     [Fact]
     public void Names_are_not_repeated()

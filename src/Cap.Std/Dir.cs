@@ -1696,6 +1696,37 @@ public sealed partial class Dir : IDir
     }
 
     /// <summary>
+    /// Creates a file beneath this one that no other account can read or write, and opens it
+    /// for reading and writing.
+    /// </summary>
+    /// <param name="name">A single component, which must not already be taken.</param>
+    /// <param name="file">A handle on the new file, on success.</param>
+    /// <returns>
+    /// The platform's answer, so that a caller can tell the name being taken from every
+    /// other reason the creation did not happen.
+    /// </returns>
+    /// <remarks>
+    /// The file counterpart of <see cref="CreateOwnedDir"/>, internal for the same reason: a
+    /// narrower mode than the system's own is right only where this library chose the name.
+    /// The creation is exclusive, so a link already holding the name counts as the name being
+    /// taken and is never followed.
+    /// </remarks>
+    internal CapError CreateOwnedFile(string name, out CapFile? file)
+    {
+        FileOpenRequest request = new(
+            FileMode.CreateNew,
+            FileAccess.ReadWrite,
+            FileShare.Read,
+            FileOptions.None,
+            preallocationSize: 0,
+            visibility: CreationVisibility.OwnerOnly);
+
+        CapPathError pathError = OpenFileCore(name, in request, out file, out CapError error);
+
+        return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
+    }
+
+    /// <summary>
     /// Opens a directory beneath this one, creating it so that no other account can look
     /// into it if it is not there.
     /// </summary>

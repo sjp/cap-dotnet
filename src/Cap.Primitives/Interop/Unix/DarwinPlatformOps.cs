@@ -161,7 +161,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             fixed (byte* path = encoded.Bytes)
             {
                 fd = request.Creates
-                    ? DarwinNative.OpenAtWithMode(lease.Descriptor, path, flags, DarwinConstants.FileCreateMode)
+                    ? DarwinNative.OpenAtWithMode(lease.Descriptor, path, flags, FileCreateMode(in request))
                     : DarwinNative.OpenAt(lease.Descriptor, path, flags);
 
                 if (fd < 0)
@@ -1029,6 +1029,18 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         visibility == CreationVisibility.OwnerOnly
             ? DarwinConstants.OwnerOnlyDirectoryCreateMode
             : DarwinConstants.DirectoryCreateMode;
+
+    /// <summary>
+    /// The permissions a file creation asks the kernel for.
+    /// </summary>
+    /// <remarks>
+    /// Part of the creating open itself rather than applied afterwards, so the file is never
+    /// wider than asked for, not even between the open and a later change of mode.
+    /// </remarks>
+    private static uint FileCreateMode(in FileOpenRequest request) =>
+        request.Visibility == CreationVisibility.OwnerOnly
+            ? DarwinConstants.OwnerOnlyFileCreateMode
+            : DarwinConstants.FileCreateMode;
 
     /// <inheritdoc/>
     /// <remarks>

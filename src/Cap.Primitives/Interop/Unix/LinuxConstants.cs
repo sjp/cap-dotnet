@@ -381,12 +381,15 @@ internal static class LinuxConstants
     public const uint FileCreateMode = 0x1B6;
 
     /// <summary>
-    /// The permissions a file with no name is asked for.
+    /// The permissions a file with no name, or a named scratch file, is asked for.
     /// </summary>
     /// <remarks>
-    /// Owner-only, and the choice costs nothing: a file with no entry in any directory
-    /// cannot be opened by anybody at all, so the mode is a statement about what it would be
-    /// if it were ever given a name rather than about what it is now.
+    /// Read and write for the owning account alone, which is what <c>mkstemp</c> asks for.
+    /// For a file with no name the choice costs nothing: a file with no entry in any
+    /// directory cannot be opened by anybody at all, so the mode is a statement about what it
+    /// would be if it were ever given a name rather than about what it is now. A named
+    /// scratch file has an entry, under a name this library drew rather than one the caller
+    /// chose, and closing it to everybody else is part of making it.
     /// </remarks>
     public const uint OwnerOnlyFileCreateMode = 0x180;
 

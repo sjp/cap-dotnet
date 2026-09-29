@@ -195,7 +195,7 @@ internal sealed class FakePlatformOps : IPlatformOps
 
         if (error.Category == CapErrorCategory.NotFound && request.Creates)
         {
-            return CreateChildFile(parent, name, request.Access);
+            return CreateChildFile(parent, name, in request);
         }
 
         if (error.IsFailure)
@@ -245,7 +245,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     }
 
     /// <summary>Adds a file to the simulation and hands back a handle on it.</summary>
-    private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, FileAccess access)
+    private CapResult<SafeFileHandle> CreateChildFile(SafeDirHandle parent, ReadOnlySpan<char> name, in FileOpenRequest request)
     {
         CapError error = ResolveDirectory(parent, out MemoryNode? directory);
         if (error.IsFailure)
@@ -258,10 +258,11 @@ internal sealed class FakePlatformOps : IPlatformOps
             Type = CapNodeType.File,
             VolumeId = directory!.VolumeId,
             NodeId = _fileSystem.NextNodeId(),
+            UnixMode = request.Visibility == CreationVisibility.OwnerOnly ? OwnerOnlyFileMode : SharedFileMode,
         };
 
         directory.Entries[name.ToString()] = created;
-        return CapResult<SafeFileHandle>.Ok(RegisterFile(created, access));
+        return CapResult<SafeFileHandle>.Ok(RegisterFile(created, request.Access));
     }
 
     /// <summary>Hands back a handle on a file that exists, emptying it first if the open says to.</summary>
@@ -797,6 +798,13 @@ internal sealed class FakePlatformOps : IPlatformOps
         OwnerOnlyMode |
         UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
         UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+
+    /// <summary>What the simulation records for a file only its owner may reach.</summary>
+    private const UnixFileMode OwnerOnlyFileMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+    /// <summary>What it records for a file created with the usual permissions.</summary>
+    private const UnixFileMode SharedFileMode =
+        OwnerOnlyFileMode | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
 
     /// <inheritdoc/>
     public CapResult<string> GetSystemTemporaryDirectory() =>

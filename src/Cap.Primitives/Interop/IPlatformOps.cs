@@ -157,6 +157,11 @@ internal interface IPlatformOps
     /// target re-resolved from the sandbox root.
     /// </para>
     /// <para>
+    /// A file it creates is created with <see cref="FileOpenRequest.Visibility"/>, asked for
+    /// in the same call that creates it, as <see cref="CreateChildDirectory"/> does for a
+    /// directory.
+    /// </para>
+    /// <para>
     /// Reports <see cref="CapErrorCategory.NotSupported"/> for anything in the request this
     /// platform cannot honour, rather than opening a handle that behaves differently from
     /// the one that was asked for.

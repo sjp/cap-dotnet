@@ -1316,6 +1316,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, NoSpaceErrno));
         }
 
+        if (!_fs.WindowsRules && request.Visibility == CreationVisibility.OwnerOnly)
+        {
+            created.UnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
         _fs.Attach(directory, name, created);
         return CapResult<SafeFileHandle>.Ok(IssueFile(created, request.Access, appendOnly: false));
     }

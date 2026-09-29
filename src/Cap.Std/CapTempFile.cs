@@ -54,10 +54,17 @@ public sealed class CapTempFile : IDisposable
     /// <remarks>
     /// <para>
     /// No ambient authority is needed and none is taken: the place comes from a handle the
-    /// caller was given. The file is created with whatever permissions the system gives a
-    /// file created in that directory, because the caller chose the directory — a scratch
-    /// file in a directory somebody asked for should be no more and no less readable than
-    /// anything else they put there.
+    /// caller was given.
+    /// </para>
+    /// <para>
+    /// <strong>Permissions.</strong> On Unix the file is created readable and writable by
+    /// its owner alone (mode 0600, narrowed further by the umask if it asks), as
+    /// <c>mkstemp</c> and <c>Path.GetTempFileName</c> create theirs. The
+    /// caller chose the directory but not the name, and a scratch file is private to the
+    /// code that made it, whoever else can list the directory. The mode is part of the
+    /// creating call itself, so there is no moment at which the file is more widely readable.
+    /// On Windows the file takes the permissions the directory hands down, as a scratch
+    /// directory does.
     /// </para>
     /// <para>
     /// The parent handle is duplicated rather than borrowed, so disposing it does not stop
@@ -113,9 +120,10 @@ public sealed class CapTempFile : IDisposable
     /// </para>
     /// <para>
     /// Where the system or the filesystem has no such facility, this creates an ordinary
-    /// exclusively-named file instead. That is a weaker thing and it is reported rather than
-    /// glossed over: the file has a name, something with access to the directory can open it,
-    /// and it needs disposal to go away.
+    /// exclusively-named file instead, owner-only as <see cref="New"/> makes it. That is a
+    /// weaker thing and it is reported rather than glossed over: the file has a name, code
+    /// running as the same account with access to the directory can open it, and it needs
+    /// disposal to go away.
     /// </para>
     /// <para>
     /// Safe to call from any thread, including several at once against the same
@@ -274,6 +282,8 @@ public sealed class CapTempFile : IDisposable
     /// </remarks>
     private static CapTempFile CreateNamed(Dir parent)
     {
+        CapError error = CapError.FromCategory(CapErrorCategory.AlreadyExists);
+
         for (int attempt = 0; attempt < TemporaryNames.Attempts; attempt++)
         {
             string name = TemporaryNames.Next();
@@ -281,26 +291,26 @@ public sealed class CapTempFile : IDisposable
             // Exclusive creation, and the only mode that is: the name is either claimed by
             // this call or it was somebody else's already. Read as well as write, because a
             // scratch file is written and then read back, and reopening it by name to read it
-            // would put a lookup where the handle already is.
-            bool created = parent.TryOpenFile(
-                name,
-                FileMode.CreateNew,
-                FileAccess.ReadWrite,
-                FileShare.Read,
-                FileOptions.None,
-                preallocationSize: 0,
-                append: false,
-                noFollow: false,
-                out CapFile? file);
+            // would put a lookup where the handle already is. Owner-only, as mkstemp makes
+            // it, because the name was drawn here rather than chosen by the caller.
+            error = parent.CreateOwnedFile(name, out CapFile? file);
 
-            if (created)
+            if (error.IsSuccess)
             {
                 return new CapTempFile(parent, file!, name);
             }
+
+            // Only a name already taken is worth another draw. Anything else — the directory
+            // refusing the creation, or gone — would be refused again under any name.
+            if (error.Category != CapErrorCategory.AlreadyExists)
+            {
+                break;
+            }
         }
 
-        throw FailureTranslation.ToException(
-            CapError.FromCategory(CapErrorCategory.AlreadyExists), NamedDescription, ExpectedTarget.Name);
+        // A creating open cannot fail for want of the file it was making, so something
+        // missing can only be the directory it was being made in.
+        throw FailureTranslation.ToException(error, NamedDescription, ExpectedTarget.Parent);
     }
 
     /// <summary>How a nameless file is described in a failure message.</summary>

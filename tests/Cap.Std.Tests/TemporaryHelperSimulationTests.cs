@@ -82,6 +82,45 @@ public sealed class TemporaryHelperSimulationTests
         Assert.True(created!.UnixMode!.Value.HasFlag(UnixFileMode.OtherRead));
     }
 
+    /// <summary>The creation asks for a scratch file only its owner can read or write.</summary>
+    /// <remarks>
+    /// Asserted about the request for the same reason as the directory: a umask can only
+    /// narrow what is asked for, so the result on a real machine cannot tell a library that
+    /// asked for 0600 from one whose umask happened to clear the rest.
+    /// </remarks>
+    [Fact]
+    public void A_scratch_file_is_asked_for_closed_to_everybody_else()
+    {
+        FakeFileSystem fs = Simulated();
+        FakePlatformOps ops = new(fs);
+        using Dir root = Dir.OpenThrough(ops, TemporaryLocation, AmbientAuthority.Acquire());
+        using CapTempFile file = CapTempFile.New(root);
+
+        MemoryNode? created = fs.Find(Inside(file.Name!));
+
+        Assert.NotNull(created);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, created!.UnixMode);
+    }
+
+    /// <summary>An ordinary file creation is not narrowed the same way.</summary>
+    /// <remarks>
+    /// The other half of the decision: a file the caller named should be no different from
+    /// one made by any other program in the same place.
+    /// </remarks>
+    [Fact]
+    public void A_file_the_caller_named_is_asked_for_with_the_usual_permissions()
+    {
+        FakeFileSystem fs = Simulated();
+        FakePlatformOps ops = new(fs);
+        using Dir root = Dir.OpenThrough(ops, TemporaryLocation, AmbientAuthority.Acquire());
+        root.CreateFile("ordinary").Dispose();
+
+        MemoryNode? created = fs.Find(Inside("ordinary"));
+
+        Assert.NotNull(created);
+        Assert.True(created!.UnixMode!.Value.HasFlag(UnixFileMode.OtherRead));
+    }
+
     /// <summary>A system with no temporary location says so rather than guessing at one.</summary>
     [Fact]
     public void A_system_with_no_temporary_location_reports_it()

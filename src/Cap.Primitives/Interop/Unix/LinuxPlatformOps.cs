@@ -235,7 +235,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             fixed (byte* path = encoded.Bytes)
             {
                 fd = request.Creates
-                    ? LinuxNative.OpenAtWithMode(lease.Descriptor, path, flags, LinuxConstants.FileCreateMode)
+                    ? LinuxNative.OpenAtWithMode(lease.Descriptor, path, flags, FileCreateMode(in request))
                     : LinuxNative.OpenAt(lease.Descriptor, path, flags);
                 errno = fd < 0 ? Marshal.GetLastPInvokeError() : 0;
             }
@@ -473,7 +473,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         // The creation mode is read by the kernel only when the flags ask for creation, and
         // passing a non-zero one when they do not is rejected outright rather than ignored.
-        uint mode = request.Creates ? LinuxConstants.FileCreateMode : 0;
+        uint mode = request.Creates ? FileCreateMode(in request) : 0;
 
         CapError error = OpenConfinedDescriptor(root, path, flags, mode, options, out int fd);
         if (error.IsFailure)
@@ -1209,6 +1209,18 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         visibility == CreationVisibility.OwnerOnly
             ? LinuxConstants.OwnerOnlyDirectoryCreateMode
             : LinuxConstants.DirectoryCreateMode;
+
+    /// <summary>
+    /// The permissions a file creation asks the kernel for.
+    /// </summary>
+    /// <remarks>
+    /// Part of the creating open itself rather than applied afterwards, so the file is never
+    /// wider than asked for, not even between the open and a later change of mode.
+    /// </remarks>
+    private static uint FileCreateMode(in FileOpenRequest request) =>
+        request.Visibility == CreationVisibility.OwnerOnly
+            ? LinuxConstants.OwnerOnlyFileCreateMode
+            : LinuxConstants.FileCreateMode;
 
     /// <inheritdoc/>
     /// <remarks>

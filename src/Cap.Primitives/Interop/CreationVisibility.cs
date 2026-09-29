@@ -16,9 +16,12 @@ namespace Cap.Primitives.Interop;
 /// this library, rather than the caller, picked the place. A scratch directory made in the
 /// system temporary location is put somewhere shared by every account on the machine, nobody
 /// asked for it to be there, and so closing it to everybody else is part of putting it there
-/// at all. An application's configuration, data, cache and state directories are the other
+/// at all. An application's configuration, data, cache and state directories are another
 /// instance: their location comes from the platform's conventions, and on Unix those
-/// conventions ask for exactly this mode.
+/// conventions ask for exactly this mode. A named scratch file is the last: its name was
+/// drawn by this library, and every other scratch-file primitive a caller knows —
+/// <c>mkstemp</c>, <c>Path.GetTempFileName</c> — makes it owner-only, so a scratch file
+/// made here without the same would be a quiet downgrade for whoever moved to it.
 /// </para>
 /// </remarks>
 internal enum CreationVisibility : byte
@@ -35,8 +38,8 @@ internal enum CreationVisibility : byte
     /// permissions per object that way.
     /// </summary>
     /// <remarks>
-    /// On Unix this is mode 0700, which is what <c>mkdtemp</c> asks for and for the same
-    /// reason. On Windows it is not expressible as a creation flag — access there is decided
+    /// On Unix this is mode 0700 for a directory and 0600 for a file, which is what
+    /// <c>mkdtemp</c> and <c>mkstemp</c> ask for and for the same reason. On Windows it is not expressible as a creation flag — access there is decided
     /// by a security descriptor inherited from the containing directory — so this is the
     /// same as <see cref="SystemDefault"/>, and the protection comes from the temporary
     /// location itself being per-account.

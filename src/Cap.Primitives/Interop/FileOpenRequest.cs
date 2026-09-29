@@ -40,7 +40,8 @@ internal readonly struct FileOpenRequest
         FileOptions options,
         long preallocationSize,
         bool append = false,
-        bool noFollow = false)
+        bool noFollow = false,
+        CreationVisibility visibility = CreationVisibility.SystemDefault)
     {
         Mode = mode;
         Access = access;
@@ -49,6 +50,7 @@ internal readonly struct FileOpenRequest
         PreallocationSize = preallocationSize;
         Appends = append || mode == FileMode.Append;
         NoFollow = noFollow;
+        Visibility = visibility;
     }
 
     /// <summary>Whether the name may be created, and what happens to what is already there.</summary>
@@ -96,6 +98,19 @@ internal readonly struct FileOpenRequest
     /// nothing for it.
     /// </remarks>
     public bool NoFollow { get; }
+
+    /// <summary>
+    /// How much of the rest of the machine may see into a file this open creates.
+    /// </summary>
+    /// <remarks>
+    /// Read only when the open creates the file, and only as the permissions the creating
+    /// call itself asks for, so there is no moment at which the file is wider than asked. A
+    /// file that was already there keeps what it had: its permissions were somebody's
+    /// decision, and an open does not revisit it. Every open a caller can make takes
+    /// <see cref="CreationVisibility.SystemDefault"/>; the narrower one is for files this
+    /// library placed, as <see cref="CreationVisibility"/> explains.
+    /// </remarks>
+    public CreationVisibility Visibility { get; }
 
     /// <summary>Whether the handle is to be capable of overlapped operations.</summary>
     public bool IsAsynchronous => (Options & FileOptions.Asynchronous) != 0;

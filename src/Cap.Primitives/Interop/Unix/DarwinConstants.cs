@@ -124,6 +124,16 @@ internal static class DarwinConstants
     /// </summary>
     public const uint FileCreateMode = 0x1B6;
 
+    /// <summary>
+    /// The permissions a named scratch file is asked for.
+    /// </summary>
+    /// <remarks>
+    /// Read and write for the owning account alone, which is what <c>mkstemp</c> asks for.
+    /// The name was drawn by this library rather than chosen by the caller, so closing the
+    /// file to everybody else is part of making it.
+    /// </remarks>
+    public const uint OwnerOnlyFileCreateMode = 0x180;
+
     public const int F_GETFL = 3;
     public const int F_SETFL = 4;
 

@@ -103,7 +103,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `Path.Combine(root, p)`, `Path.Join` | `dir.OpenDir(a)` and then a name within it | Or a relative path with `/` in it, when every part is yours. |
 | `Path.GetFullPath(p)` | none | It is what the README shows being walked past. See [Why there is no `Dir.FullName`](no-full-name.md). |
 | `Path.GetTempPath()` | `CapTempDir.New(AmbientAuthority.Acquire())` | A private scratch directory beneath it, removed on disposal. |
-| `Path.GetTempFileName()` | `CapTempFile.New(dir)`, or `CapTempFile.NewAnonymous(dir)` for a file with no name at all | |
+| `Path.GetTempFileName()` | `CapTempFile.New(dir)`, or `CapTempFile.NewAnonymous(dir)` for a file with no name at all | Created owner-only (`0600`) on Unix, as `GetTempFileName` does, whatever `dir` is; on Windows it takes the permissions `dir` hands down. |
 | `Path.GetFileName`, `GetExtension`, `GetFileNameWithoutExtension`, `ChangeExtension` | unchanged | String manipulation of a name is harmless. Deciding *containment* from strings is what is not. |
 | `Environment.GetFolderPath(SpecialFolder.ApplicationData)` and friends | `Cap.Directories.ProjectDirs` | Configuration, data, cache, state and runtime directories as `Dir` handles; see [directories.md](directories.md). |
 
