@@ -142,11 +142,12 @@ Each of these is deliberate and is covered by the package's tests.
 | Changing permissions or attributes: `SetAttributes`, `SetUnixFileMode`, the `Attributes`, `IsReadOnly` and `UnixFileMode` setters | supported | `NotSupportedException`: `Cap.Std` cannot change them beneath a handle. The `Attributes` and `IsReadOnly` setters accept the value already there |
 | Creating with a Unix mode: `Directory.CreateDirectory(path, mode)`, `FileStreamOptions.UnixCreateMode` | supported | `NotSupportedException`. Ignoring the mode would create something more permissive than asked for |
 | Setting a creation time | supported | `NotSupportedException`. Access and write times can be set |
-| Members that take a `SafeFileHandle`, and `Wrap` on the factories | supported | `NotSupportedException`: the handle, or the host path inside a `FileInfo`, `DirectoryInfo` or `FileStream`, was not opened beneath the `Dir` |
+| Members that take a `SafeFileHandle`, `RandomAccess`, and `Wrap` on the factories | supported | `NotSupportedException`: the handle, or the host path inside a `FileInfo`, `DirectoryInfo` or `FileStream`, was not opened beneath the `Dir` |
+| `File.OpenHandle` | supported | `NotSupportedException`: nothing in the adapter accepts the handle back. `File.Open` returns a stream that reads and writes at any position |
 | `DriveInfo`, `FileSystemWatcher`, `FileVersionInfo`, access control lists, `Encrypt`, `Decrypt` | supported | `NotSupportedException`, saying why |
 
-The members that throw `NotSupportedException` do so for every argument. A missing member
-would fail at the first call anyway, and the exception says what to use instead.
+The members that throw `NotSupportedException` do so for every argument, and the exception
+says what to use instead.
 
 ## Differences from `MockFileSystem`
 
@@ -267,10 +268,14 @@ of one instance, as the process's is shared by every caller of `System.IO`.
 The package depends on `TestableIO.System.IO.Abstractions` and on
 `Testably.Abstractions.FileSystem.Interface`, where the interfaces are declared. Both are MIT
 licensed, and they are the only third-party runtime dependencies of any package in this
-repository. Their maintainers add members to the interfaces in minor releases, and a newer
-interface assembly beside this one would load and then fail the first time a new member was
-called. So the dependency is pinned to the minor versions the adapter is built and tested
-against, 22.2.x and 10.3.x, and each new minor version needs a release of this package that
-implements its members.
+repository. It needs at least 22.3.0 and 10.4.0 respectively, and accepts any newer
+version.
+
+Their maintainers add members to the interfaces in minor releases. If a newer interface
+assembly declares a member this package does not implement, `DirFileSystem` fails to load:
+`new DirFileSystem(...)` throws `TypeLoadException` naming the missing member, before any
+file is touched. The fix is a release of this package that implements the member. CI builds
+and tests the adapter against the newest stable versions of both packages, so a new member
+is normally implemented before a consumer can meet the failure.
 
 The `Wrappers` package, which holds the ambient `FileSystem`, is not a dependency.

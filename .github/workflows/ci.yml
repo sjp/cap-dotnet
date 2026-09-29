@@ -369,6 +369,24 @@ jobs:
       - name: Fail on a coverage drop in Cap.Primitives
         run: build/ci/check-coverage.sh coverage Cap.Primitives 0.47 0.45
 
+  # Cap.IO.Abstractions depends on a minimum of each System.IO.Abstractions package, so a
+  # consumer can install a newer one beside it; every other leg builds against the minimums.
+  # The interfaces gain members in minor releases, and a member the adapter lacks makes
+  # DirFileSystem fail to load. This leg builds and tests it against the newest stable
+  # versions, so a red leg here means the adapter has new members to implement.
+  io-abstractions-latest:
+    name: Cap.IO.Abstractions against the newest upstream
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - name: Move the System.IO.Abstractions packages to their newest stable versions
+        run: build/ci/use-latest-io-abstractions.sh | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Build and test
+        run: dotnet test tests/Cap.IO.Abstractions.Tests/Cap.IO.Abstractions.Tests.csproj --configuration Release
+
   analyzer-package:
     name: analyzer ships in Cap.Std
     runs-on: ubuntu-latest

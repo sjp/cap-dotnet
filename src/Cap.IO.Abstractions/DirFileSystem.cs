@@ -115,6 +115,7 @@ public sealed class DirFileSystem : IFileSystem
         DriveInfo = new DriveInfoFactory(this);
         FileSystemWatcher = new FileSystemWatcherFactory(this);
         FileVersionInfo = new FileVersionInfoFactory(this);
+        RandomAccess = new RandomAccessAdapter(this);
     }
 
     /// <inheritdoc/>
@@ -146,6 +147,10 @@ public sealed class DirFileSystem : IFileSystem
 
     /// <inheritdoc/>
     public IPath Path { get; }
+
+    /// <inheritdoc/>
+    /// <remarks>Every member throws <see cref="NotSupportedException"/>.</remarks>
+    public IRandomAccess RandomAccess { get; }
 
     /// <summary>The directory this file system is confined to.</summary>
     internal Dir Dir { get; }

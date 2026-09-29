@@ -327,6 +327,7 @@ public abstract class EscapeTests : IDisposable
         yield return E("IFile.Open(String, FileMode, FileAccess) path", F, R, (fs, p) => fs.File.Open(p, FileMode.OpenOrCreate, FileAccess.ReadWrite));
         yield return E("IFile.Open(String, FileMode, FileAccess, FileShare) path", F, R, (fs, p) => fs.File.Open(p, FileMode.Open, FileAccess.Read, FileShare.Read));
         yield return E("IFile.Open(String, FileStreamOptions) path", F, R, (fs, p) => fs.File.Open(p, createOptions));
+        yield return E("IFile.OpenHandle(String, FileMode, FileAccess, FileShare, FileOptions, Int64) path", F, Outcome.Unsupported, (fs, p) => fs.File.OpenHandle(p, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0));
         yield return E("IFile.OpenRead(String) path", F, R, (fs, p) => fs.File.OpenRead(p));
         yield return E("IFile.OpenText(String) path", F, R, (fs, p) => fs.File.OpenText(p));
         yield return E("IFile.OpenWrite(String) path", F, R, (fs, p) => fs.File.OpenWrite(p));

@@ -110,6 +110,8 @@ public abstract class DifferenceTests : IDisposable
         Assert.Throws<NotSupportedException>(() => Fs.DirectoryInfo.Wrap(new DirectoryInfo("d")));
         Assert.Throws<NotSupportedException>(() => Fs.FileStream.New(handle, FileAccess.Read));
         Assert.Throws<NotSupportedException>(() => Fs.File.GetAttributes(handle));
+        Assert.Throws<NotSupportedException>(() => Fs.File.OpenHandle("a.txt", FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0));
+        Assert.Throws<NotSupportedException>(() => Fs.RandomAccess.GetLength(handle));
         Assert.Throws<NotSupportedException>(() => Fs.File.SetAttributes("a.txt", FileAttributes.Hidden));
         Assert.Throws<NotSupportedException>(() => Fs.File.SetUnixFileMode("a.txt", UnixFileMode.UserRead));
         Assert.Throws<NotSupportedException>(() => Fs.File.SetCreationTimeUtc("a.txt", DateTime.UtcNow));

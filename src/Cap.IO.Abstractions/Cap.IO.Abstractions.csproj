@@ -18,10 +18,14 @@
     The only third-party runtime dependency in any package here. The interfaces this assembly
     implements are declared in Testably.Abstractions.FileSystem.Interface, which
     TestableIO.System.IO.Abstractions depends on and forwards to, so both are referenced
-    directly and both are pinned in Directory.Packages.props to the minor versions this
-    assembly was built and tested against. Their maintainers add members to the interfaces in
-    minor releases, and a newer interface assembly beside this one would load and then fail
-    the first time a new member was called.
+    directly. Directory.Packages.props gives each a minimum, the versions this assembly is
+    built against, and no maximum. Their maintainers add members to the interfaces in minor
+    releases, and beside a newer interface assembly with a member this one lacks,
+    DirFileSystem fails to load, with TypeLoadException, when it is constructed. That is loud
+    and immediate, and it is what every other IFileSystem implementation accepts; capping the
+    range instead would refuse the whole package to any project that has the newer version.
+    The io-abstractions-latest job in .github/workflows/ci.yml builds and tests against the
+    newest stable versions, so a new member is found here before a release.
 
     The Wrappers package, which holds the ambient FileSystem over the static System.IO types,
     is deliberately not referenced: a containment package has no business shipping the thing

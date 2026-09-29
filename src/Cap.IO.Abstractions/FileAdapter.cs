@@ -238,6 +238,9 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
             OperatingSystem.IsWindows() ? null : options.UnixCreateMode);
     }
 
+    public SafeFileHandle OpenHandle(string path, FileMode mode, FileAccess access, FileShare share, FileOptions options, long preallocationSize) =>
+        throw Unsupported.OpenHandle();
+
     public FileSystemStream OpenRead(string path) => fs.OpenStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 
     public StreamReader OpenText(string path) => Reader(path, Encoding.UTF8);

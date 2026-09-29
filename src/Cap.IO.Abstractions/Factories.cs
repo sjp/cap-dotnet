@@ -94,3 +94,35 @@ internal sealed class FileVersionInfoFactory(DirFileSystem fs) : IFileVersionInf
 
     public IFileVersionInfo GetVersionInfo(string fileName) => throw Unsupported.VersionInfo();
 }
+
+/// <summary>Positional access: none, since every member takes a handle that was not opened beneath the directory.</summary>
+internal sealed class RandomAccessAdapter(DirFileSystem fs) : IRandomAccess
+{
+    public IFileSystem FileSystem => fs;
+
+    public void FlushToDisk(SafeFileHandle handle) => throw Unsupported.Handle();
+
+    public long GetLength(SafeFileHandle handle) => throw Unsupported.Handle();
+
+    public int Read(SafeFileHandle handle, Span<byte> buffer, long fileOffset) => throw Unsupported.Handle();
+
+    public long Read(SafeFileHandle handle, IReadOnlyList<Memory<byte>> buffers, long fileOffset) => throw Unsupported.Handle();
+
+    public ValueTask<int> ReadAsync(SafeFileHandle handle, Memory<byte> buffer, long fileOffset, CancellationToken cancellationToken = default) =>
+        throw Unsupported.Handle();
+
+    public ValueTask<long> ReadAsync(SafeFileHandle handle, IReadOnlyList<Memory<byte>> buffers, long fileOffset, CancellationToken cancellationToken = default) =>
+        throw Unsupported.Handle();
+
+    public void SetLength(SafeFileHandle handle, long length) => throw Unsupported.Handle();
+
+    public void Write(SafeFileHandle handle, ReadOnlySpan<byte> buffer, long fileOffset) => throw Unsupported.Handle();
+
+    public void Write(SafeFileHandle handle, IReadOnlyList<ReadOnlyMemory<byte>> buffers, long fileOffset) => throw Unsupported.Handle();
+
+    public ValueTask WriteAsync(SafeFileHandle handle, ReadOnlyMemory<byte> buffer, long fileOffset, CancellationToken cancellationToken = default) =>
+        throw Unsupported.Handle();
+
+    public ValueTask WriteAsync(SafeFileHandle handle, IReadOnlyList<ReadOnlyMemory<byte>> buffers, long fileOffset, CancellationToken cancellationToken = default) =>
+        throw Unsupported.Handle();
+}

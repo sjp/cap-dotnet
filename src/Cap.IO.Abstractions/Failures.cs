@@ -107,6 +107,9 @@ internal static class Unsupported
     public static NotSupportedException Handle() =>
         new("Members that take a SafeFileHandle are not supported by DirFileSystem. The handle was not opened beneath this file system's directory, so nothing here can say what it reaches.");
 
+    public static NotSupportedException OpenHandle() =>
+        new("OpenHandle is not supported by DirFileSystem. The handle would leave the adapter, and every member that could take it back refuses a SafeFileHandle. Use File.Open, whose stream reads and writes at any position.");
+
     public static NotSupportedException Wrap(string type) =>
         new($"Wrapping a {type} is not supported by DirFileSystem. A {type} names a host path, and wrapping it would reach the host filesystem around the directory handle.");
 

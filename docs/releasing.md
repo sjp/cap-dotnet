@@ -17,7 +17,7 @@ package you have downloaded.
 | `Cap.Rand` | `Cap.Rand.dll`; depends on `Cap.Std` |
 | `Cap.Directories` | `Cap.Directories.dll`; depends on `Cap.Std` |
 | `Cap.Std.Testing` | `Cap.Std.Testing.dll`, and `buildTransitive/Cap.Std.Testing.targets`, which warns a project that is not a test project; depends on exactly the `Cap.Std` of the same version |
-| `Cap.IO.Abstractions` | `Cap.IO.Abstractions.dll`; depends on `Cap.Std`, `Cap.Fs.Ext`, and on `TestableIO.System.IO.Abstractions` and `Testably.Abstractions.FileSystem.Interface` pinned to one minor version each |
+| `Cap.IO.Abstractions` | `Cap.IO.Abstractions.dll`; depends on `Cap.Std`, `Cap.Fs.Ext`, and on `TestableIO.System.IO.Abstractions` and `Testably.Abstractions.FileSystem.Interface` at a minimum version each |
 
 There is no `Cap.Primitives` package. The assembly holds the few public types every package
 shares, such as `AmbientAuthority`, `CapPath` and `SymlinkPolicy`, together with the
@@ -32,10 +32,11 @@ any release, so it is correct only beside the `Cap.Std` it was built with, and N
 combination of the two that would compile and then fail at run time.
 
 `Cap.IO.Abstractions` is the one package with a third-party runtime dependency. It implements
-the System.IO.Abstractions interfaces, whose maintainers add members in minor releases, so
-each dependency is a range within one minor version (for example `[22.2.0,22.3.0)`) rather
-than a minimum. A newer minor version needs a release of this package that implements its
-members. The build refuses a reference to either dependency from any other shipped project,
+the System.IO.Abstractions interfaces, whose maintainers add members in minor releases. Each
+dependency is a minimum (for example `[22.3.0,)`), so the package installs beside newer
+versions. A newer version with a member the adapter lacks makes `DirFileSystem` fail to load
+with `TypeLoadException`, and needs a release of this package that implements the member;
+the `io-abstractions-latest` CI job builds against the newest versions to find one first. The build refuses a reference to either dependency from any other shipped project,
 so the rest of the packages keep depending on .NET alone.
 
 Each package carries `LICENSE` (MIT), `NOTICE` and a readme. Each assembly embeds its PDB,
