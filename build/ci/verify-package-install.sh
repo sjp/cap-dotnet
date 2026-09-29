@@ -3,12 +3,14 @@
 # warning an error, and runs them.
 #
 # Three consumers, all outside the repository so that none of its build settings reach them,
-# restoring from a feed that holds only the packages under test, into a package cache of
-# their own:
+# restoring every Cap.* package from a feed that holds only the packages under test, into a
+# package cache of their own. nuget.org is a second source, mapped so that it supplies only
+# what is not Cap.*: the two System.IO.Abstractions packages Cap.IO.Abstractions depends on.
 #
-#   1. one that references all seven packages and calls into each, which shows that they
-#      restore together, that Cap.Primitives arrives with Cap.Std, and that the assemblies
-#      load and work on this platform;
+#   1. one that references all eight packages and calls into each, which shows that they
+#      restore together, that Cap.Primitives arrives with Cap.Std, that Cap.IO.Abstractions'
+#      third-party dependencies restore from nuget.org, and that the assemblies load and work
+#      on this platform;
 #   2. one that references only Cap.Time, which shows that the analyzer reaches a consumer
 #      through a dependency on Cap.Std and not only through a direct reference;
 #   3. one that references only Cap.Std.Testing, which shows that the package warns a project
@@ -39,7 +41,16 @@ write_nuget_config() {
   <packageSources>
     <clear />
     <add key="local" value="$feed" />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
   </packageSources>
+  <packageSourceMapping>
+    <packageSource key="local">
+      <package pattern="Cap.*" />
+    </packageSource>
+    <packageSource key="nuget.org">
+      <package pattern="*" />
+    </packageSource>
+  </packageSourceMapping>
 </configuration>
 EOF
 }
@@ -69,7 +80,7 @@ echo "== Every package, in one consumer"
 consumer="$work/all"
 write_nuget_config "$consumer"
 references=""
-for id in Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories Cap.Std.Testing; do
+for id in Cap.Std Cap.Fs.Ext Cap.Net Cap.Time Cap.Rand Cap.Directories Cap.Std.Testing Cap.IO.Abstractions; do
   references+="    <PackageReference Include=\"$id\" Version=\"$version\" />"$'\n'
 done
 # Not a test project, but it uses Cap.Std.Testing on purpose, and says so.
@@ -77,9 +88,11 @@ write_project "$consumer" "$references" true \
   "    <CapAllowStdTestingOutsideTests>true</CapAllowStdTestingOutsideTests>"
 
 cat > "$consumer/Program.cs" <<'EOF'
+using System.IO.Abstractions;
 using System.Net;
 using Cap.Directories;
 using Cap.Fs.Ext;
+using Cap.IO.Abstractions;
 using Cap.Net;
 using Cap.Primitives;
 using Cap.Rand;
@@ -109,6 +122,21 @@ catch (SandboxEscapeException)
 if (escaped)
 {
     throw new InvalidOperationException("A parent link was not refused.");
+}
+
+IFileSystem fileSystem = new DirFileSystem(root);
+if (fileSystem.File.ReadAllText("/greeting.txt") != "installed")
+{
+    throw new InvalidOperationException("Cap.IO.Abstractions did not read a file beneath the root.");
+}
+
+try
+{
+    _ = fileSystem.File.ReadAllText("../outside.txt");
+    throw new InvalidOperationException("A parent link was not refused through IFileSystem.");
+}
+catch (SandboxEscapeException)
+{
 }
 
 InMemoryFileSystem memory = new();

@@ -70,8 +70,17 @@
     <PackageTags>capability;security;sandbox;filesystem;path-traversal;cap-std</PackageTags>
   </PropertyGroup>
 
+  <!--
+    build/ci/pack.sh passes CapPackageReadme for a release: a copy of the readme whose links
+    name the release's tag rather than main, so a reader of an installed package is sent to
+    the docs for the version they have.
+  -->
+  <PropertyGroup Condition="'$(CapIsProductCode)' == 'true'">
+    <CapPackageReadme Condition="'$(CapPackageReadme)' == ''">$(MSBuildThisFileDirectory)build/package/README.md</CapPackageReadme>
+  </PropertyGroup>
+
   <ItemGroup Condition="'$(CapIsProductCode)' == 'true' and '$(IsPackable)' != 'false'">
-    <None Include="$(MSBuildThisFileDirectory)build/package/README.md" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="$(CapPackageReadme)" Pack="true" PackagePath="/README.md" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)LICENSE" Pack="true" PackagePath="/" Visible="false" />
     <None Include="$(MSBuildThisFileDirectory)NOTICE" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>

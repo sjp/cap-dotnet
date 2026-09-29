@@ -19,6 +19,10 @@ package you have downloaded.
 | `Cap.Std.Testing` | `Cap.Std.Testing.dll`, and `buildTransitive/Cap.Std.Testing.targets`, which warns a project that is not a test project; depends on exactly the `Cap.Std` of the same version |
 | `Cap.IO.Abstractions` | `Cap.IO.Abstractions.dll`; depends on `Cap.Std`, `Cap.Fs.Ext`, and on `TestableIO.System.IO.Abstractions` and `Testably.Abstractions.FileSystem.Interface` at a minimum version each |
 
+[`build/ci/pack.sh`](../build/ci/pack.sh) names these eight packages. It fails if that list
+differs from the projects under `src/` that MSBuild considers packable, so a new project is
+either added to a release on purpose or marked `IsPackable=false`.
+
 There is no `Cap.Primitives` package. The assembly holds the few public types every package
 shares, such as `AmbientAuthority`, `CapPath` and `SymlinkPolicy`, together with the
 resolution code behind them. It ships inside `Cap.Std`, so nobody takes a dependency on it as
@@ -39,7 +43,8 @@ with `TypeLoadException`, and needs a release of this package that implements th
 the `io-abstractions-latest` CI job builds against the newest versions to find one first. The build refuses a reference to either dependency from any other shipped project,
 so the rest of the packages keep depending on .NET alone.
 
-Each package carries `LICENSE` (MIT), `NOTICE` and a readme. Each assembly embeds its PDB,
+Each package carries `LICENSE` (MIT), `NOTICE` and a readme, whose links go to the docs at
+the release's tag rather than at `main`. Each assembly embeds its PDB,
 with SourceLink pointing at the commit it was built from, so a debugger can step into the
 source without a symbol server.
 
@@ -81,7 +86,7 @@ Pre-1.0, only the latest release is supported ([SECURITY.md](../SECURITY.md#supp
    git push origin v0.2.0
    ```
 
-3. The [release workflow](../.github/workflows/release.yml) packs the six packages and checks
+3. The [release workflow](../.github/workflows/release.yml) packs the eight packages and checks
    their contents. It builds them a second time from another directory and confirms every
    assembly is identical. It attests their provenance, and installs them into fresh projects
    on Linux, Windows and macOS.
