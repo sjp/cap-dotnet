@@ -150,41 +150,178 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
-    /// The open flags that differ between architectures differ in the direction they are
-    /// supposed to.
+    /// The running process reads the table for its own architecture, and is one of the three
+    /// that have one.
     /// </summary>
-    /// <remarks>
-    /// AArch64 inherited 32-bit ARM's values here rather than the generic ones. Swapping the
-    /// two sets does not produce an error: the x86-64 value for "do not follow the final
-    /// link" is the AArch64 value for "bypass the buffer cache", so an open meant to refuse a
-    /// symbolic link would instead follow it and ask for unbuffered IO. Nothing downstream
-    /// would report anything wrong.
-    /// </remarks>
     [Fact]
-    public void Linux_open_flags_follow_the_running_architecture()
+    public void Linux_constants_follow_the_running_architecture()
     {
-        bool arm64 = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+        LinuxAbi expected = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => LinuxAbi.X64,
+            Architecture.Arm64 => LinuxAbi.Arm64,
+            Architecture.Arm => LinuxAbi.Arm,
+            _ => LinuxAbi.Unsupported,
+        };
 
-        Assert.Equal(arm64 ? 0x4000 : 0x10000, LinuxConstants.O_DIRECTORY);
-        Assert.Equal(arm64 ? 0x8000 : 0x20000, LinuxConstants.O_NOFOLLOW);
+        Assert.Equal(expected, LinuxConstants.Abi);
+        Assert.Equal(LinuxConstants.DirectoryFlag(expected), LinuxConstants.O_DIRECTORY);
+        Assert.Equal(LinuxConstants.NoFollowFlag(expected), LinuxConstants.O_NOFOLLOW);
+        Assert.Equal(LinuxConstants.LargeFileFlag(expected), LinuxConstants.O_LARGEFILE);
+        Assert.Equal(0x400000 | LinuxConstants.O_DIRECTORY, LinuxConstants.O_TMPFILE);
+        Assert.Equal(LinuxConstants.StatxNumber(expected), LinuxConstants.SYS_statx);
+        Assert.Equal(LinuxConstants.Renameat2Number(expected), LinuxConstants.SYS_renameat2);
+        Assert.Equal(LinuxConstants.Getdents64Number(expected), LinuxConstants.SYS_getdents64);
+        Assert.Equal(expected == LinuxAbi.Arm, LinuxConstants.HasNarrowCTypes);
 
-        // The two flag sets are disjoint. If they were not, a value borrowed from the wrong
-        // architecture could still be a meaningful flag on this one.
-        Assert.NotEqual(LinuxConstants.O_DIRECTORY, LinuxConstants.O_NOFOLLOW);
-
-        // Unlike the two above, these are the same everywhere.
+        // Unlike the ones above, these are the same everywhere.
         Assert.Equal(0x80000, LinuxConstants.O_CLOEXEC);
+        Assert.Equal(0x200000, LinuxConstants.O_PATH);
         Assert.Equal(-100, LinuxConstants.AT_FDCWD);
+        Assert.Equal(437, LinuxConstants.SYS_openat2);
     }
 
-    /// <summary>The stat syscall is numbered differently on the two architectures.</summary>
-    [Fact]
-    public void Linux_syscall_numbers_follow_the_running_architecture()
+    /// <summary>
+    /// The open flags that differ between architectures differ in the direction they are
+    /// supposed to, in every table, whichever architecture runs the test.
+    /// </summary>
+    /// <remarks>
+    /// The ARM targets have their own values here rather than the generic ones. Swapping the
+    /// two sets does not produce an error: the x86-64 value for "do not follow the final link"
+    /// is the ARM value for "large file", and the x86-64 value for "must be a directory" is
+    /// the ARM value for "bypass the buffer cache", so an open meant to refuse a symbolic link
+    /// would instead follow it. Nothing downstream would report anything wrong. Asserted as
+    /// literals from the kernel's headers, per table, because an x86-64 agent is the only
+    /// place most changes are ever run.
+    /// </remarks>
+    [Theory]
+    [InlineData(nameof(LinuxAbi.X64), 0x10000, 0x20000, 0x4000, 0x8000)]
+    [InlineData(nameof(LinuxAbi.Arm64), 0x4000, 0x8000, 0x10000, 0x20000)]
+    [InlineData(nameof(LinuxAbi.Arm), 0x4000, 0x8000, 0x10000, 0x20000)]
+    public void Linux_open_flags_match_each_architecture(
+        string abiName, int directory, int noFollow, int direct, int largeFile)
     {
-        bool arm64 = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+        LinuxAbi abi = Enum.Parse<LinuxAbi>(abiName);
 
-        Assert.Equal(arm64 ? 291 : 332, LinuxConstants.SYS_statx);
-        Assert.Equal(437, LinuxConstants.SYS_openat2);
+        Assert.Equal(directory, LinuxConstants.DirectoryFlag(abi));
+        Assert.Equal(noFollow, LinuxConstants.NoFollowFlag(abi));
+        Assert.Equal(direct, LinuxConstants.DirectFlag(abi));
+        Assert.Equal(largeFile, LinuxConstants.LargeFileFlag(abi));
+
+        // Within a table the four are distinct single bits, and none of the flags every table
+        // shares lands on one of them.
+        int[] bits = [directory, noFollow, direct, largeFile];
+        Assert.All(bits, bit => Assert.Equal(1, System.Numerics.BitOperations.PopCount((uint)bit)));
+        Assert.Equal(bits.Length, bits.Distinct().Count());
+
+        int shared = LinuxConstants.O_PATH | LinuxConstants.O_CLOEXEC | LinuxConstants.O_CREAT |
+                     LinuxConstants.O_EXCL | LinuxConstants.O_TRUNC | LinuxConstants.O_APPEND |
+                     LinuxConstants.O_SYNC | LinuxConstants.O_NONBLOCK | LinuxConstants.O_RDWR |
+                     LinuxConstants.O_WRONLY | 0x400000;
+        Assert.All(bits, bit => Assert.Equal(0, bit & shared));
+    }
+
+    /// <summary>
+    /// The syscalls called by number are numbered as each architecture's table has them.
+    /// </summary>
+    /// <remarks>
+    /// Three tables, not two: x86-64 has its own, AArch64 has the generic one, and 32-bit ARM
+    /// has an older one of its own. A number from the wrong table is either unassigned, which
+    /// fails every call, or a different call entirely.
+    /// </remarks>
+    [Theory]
+    [InlineData(nameof(LinuxAbi.X64), 332, 316, 217)]
+    [InlineData(nameof(LinuxAbi.Arm64), 291, 276, 61)]
+    [InlineData(nameof(LinuxAbi.Arm), 397, 382, 217)]
+    public void Linux_syscall_numbers_match_each_architecture(
+        string abiName, int statx, int renameat2, int getdents64)
+    {
+        LinuxAbi abi = Enum.Parse<LinuxAbi>(abiName);
+
+        Assert.Equal(statx, LinuxConstants.StatxNumber(abi));
+        Assert.Equal(renameat2, LinuxConstants.Renameat2Number(abi));
+        Assert.Equal(getdents64, LinuxConstants.Getdents64Number(abi));
+    }
+
+    /// <summary>
+    /// The calls 32-bit ARM makes by number, where the C library's default ones take a
+    /// 32-bit offset or time.
+    /// </summary>
+    [Fact]
+    public void Linux_arm_only_syscall_numbers_match_the_arm_table()
+    {
+        Assert.Equal(181, LinuxConstants.SYS_arm_pwrite64);
+        Assert.Equal(352, LinuxConstants.SYS_arm_fallocate);
+        Assert.Equal(267, LinuxConstants.SYS_arm_fstatfs64);
+        Assert.Equal(412, LinuxConstants.SYS_arm_utimensat_time64);
+        Assert.Equal(84u, LinuxConstants.ArmStatfs64Bytes);
+        Assert.True(LinuxConstants.ArmStatfs64Bytes <= (nuint)LinuxConstants.StatfsBufferBytes);
+    }
+
+    /// <summary>
+    /// A 64-bit argument passed as two 32-bit registers is split low word first, and the
+    /// split loses nothing.
+    /// </summary>
+    [Theory]
+    [InlineData(0L, 0, 0)]
+    [InlineData(1L, 1, 0)]
+    [InlineData(0x1_0000_0000L, 0, 1)]
+    [InlineData(0x1234_5678_9ABC_DEF0L, unchecked((int)0x9ABC_DEF0), 0x1234_5678)]
+    [InlineData(long.MaxValue, -1, int.MaxValue)]
+    public void A_64_bit_argument_splits_into_two_registers(long value, int low, int high)
+    {
+        Assert.Equal((nint)low, LinuxNative.Low(value));
+        Assert.Equal((nint)high, LinuxNative.High(value));
+        Assert.Equal(value, ((long)(uint)LinuxNative.High(value) << 32) | (uint)LinuxNative.Low(value));
+    }
+
+    /// <summary>
+    /// An architecture without a table is refused rather than handed another's values.
+    /// </summary>
+    /// <remarks>
+    /// Several of these run .NET through community ports and would load the library without
+    /// complaint. On riscv64 and loongarch64 the open flags happen to match x86-64's but every
+    /// syscall number differs; ppc64le has ARM's flags and a table of its own; s390x is
+    /// big-endian. The pointer size is part of the key, because the right numbers read at the
+    /// wrong width are still wrong.
+    /// </remarks>
+    [Theory]
+    [InlineData(Architecture.X64, 8, true)]
+    [InlineData(Architecture.Arm64, 8, true)]
+    [InlineData(Architecture.Arm, 4, true)]
+    [InlineData(Architecture.X64, 4, false)]
+    [InlineData(Architecture.Arm64, 4, false)]
+    [InlineData(Architecture.Arm, 8, false)]
+    [InlineData(Architecture.X86, 4, false)]
+    [InlineData(Architecture.RiscV64, 8, false)]
+    [InlineData(Architecture.LoongArch64, 8, false)]
+    [InlineData(Architecture.Ppc64le, 8, false)]
+    [InlineData(Architecture.S390x, 8, false)]
+    [InlineData(Architecture.Armv6, 4, false)]
+    [InlineData(Architecture.Wasm, 4, false)]
+    public void An_architecture_without_a_table_is_refused(Architecture architecture, int pointerSize, bool supported)
+    {
+        Assert.Equal(supported, LinuxConstants.IsSupportedArchitecture(architecture, pointerSize));
+        Assert.Equal(supported, LinuxConstants.AbiFor(architecture, pointerSize) != LinuxAbi.Unsupported);
+    }
+
+    /// <summary>
+    /// Asking the unsupported table for a value throws, naming the file to extend, rather
+    /// than answering with some other architecture's.
+    /// </summary>
+    [Fact]
+    public void The_unsupported_table_has_no_values()
+    {
+        PlatformNotSupportedException thrown =
+            Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.NoFollowFlag(LinuxAbi.Unsupported));
+        Assert.Contains("LinuxConstants.cs", thrown.Message, StringComparison.Ordinal);
+
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.DirectoryFlag(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.LargeFileFlag(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.DirectFlag(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.StatxNumber(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Renameat2Number(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Getdents64Number(LinuxAbi.Unsupported));
     }
 
     /// <summary>

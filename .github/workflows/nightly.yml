@@ -2,7 +2,7 @@ name: Nightly stress and fuzzing
 
 # ---------------------------------------------------------------------------------------
 # Work too slow for every change: the stress races at full size, the fuzz targets for an hour
-# each, and the property tests at a million cases.
+# each, the property tests at a million cases, and the 32-bit ARM build under emulation.
 #
 # The races in tests/Cap.Stress.Tests at full size. The same tests run on every change at a
 # size that finishes in seconds, which shows the harness still stages its races and still
@@ -161,6 +161,83 @@ jobs:
           path: findings/
           retention-days: 7
           if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------------------
+  # 32-bit ARM, under glibc and musl, emulated. The Linux backend carries a table of flag
+  # values and syscall numbers per architecture, and on this one also sends file offsets,
+  # timestamps and filesystem sizes to the kernel by number, because the C library's default
+  # calls take 32-bit ones. The per-table literals are asserted on every leg of ci.yml; this
+  # is where the calls themselves are made against a 32-bit ARM kernel interface. There is
+  # no hosted 32-bit ARM runner, so the build is published for the target on an ordinary
+  # agent and run in the runtime's own arm32v7 image under QEMU, which is too slow and too
+  # much of its own moving part to gate every change on.
+  #
+  # What running under a user-mode emulator changes, and how each is handled:
+  # - The runtime's write-xor-execute double mapping of generated code is not something QEMU
+  #   emulates faithfully; with it on, the process dies at random with an illegal
+  #   instruction or an access violation. It is turned off.
+  # - QEMU answers some of /proc/self itself. A file under it opened by absolute path is the
+  #   emulator's version and the same file opened beneath a directory handle is the kernel's,
+  #   so the one test comparing the two is excluded here.
+  # - The seccomp-driven demotion tests skip themselves: a filter installed under the
+  #   emulator would filter the emulator's own syscalls, not the emulated program's.
+  #
+  # Unprivileged, because the escape corpus refuses to run where file permissions can be
+  # bypassed, and a container's default user can. The checkout is mounted at its own path so
+  # the tests that read the docs find the repository above the published assemblies.
+  # -------------------------------------------------------------------------------------
+  linux-arm:
+    name: linux-arm (${{ matrix.libc }}, emulated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - libc: glibc
+            rid: linux-arm
+            image: mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-arm32v7
+          - libc: musl
+            rid: linux-musl-arm
+            image: mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine-arm32v7
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Publish the tests for ${{ matrix.rid }}
+        run: |
+          for project in Cap.Primitives.Tests Cap.Std.Tests Cap.Escape.Tests; do
+            dotnet publish "tests/$project/$project.csproj" --configuration Release \
+              --runtime ${{ matrix.rid }} --self-contained --output "artifacts/arm/$project"
+          done
+
+      - name: Run the tests under emulation
+        run: |
+          status=0
+          for project in Cap.Primitives.Tests Cap.Std.Tests Cap.Escape.Tests; do
+            echo "::group::$project"
+            docker run --rm --platform linux/arm/v7 \
+              --user "$(id -u):$(id -g)" \
+              --env HOME=/tmp \
+              --env DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
+              --env DOTNET_EnableWriteXorExecute=0 \
+              --volume "$PWD:$PWD" \
+              --workdir "$PWD/artifacts/arm/$project" \
+              ${{ matrix.image }} \
+              "./$project" \
+              -method- "Cap.Std.Tests.DirFileOpenTests.A_file_longer_than_it_reports_is_read_to_its_end" \
+              || status=1
+            echo "::endgroup::"
+          done
+          exit $status
 
   # -------------------------------------------------------------------------------------
   # The same property tests that run on every change at two thousand cases each, run here at

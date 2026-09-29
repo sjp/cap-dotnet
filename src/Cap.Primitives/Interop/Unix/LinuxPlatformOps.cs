@@ -50,10 +50,35 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// <summary>An absolute ceiling on a link target, well above any filesystem's own limit.</summary>
     private const int MaxLinkBufferBytes = 64 * 1024;
 
-    private readonly Openat2Probe _probe = Openat2Probe.Run();
+    private readonly Openat2Probe _probe;
     private long _confinedOpenAttempts;
     private long _confinedOpenRaceRetries;
     private long _componentOpens;
+
+    /// <summary>
+    /// Builds the backend, refusing on an architecture <see cref="LinuxConstants"/> has no
+    /// table for.
+    /// </summary>
+    /// <remarks>
+    /// The refusal comes first, before the probe: the probe is itself a syscall with flag
+    /// values, and on an architecture without a table it would be issued with another
+    /// architecture's. Made here rather than where the host's backend is chosen so that every
+    /// construction is covered, including the ones tests make directly. It is the same
+    /// fail-closed answer <see cref="PlatformOps"/> gives an operating system it has no
+    /// backend for.
+    /// </remarks>
+    /// <exception cref="PlatformNotSupportedException">
+    /// The process is not x86-64, AArch64 or 32-bit ARM.
+    /// </exception>
+    public LinuxPlatformOps()
+    {
+        if (LinuxConstants.Abi == LinuxAbi.Unsupported)
+        {
+            throw new PlatformNotSupportedException(LinuxConstants.UnsupportedArchitectureMessage);
+        }
+
+        _probe = Openat2Probe.Run();
+    }
 
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities =>
@@ -1395,7 +1420,9 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return false;
         }
 
-        type = *(nint*)buffer;
+        // Unsigned: the kernel's field is, and on 32-bit ARM a magic number past 2^31 read
+        // as a signed word would widen to a negative one.
+        type = (long)*(nuint*)buffer;
         return true;
     }
 

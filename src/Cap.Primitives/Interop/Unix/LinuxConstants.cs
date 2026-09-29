@@ -3,36 +3,176 @@ using System.Runtime.InteropServices;
 namespace Cap.Primitives.Interop.Unix;
 
 /// <summary>
+/// The Linux targets this backend carries flag values and syscall numbers for: the ones .NET
+/// itself supports on Linux.
+/// </summary>
+/// <remarks>
+/// Anything else is <see cref="Unsupported"/>, and the backend refuses to start there rather
+/// than guess. A community port of the runtime to another architecture loads this library
+/// perfectly well, which is exactly why the refusal has to be explicit: nothing else would
+/// stop it issuing another architecture's syscall numbers and flag bits.
+/// </remarks>
+internal enum LinuxAbi
+{
+    /// <summary>An architecture with no table here. Every lookup against it throws.</summary>
+    Unsupported,
+
+    /// <summary>x86-64: the generic open flags, and its own syscall table.</summary>
+    X64,
+
+    /// <summary>AArch64: 32-bit ARM's open flags, and the generic syscall table.</summary>
+    Arm64,
+
+    /// <summary>
+    /// 32-bit ARM (EABI): the same open flags as AArch64, its own syscall table, and a 32-bit
+    /// <c>long</c>, <c>off_t</c> and <c>time_t</c> in the C library's default interfaces.
+    /// </summary>
+    Arm,
+}
+
+/// <summary>
 /// Linux syscall numbers and flag values, selected for the running architecture.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Three of these flags are architecture-dependent, which is the part that surprises people:
+/// Some of these flags are architecture-dependent, which is the part that surprises people:
 /// AArch64 inherited 32-bit ARM's values for <c>O_DIRECTORY</c> and <c>O_NOFOLLOW</c> rather
 /// than the generic ones x86-64 uses. Getting them the wrong way round does not fail
-/// loudly. <c>O_NOFOLLOW</c>'s x86-64 value is <c>O_DIRECT</c> on AArch64, so an open
-/// intended to refuse a symlink would instead ask for unbuffered IO and follow the link —
-/// a containment failure that no test looking only at return codes would notice.
+/// loudly. <c>O_NOFOLLOW</c>'s x86-64 value is <c>O_LARGEFILE</c> on the ARM targets, so an
+/// open intended to refuse a symlink would instead follow the link — a containment failure
+/// that no test looking only at return codes would notice.
 /// </para>
 /// <para>
-/// The syscall numbers split the same way. <c>statx</c> is 332 on x86-64 and 291 on
-/// AArch64; calling 332 on AArch64 lands on <c>fsconfig</c>. Both are asserted by tests that
-/// run on both architectures, because there is no way to tell from a Linux-x64 build agent
-/// that the AArch64 values were ever right.
+/// The syscall numbers split three ways. <c>statx</c> is 332 on x86-64, 291 on AArch64 and
+/// 397 on 32-bit ARM, and a number from the wrong table is either unassigned or a different
+/// call entirely. Every table is asserted by tests that run on every leg, through the
+/// per-ABI lookups below, because there is no way to tell from a Linux-x64 build agent that
+/// the ARM values were ever right.
+/// </para>
+/// <para>
+/// <strong>Supported:</strong> x86-64, AArch64 and 32-bit ARM — the Linux architectures .NET
+/// supports. On any other architecture <see cref="Abi"/> is <see cref="LinuxAbi.Unsupported"/>,
+/// <see cref="LinuxPlatformOps"/> refuses to be constructed, and every architecture-dependent
+/// value here throws rather than answer. That refusal is deliberately not made in a static
+/// constructor: the architecture-independent values are read by tests on every platform, and
+/// a type that failed to initialise would take them down too. To add an architecture, add a
+/// member to <see cref="LinuxAbi"/>, a row to <see cref="AbiFor"/>, and a value to every
+/// lookup that switches on it — the compiler does not insist on the last, the tests do.
 /// </para>
 /// </remarks>
 internal static class LinuxConstants
 {
-    /// <summary>True when the process is running on 64-bit ARM.</summary>
-    private static readonly bool IsArm64 = RuntimeInformation.ProcessArchitecture == Architecture.Arm64;
+    /// <summary>The table the running process uses.</summary>
+    private static readonly LinuxAbi s_abi = AbiFor(RuntimeInformation.ProcessArchitecture, IntPtr.Size);
+
+    /// <summary>
+    /// What <see cref="LinuxPlatformOps"/> says when it refuses to start on an architecture
+    /// without a table.
+    /// </summary>
+    internal const string UnsupportedArchitectureMessage =
+        "cap-dotnet's Linux backend carries open flags and syscall numbers for x86-64, AArch64 " +
+        "and 32-bit ARM only. Values from another architecture's table would not fail: the " +
+        "flag that refuses to follow a symbolic link is a different flag elsewhere, and the " +
+        "containment the library exists to provide rests on it. See " +
+        "src/Cap.Primitives/Interop/Unix/LinuxConstants.cs to add this architecture.";
+
+    /// <summary>The table the running process uses.</summary>
+    internal static LinuxAbi Abi => s_abi;
+
+    /// <summary>
+    /// The table for a process of the given architecture and pointer size, or
+    /// <see cref="LinuxAbi.Unsupported"/> when there is none.
+    /// </summary>
+    /// <remarks>
+    /// The pointer size is part of the key because the architecture alone does not settle the
+    /// C types the kernel interface is described in: a 64-bit table read by a process whose
+    /// <c>long</c> is 32 bits would pass every argument at the wrong width.
+    /// </remarks>
+    internal static LinuxAbi AbiFor(Architecture architecture, int pointerSize) =>
+        (architecture, pointerSize) switch
+        {
+            (Architecture.X64, 8) => LinuxAbi.X64,
+            (Architecture.Arm64, 8) => LinuxAbi.Arm64,
+            (Architecture.Arm, 4) => LinuxAbi.Arm,
+            _ => LinuxAbi.Unsupported,
+        };
+
+    /// <summary>
+    /// Whether this backend has flag values and syscall numbers for a process of the given
+    /// architecture and pointer size.
+    /// </summary>
+    internal static bool IsSupportedArchitecture(Architecture architecture, int pointerSize) =>
+        AbiFor(architecture, pointerSize) != LinuxAbi.Unsupported;
+
+    /// <summary>
+    /// True when the C library's default interfaces take a 32-bit <c>off_t</c> and
+    /// <c>time_t</c>, so that file offsets and timestamps have to go to the kernel through
+    /// the calls that take 64-bit ones.
+    /// </summary>
+    internal static bool HasNarrowCTypes => s_abi == LinuxAbi.Arm;
+
+    private static PlatformNotSupportedException Unsupported() => new(UnsupportedArchitectureMessage);
 
     // --- Architecture-dependent open flags ------------------------------------------------
 
     /// <summary>Refuse the open unless the name is a directory.</summary>
-    public static int O_DIRECTORY => IsArm64 ? 0x4000 : 0x10000;
+    public static int O_DIRECTORY => DirectoryFlag(s_abi);
 
     /// <summary>Refuse the open if the final component is a symbolic link.</summary>
-    public static int O_NOFOLLOW => IsArm64 ? 0x8000 : 0x20000;
+    public static int O_NOFOLLOW => NoFollowFlag(s_abi);
+
+    /// <summary>
+    /// Allow an open file to be larger than a 32-bit offset can reach.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A 64-bit kernel adds this to every open itself, so on the 64-bit targets it is never
+    /// passed. A 32-bit kernel does not, and without it an open of a file past 2 GiB fails
+    /// with an overflow — through <c>openat2</c> as well, which applies nothing on the
+    /// caller's behalf. <see cref="LinuxNative"/> adds it to every open on 32-bit ARM that is
+    /// not a traversal-only one, which the kernel refuses to combine with it.
+    /// </para>
+    /// <para>
+    /// Architecture-dependent, and the reason <see cref="O_NOFOLLOW"/> matters so much: on
+    /// the ARM targets this is the bit x86-64 uses to refuse a symbolic link.
+    /// </para>
+    /// </remarks>
+    public static int O_LARGEFILE => LargeFileFlag(s_abi);
+
+    /// <summary><see cref="O_DIRECTORY"/> in a given table.</summary>
+    internal static int DirectoryFlag(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 0x10000,
+        LinuxAbi.Arm64 or LinuxAbi.Arm => 0x4000,
+        _ => throw Unsupported(),
+    };
+
+    /// <summary><see cref="O_NOFOLLOW"/> in a given table.</summary>
+    internal static int NoFollowFlag(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 0x20000,
+        LinuxAbi.Arm64 or LinuxAbi.Arm => 0x8000,
+        _ => throw Unsupported(),
+    };
+
+    /// <summary>
+    /// <c>O_DIRECT</c> in a given table. Never passed; it is here so the tests can show that
+    /// no table's directory or no-follow bit means unbuffered IO in another.
+    /// </summary>
+    internal static int DirectFlag(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 0x4000,
+        LinuxAbi.Arm64 or LinuxAbi.Arm => 0x10000,
+        _ => throw Unsupported(),
+    };
+
+    /// <summary><see cref="O_LARGEFILE"/> in a given table.</summary>
+    internal static int LargeFileFlag(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 0x8000,
+        LinuxAbi.Arm64 or LinuxAbi.Arm => 0x20000,
+        _ => throw Unsupported(),
+    };
 
     /// <summary>
     /// Create a file with no name in any directory, taking its storage from the directory
@@ -315,9 +455,10 @@ internal static class LinuxConstants
     // --- Filesystem type numbers ---------------------------------------------------------------
 
     /// <summary>
-    /// The size of the buffer handed to <c>fstatfs</c>. The structure is 120 bytes on both
-    /// targets under both common C libraries; the margin is so that a layout that grows can
-    /// never write past the buffer.
+    /// The size of the buffer handed to <c>fstatfs</c>. The structure is 120 bytes on the
+    /// 64-bit targets under both common C libraries, and the kernel's <c>statfs64</c> used on
+    /// 32-bit ARM is <see cref="ArmStatfs64Bytes"/>; the margin is so that a layout that grows
+    /// can never write past the buffer.
     /// </summary>
     public const int StatfsBufferBytes = 256;
 
@@ -332,18 +473,80 @@ internal static class LinuxConstants
 
     // --- Syscall numbers -------------------------------------------------------------------------
 
+    // A syscall number is a C long, as is what the call returns, so these are machine words:
+    // 32 bits on 32-bit ARM, where passing a 64-bit value would shift every argument after it.
+
     /// <summary>
-    /// <c>openat2</c>. The same number on x86-64 and AArch64 only because it was added long
-    /// after the two tables stopped growing independently.
+    /// <c>openat2</c>. The same number on every supported target only because it was added
+    /// long after the tables stopped growing independently.
     /// </summary>
-    public const long SYS_openat2 = 437;
+    public const nint SYS_openat2 = 437;
 
-    /// <summary><c>statx</c>: 332 on x86-64, 291 on AArch64.</summary>
-    public static long SYS_statx => IsArm64 ? 291 : 332;
+    /// <summary><c>statx</c>: 332 on x86-64, 291 on AArch64, 397 on 32-bit ARM.</summary>
+    public static nint SYS_statx => StatxNumber(s_abi);
 
-    /// <summary><c>renameat2</c>: 316 on x86-64, 276 on AArch64.</summary>
-    public static long SYS_renameat2 => IsArm64 ? 276 : 316;
+    /// <summary><c>renameat2</c>: 316 on x86-64, 276 on AArch64, 382 on 32-bit ARM.</summary>
+    public static nint SYS_renameat2 => Renameat2Number(s_abi);
 
-    /// <summary><c>getdents64</c>: 217 on x86-64, 61 on AArch64.</summary>
-    public static long SYS_getdents64 => IsArm64 ? 61 : 217;
+    /// <summary><c>getdents64</c>: 217 on x86-64 and on 32-bit ARM, 61 on AArch64.</summary>
+    public static nint SYS_getdents64 => Getdents64Number(s_abi);
+
+    /// <summary><see cref="SYS_statx"/> in a given table.</summary>
+    internal static nint StatxNumber(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 332,
+        LinuxAbi.Arm64 => 291,
+        LinuxAbi.Arm => 397,
+        _ => throw Unsupported(),
+    };
+
+    /// <summary><see cref="SYS_renameat2"/> in a given table.</summary>
+    internal static nint Renameat2Number(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 316,
+        LinuxAbi.Arm64 => 276,
+        LinuxAbi.Arm => 382,
+        _ => throw Unsupported(),
+    };
+
+    /// <summary><see cref="SYS_getdents64"/> in a given table.</summary>
+    internal static nint Getdents64Number(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 217,
+        LinuxAbi.Arm64 => 61,
+        LinuxAbi.Arm => 217,
+        _ => throw Unsupported(),
+    };
+
+    // --- 32-bit ARM only -------------------------------------------------------------------
+    //
+    // The C library's plain pwrite, fallocate, fstatfs, utimensat and futimens take a 32-bit
+    // offset or time there, and the names of the 64-bit versions differ between glibc and
+    // musl. The kernel's own calls are the same under both, so on that target these go to it
+    // by number, as openat2 and statx already do everywhere.
+
+    /// <summary><c>pwrite64</c> on 32-bit ARM. The offset is a register pair, aligned.</summary>
+    public const nint SYS_arm_pwrite64 = 181;
+
+    /// <summary><c>fallocate</c> on 32-bit ARM. Both 64-bit arguments are register pairs.</summary>
+    public const nint SYS_arm_fallocate = 352;
+
+    /// <summary>
+    /// <c>fstatfs64</c> on 32-bit ARM, which reports a block count past 2^32 where the
+    /// 32-bit call would fail with an overflow.
+    /// </summary>
+    public const nint SYS_arm_fstatfs64 = 267;
+
+    /// <summary>
+    /// <c>utimensat_time64</c> on 32-bit ARM (Linux 5.1 and later): the call that takes a
+    /// timestamp as two 64-bit words, the layout <see cref="UnixTimespec"/> has.
+    /// </summary>
+    public const nint SYS_arm_utimensat_time64 = 412;
+
+    /// <summary>
+    /// The size of 32-bit ARM's <c>struct statfs64</c>, which the kernel checks against the
+    /// size it is passed. Packed to four-byte alignment there, so it is 84 bytes rather than
+    /// the 88 the fields would otherwise round to.
+    /// </summary>
+    public const nuint ArmStatfs64Bytes = 84;
 }

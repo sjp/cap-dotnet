@@ -4,8 +4,14 @@ namespace Cap.Primitives.Interop.Unix;
 
 /// <summary>
 /// A <c>struct timespec</c> as both Unix platforms lay it out on a 64-bit process: whole
-/// seconds, then nanoseconds, each a machine word.
+/// seconds, then nanoseconds, each a 64-bit word.
 /// </summary>
+/// <remarks>
+/// Not the C library's layout on 32-bit ARM, where both fields are 32 bits by default. It is
+/// the kernel's own <c>__kernel_timespec</c> on every Linux target, though, which is why that
+/// target sets times through the time64 syscall by number rather than through the C library
+/// (see <see cref="LinuxNative.UtimensAt"/>).
+/// </remarks>
 [StructLayout(LayoutKind.Sequential)]
 internal struct UnixTimespec
 {

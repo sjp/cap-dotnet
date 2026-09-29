@@ -20,6 +20,14 @@ namespace Cap.Primitives.Interop.Unix;
 /// at all, and a <c>statx</c> wrapper is only present in newer library versions. Calling by
 /// number sidesteps the question of which C library the process was linked against.
 /// </para>
+/// <para>
+/// On 32-bit ARM the C library's default interfaces take a 32-bit file offset and a 32-bit
+/// time, and the names of their 64-bit counterparts differ between glibc and musl. The calls
+/// that carry an offset, a timestamp or a filesystem size therefore go to the kernel by
+/// number on that target, and every open that is not a traversal-only one asks for
+/// <see cref="LinuxConstants.O_LARGEFILE"/>, which a 64-bit kernel adds by itself. The
+/// wrappers below make that choice, so callers write the same code for every target.
+/// </para>
 /// </remarks>
 internal static unsafe partial class LinuxNative
 {
@@ -32,8 +40,11 @@ internal static unsafe partial class LinuxNative
     internal static partial int Close(int fd);
 
     /// <summary>Opens a name relative to a directory descriptor.</summary>
+    internal static int OpenAt(int directoryFd, byte* path, int flags) =>
+        OpenAtImport(directoryFd, path, WithLargeFile(flags));
+
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
-    internal static partial int OpenAt(int directoryFd, byte* path, int flags);
+    private static partial int OpenAtImport(int directoryFd, byte* path, int flags);
 
     /// <summary>
     /// Opens a name relative to a directory descriptor, creating it with
@@ -47,8 +58,24 @@ internal static unsafe partial class LinuxNative
     /// therefore not merely untidy, it hands the kernel whatever happened to be in the
     /// register the mode is read from.
     /// </remarks>
+    internal static int OpenAtWithMode(int directoryFd, byte* path, int flags, uint mode) =>
+        OpenAtWithModeImport(directoryFd, path, WithLargeFile(flags), mode);
+
     [LibraryImport("libc", EntryPoint = "openat", SetLastError = true)]
-    internal static partial int OpenAtWithMode(int directoryFd, byte* path, int flags, uint mode);
+    private static partial int OpenAtWithModeImport(int directoryFd, byte* path, int flags, uint mode);
+
+    /// <summary>
+    /// Adds <see cref="LinuxConstants.O_LARGEFILE"/> where the kernel will not add it itself.
+    /// </summary>
+    /// <remarks>
+    /// Only on 32-bit ARM, and never to a traversal-only open: the kernel refuses to combine
+    /// that with any flag beyond the close-on-exec, directory and no-follow ones, and a
+    /// traversal-only descriptor has no size for the flag to be about.
+    /// </remarks>
+    private static int WithLargeFile(int flags) =>
+        LinuxConstants.HasNarrowCTypes && (flags & LinuxConstants.O_PATH) == 0
+            ? flags | LinuxConstants.O_LARGEFILE
+            : flags;
 
     /// <summary>
     /// Reserves space for a file, so that a later write cannot fail for want of room.
@@ -60,8 +87,20 @@ internal static unsafe partial class LinuxNative
     /// with room behind it — and the second is what every other platform's reservation
     /// produces.
     /// </remarks>
+    internal static int Fallocate(int fd, int mode, long offset, long length) =>
+        LinuxConstants.HasNarrowCTypes
+            ? (int)ArmSyscall(
+                LinuxConstants.SYS_arm_fallocate,
+                fd,
+                mode,
+                Low(offset),
+                High(offset),
+                Low(length),
+                High(length))
+            : FallocateImport(fd, mode, offset, length);
+
     [LibraryImport("libc", EntryPoint = "fallocate", SetLastError = true)]
-    internal static partial int Fallocate(int fd, int mode, long offset, long length);
+    private static partial int FallocateImport(int fd, int mode, long offset, long length);
 
     /// <summary>Reads a symbolic link relative to a directory descriptor.</summary>
     /// <returns>The number of bytes written, which is <em>not</em> null-terminated.</returns>
@@ -96,16 +135,31 @@ internal static unsafe partial class LinuxNative
     /// <paramref name="times"/> points at two entries, access first. A symbolic link at the
     /// name is followed unless <c>AT_SYMLINK_NOFOLLOW</c> is passed.
     /// </remarks>
+    internal static int UtimensAt(int directoryFd, byte* path, UnixTimespec* times, int flags) =>
+        LinuxConstants.HasNarrowCTypes
+            ? (int)ArmSyscall(
+                LinuxConstants.SYS_arm_utimensat_time64, directoryFd, (nint)path, (nint)times, flags, 0, 0)
+            : UtimensAtImport(directoryFd, path, times, flags);
+
     [LibraryImport("libc", EntryPoint = "utimensat", SetLastError = true)]
-    internal static partial int UtimensAt(int directoryFd, byte* path, UnixTimespec* times, int flags);
+    private static partial int UtimensAtImport(int directoryFd, byte* path, UnixTimespec* times, int flags);
 
     /// <summary>Sets the last-access and last-write times of an open object.</summary>
     /// <remarks>
     /// By descriptor rather than by name, for the reason <see cref="FChmod"/> is.
     /// <paramref name="times"/> points at two entries, access first.
     /// </remarks>
+    /// <remarks>
+    /// On 32-bit ARM this is the time64 form of the call above with no name, which is how the
+    /// C library implements it everywhere.
+    /// </remarks>
+    internal static int FUtimens(int fd, UnixTimespec* times) =>
+        LinuxConstants.HasNarrowCTypes
+            ? (int)ArmSyscall(LinuxConstants.SYS_arm_utimensat_time64, fd, 0, (nint)times, 0, 0, 0)
+            : FUtimensImport(fd, times);
+
     [LibraryImport("libc", EntryPoint = "futimens", SetLastError = true)]
-    internal static partial int FUtimens(int fd, UnixTimespec* times);
+    private static partial int FUtimensImport(int fd, UnixTimespec* times);
 
     /// <summary>
     /// Manipulates a descriptor. Used to duplicate one, to clear a status flag, and to read
@@ -118,8 +172,18 @@ internal static unsafe partial class LinuxNative
     /// Writes at a given offset without moving the descriptor's position. On a descriptor
     /// that appends, the kernel writes at the end of the file instead.
     /// </summary>
+    /// <remarks>
+    /// On 32-bit ARM the offset is a register pair that has to start on an even register, so
+    /// the argument before it is a slot of padding.
+    /// </remarks>
+    internal static nint PWrite(int fd, byte* buffer, nuint count, long offset) =>
+        LinuxConstants.HasNarrowCTypes
+            ? ArmSyscall(
+                LinuxConstants.SYS_arm_pwrite64, fd, (nint)buffer, (nint)count, 0, Low(offset), High(offset))
+            : PWriteImport(fd, buffer, count, offset);
+
     [LibraryImport("libc", EntryPoint = "pwrite", SetLastError = true)]
-    internal static partial nint PWrite(int fd, byte* buffer, nuint count, long offset);
+    private static partial nint PWriteImport(int fd, byte* buffer, nuint count, long offset);
 
     /// <summary>Creates a directory relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
@@ -152,8 +216,8 @@ internal static unsafe partial class LinuxNative
     /// <see cref="LinuxConstants.SYS_renameat2"/>.
     /// </remarks>
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
-    internal static partial long RenameAt2(
-        long number, int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, uint flags);
+    internal static partial nint RenameAt2(
+        nint number, int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, uint flags);
 
     /// <summary>Creates a symbolic link relative to a directory descriptor.</summary>
     /// <remarks>
@@ -184,8 +248,20 @@ internal static unsafe partial class LinuxNative
     /// invalid argument — which is indistinguishable, from the outside, from the syscall not
     /// existing at all.
     /// </remarks>
+    internal static nint OpenAt2(nint number, int directoryFd, byte* path, OpenHow* how, nuint size)
+    {
+        if (!LinuxConstants.HasNarrowCTypes)
+        {
+            return OpenAt2Import(number, directoryFd, path, how, size);
+        }
+
+        OpenHow request = *how;
+        request.Flags = (ulong)(uint)WithLargeFile((int)request.Flags);
+        return OpenAt2Import(number, directoryFd, path, &request, size);
+    }
+
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
-    internal static partial long OpenAt2(long number, int directoryFd, byte* path, OpenHow* how, nuint size);
+    private static partial nint OpenAt2Import(nint number, int directoryFd, byte* path, OpenHow* how, nuint size);
 
     /// <summary>
     /// Reads a run of directory entries into a buffer, by syscall number.
@@ -200,7 +276,7 @@ internal static unsafe partial class LinuxNative
     /// partial record.
     /// </returns>
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
-    internal static partial long GetDents64(long number, int fd, byte* buffer, nuint count);
+    internal static partial nint GetDents64(nint number, int fd, byte* buffer, nuint count);
 
     /// <summary>
     /// Describes the filesystem a descriptor is on, into a buffer of at least
@@ -208,20 +284,46 @@ internal static unsafe partial class LinuxNative
     /// </summary>
     /// <remarks>
     /// Only the first field, the filesystem's type number, is read, and it is a machine word
-    /// on both targets. The structure is not declared: its tail differs between C libraries
+    /// on every target. The structure is not declared: its tail differs between C libraries
     /// and nothing past the first field is wanted, so a buffer comfortably larger than every
-    /// layout is passed instead of a declaration that would have to match each one.
+    /// layout is passed instead of a declaration that would have to match each one. On
+    /// 32-bit ARM the kernel's <c>fstatfs64</c> is called instead, whose structure starts
+    /// with the same word and which does not fail on a filesystem with more than 2^32 blocks.
     /// </remarks>
+    internal static int Fstatfs(int fd, byte* buffer) =>
+        LinuxConstants.HasNarrowCTypes
+            ? (int)ArmSyscall(
+                LinuxConstants.SYS_arm_fstatfs64, fd, (nint)LinuxConstants.ArmStatfs64Bytes, (nint)buffer, 0, 0, 0)
+            : FstatfsImport(fd, buffer);
+
     [LibraryImport("libc", EntryPoint = "fstatfs", SetLastError = true)]
-    internal static partial int Fstatfs(int fd, byte* buffer);
+    private static partial int FstatfsImport(int fd, byte* buffer);
 
     /// <summary><c>statx</c>, by syscall number.</summary>
     /// <remarks><paramref name="number"/> must be <see cref="LinuxConstants.SYS_statx"/>.</remarks>
     [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
-    internal static partial long Statx(long number, int directoryFd, byte* path, int flags, uint mask, StatxBuffer* result);
+    internal static partial nint Statx(nint number, int directoryFd, byte* path, int flags, uint mask, StatxBuffer* result);
 
     /// <summary>The account this process acts as when the filesystem checks permissions.</summary>
     /// <remarks>Cannot fail, so there is no error to collect.</remarks>
     [LibraryImport("libc", EntryPoint = "geteuid")]
     internal static partial uint GetEffectiveUserId();
+
+    /// <summary>
+    /// A syscall by number with six word-sized arguments, for the 32-bit ARM routes above.
+    /// </summary>
+    /// <remarks>
+    /// Every argument is a machine word so that each lands in exactly one register, which is
+    /// what the kernel's calling convention on that target counts in. A 64-bit value is two
+    /// of them, low word first (<see cref="Low"/>, <see cref="High"/>); unused trailing
+    /// arguments are zero and ignored by the kernel.
+    /// </remarks>
+    [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    private static partial nint ArmSyscall(nint number, nint a1, nint a2, nint a3, nint a4, nint a5, nint a6);
+
+    /// <summary>The low 32 bits of a 64-bit argument, as a register.</summary>
+    internal static nint Low(long value) => (nint)(int)(uint)(ulong)value;
+
+    /// <summary>The high 32 bits of a 64-bit argument, as a register.</summary>
+    internal static nint High(long value) => (nint)(int)(uint)((ulong)value >> 32);
 }

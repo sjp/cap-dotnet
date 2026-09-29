@@ -454,4 +454,8 @@ available", demoting every caller to the fallback permanently and silently. The 
 would then never run again, on any machine, and every test would still pass.
 
 This is why the interop layer requires per-architecture struct
-layout tests, and why the arm64 leg exists in CI.
+layout tests, and why the arm64 leg exists in CI. The flag values and syscall numbers that
+differ between x86-64, AArch64 and 32-bit ARM are asserted per table on every leg, whatever
+it runs on, and the 32-bit ARM build runs the Linux backend's tests nightly under QEMU; any
+other architecture is refused outright (see
+[platforms.md](platforms.md#linux-architectures)).

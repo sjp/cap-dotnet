@@ -25,6 +25,7 @@ what a program moving between Linux, macOS and Windows will notice.
 | Appending (`append: true`, `CapFile.IsAppending`) | a flag on the open file, shared with streams taken from it | same | applied by `CapFile` to its own writes; a stream taken while it is on gets a handle that can only append |
 | Committing a directory's entries (`Dir.Flush(toDisk: true)`) | `fsync` on the directory | `fsync` on the directory; the drive may still cache it | not possible; returns false |
 | Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
+| Processor architectures | x86-64, AArch64, 32-bit ARM; any other is refused ([below](#linux-architectures)) | any .NET runs on | any .NET runs on |
 
 ## Windows
 
@@ -132,6 +133,28 @@ refused here: `CON` and `name.` are ordinary files.
 
 **Case** is significant, unless the volume folds it (vfat, or ext4 with casefolding enabled),
 in which case the Windows remarks apply.
+
+### Linux architectures
+
+The Linux backend supports the architectures .NET itself supports on Linux: **x86-64,
+AArch64 and 32-bit ARM**, under glibc or musl. On any other — riscv64, loongarch64, ppc64le,
+s390x, 32-bit x86, all of which have community builds of the runtime — constructing the
+backend throws `PlatformNotSupportedException`, so the first `Dir` opened fails rather than
+running.
+
+The refusal is deliberate. Several open flags and syscall numbers differ by architecture,
+and the one the containment guarantee rests on, "do not follow a symbolic link", is a
+different flag on another architecture (x86-64's value is "large file" on ARM). Running with
+another architecture's values would not fail loudly; it would follow links. Each supported
+table is written out in `src/Cap.Primitives/Interop/Unix/LinuxConstants.cs` and asserted
+literally by tests that run on every CI leg; adding an architecture means adding a table
+there.
+
+On 32-bit ARM, file offsets, timestamps and filesystem sizes go to the kernel through its
+64-bit calls by number rather than through the C library's 32-bit defaults, so files past
+2 GiB and times past 2038 work as they do elsewhere. Setting a file's times there needs
+Linux 5.1 or later (`utimensat_time64`). That leg runs nightly under emulation rather than
+on every change.
 
 ## Everywhere
 

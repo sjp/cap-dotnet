@@ -124,9 +124,16 @@ public sealed class PlatformErrorTests
     /// reports for it. Asked of <c>/proc</c>, whose type is the same on every Linux.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Read from the wrong place, the number would be some other field — a block size, a
     /// count — that never equals a type the library compares against, and a FAT volume's
     /// refusal would silently go on being reported as a permission failure.
+    /// </para>
+    /// <para>
+    /// <c>/proc/version</c> rather than anything under <c>/proc/self</c>: a user-mode emulator
+    /// running another architecture's build answers several of those files itself, from a
+    /// file it made in memory, and the nightly 32-bit ARM leg runs under one.
+    /// </para>
     /// </remarks>
     [Fact]
     public void Linux_recognises_a_volume_by_its_filesystem_type()
@@ -136,7 +143,7 @@ public sealed class PlatformErrorTests
             return;
         }
 
-        using SafeFileHandle proc = File.OpenHandle("/proc/self/stat", FileMode.Open, FileAccess.Read);
+        using SafeFileHandle proc = File.OpenHandle("/proc/version", FileMode.Open, FileAccess.Read);
         int fd = (int)proc.DangerousGetHandle();
 
         Assert.True(LinuxPlatformOps.TryGetFilesystemType(fd, out long type), "fstatfs failed on /proc.");
