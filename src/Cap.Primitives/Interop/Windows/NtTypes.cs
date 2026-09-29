@@ -128,6 +128,42 @@ internal struct FileAttributeTagInformation
     /// The reparse tag, meaningful only when the attributes say this is a reparse point.
     /// </summary>
     public uint ReparseTag;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileAttributeTagInformation);
+}
+
+/// <summary>
+/// Where the fields of a request to give an open object a new name sit: a flag word, the
+/// directory handle the name is relative to, the length of the name in bytes, and the
+/// characters.
+/// </summary>
+/// <remarks>
+/// Not declared as a structure, because the name runs on past the end of one: the buffer is
+/// built by hand, and these are the offsets it is built with. The handle sits at its natural
+/// alignment, so every offset after the flag word depends on the pointer size. The older
+/// rename class reads the first byte of the flag word as a single "replace" flag; the layout is
+/// otherwise the same, and so is the hard-link class.
+/// </remarks>
+internal static class FileRenameInformationLayout
+{
+    /// <summary>Where the directory handle the name is relative to sits.</summary>
+    public static int RootDirectoryOffset => nint.Size;
+
+    /// <summary>Where the length of the name, in bytes, sits.</summary>
+    public static int FileNameLengthOffset => RootDirectoryOffset + nint.Size;
+
+    /// <summary>Where the name's characters start.</summary>
+    public static int FileNameOffset => FileNameLengthOffset + sizeof(uint);
+
+    /// <summary>
+    /// The size of the declared structure, whose one-character name array is padded out to
+    /// pointer alignment. The system refuses a buffer shorter than this whatever name it holds.
+    /// </summary>
+    public static int DeclaredSize => (FileNameOffset + sizeof(char) + nint.Size - 1) & ~(nint.Size - 1);
+
+    /// <summary>The size of a request carrying a name of <paramref name="nameLength"/> characters.</summary>
+    public static int SizeFor(int nameLength) => Math.Max(FileNameOffset + (nameLength * sizeof(char)), DeclaredSize);
 }
 
 /// <summary>An open object's four timestamps and its attribute bits.</summary>

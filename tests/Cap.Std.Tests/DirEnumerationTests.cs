@@ -265,6 +265,57 @@ public sealed partial class DirEnumerationTests : IDisposable
         Assert.Single(root.EnumerateEntries());
     }
 
+    /// <summary>
+    /// A name ending in a dot or a space, which the volume can hold but the parser refuses,
+    /// is listed as stored and refused when it is handed back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The documented behaviour, asserted so that it does not change unnoticed in either
+    /// direction. Hiding the name from the listing would leave a caller emptying the directory
+    /// unable to see why it is not empty; accepting it back would open whatever the system's
+    /// stripping made of it, which is the divergence the refusal exists to prevent.
+    /// </para>
+    /// <para>
+    /// Planted through the extended-length prefix, which is the only way to make one: every
+    /// other route strips the dot or the space before the name reaches the volume.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData("dotted.")]
+    [InlineData("spaced ")]
+    [NotInMemory("Needs a name the host's own API would strip.")]
+    public void A_name_ending_in_a_dot_or_space_is_listed_but_not_reopened(string name)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows strips trailing dots and spaces.");
+            return;
+        }
+
+        string planted = @"\\?\" + Path.GetFullPath(Host(name));
+        File.WriteAllText(planted, "x");
+
+        try
+        {
+            using Dir root = OpenRoot();
+
+            DirEntry entry = Assert.Single(root.EnumerateEntries());
+            Assert.Equal(name, entry.Name);
+            Assert.Equal(CapFileType.File, entry.Type);
+
+            Assert.False(entry.TryOpenFile(out CapFile? file));
+            Assert.Null(file);
+            Assert.Throws<ArgumentException>(() => entry.OpenFile().Dispose());
+            Assert.Throws<ArgumentException>(() => root.OpenFile(name).Dispose());
+            Assert.Throws<ArgumentException>(() => root.DeleteFile(name));
+        }
+        finally
+        {
+            File.Delete(planted);
+        }
+    }
+
     // --- acting on an entry ----------------------------------------------------------------------
 
     /// <summary>An entry opens the file it names.</summary>

@@ -54,7 +54,11 @@ directory on a filesystem is closed before it reaches the caller: a device name 
 anticipated still gets nowhere.
 
 **Names ending in a dot or a space are refused.** Windows strips them below the API, so
-`report.txt.` would be checked as one name and opened as another.
+`report.txt.` would be checked as one name and opened as another. The volume itself can
+still hold such a name, made through the `\\?\` prefix that skips the stripping, and an
+enumeration lists it as it is stored; handing that name back to open, remove or rename it is
+refused like any other name ending in a dot or a space, so it has to be dealt with outside
+the library.
 
 **`:` is refused.** It introduces an alternate data stream — `file.txt:hidden` is a second
 body of the same file — and `CON::$DATA` is a device reached through one.
@@ -75,7 +79,11 @@ as `~$report.docx` or `notes.txt~` are never eight-plus-three, so they are alway
 **Case is not a boundary, and containment never relies on it.** `Secret` and `SECRET` are
 one file, and every open this library issues matches case-insensitively, as the rest of
 Windows does. Every containment decision is taken from an open handle rather than by
-comparing strings, so changing the case of a refused name gets nowhere.
+comparing strings, so changing the case of a refused name gets nowhere. The exception is a
+directory made case-sensitive (`fsutil file setCaseSensitiveInfo <dir> enable`, which needs no
+privilege from Windows 10 version 1803): beneath it the filesystem matches names exactly
+whatever the open asks for, so `a` and `A` are two files there and `a` does not open `A`, as
+on Linux. Containment is unaffected, for the same reason as above.
 
 **Symbolic links and junctions.** A link to a directory and a link to a file are different
 kinds on Windows, and Windows itself will not traverse a link as the wrong kind. Resolution

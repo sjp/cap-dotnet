@@ -412,6 +412,86 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The Windows structure carrying the times and the attributes is 40 bytes, with the
+    /// attributes after the four times.
+    /// </summary>
+    /// <remarks>
+    /// Written as well as read: a request that changes attributes or times is this structure,
+    /// and one whose attributes sat at the wrong offset would be taken by the system as a new
+    /// timestamp, with the attributes it was meant to set read as zero, which asks for nothing
+    /// to change.
+    /// </remarks>
+    [Fact]
+    public void Windows_basic_information_matches_the_native_layout()
+    {
+        Assert.Equal(40, FileBasicInformation.StructSize);
+
+        Assert.Equal(
+            0,
+            Marshal.OffsetOf<FileBasicInformation>(nameof(FileBasicInformation.CreationTime)).ToInt32());
+        Assert.Equal(
+            8,
+            Marshal.OffsetOf<FileBasicInformation>(nameof(FileBasicInformation.LastAccessTime)).ToInt32());
+        Assert.Equal(
+            16,
+            Marshal.OffsetOf<FileBasicInformation>(nameof(FileBasicInformation.LastWriteTime)).ToInt32());
+        Assert.Equal(
+            24,
+            Marshal.OffsetOf<FileBasicInformation>(nameof(FileBasicInformation.ChangeTime)).ToInt32());
+        Assert.Equal(
+            32,
+            Marshal.OffsetOf<FileBasicInformation>(nameof(FileBasicInformation.FileAttributes)).ToInt32());
+    }
+
+    /// <summary>
+    /// The Windows reply carrying the attributes and the reparse tag is 8 bytes, the tag
+    /// second.
+    /// </summary>
+    [Fact]
+    public void Windows_attribute_tag_reply_matches_the_native_layout()
+    {
+        Assert.Equal(8, FileAttributeTagInformation.StructSize);
+
+        Assert.Equal(
+            0,
+            Marshal.OffsetOf<FileAttributeTagInformation>(
+                nameof(FileAttributeTagInformation.FileAttributes)).ToInt32());
+        Assert.Equal(
+            4,
+            Marshal.OffsetOf<FileAttributeTagInformation>(
+                nameof(FileAttributeTagInformation.ReparseTag)).ToInt32());
+    }
+
+    /// <summary>
+    /// The rename request built by hand puts the directory handle at pointer alignment, the
+    /// name's length after it and the name straight after the length, and is never shorter
+    /// than the declared structure.
+    /// </summary>
+    /// <remarks>
+    /// The one Windows structure with no declaration to take an offset of, because the name
+    /// runs past its end, so the offsets are asserted against the native header's numbers
+    /// directly. A handle written four bytes early on a 64-bit process would give the system a
+    /// directory made of the flag word and half a pointer.
+    /// </remarks>
+    [Fact]
+    public void Windows_rename_request_matches_the_native_layout()
+    {
+        bool wide = nint.Size == 8;
+
+        Assert.Equal(wide ? 8 : 4, FileRenameInformationLayout.RootDirectoryOffset);
+        Assert.Equal(wide ? 16 : 8, FileRenameInformationLayout.FileNameLengthOffset);
+        Assert.Equal(wide ? 20 : 12, FileRenameInformationLayout.FileNameOffset);
+        Assert.Equal(wide ? 24 : 16, FileRenameInformationLayout.DeclaredSize);
+
+        // One character fits inside the declared size and is padded out to it; a longer name
+        // runs past it by exactly its own length.
+        Assert.Equal(FileRenameInformationLayout.DeclaredSize, FileRenameInformationLayout.SizeFor(1));
+        Assert.Equal(
+            FileRenameInformationLayout.FileNameOffset + (40 * sizeof(char)),
+            FileRenameInformationLayout.SizeFor(40));
+    }
+
+    /// <summary>
     /// The identity reply carries both halves of the 128-bit identifier, the high one after
     /// the low one.
     /// </summary>

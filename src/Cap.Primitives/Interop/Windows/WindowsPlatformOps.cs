@@ -1760,18 +1760,20 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <remarks>
     /// <para>
     /// Renaming and hard linking take the same structure and differ only in which class it
-    /// is written as, so they are built here once. The layout is a flag word, the directory
-    /// handle the name is relative to, the length of the name in bytes, and the characters —
-    /// with the handle at its natural alignment, which is why the offsets are computed from
-    /// the pointer size rather than written down.
+    /// is written as, so they are built here once, at the offsets
+    /// <see cref="FileRenameInformationLayout"/> gives.
     /// </para>
     /// <para>
     /// The destination handle is what confines the far end. Naming it as a path from the
     /// object being moved would resolve a string all over again, with none of the work
     /// resolution has already done and with this platform's rewriting in front of it.
     /// </para>
+    /// <para>
+    /// Internal so the on-disk tests can write the older rename class directly: the volumes
+    /// they run on accept the newer one, so <see cref="RenameChild"/> never falls back there.
+    /// </para>
     /// </remarks>
-    private static unsafe CapError SetDestinationName(
+    internal static unsafe CapError SetDestinationName(
         nint handle,
         SafeDirHandle destinationParent,
         ReadOnlySpan<char> destinationName,
@@ -1797,17 +1799,16 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return HandleLease.ClosedError;
         }
 
-        int rootOffset = sizeof(nint);
-        int lengthOffset = rootOffset + sizeof(nint);
-        int nameOffset = lengthOffset + sizeof(uint);
+        int rootOffset = FileRenameInformationLayout.RootDirectoryOffset;
+        int lengthOffset = FileRenameInformationLayout.FileNameLengthOffset;
+        int nameOffset = FileRenameInformationLayout.FileNameOffset;
         int nameBytes = destinationName.Length * sizeof(char);
 
-        // Never shorter than the declared structure, whose one-character name array is padded
-        // out to pointer alignment. The system checks the length it is given against that size
-        // before it looks at the name, so a destination of a single character, which fits in
-        // fewer bytes, would otherwise be refused as a buffer of the wrong length.
-        int declaredSize = (nameOffset + sizeof(char) + sizeof(nint) - 1) & ~(sizeof(nint) - 1);
-        int total = Math.Max(nameOffset + nameBytes, declaredSize);
+        // Never shorter than the declared structure. The system checks the length it is given
+        // against that size before it looks at the name, so a destination of a single
+        // character, which fits in fewer bytes, would otherwise be refused as a buffer of the
+        // wrong length.
+        int total = FileRenameInformationLayout.SizeFor(destinationName.Length);
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(total);
         try
@@ -2937,7 +2938,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             handle,
             &status,
             &value,
-            (uint)sizeof(FileAttributeTagInformation),
+            (uint)FileAttributeTagInformation.StructSize,
             NtConstants.FileAttributeTagInformationClass);
 
         if (NtStatusCodes.IsFailure(nt))
