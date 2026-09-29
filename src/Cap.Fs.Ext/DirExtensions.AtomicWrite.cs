@@ -440,30 +440,98 @@ public static partial class DirExtensions
             cancellationToken);
     }
 
+    /// <summary>
+    /// Starts publishing a file beneath this handle whose contents are written a piece at a
+    /// time, so that no reader ever sees it half-written.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">A relative path to the file to publish.</param>
+    /// <param name="durability">How far the write is pushed before it is treated as done.</param>
+    /// <param name="asynchronous">
+    /// Whether the scratch file is opened for writes the operating system completes by itself,
+    /// as <see cref="FileOptions.Asynchronous"/> asks.
+    /// </param>
+    /// <returns>
+    /// The scratch file, open for writing. Write to it, then call
+    /// <see cref="AtomicFile.Commit"/>; disposing it without doing so publishes nothing.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// For contents that should not have to be held in memory before they are published —
+    /// a serialiser, a network body, an archive being built. The path is resolved and the
+    /// scratch name claimed now, beside the target; the name is not touched until the commit.
+    /// </para>
+    /// <para>
+    /// Everything <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/>
+    /// says about the scratch name, concurrent writers, symbolic links, handles that are not a
+    /// <see cref="Dir"/>, and permissions, ownership and hard links holds here: that operation
+    /// is this one with the contents written in one call.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
+    /// <exception cref="CapIOException">The scratch file could not be created.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static AtomicFile OpenAtomicWrite(
+        this IDir dir,
+        string path,
+        Durability durability = Durability.FileAndDirectory,
+        bool asynchronous = false) =>
+        AtomicFile.Open(dir, path, durability, preservePermissions: true, asynchronous);
+
+    /// <summary>
+    /// Starts publishing a file beneath this handle whose contents are written a piece at a
+    /// time, with the settings given.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">A relative path to the file to publish.</param>
+    /// <param name="options">How far the write is pushed, and what it carries from a file it replaces.</param>
+    /// <param name="asynchronous">
+    /// Whether the scratch file is opened for writes the operating system completes by itself,
+    /// as <see cref="FileOptions.Asynchronous"/> asks.
+    /// </param>
+    /// <returns>
+    /// The scratch file, open for writing. Write to it, then call
+    /// <see cref="AtomicFile.Commit"/>; disposing it without doing so publishes nothing.
+    /// </returns>
+    /// <remarks>
+    /// The same operation as <see cref="OpenAtomicWrite(IDir, string, Durability, bool)"/>,
+    /// which is this with <see cref="AtomicWriteOptions.Default"/> and the durability it was
+    /// given.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation.</exception>
+    /// <exception cref="CapIOException">The scratch file could not be created.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static AtomicFile OpenAtomicWrite(
+        this IDir dir,
+        string path,
+        AtomicWriteOptions options,
+        bool asynchronous = false)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        return AtomicFile.Open(dir, path, options.Durability, options.PreservePermissions, asynchronous);
+    }
+
     /// <summary>The synchronous publish, whichever form it was asked for through.</summary>
     private static void WriteAllBytesAtomicCore(
         IDir dir, string path, ReadOnlySpan<byte> bytes, Durability durability, bool preservePermissions)
     {
-        using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
+        using AtomicFile publish = AtomicFile.Open(dir, path, durability, preservePermissions, asynchronous: false);
 
-        CapPermissions? carried = preservePermissions ? Replaced(location.Directory, location.Name) : null;
-        string? scratch = Claim(location.Directory, asynchronous: false, OwnerOnlyFor(carried), out ICapFile file);
-        try
-        {
-            using (file)
-            {
-                file.Write(bytes, 0);
-                Carry(file, carried, location.Name);
-                Commit(file, durability);
-            }
-
-            Publish(location.Directory, scratch, location.Name, durability);
-            scratch = null;
-        }
-        finally
-        {
-            Abandon(location.Directory, scratch);
-        }
+        publish.File.Write(bytes, 0);
+        publish.Commit();
     }
 
     /// <summary>The asynchronous publish, whichever form it was asked for through.</summary>
@@ -475,26 +543,10 @@ public static partial class DirExtensions
         bool preservePermissions,
         CancellationToken cancellationToken)
     {
-        using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
+        using AtomicFile publish = AtomicFile.Open(dir, path, durability, preservePermissions, asynchronous: true);
 
-        CapPermissions? carried = preservePermissions ? Replaced(location.Directory, location.Name) : null;
-        string? scratch = Claim(location.Directory, asynchronous: true, OwnerOnlyFor(carried), out ICapFile file);
-        try
-        {
-            using (file)
-            {
-                await file.WriteAsync(bytes, 0, cancellationToken).ConfigureAwait(false);
-                Carry(file, carried, location.Name);
-                Commit(file, durability);
-            }
-
-            Publish(location.Directory, scratch, location.Name, durability);
-            scratch = null;
-        }
-        finally
-        {
-            Abandon(location.Directory, scratch);
-        }
+        await publish.File.WriteAsync(bytes, 0, cancellationToken).ConfigureAwait(false);
+        publish.Commit();
     }
 
     /// <summary>
@@ -520,7 +572,7 @@ public static partial class DirExtensions
     /// file by losing that race, so it is not carried.
     /// </para>
     /// </remarks>
-    private static CapPermissions? Replaced(IDir directory, string name)
+    internal static CapPermissions? Replaced(IDir directory, string name)
     {
         if (!directory.TryGetMetadata(name, out CapMetadata existing) || existing.Type != CapFileType.File)
         {
@@ -544,7 +596,7 @@ public static partial class DirExtensions
     /// Without a mode to give it afterwards the scratch file must be created as any new file
     /// is, because what a new file gets is what the published one is meant to have.
     /// </remarks>
-    private static bool OwnerOnlyFor(CapPermissions? carried) =>
+    internal static bool OwnerOnlyFor(CapPermissions? carried) =>
         carried is { } permissions && permissions.TryGetUnixMode(out _);
 
     /// <summary>
@@ -555,7 +607,7 @@ public static partial class DirExtensions
     /// After the contents, so that a mode forbidding writes cannot get in their way, and
     /// before the commit, so that the mode is committed with them.
     /// </remarks>
-    private static void Carry(ICapFile file, CapPermissions? carried, string name)
+    internal static void Carry(ICapFile file, CapPermissions? carried, string name)
     {
         if (carried is not { } permissions)
         {
@@ -606,7 +658,7 @@ public static partial class DirExtensions
     /// creates any file.
     /// </para>
     /// </remarks>
-    private static string Claim(IDir directory, bool asynchronous, bool ownerOnly, out ICapFile file)
+    internal static string Claim(IDir directory, bool asynchronous, bool ownerOnly, out ICapFile file)
     {
         FileOptions options = asynchronous ? FileOptions.Asynchronous : FileOptions.None;
 
@@ -665,7 +717,7 @@ public static partial class DirExtensions
     private const string ScratchDescription = "a scratch file";
 
     /// <summary>Commits the contents, if the caller asked for the contents to be committed.</summary>
-    private static void Commit(ICapFile file, Durability durability)
+    internal static void Commit(ICapFile file, Durability durability)
     {
         if (durability != Durability.None)
         {
@@ -695,7 +747,7 @@ public static partial class DirExtensions
     /// whatever that implementation throws.
     /// </para>
     /// </remarks>
-    private static void Publish(IDir directory, string scratch, string name, Durability durability)
+    internal static void Publish(IDir directory, string scratch, string name, Durability durability)
     {
         directory.Rename(scratch, directory, name, replaceExisting: true);
 
@@ -724,7 +776,7 @@ public static partial class DirExtensions
     /// is a stray file rather than a reason to replace that exception with one about tidying
     /// up.
     /// </remarks>
-    private static void Abandon(IDir directory, string? scratch)
+    internal static void Abandon(IDir directory, string? scratch)
     {
         if (scratch is not null)
         {

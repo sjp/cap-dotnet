@@ -81,6 +81,40 @@ operation promises never to do. The failure is a `CapIOException` whose `Kind` i
 from a permissions problem. `Dir.Rename` with `replaceExisting` reports the same case the
 same way.
 
+### Streaming the contents
+
+When the contents are produced a piece at a time — a serialiser, a response body, an archive
+being built — `OpenAtomicWrite` publishes them without holding them all in memory first. It
+resolves the path and claims the scratch name beside the target, then hands back an
+`AtomicFile` to write through. `Commit()` publishes what was written. Disposing the
+`AtomicFile` without committing removes the scratch name and leaves the target as it was.
+
+```csharp
+using (AtomicFile publish = root.OpenAtomicWrite("state.json"))
+{
+    await JsonSerializer.SerializeAsync(publish.Stream, state, cancellationToken);
+    publish.Commit();   // write out, commit the file, move it onto the name, commit the directory
+}
+```
+
+`Stream` is created the first time it is asked for and belongs to the `AtomicFile`. The
+commit flushes and closes it before the move, so the caller does not have to. If a writer
+closes it first, that is fine too. `File` gives the same scratch file as an `ICapFile`, for
+writes at an offset. Everything else is what `WriteAllBytesAtomic` does, since that method is
+this one with the contents written in a single call. That covers the durability settings,
+link replacement, permission carrying and cleanup.
+
+- **One attempt.** After a commit, successful or not, the `AtomicFile` is spent: a second
+  `Commit` throws `InvalidOperationException`, and `Stream` and `File` throw
+  `ObjectDisposedException`. A failed commit leaves the name as it was.
+- **Async.** Pass `asynchronous: true` to open the scratch file for asynchronous writes.
+  `CommitAsync(cancellationToken)` flushes the stream asynchronously. The file commit, the
+  move and the directory commit still run on the calling thread, as they do for
+  `WriteAllBytesAtomicAsync`. Cancellation is checked up to the move and not after it.
+- **Permissions** are read from the file holding the name when the `AtomicFile` is opened,
+  not when it is committed.
+- **Threads.** An `AtomicFile` belongs to one caller at a time, like any stream.
+
 ### Permissions, ownership and hard links
 
 The published file is a new object, not the old one rewritten. By default it is given the

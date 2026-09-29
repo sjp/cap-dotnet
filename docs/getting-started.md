@@ -142,7 +142,7 @@ stream's usual single-caller rules.
 | You want to | Use |
 |---|---|
 | Read or write a whole file | `dir.ReadAllText`, `ReadAllBytes`, `WriteAllBytes`, and their `Async` forms |
-| Write a file so that readers see all of it or none | `dir.WriteAllTextAtomic` (`Cap.Fs.Ext`) |
+| Write a file so that readers see all of it or none | `dir.WriteAllTextAtomic`, or `dir.OpenAtomicWrite` to stream the contents (`Cap.Fs.Ext`) |
 | Open a file | `dir.OpenFile(path, mode, access)` → `CapFile` |
 | Open a name to read without knowing whether it holds a file or a directory | `dir.OpenAny(path)` → `CapOpened`, which says which and hands over the `Dir` or `CapFile` |
 | List a directory | `dir.EnumerateEntries()` → `DirEntry`, which opens what it names without a path |

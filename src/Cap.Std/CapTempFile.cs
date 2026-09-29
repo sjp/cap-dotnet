@@ -30,6 +30,13 @@ namespace Cap.Std;
 /// behind.</strong> A file with no name is the exception: nothing has to run for it to go,
 /// because there is no name to clean up and the system reclaims the storage on its own.
 /// </para>
+/// <para>
+/// <strong>To publish a scratch file onto a real name, use <c>OpenAtomicWrite</c> in
+/// Cap.Fs.Ext rather than this.</strong> It claims the scratch name in the same way, beside
+/// the target, and adds the steps a publish needs and that are easy to get wrong: committing
+/// the contents before the move, moving the name without following a link that holds it,
+/// committing the directory afterwards, and carrying over the replaced file's permissions.
+/// </para>
 /// </remarks>
 public sealed class CapTempFile : IDisposable
 {

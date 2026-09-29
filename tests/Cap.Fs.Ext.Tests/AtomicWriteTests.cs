@@ -457,7 +457,277 @@ public sealed class AtomicWriteTests : IDisposable
         Assert.Equal(["elsewhere", "report"], Names());
     }
 
-    /// <summary>Publishes text through either form of the operation.</summary>
+    /// <summary>Contents written a piece at a time through the stream are what is published.</summary>
+    [Theory]
+    [InlineData(false, Durability.None)]
+    [InlineData(false, Durability.FileAndDirectory)]
+    [InlineData(true, Durability.None)]
+    [InlineData(true, Durability.FileAndDirectory)]
+    public async Task A_streamed_publish_holds_what_was_written(bool asynchronous, Durability durability)
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
+        byte[] contents = [.. Enumerable.Range(0, 1 << 20).Select(i => (byte)i)];
+
+        await using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("report", durability, asynchronous))
+        {
+            for (int offset = 0; offset < contents.Length; offset += 4096)
+            {
+                await publish.Stream.WriteAsync(contents.AsMemory(offset, 4096), TestContext.Current.CancellationToken);
+            }
+
+            await publish.CommitAsync(TestContext.Current.CancellationToken);
+            Assert.True(publish.IsCommitted);
+        }
+
+        Assert.Equal(contents, HostFile.ReadAllBytes(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal(["report"], Names());
+    }
+
+    /// <summary>
+    /// A streamed publish is atomic: a reader sees one whole version or the other while the
+    /// contents are being written and moved into place.
+    /// </summary>
+    [Fact]
+    public async Task A_streamed_publish_is_atomic()
+    {
+        string oldText = new('a', 1 << 16);
+        byte[] newBytes = Encoding.UTF8.GetBytes(new string('b', 1 << 20));
+        string newText = Encoding.UTF8.GetString(newBytes);
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), oldText);
+
+        using CancellationTokenSource stop = new();
+        Task<List<string>> reader = Observing(() => ReadUntilStopped(stop.Token));
+
+        for (int i = 0; i < 20; i++)
+        {
+            using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("report", Durability.None))
+            {
+                for (int offset = 0; offset < newBytes.Length; offset += 4096)
+                {
+                    publish.Stream.Write(newBytes, offset, 4096);
+                }
+
+                publish.Commit();
+            }
+
+            _tree.Directory.WriteAllTextAtomic("report", oldText, Durability.None);
+        }
+
+        await stop.CancelAsync();
+        List<string> seen = await reader;
+
+        Assert.NotEmpty(seen);
+        Assert.All(seen, text => Assert.True(
+            text == oldText || text == newText,
+            $"A reader saw {text.Length} bytes, which is neither of the two whole answers."));
+    }
+
+    /// <summary>
+    /// Until the commit, the name holds what it held before, however much has been written and
+    /// flushed.
+    /// </summary>
+    [Fact]
+    public void Nothing_is_published_before_the_commit()
+    {
+        string published = Path.Combine(_tree.HostPath, "report");
+        HostFile.WriteAllText(published, "old");
+
+        using AtomicFile publish = _tree.Directory.OpenAtomicWrite("report");
+        publish.Stream.Write("new"u8);
+        publish.Stream.Flush();
+
+        Assert.Equal("old", HostFile.ReadAllText(published));
+        Assert.False(publish.IsCommitted);
+
+        publish.Commit();
+
+        Assert.Equal("new", HostFile.ReadAllText(published));
+    }
+
+    /// <summary>
+    /// Disposing without committing leaves the name as it was and removes the scratch name.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Disposing_without_committing_leaves_the_name_untouched_and_no_scratch(bool asynchronous)
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
+
+        AtomicFile publish = _tree.Directory.OpenAtomicWrite("report", asynchronous: asynchronous);
+        publish.Stream.Write(new byte[1 << 16]);
+        if (asynchronous)
+        {
+            await publish.DisposeAsync();
+        }
+        else
+        {
+            publish.Dispose();
+        }
+
+        Assert.Equal("old", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal(["report"], Names());
+        Assert.Throws<ObjectDisposedException>(publish.Commit);
+    }
+
+    /// <summary>Disposing without committing, with no file at the name, leaves nothing at all.</summary>
+    [Fact]
+    public void Disposing_without_committing_creates_nothing()
+    {
+        using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("report"))
+        {
+            publish.File.Write("new"u8, 0);
+        }
+
+        Assert.Empty(Names());
+    }
+
+    /// <summary>A second commit is refused, and the published file is left as it is.</summary>
+    [Fact]
+    public void Committing_twice_throws()
+    {
+        using AtomicFile publish = _tree.Directory.OpenAtomicWrite("report");
+        publish.Stream.Write("new"u8);
+        publish.Commit();
+
+        Assert.Throws<InvalidOperationException>(publish.Commit);
+        Assert.Equal("new", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+    }
+
+    /// <summary>
+    /// After the commit the file and the stream are closed, so a late write cannot reach the
+    /// published file.
+    /// </summary>
+    [Fact]
+    public void Writing_after_commit_throws()
+    {
+        using AtomicFile publish = _tree.Directory.OpenAtomicWrite("report");
+        ICapFile file = publish.File;
+        Stream stream = publish.Stream;
+        stream.Write("new"u8);
+        publish.Commit();
+
+        Assert.Throws<ObjectDisposedException>(() => file.Write("late"u8, 0));
+        Assert.Throws<ObjectDisposedException>(() => stream.Write("late"u8));
+        Assert.Throws<ObjectDisposedException>(() => publish.File);
+        Assert.Throws<ObjectDisposedException>(() => publish.Stream);
+        Assert.Equal("new", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+    }
+
+    /// <summary>
+    /// A stream the caller closed — as a writer that owns it does — is still published by the
+    /// commit, together with writes made through the file at an offset.
+    /// </summary>
+    [Fact]
+    public void A_stream_closed_by_its_writer_and_offset_writes_are_published()
+    {
+        using AtomicFile publish = _tree.Directory.OpenAtomicWrite("report");
+        using (StreamWriter writer = new(publish.Stream))
+        {
+            writer.Write("hello world");
+        }
+
+        publish.File.Write("W"u8, 6);
+        publish.Commit();
+
+        Assert.Equal("hello World", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal(["report"], Names());
+    }
+
+    /// <summary>
+    /// A commit that fails leaves the name as it was, refuses to be tried again, and disposal
+    /// then removes the scratch name.
+    /// </summary>
+    [Fact]
+    public void A_failed_commit_leaves_nothing_behind_once_disposed()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "occupied"));
+
+        using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("occupied"))
+        {
+            publish.Stream.Write("contents"u8);
+
+            Assert.ThrowsAny<IOException>(publish.Commit);
+            Assert.False(publish.IsCommitted);
+            Assert.Throws<InvalidOperationException>(publish.Commit);
+        }
+
+        Assert.Equal(["occupied"], Names());
+        Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "occupied")));
+    }
+
+    /// <summary>
+    /// A cancelled asynchronous commit publishes nothing, and disposal removes the scratch name.
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_commit_leaves_the_name_as_it_was()
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "report"), "old");
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+
+        await using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("report", asynchronous: true))
+        {
+            await publish.Stream.WriteAsync("new"u8.ToArray(), TestContext.Current.CancellationToken);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => publish.CommitAsync(cancelled.Token));
+            Assert.False(publish.IsCommitted);
+        }
+
+        Assert.Equal("old", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "report")));
+        Assert.Equal(["report"], Names());
+    }
+
+    /// <summary>
+    /// A link at the name is replaced by a streamed publish, and what it pointed at is left
+    /// alone.
+    /// </summary>
+    [Fact]
+    public void A_link_at_the_name_is_replaced_by_a_streamed_publish()
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "keep"), "untouched");
+        HostFile.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "keep");
+
+        using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("report"))
+        {
+            publish.Stream.Write("new"u8);
+            publish.Commit();
+        }
+
+        string published = Path.Combine(_tree.HostPath, "report");
+        Assert.Null(HostEntry.LinkTarget(published));
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal("untouched", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "keep")));
+    }
+
+    /// <summary>A streamed publish over a private file keeps it private.</summary>
+    [Fact]
+    public void A_streamed_publish_over_a_private_file_keeps_its_mode()
+    {
+        SkipWithoutModeBits();
+        string published = Path.Combine(_tree.HostPath, "secret");
+        HostFile.WriteAllText(published, "old");
+        HostFile.SetUnixFileMode(published, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        using (AtomicFile publish = _tree.Directory.OpenAtomicWrite("secret", AtomicWriteOptions.Default))
+        {
+            publish.Stream.Write("new"u8);
+            publish.Commit();
+        }
+
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, HostFile.GetUnixFileMode(published));
+    }
+
+    /// <summary>A path that climbs out is refused before anything is created.</summary>
+    [Fact]
+    public void Opening_a_streamed_publish_outside_the_handle_is_refused()
+    {
+        Assert.Throws<SandboxEscapeException>(() => _tree.Directory.OpenAtomicWrite("../report"));
+        Assert.Throws<ArgumentException>(() => _tree.Directory.OpenAtomicWrite("report/"));
+        Assert.Empty(Names());
+    }
+
     /// <summary>Skips a test about Unix mode bits where files do not have them.</summary>
     private static void SkipWithoutModeBits()
     {

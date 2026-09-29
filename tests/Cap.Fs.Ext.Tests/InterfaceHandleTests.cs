@@ -324,6 +324,54 @@ public sealed class InterfaceHandleTests
         Assert.Equal(".: Flush(True)", root.Log[^1]);
     }
 
+    /// <summary>
+    /// A streamed publish through the interface takes the same steps as the one-call form:
+    /// create the scratch name exclusively, commit it, move it onto the name, commit the
+    /// directory.
+    /// </summary>
+    [Fact]
+    public void A_streamed_atomic_write_through_the_interface_writes_a_scratch_name_then_moves_it()
+    {
+        _fs.AddFile("out/report.txt", "old");
+        using RecordingDir root = Root();
+
+        using (AtomicFile publish = root.OpenAtomicWrite("out/report.txt"))
+        {
+            publish.Stream.Write("new"u8);
+            publish.Commit();
+        }
+
+        Assert.Equal("new", _fs.ReadAllText("out/report.txt"));
+        Assert.Equal(["report.txt"], _fs.GetEntries("out"));
+        string created = Assert.Single(root.Log, call => call.StartsWith("./out: TryOpenFile(", StringComparison.Ordinal));
+        Assert.EndsWith(", CreateNew)", created, StringComparison.Ordinal);
+        string scratch = created["./out: TryOpenFile(".Length..created.IndexOf(',', StringComparison.Ordinal)];
+        Assert.Equal(
+            [$"./out/{scratch}: Flush(True)", $"./out: Rename({scratch}, [./out], report.txt, True)", "./out: Flush(True)"],
+            root.Log[^3..]);
+    }
+
+    /// <summary>
+    /// A streamed publish disposed without a commit through the interface removes its scratch
+    /// name and never moves anything.
+    /// </summary>
+    [Fact]
+    public void An_abandoned_streamed_atomic_write_through_the_interface_removes_its_scratch_name()
+    {
+        _fs.AddFile("report.txt", "old");
+        using RecordingDir root = Root();
+
+        using (AtomicFile publish = root.OpenAtomicWrite("report.txt"))
+        {
+            publish.Stream.Write("new"u8);
+        }
+
+        Assert.Equal("old", _fs.ReadAllText("report.txt"));
+        Assert.Equal(["report.txt"], _fs.GetEntries());
+        Assert.StartsWith(".: TryDeleteFile(", root.Log[^1], StringComparison.Ordinal);
+        Assert.DoesNotContain(root.Log, call => call.Contains("Rename(", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void A_failed_atomic_write_through_the_interface_removes_its_scratch_name()
     {
