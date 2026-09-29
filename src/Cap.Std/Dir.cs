@@ -2293,7 +2293,7 @@ public sealed partial class Dir : IDir
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
-                expected = ExpectedTarget.Directory;
+                expected = ExpectedTarget.Parent;
                 return pathError;
             }
 
@@ -2337,7 +2337,7 @@ public sealed partial class Dir : IDir
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
-                expected = ExpectedTarget.Directory;
+                expected = ExpectedTarget.Parent;
                 return pathError;
             }
 
@@ -2413,7 +2413,7 @@ public sealed partial class Dir : IDir
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
-                expected = ExpectedTarget.Directory;
+                expected = ExpectedTarget.Parent;
                 return pathError;
             }
 
@@ -2519,7 +2519,7 @@ public sealed partial class Dir : IDir
         {
             if (fromError != CapPathError.None || error.IsFailure)
             {
-                expected = ExpectedTarget.Directory;
+                expected = ExpectedTarget.Parent;
                 return error;
             }
 
@@ -2536,7 +2536,7 @@ public sealed partial class Dir : IDir
             {
                 if (toError != CapPathError.None || error.IsFailure)
                 {
-                    expected = ExpectedTarget.Directory;
+                    expected = ExpectedTarget.Parent;
                     return error;
                 }
 
@@ -2616,7 +2616,7 @@ public sealed partial class Dir : IDir
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
-                expected = ExpectedTarget.Directory;
+                expected = ExpectedTarget.Parent;
                 return pathError;
             }
 

@@ -215,7 +215,8 @@ public sealed partial class Dir
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public CapMetadata GetMetadata(string path, bool followLink = false)
     {
-        CapPathError pathError = MetadataCore(path, followLink, out CapMetadata metadata, out CapError error);
+        CapPathError pathError = MetadataCore(
+            path, followLink, out CapMetadata metadata, out CapError error, out ExpectedTarget expected);
         if (pathError != CapPathError.None)
         {
             throw FailureTranslation.ToException(pathError, path, nameof(path));
@@ -223,7 +224,7 @@ public sealed partial class Dir
 
         return error.IsSuccess
             ? metadata
-            : throw FailureTranslation.ToException(error, path, ExpectedTarget.Name);
+            : throw FailureTranslation.ToException(error, path, expected);
     }
 
     /// <summary>
@@ -274,7 +275,7 @@ public sealed partial class Dir
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public bool TryGetMetadata(string path, bool followLink, out CapMetadata metadata)
     {
-        CapPathError pathError = MetadataCore(path, followLink, out metadata, out CapError error);
+        CapPathError pathError = MetadataCore(path, followLink, out metadata, out CapError error, out _);
         return pathError == CapPathError.None && error.IsSuccess;
     }
 
@@ -390,7 +391,7 @@ public sealed partial class Dir
         bool followLink = false)
     {
         CapPathError pathError = SetTimesCore(
-            path, lastAccess, lastWrite, followLink, out CapError error, out bool refusedTime);
+            path, lastAccess, lastWrite, followLink, out CapError error, out bool refusedTime, out ExpectedTarget expected);
         if (pathError != CapPathError.None)
         {
             throw FailureTranslation.ToException(pathError, path, nameof(path));
@@ -403,7 +404,7 @@ public sealed partial class Dir
 
         if (error.IsFailure)
         {
-            throw FailureTranslation.ToException(error, path, ExpectedTarget.Name);
+            throw FailureTranslation.ToException(error, path, expected);
         }
     }
 
@@ -446,7 +447,7 @@ public sealed partial class Dir
         bool followLink = false)
     {
         CapPathError pathError = SetTimesCore(
-            path, lastAccess, lastWrite, followLink, out CapError error, out bool refusedTime);
+            path, lastAccess, lastWrite, followLink, out CapError error, out bool refusedTime, out _);
         if (refusedTime)
         {
             throw FailureTranslation.UnrecordableTime(error);
@@ -469,6 +470,10 @@ public sealed partial class Dir
     /// about the name. Only the call that sets the times can report that, so it is told apart
     /// here and not by the error's category, which resolution uses for other things.
     /// </param>
+    /// <param name="expected">
+    /// How a missing thing is reported: as a directory on the way when resolution failed
+    /// before reaching the name, and as the name itself when the call on it did.
+    /// </param>
     /// <remarks>
     /// A path that must name a directory is checked by describing the name first. Something
     /// else could take the name between that check and the change. If it does, the change
@@ -480,9 +485,11 @@ public sealed partial class Dir
         CapFileTime lastWrite,
         bool followLink,
         out CapError error,
-        out bool refusedTime)
+        out bool refusedTime,
+        out ExpectedTarget expected)
     {
         refusedTime = false;
+        expected = ExpectedTarget.Name;
 
         CapPathError pathError = Locate(
             path, out NameLookup lookup, out error, describing: true, followLastLink: followLink);
@@ -490,6 +497,7 @@ public sealed partial class Dir
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
+                expected = ExpectedTarget.Parent;
                 return pathError;
             }
 
@@ -532,9 +540,15 @@ public sealed partial class Dir
     /// hold something else, which is a fact about the request. Nothing is re-opened to
     /// decide it: the snapshot already says what the entry is.
     /// </remarks>
-    private CapPathError MetadataCore(string path, bool followLink, out CapMetadata metadata, out CapError error)
+    private CapPathError MetadataCore(
+        string path,
+        bool followLink,
+        out CapMetadata metadata,
+        out CapError error,
+        out ExpectedTarget expected)
     {
         metadata = default;
+        expected = ExpectedTarget.Name;
 
         CapPathError pathError = Locate(
             path, out NameLookup lookup, out error, describing: true, followLastLink: followLink);
@@ -542,6 +556,7 @@ public sealed partial class Dir
         {
             if (pathError != CapPathError.None || error.IsFailure)
             {
+                expected = ExpectedTarget.Parent;
                 return pathError;
             }
 

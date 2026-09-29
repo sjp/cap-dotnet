@@ -597,6 +597,28 @@ public sealed class DirMetadataTests : IDisposable
         Assert.False(root.TryGetMetadata("absent", out _));
     }
 
+    /// <summary>
+    /// Describing, or setting the times of, a name beneath a directory that is not there reports
+    /// the directory as missing; a missing name beneath one that is there is a missing file.
+    /// </summary>
+    [Fact]
+    public void Describing_beneath_a_missing_directory_reports_the_directory_as_missing()
+    {
+        HostDirectory.CreateDirectory(Host("a"));
+
+        using Dir root = OpenRoot();
+
+        DirectoryNotFoundException missing =
+            Assert.Throws<DirectoryNotFoundException>(() => root.GetMetadata("missing/x"));
+        Assert.Equal(CapErrorKind.NotFound, CapIOException.KindOf(missing));
+        Assert.Throws<DirectoryNotFoundException>(() => root.GetMetadata("missing/x", followLink: true));
+        Assert.Throws<DirectoryNotFoundException>(() => root.SetTimes("missing/x", lastWrite: CapFileTime.Now));
+
+        FileNotFoundException absent = Assert.Throws<FileNotFoundException>(() => root.GetMetadata("a/missing"));
+        Assert.Equal(CapErrorKind.NotFound, CapIOException.KindOf(absent));
+        Assert.Throws<FileNotFoundException>(() => root.SetTimes("a/missing", lastWrite: CapFileTime.Now));
+    }
+
     /// <summary>A path that leaves the subtree is refused rather than described.</summary>
     [Fact]
     public void A_path_that_climbs_out_is_refused()

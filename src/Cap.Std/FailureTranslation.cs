@@ -37,6 +37,13 @@ internal enum ExpectedTarget
 
     /// <summary>A name of any kind: a missing one is reported as a missing file.</summary>
     Name,
+
+    /// <summary>
+    /// A name of any kind, not reached because a directory the path passes through on the way
+    /// to it is missing. Reported as a missing directory, as the framework reports it, but in
+    /// words that do not claim the whole path was meant to name one.
+    /// </summary>
+    Parent,
 }
 
 internal static class FailureTranslation
@@ -63,9 +70,14 @@ internal static class FailureTranslation
             // call reached it.
             CapErrorCategory.Closed => DisposedDuringCall(),
 
-            CapErrorCategory.NotFound => expected == ExpectedTarget.Directory
-                ? new DirectoryNotFoundException($"'{path}' does not name a directory that exists. ({error})")
-                : new FileNotFoundException($"'{path}' does not name anything that exists. ({error})"),
+            CapErrorCategory.NotFound => expected switch
+            {
+                ExpectedTarget.Directory =>
+                    new DirectoryNotFoundException($"'{path}' does not name a directory that exists. ({error})"),
+                ExpectedTarget.Parent =>
+                    new DirectoryNotFoundException($"'{path}' passes through a directory that does not exist. ({error})"),
+                _ => new FileNotFoundException($"'{path}' does not name anything that exists. ({error})"),
+            },
 
             CapErrorCategory.AlreadyExists =>
                 new CapIOException(KindOf(error.Category), $"'{path}' names something that already exists. ({error})"),

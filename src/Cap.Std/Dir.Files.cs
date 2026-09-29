@@ -179,10 +179,10 @@ public sealed partial class Dir
 
         // A mode that creates cannot fail for want of the file it was going to make, so a
         // report of something missing can only be about a directory above it. A mode that
-        // cannot create has no such certainty, and the file is by far the likelier answer.
-        // This is the whole of the distinction the framework draws between its two missing-
-        // thing exceptions, and drawing it the same way keeps a ported catch clause matching.
-        ExpectedTarget expected = request.Creates ? ExpectedTarget.Directory : ExpectedTarget.Name;
+        // cannot create has no such certainty, and asks which it was. This is the whole of the
+        // distinction the framework draws between its two missing-thing exceptions, and
+        // drawing it the same way keeps a ported catch clause matching.
+        ExpectedTarget expected = request.Creates ? ExpectedTarget.Parent : ClassifyMissing(path, error);
         throw FailureTranslation.ToException(error, path, expected);
     }
 
@@ -330,6 +330,7 @@ public sealed partial class Dir
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
     /// <exception cref="FileNotFoundException">There is nothing at the name.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the name is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
     /// <exception cref="CapIOException">
     /// A symbolic link the policy will not follow is in the way, the name holds a link and
@@ -354,7 +355,7 @@ public sealed partial class Dir
 
         return error.IsSuccess
             ? opened!
-            : throw FailureTranslation.ToException(error, path, ExpectedTarget.Name);
+            : throw FailureTranslation.ToException(error, path, ClassifyMissing(path, error));
     }
 
     /// <summary>
@@ -549,6 +550,7 @@ public sealed partial class Dir
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
     /// <exception cref="CapIOException">
     /// The name holds a directory, a symbolic link the policy will not follow is in the way,
@@ -583,6 +585,7 @@ public sealed partial class Dir
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
     /// <exception cref="CapIOException">
     /// The name holds a directory, a symbolic link the policy will not follow is in the way,
@@ -651,6 +654,7 @@ public sealed partial class Dir
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
     /// <exception cref="CapIOException">
     /// The name holds a directory, a symbolic link the policy will not follow is in the way,
@@ -684,6 +688,7 @@ public sealed partial class Dir
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
     /// <exception cref="FileNotFoundException">There is no such file.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
     /// <exception cref="CapIOException">
     /// The name holds a directory, a symbolic link the policy will not follow is in the way,
@@ -970,6 +975,56 @@ public sealed partial class Dir
                 appending: false));
 
         return CapPathError.None;
+    }
+
+    /// <summary>
+    /// Says whether an open that found something missing was missing its last component or
+    /// a directory on the way to it, for the exception that reports it.
+    /// </summary>
+    /// <param name="path">The path the open was given.</param>
+    /// <param name="error">The open's failure.</param>
+    /// <remarks>
+    /// <para>
+    /// Resolution reports one category for both, and an open resolves the whole path in one
+    /// call, so the only way to tell is to resolve again only as far as the directory that
+    /// holds the last component. That is a second lookup, made only on the failure path and
+    /// only for a failure that is a missing thing, so an open that succeeds costs nothing more.
+    /// It decides the exception's type and nothing else; if the tree changes between the two,
+    /// the answer can describe the later state, but nothing is opened or acted on by it.
+    /// </para>
+    /// <para>
+    /// A dangling link as the last component leaves the parent in place, so it is reported
+    /// as a missing file, as the framework reports one. A path ending in <c>..</c> names a
+    /// directory, so something missing on it can only be a directory it passes through.
+    /// </para>
+    /// </remarks>
+    private ExpectedTarget ClassifyMissing(string path, CapError error)
+    {
+        if (error.Category != CapErrorCategory.NotFound ||
+            !TryParseCallerPath(path, out CapPath parsed, out _) ||
+            !parsed.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
+        {
+            return ExpectedTarget.Name;
+        }
+
+        if (name.SequenceEqual(".."))
+        {
+            return ExpectedTarget.Parent;
+        }
+
+        if (prefix.IsEmpty)
+        {
+            return ExpectedTarget.Name;
+        }
+
+        CapResult<ResolvedParent> parent = Resolver.ResolveParent(_handle, in parsed, _options);
+        if (parent.IsSuccess)
+        {
+            parent.Value.Dispose();
+            return ExpectedTarget.Name;
+        }
+
+        return parent.Error.Category == CapErrorCategory.NotFound ? ExpectedTarget.Parent : ExpectedTarget.Name;
     }
 
     /// <summary>
