@@ -490,6 +490,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Dependabot bumps global.json and the devcontainer's SDK through different ecosystems.
+      - name: devcontainer SDK matches global.json
+        run: |
+          test "$(jq -r .sdk.version global.json)" = "$(jq -r '.features["ghcr.io/devcontainers/features/dotnet:2"].version' .devcontainer/devcontainer.json)" \
+            || { echo "::error::global.json and .devcontainer/devcontainer.json name different SDK versions"; exit 1; }
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json

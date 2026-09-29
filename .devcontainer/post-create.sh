@@ -29,6 +29,8 @@ if [ -d "$npm_root/@anthropic-ai" ]; then
     sudo chown -R "$(id -u):$(id -g)" "$npm_root/@anthropic-ai"
 fi
 
+bash .devcontainer/ensure-sdk.sh
+
 # Language servers for Claude Code's LSP tool.
 dotnet tool install --global csharp-ls
 npm install -g typescript-language-server typescript
