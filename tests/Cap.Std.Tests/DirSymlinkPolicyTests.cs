@@ -39,7 +39,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_root_opened_without_a_policy_follows_a_link_that_stays_inside()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
         Build();
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
@@ -58,7 +58,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_root_that_denies_links_refuses_one_that_stays_inside()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
         Build();
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
@@ -84,7 +84,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void A_link_out_of_the_subtree_is_refused_under_either_policy()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
         Build();
 
         using Dir following = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
@@ -115,7 +115,7 @@ public sealed class DirSymlinkPolicyTests : IDisposable
     [Fact]
     public void Restricting_produces_a_stricter_handle_on_the_same_directory()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
         Build();
 
         using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
@@ -260,31 +260,6 @@ public sealed class DirSymlinkPolicyTests : IDisposable
         HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "plain"));
         HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "inside-link"), "plain");
         HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "escape-link"), "..");
-    }
-
-    /// <summary>
-    /// Skips when this host will not let the test process create a symbolic link.
-    /// </summary>
-    /// <remarks>
-    /// Established by creating one rather than inferred from the platform. Windows needs
-    /// either developer mode or an elevated token, and which of those a machine has is not
-    /// something a platform check can answer — one that assumed would keep skipping on a
-    /// machine perfectly able to run these.
-    /// </remarks>
-    private void RequireSymbolicLinks()
-    {
-        string probe = Path.Combine(_tree.HostPath, "link-probe");
-
-        try
-        {
-            HostFile.CreateSymbolicLink(probe, "target");
-            HostFile.Delete(probe);
-        }
-        catch (Exception thrown) when (
-            thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip($"Symbolic links cannot be created here, so these cases cannot be built: {thrown.Message}");
-        }
     }
 
     /// <summary>Whether two handles refer to the same directory, by identity rather than by name.</summary>

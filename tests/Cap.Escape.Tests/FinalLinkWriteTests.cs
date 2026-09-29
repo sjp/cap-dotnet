@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Tests;
 
 namespace Cap.Escape.Tests;
 
@@ -195,11 +196,6 @@ public sealed class FinalLinkWriteTests
         return arena;
     }
 
-    private static void RequireSymlinks()
-    {
-        if ((HostFeatures.Current & HostFeature.Symlinks) == 0)
-        {
-            Assert.Skip("This host or volume cannot hold symbolic links.");
-        }
-    }
+    private static void RequireSymlinks() =>
+        HostFeatures.Require(HostFeature.Symlinks, "The links these cases attack through cannot be planted.");
 }

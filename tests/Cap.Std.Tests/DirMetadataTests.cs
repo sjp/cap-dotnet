@@ -246,7 +246,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_symbolic_link_is_described_as_a_link()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostFile.WriteAllBytes(Host("target"), new byte[4096]);
         HostFile.CreateSymbolicLink(Host("link"), "target");
@@ -266,7 +266,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_link_to_a_directory_is_described_as_a_link()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostDirectory.CreateDirectory(Host("real"));
         HostDirectory.CreateSymbolicLink(Host("pointer"), "real");
@@ -289,7 +289,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void The_answer_is_the_same_under_every_policy()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostFile.WriteAllText(Host("pointee"), "content");
         HostFile.CreateSymbolicLink(Host("indirect"), "pointee");
@@ -310,7 +310,7 @@ public sealed class DirMetadataTests : IDisposable
     [Fact]
     public void A_link_in_the_middle_of_the_path_obeys_the_policy()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostDirectory.CreateDirectory(Host("actual"));
         HostFile.WriteAllText(Host("actual", "leaf"), "x");
@@ -597,23 +597,5 @@ public sealed class DirMetadataTests : IDisposable
 
         Assert.Throws<ArgumentNullException>(() => root.GetMetadata(null!));
         Assert.Throws<ArgumentNullException>(() => root.TryGetMetadata(null!, out _));
-    }
-
-    // --- helpers -------------------------------------------------------------------------------
-
-    private void RequireSymbolicLinks()
-    {
-        string probe = Host("link-probe");
-
-        try
-        {
-            HostFile.CreateSymbolicLink(probe, "target");
-            HostFile.Delete(probe);
-        }
-        catch (Exception thrown) when (
-            thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip($"Symbolic links cannot be created here, so these cases cannot be built: {thrown.Message}");
-        }
     }
 }

@@ -467,7 +467,7 @@ public abstract class FileSystemBehaviourTests : IDisposable
     [Fact]
     public void A_symbolic_link_is_read_through()
     {
-        Assert.SkipUnless(_fixture.SupportsLinks, "This process cannot create symbolic links here.");
+        TestLinks.Require(_fixture.SupportsLinks);
         MockDiffers("a relative link target is taken against the current directory rather than the link's own.");
         Fs.Directory.CreateDirectory(P("d"));
         Fs.File.WriteAllText(P("d", "a.txt"), "through");

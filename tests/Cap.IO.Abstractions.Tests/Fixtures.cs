@@ -2,6 +2,7 @@ using System.IO.Abstractions;
 using System.IO.Abstractions.TestingHelpers;
 using Cap.Std;
 using Cap.Std.Testing;
+using Cap.Tests;
 
 namespace Cap.IO.Abstractions.Tests;
 
@@ -75,18 +76,20 @@ public sealed class MockFixture : IFileSystemFixture
 /// <summary>Whether this process can make symbolic links in a directory.</summary>
 internal static class TestLinks
 {
-    public static bool CanCreate(string directory)
-    {
-        string probe = Path.Combine(directory, "link-probe");
-        try
-        {
-            File.CreateSymbolicLink(probe, "target");
-            File.Delete(probe);
-            return true;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
+    public static bool CanCreate(string directory) =>
+        HostLinks.TryCreate(
+            () =>
+            {
+                string probe = Path.Combine(directory, "link-probe");
+                File.CreateSymbolicLink(probe, "target");
+                File.Delete(probe);
+            },
+            out _);
+
+    /// <summary>
+    /// Skips a test that needs links where the fixture cannot make them, or fails it where this
+    /// run was set up to have them.
+    /// </summary>
+    public static void Require(bool supportsLinks) =>
+        ExpectedHostFeatures.Require(HostFeature.Symlinks, supportsLinks, "This process cannot create symbolic links here.");
 }

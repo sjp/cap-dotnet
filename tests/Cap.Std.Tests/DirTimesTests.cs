@@ -333,7 +333,7 @@ public sealed class DirTimesTests : IDisposable
     [InlineData(SymlinkPolicy.Deny)]
     public void A_link_has_its_own_times_set_and_its_target_is_not_reached(SymlinkPolicy policy)
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostFile.WriteAllText(Host("target"), "content");
         HostFile.SetLastWriteTimeUtc(Host("target"), Accessed.UtcDateTime);
@@ -353,7 +353,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_link_to_something_outside_is_set_as_a_link()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         using ScratchTree outside = new();
         string victim = Path.Combine(outside.HostPath, "victim");
@@ -372,7 +372,7 @@ public sealed class DirTimesTests : IDisposable
     [Fact]
     public void A_link_in_the_middle_of_the_path_obeys_the_policy()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostDirectory.CreateDirectory(Host("actual"));
         HostFile.WriteAllText(Host("actual", "leaf"), "x");
@@ -384,23 +384,5 @@ public sealed class DirTimesTests : IDisposable
         permissive.SetTimes("hop/leaf", lastWrite: CapFileTime.At(Written));
         Assert.Equal(Written, permissive.GetMetadata("actual/leaf").LastWriteTime);
         Assert.ThrowsAny<IOException>(() => strict.SetTimes("hop/leaf", lastWrite: CapFileTime.Now));
-    }
-
-    // --- helpers -------------------------------------------------------------------------------
-
-    private void RequireSymbolicLinks()
-    {
-        string probe = Host("link-probe");
-
-        try
-        {
-            HostFile.CreateSymbolicLink(probe, "target");
-            HostFile.Delete(probe);
-        }
-        catch (Exception thrown) when (
-            thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip($"Symbolic links cannot be created here, so these cases cannot be built: {thrown.Message}");
-        }
     }
 }

@@ -31,7 +31,7 @@ public abstract class DifferenceTests : IDisposable
     [Fact]
     public void A_write_refuses_a_link_at_the_final_name()
     {
-        Assert.SkipUnless(_fixture.SupportsLinks, "This process cannot create symbolic links here.");
+        TestLinks.Require(_fixture.SupportsLinks);
         Fs.File.WriteAllText("a.txt", "kept");
         Fs.File.CreateSymbolicLink("link.txt", "a.txt");
 

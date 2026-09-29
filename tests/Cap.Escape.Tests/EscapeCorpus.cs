@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Tests;
 using static Cap.Escape.Tests.Expectation;
 
 namespace Cap.Escape.Tests;

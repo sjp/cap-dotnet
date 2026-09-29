@@ -363,7 +363,10 @@ Filesystem-dependent cases adapt to the volume they run on rather than assuming 
 needing symbolic links or hard links is skipped where the volume has none, and a filesystem
 without them must refuse to create one cleanly; a case that names an entry by a different case
 or normalisation expects the entry to be reached where the volume folds names and missed where
-it does not. The CI workflow runs the corpus on several filesystems, and against a bind mount
+it does not. A run names the features its host was set up with in
+`CAPDOTNET_EXPECT_HOST_FEATURES`, and there a missing one fails the case instead of skipping
+it, so a runner that lost them cannot pass with those cases untested (see
+[testing](testing.md#host-features-the-suite-expects)). The CI workflow runs the corpus on several filesystems, and against a bind mount
 prepared inside the sandbox root, which the corpus itself cannot create.
 
 ### 4.9 Fuzzing and properties

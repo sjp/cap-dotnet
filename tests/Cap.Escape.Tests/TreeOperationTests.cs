@@ -1,6 +1,7 @@
 using Cap.Fs.Ext;
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Tests;
 
 namespace Cap.Escape.Tests;
 
@@ -68,10 +69,7 @@ public sealed class TreeOperationTests
         string backend, SymlinkPolicy policy, TreeOperation operation)
     {
         HostFeature features = HostFeatures.Current;
-        if ((features & HostFeature.Symlinks) == 0)
-        {
-            Assert.Skip("This volume cannot hold symbolic links, so the hostile tree cannot be built.");
-        }
+        HostFeatures.Require(HostFeature.Symlinks, "The hostile tree cannot be built without them.");
 
         using Arena arena = new();
         arena.Plant(HostileTree(features));

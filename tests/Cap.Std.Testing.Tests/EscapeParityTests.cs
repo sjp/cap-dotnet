@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Tests;
 
 namespace Cap.Std.Testing.Tests;
 
@@ -21,18 +22,16 @@ public sealed class EscapeParityTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_disk.FullName, "sandbox", "inner"));
         Directory.CreateDirectory(Path.Combine(_disk.FullName, "outside"));
         File.WriteAllText(Path.Combine(_disk.FullName, "outside", "secret.txt"), "secret");
-        try
-        {
-            Directory.CreateSymbolicLink(Path.Combine(_disk.FullName, "sandbox", "out"), Path.Combine("..", "outside"));
-            File.CreateSymbolicLink(
-                Path.Combine(_disk.FullName, "sandbox", "inner", "up"), Path.Combine("..", "..", "outside", "secret.txt"));
-            _linksAvailable = true;
-        }
-        catch (Exception refused) when (refused is IOException or UnauthorizedAccessException)
-        {
-            // Windows without the privilege to create links. The cases then cannot be built on
-            // disk to compare against, and are skipped.
-        }
+        // Windows without the privilege to create links cannot build the cases on disk to
+        // compare against, and they are skipped.
+        _linksAvailable = HostLinks.TryCreate(
+            () =>
+            {
+                Directory.CreateSymbolicLink(Path.Combine(_disk.FullName, "sandbox", "out"), Path.Combine("..", "outside"));
+                File.CreateSymbolicLink(
+                    Path.Combine(_disk.FullName, "sandbox", "inner", "up"), Path.Combine("..", "..", "outside", "secret.txt"));
+            },
+            out _);
     }
 
     public void Dispose() => _disk.Delete(recursive: true);
@@ -55,7 +54,7 @@ public sealed class EscapeParityTests : IDisposable
     [MemberData(nameof(Cases))]
     public void An_escape_is_refused_as_it_is_on_disk(ResolutionBackend resolution, string path)
     {
-        Assert.SkipUnless(_linksAvailable, "This host cannot create the symbolic links the disk tree needs.");
+        ExpectedHostFeatures.Require(HostFeature.Symlinks, _linksAvailable, "The disk tree to compare against cannot be built.");
 
         InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { Resolution = resolution });
         fs.AddDirectory("sandbox/inner");

@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Tests;
 
 namespace Cap.Stress.Tests;
 
@@ -85,14 +86,12 @@ internal sealed class StressArena : IDisposable
     /// <summary>Whether an identity is one of the objects outside the sandbox.</summary>
     public bool IsOutside(CapFileId identity) => _outside.Contains(identity);
 
-    /// <summary>Skips a race that needs a symbolic link on a host that cannot make one.</summary>
-    public void RequireSymbolicLinks()
-    {
-        if (!SupportsSymbolicLinks)
-        {
-            Assert.Skip("This host or volume cannot make symbolic links, so the attack cannot be staged.");
-        }
-    }
+    /// <summary>
+    /// Skips a race that needs a symbolic link on a host that cannot make one, or fails it where
+    /// this run was set up to have them (see <see cref="ExpectedHostFeatures"/>).
+    /// </summary>
+    public void RequireSymbolicLinks() =>
+        ExpectedHostFeatures.Require(HostFeature.Symlinks, SupportsSymbolicLinks, "The attack cannot be staged.");
 
     /// <summary>
     /// Everything outside the sandbox, as text that changes if anything there does.

@@ -128,7 +128,7 @@ public sealed class UnixSocketTests : IDisposable
     public void A_link_aimed_outside_the_handle_is_refused()
     {
         RequireSupport();
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         BindAmbient(Join(_tree.HostPath, "outside.sock"));
 
@@ -155,7 +155,7 @@ public sealed class UnixSocketTests : IDisposable
     public void A_link_is_refused_even_when_it_stays_inside()
     {
         RequireSupport();
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         Dir root = _tree.Directory;
         using CapUnixListener listener = CapUnixListener.Bind(root, "real.sock");
@@ -198,7 +198,7 @@ public sealed class UnixSocketTests : IDisposable
     public void A_name_already_taken_cannot_be_bound()
     {
         RequireSupport();
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         Dir root = _tree.Directory;
         using CapUnixListener first = CapUnixListener.Bind(root, "service.sock");
@@ -261,23 +261,6 @@ public sealed class UnixSocketTests : IDisposable
         if (!CapUnixStream.IsSupported)
         {
             Assert.Skip("This platform reaches no socket through a directory handle.");
-        }
-    }
-
-    /// <summary>Skips the body where the suite cannot create the links it attacks through.</summary>
-    private void RequireSymbolicLinks()
-    {
-        string probe = Join(_tree.HostPath, "link-probe");
-
-        try
-        {
-            File.CreateSymbolicLink(probe, "target");
-            File.Delete(probe);
-        }
-        catch (Exception thrown) when (
-            thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip($"Symbolic links cannot be created here, so these cases cannot be built: {thrown.Message}");
         }
     }
 

@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Tests;
 
 namespace Cap.Std.Tests;
 
@@ -187,15 +188,5 @@ public sealed class FailureKindTests : IDisposable
         Assert.Equal(CapErrorKind.Escaped, CapIOException.KindOf(new SandboxEscapeException()));
     }
 
-    private static void RequireSymlinks(Action create)
-    {
-        try
-        {
-            create();
-        }
-        catch (Exception thrown) when (thrown is IOException or UnauthorizedAccessException)
-        {
-            Assert.Skip($"Symbolic links cannot be created here: {thrown.Message}");
-        }
-    }
+    private static void RequireSymlinks(Action create) => HostLinks.Require(HostFeature.Symlinks, create);
 }

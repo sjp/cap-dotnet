@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Tests;
 
 namespace Cap.Escape.Tests;
 
@@ -271,12 +272,6 @@ public sealed class TopologyTests
         return false;
     }
 
-    private static void RequireFeatures(HostFeature needed)
-    {
-        HostFeature missing = needed & ~HostFeatures.Current;
-        if (missing != HostFeature.None)
-        {
-            Assert.Skip($"This host or volume does not have {missing}.");
-        }
-    }
+    private static void RequireFeatures(HostFeature needed) =>
+        HostFeatures.Require(needed, "The topology cannot be built without it.");
 }

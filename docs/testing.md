@@ -258,3 +258,27 @@ that job's summary.
 The floors are a ratchet. Raise them, to a point or two below the merged figure, as coverage
 rises. Lower them only in a change that says why, since `Cap.Primitives` holds the path parser
 and every resolution backend, and its tests are the main defence against an escape.
+
+## Host features the suite expects
+
+This section is also for contributors to the library itself.
+
+A test that needs something the host may lack — a symbolic link, a hard link, a Windows
+junction, the Linux `/proc` filesystem, or a volume that stores names Windows reserves — finds
+out by trying, and stands aside where the host refuses. That is right on a machine that cannot
+provide it, and wrong on one that was set up to: creating a symbolic link on Windows needs an
+elevated token or developer mode, so a runner that lost either would pass with most of the
+escape corpus skipped.
+
+`CAPDOTNET_EXPECT_HOST_FEATURES` names, as a comma-separated list, the features a run was set
+up with: any of `Symlinks`, `HardLinks`, `Junctions`, `ProcessFilesystem`, `CaseInsensitive`,
+`NormalizationInsensitive` and `PosixNames`. Where a test needs a feature the list names and the
+host lacks, it fails naming the feature instead of skipping, and
+`HostFeaturesTests.The_features_this_run_was_set_up_with_are_present` in the escape corpus fails
+once for the whole run. A name that is not a feature fails the run. Unset, every such test skips
+as before, which is what a local run on a machine without those features wants.
+
+Continuous integration sets it on every leg for what its runner provides, and on each leg of
+the `filesystems` job for what that volume holds; only the vfat leg, which exists to show that a
+volume without links refuses to make one, leaves the links out. It is read by the tests in
+`tests/Shared/HostFeatures.cs`, which every test assembly compiles.

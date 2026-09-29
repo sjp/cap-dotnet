@@ -1,3 +1,4 @@
+using Cap.Tests;
 using System.Globalization;
 using System.Security.Cryptography;
 
@@ -238,6 +239,13 @@ internal static class HostFeatures
 
     /// <summary>The features of the host, and of the volume arenas are built on.</summary>
     public static HostFeature Current => Probed.Value;
+
+    /// <summary>
+    /// Stands a case aside where the host lacks what it needs, or fails it where this run was
+    /// set up to have that (see <see cref="ExpectedHostFeatures"/>).
+    /// </summary>
+    public static void Require(HostFeature needed, string reason) =>
+        ExpectedHostFeatures.Require(needed, Current, reason);
 
     private static HostFeature Probe()
     {

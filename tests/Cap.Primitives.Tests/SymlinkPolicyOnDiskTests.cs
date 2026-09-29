@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Tests;
 
 namespace Cap.Primitives.Tests;
 
@@ -62,13 +63,7 @@ public sealed class SymlinkPolicyOnDiskTests : IDisposable
     {
         SymlinkPolicyCase entry = SymlinkPolicyCorpus.Named(caseName);
 
-        if (!CanCreateSymbolicLinks())
-        {
-            Assert.Skip(
-                "Symbolic links cannot be created here, so the tree these cases attack " +
-                "cannot be built. On Windows that needs either developer mode or an " +
-                "elevated token.");
-        }
+        RequireSymbolicLinks();
 
         OnDiskSymlinkTree tree = new(_root);
         if ((entry.Requires & ~tree.Features) != SymlinkTreeFeature.None)
@@ -93,38 +88,16 @@ public sealed class SymlinkPolicyOnDiskTests : IDisposable
     }
 
     /// <summary>
-    /// Whether this host lets the test process create a symbolic link, established by
-    /// creating one.
+    /// Skips where this host will not let the test process create a symbolic link, or fails
+    /// where this run was set up to have them.
     /// </summary>
-    /// <remarks>
-    /// Asked of the filesystem rather than derived from the platform. Windows needs either
-    /// developer mode or an elevated token, and which of those a machine has is not something
-    /// a platform check can answer — a check that assumed the answer would keep skipping the
-    /// heart of the corpus on a machine perfectly able to run it.
-    /// </remarks>
-    private bool CanCreateSymbolicLinks()
-    {
-        string probe = Path.Join(_root, "link-probe");
-
-        try
+    private void RequireSymbolicLinks() =>
+        HostLinks.Require(HostFeature.Symlinks, () =>
         {
+            string probe = Path.Join(_root, "link-probe");
             File.CreateSymbolicLink(probe, "target");
             File.Delete(probe);
-            return true;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-        catch (PlatformNotSupportedException)
-        {
-            return false;
-        }
-    }
+        });
 
     /// <summary>The corpus laid out on a real filesystem.</summary>
     /// <remarks>

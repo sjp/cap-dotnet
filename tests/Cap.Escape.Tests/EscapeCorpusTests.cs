@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Tests;
 
 namespace Cap.Escape.Tests;
 
@@ -63,17 +64,13 @@ public sealed class EscapeCorpusTests
         EscapeCase entry = EscapeCorpus.Named(caseName);
         HostFeature features = HostFeatures.Current;
 
-        HostFeature missing = entry.Requires & ~features;
-        if (missing != HostFeature.None)
-        {
-            Assert.Skip($"'{entry.Name}' needs {missing}, which this host or volume does not have.");
-        }
+        HostFeatures.Require(entry.Requires, $"'{entry.Name}' needs it.");
 
-        if (operation == Operation.CreateSymlinkTo && (features & HostFeature.Symlinks) == 0)
+        if (operation == Operation.CreateSymlinkTo)
         {
             // The link cannot be made, so what following it would do cannot be observed. That
             // a volume without links refuses to make one is covered by creating one at the path.
-            Assert.Skip("This volume cannot hold symbolic links, so there is no link to follow.");
+            HostFeatures.Require(HostFeature.Symlinks, "There is no link to follow.");
         }
 
         using Arena arena = new();

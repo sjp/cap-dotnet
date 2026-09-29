@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Tests;
 
 namespace Cap.Escape.Tests;
 
@@ -99,10 +100,7 @@ public sealed class OpenAnyTests
     [Defends("S17")]
     public void A_final_link_is_followed_or_refused_as_the_dedicated_opens_do(string backend, SymlinkPolicy policy)
     {
-        if ((HostFeatures.Current & HostFeature.Symlinks) == 0)
-        {
-            Assert.Skip("This host or volume cannot hold symbolic links.");
-        }
+        HostFeatures.Require(HostFeature.Symlinks, "The final link cannot be planted.");
 
         using Arena arena = new();
         arena.Plant(

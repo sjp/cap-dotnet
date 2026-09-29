@@ -139,7 +139,7 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void An_entry_for_a_link_identifies_the_link()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostFile.WriteAllText(Host("plain"), "x");
         HostFile.CreateSymbolicLink(Host("to-plain"), "plain");
@@ -182,7 +182,7 @@ public sealed partial class DirEnumerationTests : IDisposable
     [Fact]
     public void A_link_to_a_directory_is_reported_as_a_link()
     {
-        RequireSymbolicLinks();
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
 
         HostDirectory.CreateDirectory(Host("folder"));
         HostDirectory.CreateSymbolicLink(Host("to-folder"), "folder");
@@ -603,22 +603,6 @@ public sealed partial class DirEnumerationTests : IDisposable
         catch (IOException thrown)
         {
             Assert.Skip(thrown.Message);
-        }
-    }
-
-    private void RequireSymbolicLinks()
-    {
-        string probe = Host("link-probe");
-
-        try
-        {
-            HostFile.CreateSymbolicLink(probe, "target");
-            HostFile.Delete(probe);
-        }
-        catch (Exception thrown) when (
-            thrown is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip($"Symbolic links cannot be created here, so these cases cannot be built: {thrown.Message}");
         }
     }
 

@@ -74,6 +74,22 @@ jobs:
         run: dotnet build CapDotnet.slnx --configuration Release
 
       # ---------------------------------------------------------------------------------
+      # A test that needs a symbolic link, a hard link, a junction or /proc stands aside on a
+      # host that cannot make one. These runners can, so the suite is told to expect them, and
+      # a runner that lost one -- the elevated token Windows needs for links, say, or a masked
+      # /proc -- fails the leg instead of passing with the heart of the corpus skipped.
+      # ---------------------------------------------------------------------------------
+      - name: Expect the host features this runner provides
+        shell: pwsh
+        run: |
+          $features = @{
+            Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames'
+            Windows = 'Symlinks,HardLinks,Junctions'
+            macOS   = 'Symlinks,HardLinks,PosixNames'
+          }['${{ runner.os }}']
+          "CAPDOTNET_EXPECT_HOST_FEATURES=$features" >> $env:GITHUB_ENV
+
+      # ---------------------------------------------------------------------------------
       # The in-memory filesystem in Cap.Std.Testing is only worth having if it behaves like the
       # disk, and a second set of tests written for it would encode the same assumptions twice.
       # So the suites that pin down the disk's behaviour run again here, unchanged, with it
@@ -93,6 +109,8 @@ jobs:
           foreach ($leg in '${{ join(matrix.in_memory, ' ') }}' -split ' ') {
             # Read by tests/InMemory before the first test.
             $env:CAPDOTNET_TEST_BACKEND = $leg
+            # The in-memory filesystem has links and hard links, and nothing the host alone has.
+            $env:CAPDOTNET_EXPECT_HOST_FEATURES = 'Symlinks,HardLinks'
             foreach ($project in 'Cap.Std.Tests', 'Cap.Fs.Ext.Tests', 'Cap.Escape.Tests') {
               "::group::$project ($leg)"
               dotnet test "tests/$project/$project.csproj" --configuration Release --no-build
@@ -254,6 +272,12 @@ jobs:
           # it can hold -- links, hard links, the characters Windows reserves, case and
           # normalisation folding -- and adapts each case rather than assuming ext4.
           CAPDOTNET_TEST_ROOT: /mnt/captest
+          # What each volume must turn out to hold, so that a case needing it fails rather than
+          # stands aside where it is missing. vfat holds no links of either kind, and is here
+          # to show that making one is refused.
+          CAPDOTNET_EXPECT_HOST_FEATURES: >-
+            ${{ matrix.fs == 'vfat-case-insensitive' && 'CaseInsensitive'
+            || 'Symlinks,HardLinks,ProcessFilesystem,PosixNames' }}
         run: >
           dotnet test tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj
           --configuration Release
@@ -294,6 +318,16 @@ jobs:
           path: ~/.nuget/packages
           key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj') }}
           restore-keys: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
+
+      # As in build-test.
+      - name: Expect the host features this runner provides
+        run: |
+          $features = @{
+            Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames'
+            Windows = 'Symlinks,HardLinks,Junctions'
+            macOS   = 'Symlinks,HardLinks,PosixNames'
+          }['${{ runner.os }}']
+          "CAPDOTNET_EXPECT_HOST_FEATURES=$features" >> $env:GITHUB_ENV
 
       - name: Enable 8.3 short-name generation on the volume the tests run on
         if: runner.os == 'Windows'

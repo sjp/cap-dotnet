@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text;
 using Cap.Std;
 using Cap.Std.Testing;
+using Cap.Tests;
 
 namespace Cap.IO.Abstractions.Tests;
 
@@ -117,7 +118,7 @@ public abstract class EscapeTests : IDisposable
         IFileSystem fs = _fixture.FileSystem;
         if (spelling == "through-link")
         {
-            Assert.SkipUnless(_fixture.SupportsLinks, "This process cannot create symbolic links here.");
+            TestLinks.Require(_fixture.SupportsLinks);
         }
 
         string outside = spelling switch
@@ -475,15 +476,9 @@ public sealed class DiskEscapeFixture : IEscapeFixture
         Directory.CreateDirectory(Path.Combine(HostOutside, "sub"));
         File.WriteAllText(Path.Combine(HostOutside, "secret.txt"), "secret");
 
-        try
-        {
-            Directory.CreateSymbolicLink(Path.Combine(inner, "escape"), Path.Combine("..", "outside"));
-            SupportsLinks = true;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            SupportsLinks = false;
-        }
+        SupportsLinks = HostLinks.TryCreate(
+            () => Directory.CreateSymbolicLink(Path.Combine(inner, "escape"), Path.Combine("..", "outside")),
+            out _);
 
         _inner = _tree.Directory.OpenDir("inner");
         FileSystem = new DirFileSystem(_inner);

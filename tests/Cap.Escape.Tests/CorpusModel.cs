@@ -1,3 +1,5 @@
+using Cap.Tests;
+
 namespace Cap.Escape.Tests;
 
 /// <summary>
@@ -177,40 +179,6 @@ internal enum LinkRole
     /// the stricter policy every operation is refused.
     /// </summary>
     Prefix,
-}
-
-/// <summary>
-/// Properties of the host and its filesystem that a case may need, or whose presence changes
-/// what a case should see.
-/// </summary>
-[Flags]
-internal enum HostFeature
-{
-    None = 0,
-
-    /// <summary>Symbolic links can be created here.</summary>
-    Symlinks = 1 << 0,
-
-    /// <summary>Hard links can be created here.</summary>
-    HardLinks = 1 << 1,
-
-    /// <summary>Windows junctions can be created here.</summary>
-    Junctions = 1 << 2,
-
-    /// <summary>The Linux process filesystem, and its synthetic links, are mounted.</summary>
-    ProcessFilesystem = 1 << 3,
-
-    /// <summary>Names differing only in case reach the same entry.</summary>
-    CaseInsensitive = 1 << 4,
-
-    /// <summary>The composed and decomposed spellings of a name reach the same entry.</summary>
-    NormalizationInsensitive = 1 << 5,
-
-    /// <summary>
-    /// The volume stores a name containing the characters Windows reserves, as POSIX allows.
-    /// Absent on a FAT volume, which refuses them even under Linux.
-    /// </summary>
-    PosixNames = 1 << 6,
 }
 
 /// <summary>One step of arranging the tree a case attacks.</summary>
