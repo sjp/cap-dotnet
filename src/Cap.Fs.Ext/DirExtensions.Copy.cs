@@ -188,6 +188,10 @@ public static partial class DirExtensions
     /// </remarks>
     private sealed class Copier
     {
+        /// <summary>What a copied directory is given while it is filled. See <see cref="Guard"/>.</summary>
+        private static readonly CapPermissions OwnerOnly = CapPermissions.FromUnixMode(
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
         private readonly CopyOptions _options;
         private readonly CapFileId? _destinationRoot;
         private readonly List<CopyLevel> _levels = [];
@@ -218,7 +222,7 @@ public static partial class DirExtensions
         {
             try
             {
-                Push(source, Destination, ownsSource: false, ownsDestination: false, times: null);
+                Push(source, Destination, ownsSource: false, ownsDestination: false, name: null, metadata: null);
 
                 while (_levels.Count > 0)
                 {
@@ -228,7 +232,7 @@ public static partial class DirExtensions
                         _levels.RemoveAt(_levels.Count - 1);
                         try
                         {
-                            Finish(level.Destination, level.Times);
+                            Finish(level.Destination, level.SourceMetadata, level.Name);
                         }
                         finally
                         {
@@ -320,7 +324,7 @@ public static partial class DirExtensions
                     ? level.Destination.OpenOrCreateDir(entry.Name)
                     : level.Destination.CreateDir(entry.Name);
 
-                Apply(target, metadata, entry.Name);
+                Guard(target, metadata, entry.Name);
                 _directories++;
 
                 if (atLimit)
@@ -328,11 +332,11 @@ public static partial class DirExtensions
                     // Not entered: it was empty when looked at, and reading it again from a
                     // level past the limit would copy whatever arrived since, at a depth the
                     // caller did not allow.
-                    Finish(target, metadata);
+                    Finish(target, metadata, entry.Name);
                     return;
                 }
 
-                Push(source, target, ownsSource: true, ownsDestination: true, times: metadata);
+                Push(source, target, ownsSource: true, ownsDestination: true, entry.Name, metadata);
                 kept = true;
             }
             finally
@@ -538,44 +542,77 @@ public static partial class DirExtensions
             _symlinks++;
         }
 
-        /// <summary>Carries the source's permissions onto a copied directory, if asked.</summary>
+        /// <summary>
+        /// Closes a copied directory to everyone but its owner while it is filled, if
+        /// permissions are to be carried across.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// The source's own permissions are not given to the directory until everything inside
+        /// it has been copied: a source directory its owner cannot write to would otherwise
+        /// give a copy the copy itself could not write into. Until then a directory whose
+        /// source records Unix mode bits is left readable, writable and searchable by its owner
+        /// alone, as <c>cp -p</c> leaves one, so a private source directory is never open to
+        /// anyone else while its contents are arriving.
+        /// </para>
+        /// <para>
+        /// Attribute flags are left alone until the end. None of them stops entries being
+        /// created in a directory, and none of them keeps anyone out.
+        /// </para>
+        /// </remarks>
+        private void Guard(IDir target, in CapMetadata metadata, string name)
+        {
+            if (_options.PreservePermissions && metadata.Permissions.TryGetUnixMode(out _))
+            {
+                Apply(target, OwnerOnly, name);
+            }
+        }
+
+        /// <summary>
+        /// Gives a copied directory the source's permissions and times, if asked, once
+        /// everything inside it has been copied.
+        /// </summary>
+        /// <remarks>
+        /// Left until the directory is finished because every entry created in it moves its
+        /// last-write time on, and because the source's permissions may not let the copy
+        /// create those entries. Permissions go first, so that the times are the last thing
+        /// written. The directory the copy writes into has neither to carry, since the copy
+        /// does not reproduce it.
+        /// </remarks>
+        private void Finish(IDir destination, CapMetadata? metadata, string? name)
+        {
+            if (metadata is not { } source || name is null)
+            {
+                return;
+            }
+
+            if (_options.PreservePermissions)
+            {
+                Apply(destination, source.Permissions, name);
+            }
+
+            if (_options.PreserveTimes)
+            {
+                destination.SetTimes(
+                    CapFileTime.At(source.LastAccessTime), CapFileTime.At(source.LastWriteTime));
+            }
+        }
+
+        /// <summary>Writes permissions onto a copied directory.</summary>
         /// <remarks>
         /// A <see cref="Dir"/> is asked for the platform's own answer, so that a refusal names
         /// the entry being copied. Any other handle is asked through the interface, and a
         /// refusal is whatever that implementation throws.
         /// </remarks>
-        private void Apply(IDir target, in CapMetadata metadata, string name)
+        private static void Apply(IDir target, in CapPermissions permissions, string name)
         {
-            if (!_options.PreservePermissions)
-            {
-                return;
-            }
-
             if (target is Dir directory)
             {
-                Demand(directory.SetPermissionsCore(metadata.Permissions), name);
+                Demand(directory.SetPermissionsCore(permissions), name);
             }
             else
             {
-                target.SetPermissions(metadata.Permissions);
-            }
-        }
-
-        /// <summary>
-        /// Gives a copied directory the source's times, if asked, once everything inside it
-        /// has been copied.
-        /// </summary>
-        /// <remarks>
-        /// Left until the directory is finished because every entry created in it moves its
-        /// last-write time on. The directory the copy writes into has no times to carry, since
-        /// the copy does not reproduce it.
-        /// </remarks>
-        private void Finish(IDir destination, CapMetadata? times)
-        {
-            if (_options.PreserveTimes && times is { } source)
-            {
-                destination.SetTimes(
-                    CapFileTime.At(source.LastAccessTime), CapFileTime.At(source.LastWriteTime));
+                target.SetPermissions(permissions);
             }
         }
 
@@ -608,8 +645,9 @@ public static partial class DirExtensions
             }
         }
 
-        private void Push(IDir source, IDir destination, bool ownsSource, bool ownsDestination, CapMetadata? times) =>
-            _levels.Add(new CopyLevel(source, destination, ownsSource, ownsDestination, times));
+        private void Push(
+            IDir source, IDir destination, bool ownsSource, bool ownsDestination, string? name, CapMetadata? metadata) =>
+            _levels.Add(new CopyLevel(source, destination, ownsSource, ownsDestination, name, metadata));
     }
 
     /// <summary>One pair of open directories the copy is working between.</summary>
@@ -618,11 +656,13 @@ public static partial class DirExtensions
         private readonly bool _ownsSource;
         private readonly bool _ownsDestination;
 
-        public CopyLevel(IDir source, IDir destination, bool ownsSource, bool ownsDestination, CapMetadata? times)
+        public CopyLevel(
+            IDir source, IDir destination, bool ownsSource, bool ownsDestination, string? name, CapMetadata? sourceMetadata)
         {
             Source = source;
             Destination = destination;
-            Times = times;
+            Name = name;
+            SourceMetadata = sourceMetadata;
             _ownsSource = ownsSource;
             _ownsDestination = ownsDestination;
             Reader = EntryReader.Open(source);
@@ -635,10 +675,16 @@ public static partial class DirExtensions
         public IDir Destination { get; }
 
         /// <summary>
-        /// The source directory's description, whose times the destination is given when it
-        /// is finished. Null for the directory the copy writes into.
+        /// The directory's name in its parent, for reporting a failure to finish it. Null for
+        /// the directory the copy writes into.
         /// </summary>
-        public CapMetadata? Times { get; }
+        public string? Name { get; }
+
+        /// <summary>
+        /// The source directory's description, whose permissions and times the destination is
+        /// given when it is finished. Null for the directory the copy writes into.
+        /// </summary>
+        public CapMetadata? SourceMetadata { get; }
 
         /// <summary>The reading in progress.</summary>
         public EntryReader Reader { get; }

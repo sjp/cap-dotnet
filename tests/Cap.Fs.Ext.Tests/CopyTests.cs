@@ -338,6 +338,48 @@ public sealed class CopyTests : IDisposable
             HostFile.GetUnixFileMode(Path.Combine(_tree.HostPath, "destination", "private.txt")));
     }
 
+    /// <summary>
+    /// A directory its owner cannot write to is copied with its permissions, which are given
+    /// to the copy only after its contents are in.
+    /// </summary>
+    [Fact]
+    public void A_read_only_directory_is_copied_with_its_permissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Permissions here are attribute flags, and none of them stops a directory being filled.");
+            return;
+        }
+
+        const UnixFileMode Locked =
+            UnixFileMode.UserRead | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+        const UnixFileMode Open = Locked | UnixFileMode.UserWrite;
+
+        Make("source", "locked", "inner.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        string sourceLocked = Path.Combine(_tree.HostPath, "source", "locked");
+        string destinationLocked = Path.Combine(_tree.HostPath, "destination", "locked");
+        HostFile.SetUnixFileMode(sourceLocked, Locked);
+        try
+        {
+            Copy(new CopyOptions { PreservePermissions = true });
+
+            Assert.Equal(Locked, HostFile.GetUnixFileMode(destinationLocked));
+            Assert.Equal("contents", HostFile.ReadAllText(Path.Combine(destinationLocked, "inner.txt")));
+        }
+        finally
+        {
+            // Opened again so the scratch tree can be removed.
+            HostFile.SetUnixFileMode(sourceLocked, Open);
+            if (HostDirectory.Exists(destinationLocked))
+            {
+                HostFile.SetUnixFileMode(destinationLocked, Open);
+            }
+        }
+    }
+
     /// <summary>Without being asked, a copy gets whatever a new file would get.</summary>
     [Fact]
     public void Permissions_are_not_carried_across_unless_asked()

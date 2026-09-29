@@ -97,6 +97,13 @@ public sealed class CopyOptions
     /// the other's.
     /// </para>
     /// <para>
+    /// A directory is given its permissions once everything inside it has been copied, so a
+    /// source directory its owner cannot write to can still be copied. Until then a directory
+    /// whose source records mode bits is left open to its owner alone, as <c>cp -p</c> leaves
+    /// one, and a copy that fails part way leaves the directories it had not finished that
+    /// way.
+    /// </para>
+    /// <para>
     /// A symbolic link's own permissions are never carried across, on any platform. Most
     /// systems do not record any, and the ones that do offer no way to set them without
     /// following the link — which is the one thing a copy of a link must not do.

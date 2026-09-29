@@ -233,9 +233,11 @@ the source had and the copy's caller did not ask for.
   directory that a link in the destination chose.
 - `PreservePermissions` (off): each copied file and directory is given the source's
   permissions as its platform records them — mode bits on Unix, attribute flags on Windows.
-  A value recorded by one platform is never translated into the other's. A link's own
-  permissions are never carried across on any platform, because setting them would mean
-  following the link.
+  A value recorded by one platform is never translated into the other's. A directory is
+  given its permissions once its contents are copied, so a directory its owner cannot write
+  to can still be copied; until then one whose source records mode bits is open to its owner
+  alone, as `cp -p` leaves it. A link's own permissions are never carried across on any
+  platform, because setting them would mean following the link.
 - `PreserveTimes` (off): each copied file, directory and recreated link is given the source's
   last-access and last-write times. A link's own times are set, not its target's. A
   directory's are set after everything inside it has been copied, since adding entries moves

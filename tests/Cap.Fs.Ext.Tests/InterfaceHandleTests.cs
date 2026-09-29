@@ -316,6 +316,37 @@ public sealed class InterfaceHandleTests
         Assert.Contains(destination.Log, call => call.Contains(": SetPermissions(", StringComparison.Ordinal) && !call.StartsWith("dest/inner", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A copied directory is closed to everyone but its owner while it is filled, and given
+    /// the source's permissions only once its contents are in, so that a source directory its
+    /// owner cannot write to does not make a copy that cannot be filled.
+    /// </summary>
+    [Fact]
+    public void A_copied_directory_is_owner_only_while_filled_and_given_the_source_permissions_last()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Unix });
+        const UnixFileMode Locked =
+            UnixFileMode.UserRead | UnixFileMode.UserExecute |
+            UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
+            UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+        fs.AddFile("src/inner/data.txt", "x");
+        fs.SetUnixMode("src/inner", Locked);
+        fs.AddDirectory("dst");
+        using Dir source = fs.OpenRoot("src", SymlinkPolicy.FollowWithinSandbox);
+        using RecordingDir destination = new(fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox), [], "dest");
+
+        _ = source.CopyTo(destination, new CopyOptions { PreservePermissions = true });
+
+        List<string> log = destination.Log;
+        int guarded = log.IndexOf($"dest/inner: SetPermissions({UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute})");
+        int created = log.FindIndex(call => call.StartsWith("dest/inner: CreateNewFile(data.txt", StringComparison.Ordinal));
+        int finished = log.LastIndexOf($"dest/inner: SetPermissions({Locked})");
+        Assert.True(guarded >= 0 && guarded < created && created < finished, string.Join(Environment.NewLine, log));
+        Assert.True(destination.GetMetadata("inner").Permissions.TryGetUnixMode(out UnixFileMode copied));
+        Assert.Equal(Locked, copied);
+        Assert.Equal("x", fs.ReadAllText("dst/inner/data.txt"));
+    }
+
     [Fact]
     public void A_copy_from_a_wrapper_into_a_handle_preserves_permissions()
     {
