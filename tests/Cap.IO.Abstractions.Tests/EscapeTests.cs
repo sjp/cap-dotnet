@@ -150,6 +150,7 @@ public abstract class EscapeTests : IDisposable
 
     [Theory]
     [MemberData(nameof(Cases))]
+    [Trait(Difference.Name, Difference.Reach)]
     public void Every_entry_point_stays_inside(string key, string spelling)
     {
         EntryPoint entry = EntryPoints().Single(entry => entry.Key == key);

@@ -24,6 +24,11 @@
     <PackageReference Include="TestableIO.System.IO.Abstractions.TestingHelpers" />
   </ItemGroup>
 
+  <!-- The package documentation, whose table of differences the difference tests are checked against. -->
+  <ItemGroup>
+    <EmbeddedResource Include="../../docs/io-abstractions.md" LogicalName="io-abstractions.md" />
+  </ItemGroup>
+
   <!--
     The Cap.IO.Abstractions sources, carried into this assembly so that the path-construction
     audit can read them.

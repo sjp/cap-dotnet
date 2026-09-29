@@ -118,7 +118,8 @@ see.
 
 ## Differences from `System.IO`
 
-Each of these is deliberate and is covered by the package's tests.
+Each of these is deliberate. Each row is proved by a test that names the row, and a further
+test checks that every row has one and that no such test names a row missing from the table.
 
 | Area | `System.IO` | `DirFileSystem` |
 |---|---|---|
@@ -128,7 +129,7 @@ Each of these is deliberate and is covered by the package's tests.
 | `ResolveLinkTarget` on a link with a rooted target | returns the target | `SandboxEscapeException` |
 | `//x` | the same as `/x` on Unix | refused as absolute: only one root is removed |
 | `Path.Join` with a separator on both sides of a seam | writes both | writes one, so that `Join(root, "/x")` does not spell the refused `//x` |
-| Full names | host paths | virtual paths, folded lexically. See above |
+| Full names | host paths | virtual paths, folded lexically. See above. `Directory.GetParent`, `Directory.GetDirectoryRoot` and the name properties of an info work on the folded name and reach nothing, so a path that climbs above the root answers with a name beneath it |
 | Current directory | process-wide | per `DirFileSystem` instance |
 | `Directory.GetLogicalDrives` | the host's drives | the virtual root |
 | `Path.GetTempPath` | the host's temporary directory | `/.tmp/`, created beneath the root when first asked for. What goes there is part of the tree, visible to whatever else can see it, and is not cleared away |
@@ -148,7 +149,9 @@ Each of these is deliberate and is covered by the package's tests.
 | `DriveInfo`, `FileSystemWatcher`, `FileVersionInfo`, access control lists, `Encrypt`, `Decrypt` | supported | `NotSupportedException`, saying why |
 
 The members that throw `NotSupportedException` do so for every argument, and the exception
-says what to use instead.
+says what to use instead. There are two exceptions: the `Attributes` and `IsReadOnly` setters
+accept the value already there, and `Wrap` on the `FileInfo` and `DirectoryInfo` factories
+returns null for null, as `System.IO.Abstractions`' own factories do.
 
 ## Differences from `MockFileSystem`
 

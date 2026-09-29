@@ -17,6 +17,12 @@ public interface IFileSystemFixture : IDisposable
 
     /// <summary>Whether symbolic links can be made here; creating one can need a privilege on Windows.</summary>
     bool SupportsLinks { get; }
+
+    /// <summary>
+    /// Makes a symbolic link at <paramref name="path"/>, beneath the root, whose target is a
+    /// rooted path: a link the file system under test refuses to make itself.
+    /// </summary>
+    void AddRootedLink(string path);
 }
 
 /// <summary>A <see cref="DirFileSystem"/> over a scratch directory on disk.</summary>
@@ -36,17 +42,21 @@ public sealed class DiskFixture : IFileSystemFixture
 
     public bool SupportsLinks { get; }
 
+    public void AddRootedLink(string path) =>
+        File.CreateSymbolicLink(Path.Combine(_tree.HostPath, path), Path.Combine(_tree.HostPath, "a.txt"));
+
     public void Dispose() => _tree.Dispose();
 }
 
 /// <summary>A <see cref="DirFileSystem"/> over the in-memory filesystem.</summary>
 public sealed class MemoryFixture : IFileSystemFixture
 {
+    private readonly InMemoryFileSystem _memory = new();
     private readonly Dir _root;
 
     public MemoryFixture()
     {
-        _root = new InMemoryFileSystem().OpenRoot();
+        _root = _memory.OpenRoot();
         FileSystem = new DirFileSystem(_root);
     }
 
@@ -55,6 +65,8 @@ public sealed class MemoryFixture : IFileSystemFixture
     public bool Confined => true;
 
     public bool SupportsLinks => true;
+
+    public void AddRootedLink(string path) => _memory.AddSymbolicLink(path, "/a.txt");
 
     public void Dispose() => _root.Dispose();
 }
@@ -67,6 +79,8 @@ public sealed class MockFixture : IFileSystemFixture
     public bool Confined => false;
 
     public bool SupportsLinks => true;
+
+    public void AddRootedLink(string path) => FileSystem.File.CreateSymbolicLink(path, FileSystem.Path.GetFullPath("a.txt"));
 
     public void Dispose()
     {

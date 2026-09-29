@@ -92,6 +92,7 @@ public sealed class VirtualPathTests
     [InlineData("/a/b/", "/a/b/")]
     [InlineData("/", "/")]
     [InlineData("x/../y", "/cwd/y")]
+    [Trait(Difference.Name, Difference.FullNames)]
     public void Full_names_are_folded_for_display(string path, string full)
     {
         Assert.Equal(full, Posix.GetFullPath(path, "/cwd"));
@@ -167,6 +168,7 @@ public sealed class VirtualPathTests
     }
 
     [Fact]
+    [Trait(Difference.Name, Difference.JoinSeam)]
     public void Joining_writes_one_separator_where_both_sides_carry_one()
     {
         Assert.Equal("/b", Posix.JoinAll(["/", "/b"]));
