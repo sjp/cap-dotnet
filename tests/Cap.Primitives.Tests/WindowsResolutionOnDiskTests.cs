@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Windows;
+using Cap.Tests;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
@@ -402,6 +403,88 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         AssertFails(CapErrorCategory.Escaped, root, "escape");
         AssertFails(CapErrorCategory.Escaped, root, "rooted");
+    }
+
+    /// <summary>
+    /// Symbolic links this library writes are followed by the system itself, to the target
+    /// they were written with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other way round from the case above, and the half the library's own tests cannot
+    /// reach: the writer and the reader were built together, so a wrong offset, a missing
+    /// terminator or a wrong flag is one they agree about, and every round trip through both
+    /// passes. The links are read here by the framework and the filesystem instead, which is
+    /// what Explorer, the shell and every other tool on the machine will read them with.
+    /// </para>
+    /// <para>
+    /// The targets cover both kinds of link and both ways a target is stored: relative from the
+    /// directory holding the link, including one that climbs out of it, and rooted, which is
+    /// stored behind the object manager's prefix. Where a link lands relative to the sandbox is
+    /// of no interest to the system, so nothing here is refused.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Links_written_here_are_followed_by_the_platform()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        const string Contents = "read through a link";
+        BuildOutsideTarget();
+        Directory.CreateDirectory(Path.Join(Sandbox, "inside", "deeper"));
+        File.WriteAllText(Path.Join(Sandbox, "inside", "deeper", "marker"), "x");
+        File.WriteAllText(Path.Join(Sandbox, "inside", "file.txt"), Contents);
+        string rootedTarget = Path.Join(_root, "outside");
+
+        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.ReadWrite);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using SafeDirHandle root = opened.Value!;
+
+        CapError first = PlatformOps.Host.CreateChildSymbolicLink(root, "flink", @"inside\file.txt", false);
+        ExpectedHostFeatures.Require(
+            HostFeature.Symlinks,
+            first.Category != CapErrorCategory.PermissionDenied,
+            "The links this library writes cannot be checked against the system's reader without one.");
+        Assert.True(first.IsSuccess, first.FailureDescription);
+
+        CreateLink(root, "dlink", @"inside\deeper", targetIsDirectory: true);
+        CreateLink(root, "sibling", @"..\outside", targetIsDirectory: true);
+        CreateLink(root, "rooted", rootedTarget, targetIsDirectory: true);
+        CreateLink(root, "rootedfile", Path.Join(rootedTarget, "secret"), targetIsDirectory: false);
+
+        string fileLink = Path.Join(Sandbox, "flink");
+        Assert.Equal(Contents, File.ReadAllText(fileLink));
+        FileInfo fileInfo = new(fileLink);
+        Assert.Equal(FileAttributes.ReparsePoint, fileInfo.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory));
+        Assert.Equal(@"inside\file.txt", fileInfo.LinkTarget);
+
+        AssertDirectoryLink("dlink", @"inside\deeper", "marker");
+        AssertDirectoryLink("sibling", @"..\outside", "secret");
+        AssertDirectoryLink("rooted", rootedTarget, "secret");
+
+        string rootedFileLink = Path.Join(Sandbox, "rootedfile");
+        Assert.Equal("x", File.ReadAllText(rootedFileLink));
+        Assert.Equal(Path.Join(rootedTarget, "secret"), new FileInfo(rootedFileLink).LinkTarget);
+
+        static void CreateLink(SafeDirHandle root, string name, string target, bool targetIsDirectory)
+        {
+            CapError error = PlatformOps.Host.CreateChildSymbolicLink(root, name, target, targetIsDirectory);
+            Assert.True(error.IsSuccess, $"'{name}' -> '{target}': {error.FailureDescription}");
+        }
+
+        void AssertDirectoryLink(string name, string target, string entry)
+        {
+            string link = Path.Join(Sandbox, name);
+            Assert.Contains(entry, Directory.EnumerateFiles(link).Select(Path.GetFileName));
+            DirectoryInfo info = new(link);
+            Assert.Equal(
+                FileAttributes.ReparsePoint | FileAttributes.Directory,
+                info.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory));
+            Assert.Equal(target, info.LinkTarget);
+        }
     }
 
     /// <summary>
