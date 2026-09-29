@@ -256,4 +256,198 @@ public sealed class WindowsRulesTests
 
         root.SetTimes("file", lastWrite: CapFileTime.At(new DateTimeOffset(1601, 1, 1, 0, 0, 0, TimeSpan.Zero)));
     }
+
+    /// <summary>A file held with <see cref="FileShare.None"/> refuses every second open, as on Windows.</summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_file_held_sharing_nothing_refuses_any_second_open(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("open.txt", "x");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile held = root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.None);
+
+        Assert.Throws<UnauthorizedAccessException>(() => root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.ReadWrite));
+        Assert.Throws<UnauthorizedAccessException>(() => root.OpenFile("open.txt", FileMode.Open, FileAccess.Write, FileShare.ReadWrite));
+        Assert.Throws<UnauthorizedAccessException>(() => root.ReadAllBytes("open.txt"));
+    }
+
+    /// <summary>
+    /// A file held with the default <see cref="FileShare.Read"/> admits another reader and
+    /// refuses a writer, and a truncating open it refuses leaves the contents alone.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_file_held_sharing_reading_admits_a_reader_and_refuses_a_writer(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("open.txt", "kept");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile held = root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.Read);
+
+        root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.ReadWrite).Dispose();
+        Assert.Equal("kept", root.ReadAllText("open.txt"));
+        Assert.Throws<UnauthorizedAccessException>(() => root.OpenFile("open.txt", FileMode.Open, FileAccess.Write, FileShare.ReadWrite));
+        Assert.Throws<UnauthorizedAccessException>(() => root.WriteAllText("open.txt", "replaced"));
+        Assert.Equal("kept", fs.ReadAllText("open.txt"));
+    }
+
+    /// <summary>
+    /// A second open must share what the first holds as well as ask only for what the first
+    /// shares: a reader that will not share writing is refused while a writer holds the file.
+    /// </summary>
+    [Fact]
+    public void A_second_open_that_does_not_share_what_the_first_holds_is_refused()
+    {
+        InMemoryFileSystem fs = Windows();
+        fs.AddFile("open.txt", "x");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile writer = root.OpenFile("open.txt", FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+
+        Assert.Throws<UnauthorizedAccessException>(() => root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.Read));
+        root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.ReadWrite).Dispose();
+    }
+
+    /// <summary>
+    /// A file held open without <see cref="FileShare.Delete"/> cannot be removed, renamed, or
+    /// replaced by a rename, and each refusal leaves it where it was.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_file_held_without_delete_sharing_cannot_be_removed_renamed_or_replaced(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("open.txt", "held");
+        fs.AddFile("other.txt", "other");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile held = root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+
+        Assert.Throws<UnauthorizedAccessException>(() => root.DeleteFile("open.txt"));
+        Assert.Throws<UnauthorizedAccessException>(() => root.Rename("open.txt", root, "moved.txt"));
+        Assert.Throws<UnauthorizedAccessException>(() => root.Rename("other.txt", root, "open.txt", replaceExisting: true));
+
+        Assert.Equal(["open.txt", "other.txt"], fs.GetEntries());
+        Assert.Equal("held", fs.ReadAllText("open.txt"));
+        Assert.Equal("other", fs.ReadAllText("other.txt"));
+    }
+
+    /// <summary>
+    /// A file held open with <see cref="FileShare.Delete"/> can be removed, as on Windows,
+    /// and stays readable through the handle that holds it.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_file_held_with_delete_sharing_can_be_removed_and_stays_readable(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("doomed.txt", "still here");
+        fs.AddFile("moving.txt", "moved");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile doomed = root.OpenFile("doomed.txt", FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        using CapFile moving = root.OpenFile("moving.txt", FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+
+        root.DeleteFile("doomed.txt");
+        root.Rename("moving.txt", root, "moved.txt");
+
+        byte[] buffer = new byte[10];
+        Assert.Equal(10, doomed.Read(buffer, 0));
+        Assert.Equal("still here"u8.ToArray(), buffer);
+        Assert.Equal(["moved.txt"], fs.GetEntries());
+    }
+
+    /// <summary>
+    /// Closing the handle that held a file lifts its refusals at once, and so does closing
+    /// the last copy of it: a stream taken from a file is a copy of its handle, and holds the
+    /// file as the handle did.
+    /// </summary>
+    [Fact]
+    public void Closing_every_handle_on_a_file_lifts_its_sharing_refusals()
+    {
+        InMemoryFileSystem fs = Windows();
+        fs.AddFile("open.txt", "x");
+
+        using Dir root = fs.OpenRoot();
+        CapFile held = root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.None);
+        Stream stream = held.AsStream();
+
+        held.Dispose();
+        Assert.Throws<UnauthorizedAccessException>(() => root.ReadAllBytes("open.txt"));
+        Assert.Throws<UnauthorizedAccessException>(() => root.DeleteFile("open.txt"));
+
+        stream.Dispose();
+        Assert.Equal("x"u8.ToArray(), root.ReadAllBytes("open.txt"));
+        root.DeleteFile("open.txt");
+        Assert.Empty(fs.GetEntries());
+    }
+
+    /// <summary>
+    /// A copy made to only append still holds the file for writing, as a narrowed duplicate
+    /// does on Windows, where sharing belongs to the open rather than to each handle.
+    /// </summary>
+    [Fact]
+    public void An_appending_copy_holds_the_file_as_the_open_it_came_from()
+    {
+        InMemoryFileSystem fs = Windows();
+        fs.AddFile("log.txt");
+
+        using Dir root = fs.OpenRoot();
+        CapFile writer = root.OpenFile("log.txt", FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        writer.IsAppending = true;
+        using Stream appending = writer.AsStream();
+        writer.Dispose();
+
+        Assert.Throws<UnauthorizedAccessException>(() => root.OpenFile("log.txt", FileMode.Open, FileAccess.Read, FileShare.Read));
+        root.OpenFile("log.txt", FileMode.Open, FileAccess.Read, FileShare.ReadWrite).Dispose();
+    }
+
+    /// <summary>
+    /// A directory held open can still be removed and renamed, since the Windows backend opens
+    /// every directory sharing everything.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_directory_held_open_can_still_be_renamed_and_removed(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddDirectory("held");
+
+        using Dir root = fs.OpenRoot();
+        using Dir held = root.OpenDir("held");
+
+        root.Rename("held", root, "moved");
+        root.DeleteDir("moved");
+
+        Assert.Empty(fs.GetEntries());
+    }
+
+    /// <summary>
+    /// Under Unix rules sharing is ignored, as Linux ignores it: every refusal the Windows
+    /// rules give above is allowed.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void Under_unix_rules_sharing_is_ignored(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("open.txt", "x");
+        fs.AddFile("other.txt", "other");
+        fs.AddFile("doomed.txt", "gone");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile held = root.OpenFile("open.txt", FileMode.Open, FileAccess.Read, FileShare.None);
+        using CapFile doomed = root.OpenFile("doomed.txt", FileMode.Open, FileAccess.Read, FileShare.None);
+
+        root.OpenFile("open.txt", FileMode.Open, FileAccess.ReadWrite, FileShare.None).Dispose();
+        root.Rename("open.txt", root, "moved.txt");
+        root.Rename("other.txt", root, "moved.txt", replaceExisting: true);
+        root.DeleteFile("doomed.txt");
+
+        Assert.Equal(["moved.txt"], fs.GetEntries());
+        Assert.Equal("other", fs.ReadAllText("moved.txt"));
+    }
 }

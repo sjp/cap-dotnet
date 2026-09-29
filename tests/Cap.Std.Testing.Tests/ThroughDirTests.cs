@@ -187,6 +187,68 @@ public sealed class ThroughDirTests
         Assert.Equal(0, fs.UsedBytes);
     }
 
+    /// <summary>
+    /// Every handle counts from its open until it is disposed, a stream's copy of a file's
+    /// handle included, so a test can show that nothing was left open.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void Open_handles_are_counted_until_each_is_disposed(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("sub/file.txt", "x");
+        Assert.Equal(0, fs.OpenHandleCount);
+
+        Dir root = fs.OpenRoot();
+        Dir sub = root.OpenDir("sub");
+        CapFile file = sub.OpenFile("file.txt", FileMode.Open, FileAccess.Read);
+        Stream stream = file.AsStream();
+        Assert.Equal(4, fs.OpenHandleCount);
+
+        _ = root.ReadAllBytes("sub/file.txt");
+        _ = root.EnumerateEntries().Count();
+        Assert.Equal(4, fs.OpenHandleCount);
+
+        file.Dispose();
+        Assert.Equal(3, fs.OpenHandleCount);
+        stream.Dispose();
+        Assert.Equal(2, fs.OpenHandleCount);
+        sub.Dispose();
+        root.Dispose();
+        Assert.Equal(0, fs.OpenHandleCount);
+    }
+
+    /// <summary>
+    /// Two handles on a file whose name is removed: disposing one leaves the file readable
+    /// through the other, and disposing that one leaves nothing open.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_removed_file_is_counted_open_until_its_last_handle_is_disposed(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("doomed.txt", "still here");
+
+        using (Dir root = fs.OpenRoot())
+        {
+            CapFile first = root.OpenFile("doomed.txt", FileMode.Open, FileAccess.Read);
+            CapFile second = root.OpenFile("doomed.txt", FileMode.Open, FileAccess.Read);
+            root.DeleteFile("doomed.txt");
+            Assert.Equal(3, fs.OpenHandleCount);
+
+            first.Dispose();
+            Assert.Equal(2, fs.OpenHandleCount);
+            byte[] buffer = new byte[10];
+            Assert.Equal(10, second.Read(buffer, 0));
+            Assert.Equal("still here", Encoding.UTF8.GetString(buffer));
+
+            second.Dispose();
+            Assert.Equal(1, fs.OpenHandleCount);
+        }
+
+        Assert.Equal(0, fs.OpenHandleCount);
+    }
+
     [Fact]
     public void Times_come_from_the_given_clock_and_a_read_changes_none_of_them()
     {

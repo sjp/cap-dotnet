@@ -9,24 +9,26 @@ public sealed class ConcurrencyTests
     public async Task One_filesystem_takes_writes_from_many_threads()
     {
         InMemoryFileSystem fs = new();
-        using Dir root = fs.OpenRoot();
-
-        await Parallel.ForAsync(0, 64, TestContext.Current.CancellationToken, (i, cancellation) =>
+        using (Dir root = fs.OpenRoot())
         {
-            using Dir own = root.CreateDir($"worker-{i}");
-            for (int j = 0; j < 20; j++)
+            await Parallel.ForAsync(0, 64, TestContext.Current.CancellationToken, (i, cancellation) =>
             {
-                own.WriteAllBytes($"file-{j}.bin", [(byte)i, (byte)j]);
-                _ = own.ReadAllBytes($"file-{j}.bin");
-                _ = root.EnumerateEntries().Count();
-            }
+                using Dir own = root.CreateDir($"worker-{i}");
+                for (int j = 0; j < 20; j++)
+                {
+                    own.WriteAllBytes($"file-{j}.bin", [(byte)i, (byte)j]);
+                    _ = own.ReadAllBytes($"file-{j}.bin");
+                    _ = root.EnumerateEntries().Count();
+                }
 
-            return ValueTask.CompletedTask;
-        });
+                return ValueTask.CompletedTask;
+            });
+        }
 
         Assert.Equal(64, fs.GetEntries().Count);
         Assert.All(fs.GetEntries(), name => Assert.Equal(20, fs.GetEntries(name).Count));
         Assert.Equal(64 * 20 * 2, fs.UsedBytes);
+        Assert.Equal(0, fs.OpenHandleCount);
     }
 
     [Fact]
@@ -37,7 +39,8 @@ public sealed class ConcurrencyTests
 
         await Parallel.ForAsync(0, 32, TestContext.Current.CancellationToken, (_, _) =>
         {
-            using CapFile file = root.OpenFile("shared.log", FileMode.Append, FileAccess.Write);
+            // Shared for writing, which every writer needs under Windows rules, as on Windows.
+            using CapFile file = root.OpenFile("shared.log", FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
             for (int j = 0; j < 50; j++)
             {
                 file.Write([1, 2, 3, 4], 0);

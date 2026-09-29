@@ -84,6 +84,22 @@ copies and any stream taken from it, to the end, as Linux's append flag does. Un
 rules appending applies only to the file's own writes, and `Dir.Flush(toDisk: true)` returns
 false, as they do on Windows.
 
+Under Windows rules an open also honours its `FileShare`, as Windows does. A file held open
+refuses a later open that asks for something it does not share, or that does not share what it
+holds: with `FileShare.None` held, any second open fails, and with the default
+`FileShare.Read`, a second open for reading succeeds and one for writing fails. A file held
+open without `FileShare.Delete` cannot be removed, renamed, or replaced by a rename. Each of
+these fails with `UnauthorizedAccessException`, the exception the Windows backend reports for a
+sharing violation, and changes nothing. With `FileShare.Delete` the removal succeeds and the
+file stays usable through the handles that hold it. A directory handle shares everything, as
+the Windows backend opens every directory, so a directory held open can still be removed or
+renamed. Under Unix rules sharing is ignored, as Linux ignores it.
+
+The few other answers that differ by rules are these. Under Windows rules a rename never
+replaces a directory, a time before 1601 cannot be stored, a hard link cannot be given to a
+link made as a link to a directory, and a write that fills the disk carries Windows'
+`ERROR_DISK_FULL` code rather than Linux's `ENOSPC`. Everything else answers as Linux does.
+
 Reading never changes a file's access time, as on a filesystem mounted with `noatime`.
 Creating something stamps all four of its times. A write stamps the write and change times, and
 any other change stamps the change time. Adding, removing or renaming an entry stamps the
@@ -112,7 +128,7 @@ handle on it grants nothing outside it. Those roots therefore never appear in th
 
 | Option | Default | Meaning |
 |---|---|---|
-| `PathSyntax` | The running platform's | `CapPathSyntax.Windows` makes the handles read paths as Windows does, on any machine: `\` separates components, and reserved and rooted names are refused. It also switches the recorded permissions from Unix mode bits to Windows attributes. |
+| `PathSyntax` | The running platform's | `CapPathSyntax.Windows` makes the handles read paths as Windows does, on any machine: `\` separates components, and reserved and rooted names are refused. It also switches the recorded permissions from Unix mode bits to Windows attributes, enforces `FileShare`, and selects the other Windows answers listed above. |
 | `CaseSensitive` | Sensitive under Unix syntax, not under Windows syntax | When false, a name is found under any spelling, keeps the spelling it was created with, cannot be created a second time in another case, and can be renamed to change only its case. |
 | `TimeProvider` | A clock stopped at 2000-01-01T00:00:00Z | Where timestamps come from. Pass a `FakeTimeProvider` to let time pass under the test's control. |
 | `Resolution` | `ResolutionBackend.PortableWalk` | `ConfinedOpen` resolves a whole path in one call, as the Linux kernel does. The two reach the same answers, so the same test can run down both. |
@@ -120,6 +136,12 @@ handle on it grants nothing outside it. Those roots therefore never appear in th
 Every handle reports `ResolutionBackend.InMemory` as its `Backend`. Its handles are not
 operating-system objects, so `UnsafeGetHandle` throws `NotSupportedException`, and `AsStream`
 returns a stream of the filesystem's own rather than a `FileStream`.
+
+`OpenHandleCount` reports how many handles on the filesystem, files and directories together,
+are open now, including those a `Dir`, `CapFile` or stream opened for itself. A test that
+disposes everything the code under test handed it can assert that the count is zero, showing
+that the code left nothing open behind it. A handle nobody disposed stops counting once the
+garbage collector has reclaimed it, as a real one is closed by its finalizer.
 
 ### Faults
 

@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Std.Testing;
 
@@ -214,6 +215,17 @@ internal sealed class MemoryNode
 
     /// <summary>Entries, when this is a directory.</summary>
     public Dictionary<string, MemoryNode> Entries { get; }
+
+    /// <summary>
+    /// The handles issued on this file whose opens say what they let other opens do, or null
+    /// while there have been none.
+    /// </summary>
+    /// <remarks>
+    /// Kept by a backend that imitates Windows sharing, under its own lock, and held weakly: a
+    /// handle that is closed, or that nobody closed and has been collected, no longer holds
+    /// the file, and is dropped from here when next looked at.
+    /// </remarks>
+    public List<WeakReference<SafeFileHandle>>? Opens { get; set; }
 
     /// <summary>Copies contents from a position into a buffer.</summary>
     /// <returns>How many bytes were copied. Zero at or beyond the end.</returns>

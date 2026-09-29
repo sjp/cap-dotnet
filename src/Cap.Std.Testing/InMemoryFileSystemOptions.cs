@@ -29,8 +29,24 @@ public sealed class InMemoryFileSystemOptions
     /// platform records one kind or the other: Unix mode bits under
     /// <see cref="CapPathSyntax.Unix"/>, Windows attributes under
     /// <see cref="CapPathSyntax.Windows"/>, where the read-only attribute also refuses the
-    /// removal of a name and the opening of a file for writing. Nothing else about the
-    /// platform is imitated; in particular the errors reported are the same under both.
+    /// removal of a name and the opening of a file for writing.
+    /// </para>
+    /// <para>
+    /// Under <see cref="CapPathSyntax.Windows"/> an open also honours the
+    /// <see cref="FileShare"/> it was made with, as Windows does: a later open the files
+    /// already open do not share, and the removal or renaming of a file held open without
+    /// <see cref="FileShare.Delete"/>, are refused as sharing violations, reported as
+    /// <see cref="UnauthorizedAccessException"/> as the Windows backend reports them. Under
+    /// <see cref="CapPathSyntax.Unix"/> sharing is ignored, as Linux ignores it, and a file
+    /// removed while open stays usable through its handles.
+    /// </para>
+    /// <para>
+    /// The syntax also selects the few other answers that differ between the platforms:
+    /// whether a rename may replace a directory, whether a directory's entries can be flushed,
+    /// whether a time before 1601 can be stored, whether a hard link may be given to a link
+    /// made as a link to a directory, and the code a write that fills the disk reports.
+    /// Everything else answers as Linux does; see the remarks on
+    /// <see cref="InMemoryFileSystem"/>.
     /// </para>
     /// </remarks>
     public CapPathSyntax PathSyntax { get; init; } = CapPath.HostSyntax;

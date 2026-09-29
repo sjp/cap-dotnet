@@ -42,7 +42,12 @@ namespace Cap.Std.Testing;
 /// Appending, once turned on for an open file, puts every write through that file and its
 /// copies at the end, a stream's included, as Linux's append flag does; under Windows rules
 /// it applies only to the file's own writes, as on Windows. Under Windows rules, too,
-/// flushing a directory's entries is reported unsupported, as Windows reports it.
+/// flushing a directory's entries is reported unsupported, as Windows reports it; a file open
+/// with a <see cref="FileShare"/> that does not admit a later open, or does not include
+/// <see cref="FileShare.Delete"/>, refuses that open, or the removal or renaming of its name,
+/// as a sharing violation, as Windows refuses them; a rename never replaces a directory; a
+/// time before 1601 cannot be stored; a hard link cannot be given to a link made as a link to
+/// a directory; and a full disk carries Windows' code rather than Linux's.
 /// </para>
 /// <para>
 /// <strong>Times.</strong> Creating something stamps all four of its times; a write or a
@@ -203,6 +208,18 @@ public sealed class InMemoryFileSystem
             }
         }
     }
+
+    /// <summary>
+    /// How many handles on this filesystem, files and directories together, are open now.
+    /// </summary>
+    /// <remarks>
+    /// Counts every handle issued through any <see cref="Dir"/>, <see cref="CapFile"/> or
+    /// stream on this filesystem, including the ones they open for themselves, until it is
+    /// disposed. A test can dispose everything the code under test gave it and assert zero, to
+    /// show the code left nothing open behind it. A handle nobody disposed stops counting once
+    /// the garbage collector has reclaimed it, as a real one is closed by its finalizer.
+    /// </remarks>
+    public int OpenHandleCount => Backend.OpenHandleCount;
 
     /// <summary>The lock around the whole tree.</summary>
     internal object Gate { get; } = new();

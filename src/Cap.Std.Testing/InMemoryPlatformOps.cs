@@ -23,10 +23,19 @@ namespace Cap.Std.Testing;
 /// <para>
 /// A directory handle's value is a key into this object's table and is removed when the
 /// handle is closed. A file handle is the framework's own type, which would close its value
-/// through the operating system, so it is created not owning its value, and what it was opened
-/// for is kept against the handle object itself, weakly, so that a handle nobody closed is
-/// forgotten once it is collected. Neither value is ever a real descriptor, which is why raw
-/// handles are refused for this backend by the layer above.
+/// through the operating system and cannot be derived from to do otherwise, so it is created
+/// not owning its value, and what it was opened for is kept against the handle object itself,
+/// weakly, so that a handle nobody closed is forgotten once it is collected. Nothing runs when
+/// such a handle is closed, so whatever asks which files are open asks each handle whether it
+/// has been closed yet, which disposing it answers at once. Neither value is ever a real
+/// descriptor, which is why raw handles are refused for this backend by the layer above.
+/// </para>
+/// <para>
+/// Under Windows rules an open also records what it lets later opens do, as
+/// <see cref="FileShare"/> says, and an open, removal or rename that the opens already held
+/// do not admit is refused as a sharing violation, as Windows refuses it. A directory handle
+/// is taken to share everything, since the Windows backend opens every directory that way, so
+/// a directory held open never stops its own removal or rename.
 /// </para>
 /// <para>
 /// Every member takes the filesystem's lock for its whole length, which makes each one atomic
@@ -54,6 +63,16 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
     /// <summary>The code a full disk carries on Windows: ERROR_DISK_FULL as an HRESULT.</summary>
     private const int DiskFullHResult = unchecked((int)0x80070070);
+
+    /// <summary>Every kind of access an open can let another open have.</summary>
+    private const FileShare AllSharing = FileShare.Read | FileShare.Write | FileShare.Delete;
+
+    /// <summary>
+    /// A refusal because an open already held does not share what is asked, as the Windows
+    /// backend reports it.
+    /// </summary>
+    private static readonly CapError SharingViolation =
+        CapError.Create(CapErrorCategory.PermissionDenied, CapErrorSource.NtStatus, NtStatusCodes.STATUS_SHARING_VIOLATION);
 
     /// <summary>The earliest instant a Windows file time can express.</summary>
     private static readonly DateTimeOffset WindowsEpoch = new(1601, 1, 1, 0, 0, 0, TimeSpan.Zero);
@@ -103,6 +122,28 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     public bool CloseDirectory(nint handle) => _directories.TryRemove(handle, out _);
+
+    /// <summary>How many handles this backend has issued that have not been closed.</summary>
+    /// <remarks>
+    /// Takes no lock: both tables are safe to read while they change, and a file handle
+    /// being disposed on another thread is counted or not as the race falls.
+    /// </remarks>
+    internal int OpenHandleCount
+    {
+        get
+        {
+            int open = _directories.Count;
+            foreach (KeyValuePair<SafeFileHandle, OpenFile> file in _files)
+            {
+                if (!file.Key.IsClosed)
+                {
+                    open++;
+                }
+            }
+
+            return open;
+        }
+    }
 
     /// <inheritdoc/>
     /// <remarks>
@@ -276,7 +317,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 created.UnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             }
 
-            return CapResult<SafeFileHandle>.Ok(IssueFile(created, access, appendOnly: false));
+            return CapResult<SafeFileHandle>.Ok(IssueFile(created, access, FileShare.None));
         }
     }
 
@@ -648,7 +689,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             CapError error = File(handle, out OpenFile? file);
             return error.IsFailure
                 ? CapResult<SafeFileHandle>.Fail(error)
-                : CapResult<SafeFileHandle>.Ok(IssueFile(file!.Node, file.Access, appendOnly || file.AppendOnly, file.Description));
+                : CapResult<SafeFileHandle>.Ok(Issue(file!.Node, file.Access, appendOnly || file.AppendOnly, file.Description));
         }
     }
 
@@ -913,6 +954,12 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
             }
 
+            error = SharingForDelete(node);
+            if (error.IsFailure)
+            {
+                return error;
+            }
+
             Detach(directory!, name.ToString(), node);
             return CapError.Success;
         }
@@ -944,6 +991,12 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
             }
 
+            error = SharingForDelete(node);
+            if (error.IsFailure)
+            {
+                return error;
+            }
+
             Detach(directory!, name.ToString(), node);
             return CapError.Success;
         }
@@ -954,7 +1007,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// Follows <c>rename(2)</c>: replacing a name that refers to the same object does nothing,
     /// a directory replaces only an empty directory, a file replaces only a non-directory, and a
     /// directory cannot be moved beneath itself. Under Windows rules a directory is never
-    /// replaced, and a name the read-only attribute protects is not replaced either.
+    /// replaced, a name the read-only attribute protects is not replaced either, and neither
+    /// what is moved nor what it replaces may be held open by a handle that does not share
+    /// deletion.
     /// </remarks>
     public CapError RenameChild(
         SafeDirHandle fromParent,
@@ -1000,6 +1055,12 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (node.Undeletable)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+            }
+
+            error = SharingForDelete(node);
+            if (error.IsFailure)
+            {
+                return error;
             }
 
             if (existing is not null)
@@ -1331,7 +1392,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         }
 
         _fs.Attach(directory, name, created);
-        return CapResult<SafeFileHandle>.Ok(IssueFile(created, request.Access, appendOnly: false));
+        return CapResult<SafeFileHandle>.Ok(IssueFile(created, request.Access, request.Share));
     }
 
     /// <summary>Opens something a name held, as a file or as a directory, whichever it is.</summary>
@@ -1377,6 +1438,13 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return Fail<SafeFileHandle>(CapErrorCategory.PermissionDenied);
         }
 
+        // Before the file is emptied: an open Windows refuses changes nothing.
+        CapError sharing = Sharing(node, AsShare(request.Access), request.Share);
+        if (sharing.IsFailure)
+        {
+            return CapResult<SafeFileHandle>.Fail(sharing);
+        }
+
         if (request.Truncates && node.Length > 0)
         {
             long before = node.Length;
@@ -1390,16 +1458,84 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, NoSpaceErrno));
         }
 
-        return CapResult<SafeFileHandle>.Ok(IssueFile(node, request.Access, appendOnly: false));
+        return CapResult<SafeFileHandle>.Ok(IssueFile(node, request.Access, request.Share));
     }
 
-    /// <summary>Issues a file handle and records what it was opened for.</summary>
-    private SafeFileHandle IssueFile(MemoryNode node, FileAccess access, bool appendOnly, OpenFileDescription? shared = null)
+    /// <summary>Opens a file anew and issues the first handle on it.</summary>
+    private SafeFileHandle IssueFile(MemoryNode node, FileAccess access, FileShare share) =>
+        Issue(node, access, appendOnly: false, new OpenFileDescription(AsShare(access), share & AllSharing));
+
+    /// <summary>
+    /// Issues a handle on an open file and records what it was opened for, and under Windows
+    /// rules that it holds the file.
+    /// </summary>
+    private SafeFileHandle Issue(MemoryNode node, FileAccess access, bool appendOnly, OpenFileDescription description)
     {
         SafeFileHandle handle = new(NextHandle(), ownsHandle: false);
-        _files.Add(handle, new OpenFile(node, access, appendOnly, shared ?? new OpenFileDescription()));
+        _files.Add(handle, new OpenFile(node, access, appendOnly, description));
+        if (_fs.WindowsRules)
+        {
+            (node.Opens ??= []).Add(new WeakReference<SafeFileHandle>(handle));
+        }
+
         return handle;
     }
+
+    /// <summary>
+    /// Whether Windows would let an open that asks for <paramref name="wants"/>, and lets
+    /// later opens have <paramref name="shares"/>, join the opens already held on
+    /// <paramref name="node"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both sides are written as the sharing flags they concern: reading, writing and
+    /// deleting, the three kinds of access Windows checks. Every open already held must share
+    /// what the new one asks for, and the new one must share what each of them holds. An open
+    /// that asks for none of the three is never refused, as on Windows. Copies of a handle made
+    /// by duplication are one open, as they are one file object there.
+    /// </para>
+    /// <para>
+    /// Refuses nothing under Unix rules, which have no mandatory sharing. Handles found closed
+    /// or collected are dropped on the way.
+    /// </para>
+    /// </remarks>
+    private CapError Sharing(MemoryNode node, FileShare wants, FileShare shares)
+    {
+        if (!_fs.WindowsRules || node.Opens is not { } opens || wants == FileShare.None)
+        {
+            return CapError.Success;
+        }
+
+        CapError answer = CapError.Success;
+        for (int i = opens.Count - 1; i >= 0; i--)
+        {
+            if (!opens[i].TryGetTarget(out SafeFileHandle? handle) || handle.IsClosed ||
+                !_files.TryGetValue(handle, out OpenFile? file))
+            {
+                opens.RemoveAt(i);
+                continue;
+            }
+
+            OpenFileDescription held = file.Description;
+            if ((wants & ~held.Shares) != 0 || (held.Holds & ~shares) != 0)
+            {
+                answer = SharingViolation;
+            }
+        }
+
+        return answer;
+    }
+
+    /// <summary>
+    /// Whether Windows would let a name for <paramref name="node"/> be removed or moved, which
+    /// it does through an open for deleting that shares everything.
+    /// </summary>
+    private CapError SharingForDelete(MemoryNode node) => Sharing(node, FileShare.Delete, AllSharing);
+
+    /// <summary>The access an open file holds, as the sharing flag each part concerns.</summary>
+    private static FileShare AsShare(FileAccess access) =>
+        ((access & FileAccess.Read) != 0 ? FileShare.Read : FileShare.None) |
+        ((access & FileAccess.Write) != 0 ? FileShare.Write : FileShare.None);
 
     /// <summary>Removes a name, and records that the object it named has one fewer.</summary>
     private void Detach(MemoryNode directory, string name, MemoryNode node)
@@ -1450,7 +1586,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
         return RefusesRemoval(existing)
             ? CapError.FromCategory(CapErrorCategory.PermissionDenied)
-            : CapError.Success;
+            : SharingForDelete(existing);
     }
 
     /// <summary>Whether <paramref name="descendant"/> is somewhere beneath <paramref name="directory"/>.</summary>
@@ -1707,8 +1843,20 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     private sealed record OpenFile(MemoryNode Node, FileAccess Access, bool AppendOnly, OpenFileDescription Description);
 
     /// <summary>The state an open file shares with its duplicates.</summary>
-    private sealed class OpenFileDescription
+    /// <param name="holds">What the open was made for, as the sharing flags that concern it.</param>
+    /// <param name="shares">What the open lets later opens of the same file do.</param>
+    private sealed class OpenFileDescription(FileShare holds, FileShare shares)
     {
+        /// <summary>What the open was made for, as the sharing flags that concern it.</summary>
+        /// <remarks>
+        /// What it was opened for rather than what any one copy may do: a copy made to only
+        /// append still holds the file for writing, as a narrowed duplicate does on Windows.
+        /// </remarks>
+        public FileShare Holds { get; } = holds;
+
+        /// <summary>What the open lets later opens of the same file do, under Windows rules.</summary>
+        public FileShare Shares { get; } = shares;
+
         /// <summary>Whether appending has been turned on, under Unix rules.</summary>
         public bool Appending { get; set; }
     }
