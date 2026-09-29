@@ -173,6 +173,78 @@ public sealed class WalkTests : IDisposable
     }
 
     /// <summary>
+    /// An empty directory at the limit is reported and does not fail the walk, since nothing
+    /// in the tree lies deeper than the limit.
+    /// </summary>
+    [Fact]
+    public void An_empty_directory_at_the_limit_is_reported_and_does_not_fail_the_walk()
+    {
+        Make("f.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "a"));
+
+        WalkOptions options = new() { MaxDepth = 1 };
+
+        Assert.Equal(
+            [("a", 1), ("f.txt", 1)],
+            _tree.Directory.Walk(options).Select(e => (e.Name, e.Depth)).Order());
+    }
+
+    /// <summary>A directory at the limit with anything in it fails the walk.</summary>
+    [Fact]
+    public void A_non_empty_directory_at_the_limit_fails_the_walk()
+    {
+        Make("a", "x.txt");
+
+        WalkOptions options = new() { MaxDepth = 1 };
+
+        CapIOException thrown = Assert.Throws<CapIOException>(() => _tree.Directory.Walk(options).ToList());
+        Assert.Equal(CapErrorKind.PathTooDeep, thrown.Kind);
+    }
+
+    /// <summary>A tree exactly as deep as the limit is walked to its end.</summary>
+    [Fact]
+    public void A_tree_exactly_as_deep_as_the_limit_is_walked_to_its_end()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "1", "2", "3", "4"));
+
+        WalkOptions options = new() { MaxDepth = 4 };
+
+        Assert.Equal([1, 2, 3, 4], _tree.Directory.Walk(options).Select(e => e.Depth));
+    }
+
+    /// <summary>The asynchronous walk draws the limit where the synchronous one does.</summary>
+    [Fact]
+    public async Task The_asynchronous_walk_draws_the_limit_in_the_same_place()
+    {
+        Make("shallow", "f.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "shallow", "a"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "deep", "1", "2", "3", "4"));
+
+        Assert.Equal(
+            [("a", 1), ("f.txt", 1)],
+            (await WalkAsync("shallow", maxDepth: 1)).Select(e => (e.Name, e.Depth)).Order());
+
+        Assert.Equal([1, 2, 3, 4], (await WalkAsync("deep", maxDepth: 4)).Select(e => e.Depth));
+
+        CapIOException thrown = await Assert.ThrowsAsync<CapIOException>(() => WalkAsync("deep", maxDepth: 3));
+        Assert.Equal(CapErrorKind.PathTooDeep, thrown.Kind);
+
+        async Task<List<(string Name, int Depth)>> WalkAsync(string name, int maxDepth)
+        {
+            using Dir directory = _tree.Directory.OpenDir(name);
+            List<(string Name, int Depth)> entries = [];
+            await foreach (WalkEntry entry in directory.WalkAsync(
+                new WalkOptions { MaxDepth = maxDepth },
+                TestContext.Current.CancellationToken))
+            {
+                entries.Add((entry.Name, entry.Depth));
+            }
+
+            return entries;
+        }
+    }
+
+    /// <summary>
     /// A tree far deeper than the limit is refused rather than exhausting anything.
     /// </summary>
     /// <remarks>

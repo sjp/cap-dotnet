@@ -473,6 +473,51 @@ public sealed class CopyTests : IDisposable
         Assert.Throws<CapIOException>(() => Copy(new CopyOptions { MaxDepth = 3 }));
     }
 
+    /// <summary>An empty directory at the limit is copied.</summary>
+    [Fact]
+    public void An_empty_directory_at_the_limit_is_copied()
+    {
+        Make("source", "f.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "e"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+
+        CopyReport report = Copy(new CopyOptions { MaxDepth = 1 });
+
+        Assert.Equal(1, report.Directories);
+        Assert.Equal(1, report.Files);
+        Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "destination", "e")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "destination", "f.txt")));
+    }
+
+    /// <summary>
+    /// A directory at the limit with anything in it fails the copy, with nothing created for
+    /// it in the destination.
+    /// </summary>
+    [Fact]
+    public void A_non_empty_directory_at_the_limit_fails_the_copy()
+    {
+        Make("source", "a", "x.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+
+        CapIOException thrown = Assert.Throws<CapIOException>(() => Copy(new CopyOptions { MaxDepth = 1 }));
+
+        Assert.Equal(CapErrorKind.PathTooDeep, thrown.Kind);
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "destination", "a")));
+    }
+
+    /// <summary>A source exactly as deep as the limit is copied to its end.</summary>
+    [Fact]
+    public void A_source_exactly_as_deep_as_the_limit_is_copied_to_its_end()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source", "1", "2", "3"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+
+        CopyReport report = Copy(new CopyOptions { MaxDepth = 3 });
+
+        Assert.Equal(3, report.Directories);
+        Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "destination", "1", "2", "3")));
+    }
+
     /// <summary>Copies the scratch tree's source directory into its destination directory.</summary>
     private CopyReport Copy(CopyOptions? options = null)
     {

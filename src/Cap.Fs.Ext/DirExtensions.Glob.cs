@@ -155,6 +155,8 @@ public static partial class DirExtensions
                     continue;
                 }
 
+                descent.Admit();
+
                 int[]? beneath = pattern.Step(level.States, entry.Name, out bool matched);
 
                 if (matched)

@@ -228,7 +228,7 @@ public static partial class DirExtensions
                         _levels.RemoveAt(_levels.Count - 1);
                         try
                         {
-                            Finish(level);
+                            Finish(level.Destination, level.Times);
                         }
                         finally
                         {
@@ -304,7 +304,11 @@ public static partial class DirExtensions
                         $"destination cannot be inside its source.");
                 }
 
-                if (_levels.Count >= _options.MaxDepth)
+                // A directory at the limit is copied only if it is empty, and is looked into
+                // before its copy is made, so a source too deep to copy leaves nothing behind
+                // for the directory that was refused.
+                bool atLimit = _levels.Count >= _options.MaxDepth;
+                if (atLimit && HasEntries(source))
                 {
                     throw FailureTranslation.ToException(
                         CapError.FromCategory(CapErrorCategory.PathTooDeep),
@@ -318,6 +322,15 @@ public static partial class DirExtensions
 
                 Apply(target, metadata, entry.Name);
                 _directories++;
+
+                if (atLimit)
+                {
+                    // Not entered: it was empty when looked at, and reading it again from a
+                    // level past the limit would copy whatever arrived since, at a depth the
+                    // caller did not allow.
+                    Finish(target, metadata);
+                    return;
+                }
 
                 Push(source, target, ownsSource: true, ownsDestination: true, times: metadata);
                 kept = true;
@@ -557,12 +570,26 @@ public static partial class DirExtensions
         /// last-write time on. The directory the copy writes into has no times to carry, since
         /// the copy does not reproduce it.
         /// </remarks>
-        private void Finish(CopyLevel level)
+        private void Finish(IDir destination, CapMetadata? times)
         {
-            if (_options.PreserveTimes && level.Times is { } source)
+            if (_options.PreserveTimes && times is { } source)
             {
-                level.Destination.SetTimes(
+                destination.SetTimes(
                     CapFileTime.At(source.LastAccessTime), CapFileTime.At(source.LastWriteTime));
+            }
+        }
+
+        /// <summary>Whether a directory has anything in it.</summary>
+        private static bool HasEntries(IDir directory)
+        {
+            EntryReader reader = EntryReader.Open(directory);
+            try
+            {
+                return reader.MoveNext();
+            }
+            finally
+            {
+                reader.Dispose();
             }
         }
 

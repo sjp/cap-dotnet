@@ -175,6 +175,8 @@ public static partial class DirExtensions
                     continue;
                 }
 
+                descent.Admit();
+
                 yield return new WalkEntry(level.Directory, entry, descent.Depth);
 
                 descent.Enter(in entry);
@@ -208,6 +210,8 @@ public static partial class DirExtensions
                 {
                     continue;
                 }
+
+                descent.Admit();
 
                 yield return new WalkEntry(level.Directory, entry, descent.Depth);
 
@@ -262,7 +266,7 @@ public static partial class DirExtensions
                 _entered = [root.GetMetadata().FileId];
             }
 
-            Push(root, owned: false, states: null);
+            Push(root, name: null, owned: false, states: null);
         }
 
         /// <summary>The level the walk is reading now, or null when it has finished.</summary>
@@ -273,6 +277,26 @@ public static partial class DirExtensions
 
         /// <summary>Whether an entry is one the caller asked not to see.</summary>
         public bool Skips(in ListedEntry entry) => _options.SkipHidden && IsHidden(_levels[^1].Directory, in entry);
+
+        /// <summary>
+        /// Fails the walk if the entry just read lies deeper than
+        /// <see cref="WalkOptions.MaxDepth"/>.
+        /// </summary>
+        /// <remarks>
+        /// Asked of each entry the caller would be shown, so what fails the walk is an entry
+        /// that exists past the limit, not a directory at the limit that might have held one.
+        /// The directory named is the one at the limit, the last the walk was allowed to read.
+        /// </remarks>
+        public void Admit()
+        {
+            if (_levels.Count > _options.MaxDepth)
+            {
+                throw FailureTranslation.ToException(
+                    CapError.FromCategory(CapErrorCategory.PathTooDeep),
+                    _levels[^1].Name!,
+                    ExpectedTarget.Directory);
+            }
+        }
 
         /// <summary>
         /// Descends into an entry, if it is something to descend into and the walk may go
@@ -296,9 +320,11 @@ public static partial class DirExtensions
         /// so what a caller can do through an entry's directory does not depend on its depth.
         /// </para>
         /// <para>
-        /// The depth is checked after the open rather than before it, so a tree that is deep
-        /// in entries that turn out not to be directories is not refused for a descent that
-        /// was never going to happen.
+        /// The depth is not checked here. A directory at the limit is entered like any other,
+        /// and the walk fails only when <see cref="Admit"/> finds an entry inside it, so an
+        /// empty directory at the limit is walked and one with anything in it is refused. That
+        /// costs one level past the limit, and never more, because the refusal comes at the
+        /// first entry that level yields.
         /// </para>
         /// </remarks>
         public void Enter(in ListedEntry entry, int[]? states = null)
@@ -311,14 +337,6 @@ public static partial class DirExtensions
             bool kept = false;
             try
             {
-                if (_levels.Count >= _options.MaxDepth)
-                {
-                    throw FailureTranslation.ToException(
-                        CapError.FromCategory(CapErrorCategory.PathTooDeep),
-                        entry.Name,
-                        ExpectedTarget.Directory);
-                }
-
                 if (_entered is not null && !_entered.Add(child.GetMetadata().FileId))
                 {
                     // Already on the way down to here, so entering it again is a loop rather
@@ -327,7 +345,7 @@ public static partial class DirExtensions
                     return;
                 }
 
-                Push(child, owned: true, states);
+                Push(child, entry.Name, owned: true, states);
                 kept = true;
             }
             finally
@@ -480,12 +498,13 @@ public static partial class DirExtensions
             CapErrorKind.ConcurrentChange;
 
         /// <summary>Opens a directory's entries and makes it the level the walk is reading.</summary>
-        private void Push(IDir directory, bool owned, int[]? states)
+        private void Push(IDir directory, string? name, bool owned, int[]? states)
         {
             CapFileId id = _entered is null ? default : directory.GetMetadata().FileId;
 
             WalkLevel level = new(
                 directory,
+                name,
                 owned,
                 id,
                 _asynchronous
@@ -534,9 +553,10 @@ public static partial class DirExtensions
         /// <summary>The reading in progress, in whichever form the walk reads.</summary>
         private readonly EntryReader _reader;
 
-        public WalkLevel(IDir directory, bool owned, CapFileId id, EntryReader reader)
+        public WalkLevel(IDir directory, string? name, bool owned, CapFileId id, EntryReader reader)
         {
             Directory = directory;
+            Name = name;
             _owned = owned;
             Id = id;
             _reader = reader;
@@ -544,6 +564,12 @@ public static partial class DirExtensions
 
         /// <summary>The directory, open for as long as the walk is inside it.</summary>
         public IDir Directory { get; }
+
+        /// <summary>
+        /// The name it was entered by, for naming it in a failure. Null for the directory the
+        /// walk started at.
+        /// </summary>
+        public string? Name { get; }
 
         /// <summary>Its identity, kept only when the walk is watching for cycles.</summary>
         public CapFileId Id { get; }

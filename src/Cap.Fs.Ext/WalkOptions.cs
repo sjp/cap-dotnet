@@ -36,10 +36,19 @@ public sealed class WalkOptions
     /// How many levels below the starting directory the walk will descend.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// Entries at depth <see cref="MaxDepth"/> are reported; an entry at depth
+    /// <see cref="MaxDepth"/> + 1 fails the walk. A directory at the limit is therefore fine
+    /// while it is empty, and one with anything in it is refused when that first entry is
+    /// read, after the directory itself has been yielded. One, for instance, lists what is
+    /// directly inside the start and fails on the first non-empty directory among it.
+    /// </para>
+    /// <para>
     /// A tree deeper than this stops the walk with a failure rather than being quietly cut
     /// short. Returning part of a tree and calling it the tree is the kind of answer a caller
     /// acts on without noticing, and a walk that is used to decide what to delete, copy or
     /// publish must not silently leave things out.
+    /// </para>
     /// </remarks>
     public int MaxDepth { get; init; } = DefaultMaxDepth;
 

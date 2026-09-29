@@ -1,3 +1,5 @@
+using Cap.Std;
+
 namespace Cap.Fs.Ext.Tests;
 
 /// <summary>
@@ -62,6 +64,43 @@ public sealed class GlobTests : IDisposable
     public void A_crossing_piece_at_the_end_matches_everything_beneath()
     {
         Assert.Equal(["b", "one.txt", "three.txt", "two.md"], Matches(Path.Combine("a", "**")).Order());
+    }
+
+    /// <summary>
+    /// An empty directory at the limit is matched and does not fail the search, since nothing
+    /// in the tree lies deeper than the limit.
+    /// </summary>
+    [Fact]
+    public void An_empty_directory_at_the_limit_is_matched_and_does_not_fail_the_search()
+    {
+        Make("limit", "f.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "limit", "e"));
+
+        WalkOptions options = new() { MaxDepth = 2 };
+
+        Assert.Equal(["e", "f.txt"], Names(GlobPattern.Parse(Path.Combine("limit", "**")), options).Order());
+    }
+
+    /// <summary>A directory at the limit with anything in it fails the search.</summary>
+    [Fact]
+    public void A_non_empty_directory_at_the_limit_fails_the_search()
+    {
+        WalkOptions options = new() { MaxDepth = 2 };
+
+        CapIOException thrown = Assert.Throws<CapIOException>(
+            () => Names(GlobPattern.Parse(Path.Combine("a", "**")), options));
+        Assert.Equal(CapErrorKind.PathTooDeep, thrown.Kind);
+    }
+
+    /// <summary>A tree exactly as deep as the limit is searched to its end.</summary>
+    [Fact]
+    public void A_tree_exactly_as_deep_as_the_limit_is_searched_to_its_end()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "chain", "1", "2", "3"));
+
+        WalkOptions options = new() { MaxDepth = 4 };
+
+        Assert.Equal(["1", "2", "3"], Names(GlobPattern.Parse(Path.Combine("chain", "**")), options));
     }
 
     /// <summary>One character, and a set of characters, match one character.</summary>
@@ -177,7 +216,7 @@ public sealed class GlobTests : IDisposable
         {
             Assert.Equal("three.txt", entry.Name);
             Assert.Equal(3, entry.Depth);
-            using Cap.Std.ICapFile file = entry.OpenFile();
+            using ICapFile file = entry.OpenFile();
             Assert.Equal(8, file.Length);
         }
     }

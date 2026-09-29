@@ -132,8 +132,11 @@ public sealed class CopyOptions
     /// </summary>
     /// <remarks>
     /// The same limit and the same reason as a walk's: the copy holds one open directory per
-    /// level on each side for as long as it is inside that level. A source deeper than this
-    /// stops the copy rather than being quietly cut short. A symbolic link is never descended
+    /// level on each side for as long as it is inside that level. Entries at depth
+    /// <see cref="MaxDepth"/> are copied; an entry at depth <see cref="MaxDepth"/> + 1 stops
+    /// the copy rather than it being quietly cut short. A directory at the limit is looked
+    /// into before its copy is made, so an empty one is copied and one with anything in it
+    /// stops the copy with nothing created for it. A symbolic link is never descended
     /// into, so it adds no depth, whatever it points at.
     /// </remarks>
     public int MaxDepth { get; init; } = WalkOptions.DefaultMaxDepth;

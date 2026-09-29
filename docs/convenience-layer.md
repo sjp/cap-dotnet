@@ -127,7 +127,7 @@ foreach (WalkEntry entry in root.Walk(new WalkOptions { SkipHidden = true }))
 
 | Option | Default | Effect |
 |---|---|---|
-| `MaxDepth` | 256 | How far below the start the walk descends. A deeper tree stops the walk with a failure rather than being quietly cut short. |
+| `MaxDepth` | 256 | How far below the start the walk descends. Entries at depth `MaxDepth` are reported; an entry at depth `MaxDepth + 1` fails the walk rather than the tree being quietly cut short. An empty directory at the limit is therefore fine, and `MaxDepth = 1` lists what is directly inside the start, failing on the first non-empty directory among it. |
 | `FollowSymlinks` | off | Whether a link naming a directory is entered. Off, every descent is an open that refuses a link, so a link is not entered even when the directory read called it a directory or could not say what it was; the directories entered keep the starting handle's policy. On, it cannot widen that policy: a handle that refuses links keeps refusing them. |
 | `SkipHidden` | off | Leaves out names beginning with a dot, and on Windows anything carrying the hidden attribute. A skipped directory is not entered. |
 | `OnError` | null | Called with the entry and the exception when a directory is there and cannot be opened. Return true to leave it out and carry on, false to fail the walk. Null fails the walk. |
@@ -241,7 +241,9 @@ the source had and the copy's caller did not ask for.
   directory's are set after everything inside it has been copied, since adding entries moves
   its last-write time on. Creation times are not carried, and the directory the copy writes
   into keeps its own.
-- `MaxDepth` (256): as for a walk.
+- `MaxDepth` (256): as for a walk. A directory at the limit is looked into before its copy
+  is made, so an empty one is copied and one with anything in it stops the copy with nothing
+  created for it.
 
 A destination inside the source is refused, noticed by identity rather than by comparing
 names. Left to run it would copy what it had just written, and then copy that.
