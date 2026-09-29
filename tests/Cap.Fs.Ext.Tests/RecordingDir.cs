@@ -74,7 +74,7 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
         long preallocationSize = 0,
         bool append = false,
         bool noFollow = false) =>
-        File(Record(inner.OpenFile(path, mode, access, share, options, preallocationSize, append, noFollow), path, mode), path);
+        File(Record(inner.OpenFile(path, mode, access, share, options, preallocationSize, append, noFollow), path, mode, noFollow), path);
 
     public bool TryOpenFile(string path, [NotNullWhen(true)] out ICapFile? file) =>
         FileOpened(inner.TryOpenFile(path, out file), ref file, path, Call(path));

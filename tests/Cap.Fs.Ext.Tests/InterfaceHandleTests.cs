@@ -100,7 +100,7 @@ public sealed class InterfaceHandleTests
             }
         }
 
-        Assert.Contains("./a/b: OpenFile(two.txt, Open)", root.Log);
+        Assert.Contains("./a/b: OpenFile(two.txt, Open, False)", root.Log);
     }
 
     [Fact]
@@ -361,6 +361,28 @@ public sealed class InterfaceHandleTests
         Assert.Contains("./b: EnumerateEntries()", source.Log);
         AssertEveryNameIsOneComponent(source);
         AssertEveryNameIsOneComponent(destination);
+    }
+
+    [Fact]
+    public void A_copy_through_the_interface_opens_each_entry_refusing_links()
+    {
+        Tree();
+        _fs.AddDirectory("copy");
+        using RecordingDir source = new(_fs.OpenRoot("a", SymlinkPolicy.FollowWithinSandbox));
+        using RecordingDir destination = new(_fs.OpenRoot("copy", SymlinkPolicy.FollowWithinSandbox), [], "dest");
+
+        _ = source.CopyTo(destination);
+
+        // A name described as a directory or a file may be a link by the time it is opened, so
+        // the open itself refuses one rather than following it under the handle's policy.
+        Assert.Contains(".: OpenDir(b, True)", source.Log);
+        Assert.Contains(".: OpenDir(empty, True)", source.Log);
+        Assert.Contains(".: OpenFile(one.txt, Open, True)", source.Log);
+        Assert.Contains("./b: OpenFile(two.txt, Open, True)", source.Log);
+        Assert.DoesNotContain(source.Log, call =>
+            call.Contains(": OpenDir(", StringComparison.Ordinal) && call.EndsWith(", False)", StringComparison.Ordinal));
+        Assert.DoesNotContain(source.Log, call =>
+            call.Contains(": OpenFile(", StringComparison.Ordinal) && call.EndsWith(", False)", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -89,9 +89,12 @@ public static partial class DirExtensions
     /// each handle is the directory used, however it was reached. A link inside the source is
     /// recognised by describing its name without following it, and is then refused, skipped or
     /// made again with the same target text, as <see cref="CopyOptions.Symlinks"/> says — never
-    /// followed, read through or descended into. A directory or file in the source that is
-    /// swapped for a link between being described and being opened is opened as the source
-    /// handle's policy would follow that link, which never leaves the source's subtree. What a
+    /// followed, read through or descended into. Each directory and file is then opened refusing
+    /// a link at its name, so one swapped for a link between being described and being opened
+    /// is not followed either: it is described again and dealt with as the same setting says,
+    /// exactly as it would have been had it been a link all along. A file whose open finds a
+    /// named pipe, a socket or a device in its place is not read, and is dealt with as
+    /// <see cref="CopyOptions.OtherKinds"/> says. What a
     /// link already sitting at a name in the destination does is set out under
     /// <see cref="CopyOptions.Overwrite"/>.
     /// </para>
@@ -312,7 +315,20 @@ public static partial class DirExtensions
         /// <summary>Creates the matching directory in the destination and goes into both.</summary>
         private void Descend(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
         {
-            IDir source = entry.OpenDir();
+            IDir source;
+            try
+            {
+                source = level.Source.OpenDir(entry.Name, noFollow: true);
+            }
+            catch (CapIOException refusal) when (IsLinkRefusal(refusal))
+            {
+                if (!CopiedAsLink(level, entry))
+                {
+                    throw;
+                }
+
+                return;
+            }
 
             bool kept = false;
             IDir? target = null;
@@ -370,17 +386,54 @@ public static partial class DirExtensions
 
         /// <summary>Copies a file's contents into a new file of the same name.</summary>
         /// <remarks>
-        /// The source is opened from the entry, so it is opened through the handle that listed
-        /// it and the open refuses a name that has since become a link. The destination is
-        /// never opened through its name: without replacement it is created exclusively, so a
-        /// taken name stops the copy, and with replacement the copy is made under a scratch
-        /// name and moved onto the real one. Either way nothing already at the name is written
-        /// through, so a link there cannot steer the contents into whatever it points at.
+        /// <para>
+        /// The source is opened through the handle that listed it, refusing a name that has
+        /// since become a link, and what was opened is asked what it is before anything is read
+        /// from it: a refusal to follow a link says nothing about a named pipe or a device
+        /// swapped in at the name, and reading one of those is what
+        /// <see cref="CopyOptions.OtherKinds"/> exists to prevent.
+        /// </para>
+        /// <para>
+        /// The destination is never opened through its name: without replacement it is created
+        /// exclusively, so a taken name stops the copy, and with replacement the copy is made
+        /// under a scratch name and moved onto the real one. Either way nothing already at the
+        /// name is written through, so a link there cannot steer the contents into whatever it
+        /// points at.
+        /// </para>
         /// </remarks>
         private void CopyFile(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
         {
-            using ICapFile source = entry.OpenFile(
-                FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.SequentialScan, 0);
+            ICapFile opened;
+            try
+            {
+                opened = level.Source.OpenFile(
+                    entry.Name,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.Read,
+                    FileOptions.SequentialScan,
+                    0,
+                    append: false,
+                    noFollow: true);
+            }
+            catch (CapIOException refusal) when (IsLinkRefusal(refusal))
+            {
+                if (!CopiedAsLink(level, entry))
+                {
+                    throw;
+                }
+
+                return;
+            }
+
+            using ICapFile source = opened;
+
+            CapMetadata held = source.GetMetadata();
+            if (held.Type != CapFileType.File)
+            {
+                Irregular(level, entry, held, _options.OtherKinds, recreate: false);
+                return;
+            }
 
             if (_options.Overwrite)
             {
@@ -498,6 +551,41 @@ public static partial class DirExtensions
                         $"skipped, or remove it from the source.");
             }
         }
+
+        /// <summary>
+        /// Deals with a name that was described as a directory or a file and had become a link
+        /// by the time it was opened, as <see cref="CopyOptions.Symlinks"/> says to deal with any
+        /// link.
+        /// </summary>
+        /// <returns>
+        /// False when a fresh description does not say the name is a link either — it changed
+        /// again, or went away — so the refusal that led here is the caller's to report.
+        /// </returns>
+        /// <remarks>
+        /// Asked again rather than assumed, because the refusal is only the open's account of
+        /// the name, and a link is made again from what the name holds now. A copy's answer to
+        /// a link then does not depend on whether the link was there before the copy looked or
+        /// arrived while it was looking.
+        /// </remarks>
+        private bool CopiedAsLink(CopyLevel level, ListedEntry entry)
+        {
+            if (!entry.TryGetMetadata(out CapMetadata now) || now.Type != CapFileType.Symlink)
+            {
+                return false;
+            }
+
+            Irregular(level, entry, now, _options.Symlinks, recreate: true);
+            return true;
+        }
+
+        /// <summary>Whether an open that refuses a final link failed because there was one.</summary>
+        /// <remarks>
+        /// Each backend names the refusal in its own way: the kernel's answer to an open that
+        /// will not follow a link is the one it gives for a link it will not follow, and a
+        /// backend that looks at the name first reports it as the link it found.
+        /// </remarks>
+        private static bool IsLinkRefusal(CapIOException refusal) =>
+            refusal.Kind is CapErrorKind.LinkNotFollowed or CapErrorKind.SymbolicLink;
 
         /// <summary>Creates a link in the destination holding the same target text.</summary>
         /// <remarks>

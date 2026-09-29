@@ -236,6 +236,12 @@ because the one thing a copy must not do is put an object of a different kind un
 name and say nothing: a copy that followed a link would reach outside the tree it was given,
 and a copy that read a named pipe would block until something wrote to it.
 
+The kind is taken from a description of the name that does not follow links, and the open
+that follows it refuses a link at the name. So a directory or file swapped for a link between
+the two is not followed: it is described again and handled in the link row, exactly as if it
+had been a link all along. A file whose open finds a named pipe, a socket or a device in its
+place is not read, and is handled in that row instead.
+
 A recreated link carries its target text unchanged — not resolved and not rewritten. What the
 text means is decided from wherever the new link sits, so a relative target that reached one
 place from the source may reach another from the destination. Containment is enforced when
