@@ -53,6 +53,17 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void A_rooted_part_joined_onto_the_root_is_reachable()
+    {
+        MockDiffers("a path beginning with two separators does not name the path with one.");
+        Fs.File.WriteAllText(P("a.txt"), "hello");
+        string joined = Fs.Path.Join(Root, Fs.Path.DirectorySeparatorChar + "a.txt");
+
+        Assert.True(Fs.File.Exists(joined));
+        Assert.Equal("hello", Fs.File.ReadAllText(joined));
+    }
+
+    [Fact]
     public void Bytes_written_are_read_back()
     {
         Fs.File.WriteAllBytes(P("a.bin"), [1, 2, 3]);

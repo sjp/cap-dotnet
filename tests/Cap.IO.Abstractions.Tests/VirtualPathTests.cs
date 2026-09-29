@@ -165,4 +165,17 @@ public sealed class VirtualPathTests
         Assert.Equal(@"a\b", WindowsSlash.JoinAll([@"a\", "b"]));
         Assert.Equal(string.Empty, WindowsSlash.JoinAll([null, ""]));
     }
+
+    [Fact]
+    public void Joining_writes_one_separator_where_both_sides_carry_one()
+    {
+        Assert.Equal("/b", Posix.JoinAll(["/", "/b"]));
+        Assert.Equal("/a/b", Posix.JoinAll(["/a/", "/b"]));
+        Assert.Equal("/.tmp/n", Posix.JoinAll([Posix.TempPath, "/n"]));
+        Assert.Equal(@"a\b", WindowsSlash.JoinAll([@"a\", "/b"]));
+
+        // Only one separator is dropped, so a doubled root the caller wrote is still refused.
+        Assert.Equal("//x", Posix.JoinAll(["/", "//x"]));
+        Assert.Equal("/x", Posix.Resolve(Posix.JoinAll(["/", "//x"]), "/").Relative);
+    }
 }

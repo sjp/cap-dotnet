@@ -113,6 +113,12 @@ internal sealed class VirtualPath
     }
 
     /// <summary>Joins a name, or a relative path, onto a path, adding a separator if needed.</summary>
+    /// <remarks>
+    /// When both sides carry a separator at the seam, one of them is dropped, so that
+    /// <c>Join("/", "/b")</c> spells the <c>/b</c> the caller meant rather than a <c>//b</c> that
+    /// <see cref="RootLength"/> would leave rooted. Only one is dropped: a <c>//x</c> joined on
+    /// still carries the doubled separator the caller wrote.
+    /// </remarks>
     public string Join(string path, string name)
     {
         if (path.Length == 0)
@@ -123,6 +129,11 @@ internal sealed class VirtualPath
         if (name.Length == 0)
         {
             return path;
+        }
+
+        if (IsSeparator(path[^1]) && IsSeparator(name[0]))
+        {
+            return string.Concat(path, name.AsSpan(1));
         }
 
         return IsSeparator(path[^1]) || IsSeparator(name[0])
@@ -165,7 +176,8 @@ internal sealed class VirtualPath
     /// </summary>
     /// <remarks>
     /// Unlike <see cref="Combine"/>, a rooted part is joined on like any other, and null or
-    /// empty parts are skipped.
+    /// empty parts are skipped. Unlike <see cref="Path.Join(string?[])"/>, a separator on both
+    /// sides of a seam is written once; see <see cref="Join(string, string)"/>.
     /// </remarks>
     public string JoinAll(ReadOnlySpan<string?> paths)
     {

@@ -127,6 +127,7 @@ Each of these is deliberate and is covered by the package's tests.
 | Symbolic link targets | stored as given | a rooted target is refused with `SandboxEscapeException`, since it names a place on the host. Use a relative target |
 | `ResolveLinkTarget` on a link with a rooted target | returns the target | `SandboxEscapeException` |
 | `//x` | the same as `/x` on Unix | refused as absolute: only one root is removed |
+| `Path.Join` with a separator on both sides of a seam | writes both | writes one, so that `Join(root, "/x")` does not spell the refused `//x` |
 | Full names | host paths | virtual paths, folded lexically. See above |
 | Current directory | process-wide | per `DirFileSystem` instance |
 | `Directory.GetLogicalDrives` | the host's drives | the virtual root |
@@ -163,7 +164,9 @@ test is skipped for it. The skips are:
   `IOException`;
 - `Directory.SetCurrentDirectory` accepts a directory that does not exist;
 - a relative symbolic link target is taken against the current directory rather than the
-  directory holding the link.
+  directory holding the link;
+- a path beginning with two separators, such as the `//b` that `Path.Join("/", "/b")`
+  spells, does not name `/b`.
 
 A test that passes on `MockFileSystem` because of one of these can fail against
 `DirFileSystem`. Beyond these, `MockFileSystem` does not confine anything, and the
