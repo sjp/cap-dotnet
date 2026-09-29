@@ -122,6 +122,13 @@ internal static class MemoryPathWalk
             {
                 if ((options & ConfinedResolveOptions.RefuseSymlinks) != 0)
                 {
+                    // A refused final link still holds the name, and an exclusive creation is
+                    // refused for that before the link is looked at, as O_EXCL is by openat2.
+                    if (isFinal && !mustBeDirectory)
+                    {
+                        result = new MemoryWalkResult(next, current, component, mustBeDirectory);
+                    }
+
                     return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
                 }
 

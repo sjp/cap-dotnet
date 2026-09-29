@@ -248,6 +248,24 @@ public sealed class ThroughDirTests
 
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void An_exclusive_creation_on_a_link_under_deny_is_refused_as_taken(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("target", "t");
+        fs.AddSymbolicLink("link", "target");
+        fs.AddSymbolicLink("dangling", "nowhere");
+
+        using Dir root = fs.OpenRoot(SymlinkPolicy.Deny);
+
+        Assert.Equal(CapErrorKind.AlreadyExists, CapIOException.KindOf(Assert.ThrowsAny<IOException>(() => root.CreateNewFile("link"))));
+        Assert.Equal(CapErrorKind.AlreadyExists, CapIOException.KindOf(Assert.ThrowsAny<IOException>(() => root.CreateNewFile("dangling"))));
+        Assert.Equal(["dangling", "link", "target"], fs.GetEntries());
+        Assert.Equal("t", fs.ReadAllText("target"));
+        Assert.False(fs.Exists("nowhere"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public void Scratch_directories_and_files_work_beneath_a_root(ResolutionBackend resolution)
     {
         InMemoryFileSystem fs = Resolutions.Create(resolution);

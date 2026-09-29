@@ -5,7 +5,8 @@ namespace Cap.Std.Testing.Tests;
 
 /// <summary>
 /// An attempt to leave a handle's tree through an in-memory filesystem is refused exactly as
-/// it is on disk: the same exception type and the same kind.
+/// it is on disk: the same exception type and the same kind. So is an exclusive creation on a
+/// name a link holds, which a root that denies links refuses for the name, not for the link.
 /// </summary>
 /// <remarks>
 /// Each case is run against a tree on disk built the same way, and the two refusals compared,
@@ -21,6 +22,8 @@ public sealed class EscapeParityTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(_disk.FullName, "sandbox", "inner"));
         Directory.CreateDirectory(Path.Combine(_disk.FullName, "outside"));
+        Directory.CreateDirectory(Path.Combine(_disk.FullName, "links"));
+        File.WriteAllText(Path.Combine(_disk.FullName, "links", "target"), "t");
         File.WriteAllText(Path.Combine(_disk.FullName, "outside", "secret.txt"), "secret");
         // Windows without the privilege to create links cannot build the cases on disk to
         // compare against, and they are skipped.
@@ -30,6 +33,8 @@ public sealed class EscapeParityTests : IDisposable
                 Directory.CreateSymbolicLink(Path.Combine(_disk.FullName, "sandbox", "out"), Path.Combine("..", "outside"));
                 File.CreateSymbolicLink(
                     Path.Combine(_disk.FullName, "sandbox", "inner", "up"), Path.Combine("..", "..", "outside", "secret.txt"));
+                File.CreateSymbolicLink(Path.Combine(_disk.FullName, "links", "link"), "target");
+                File.CreateSymbolicLink(Path.Combine(_disk.FullName, "links", "dangling"), "nowhere");
             },
             out _);
     }
@@ -67,6 +72,41 @@ public sealed class EscapeParityTests : IDisposable
 
         Exception onDisk = Assert.ThrowsAny<Exception>(() => disk.ReadAllBytes(path));
         Exception inMemory = Assert.ThrowsAny<Exception>(() => memory.ReadAllBytes(path));
+
+        Assert.Equal(onDisk.GetType(), inMemory.GetType());
+        Assert.Equal(CapIOException.KindOf(onDisk), CapIOException.KindOf(inMemory));
+    }
+
+    public static TheoryData<ResolutionBackend, string> LinkNames()
+    {
+        TheoryData<ResolutionBackend, string> cases = [];
+        foreach (ResolutionBackend resolution in (ResolutionBackend[])[ResolutionBackend.PortableWalk, ResolutionBackend.ConfinedOpen])
+        {
+            foreach (string name in (string[])["link", "dangling"])
+            {
+                cases.Add(resolution, name);
+            }
+        }
+
+        return cases;
+    }
+
+    [Theory]
+    [MemberData(nameof(LinkNames))]
+    public void An_exclusive_creation_on_a_link_under_deny_is_refused_as_it_is_on_disk(ResolutionBackend resolution, string name)
+    {
+        ExpectedHostFeatures.Require(HostFeature.Symlinks, _linksAvailable, "The disk tree to compare against cannot be built.");
+
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { Resolution = resolution });
+        fs.AddFile("links/target", "t");
+        fs.AddSymbolicLink("links/link", "target");
+        fs.AddSymbolicLink("links/dangling", "nowhere");
+
+        using Dir memory = fs.OpenRoot("links", SymlinkPolicy.Deny);
+        using Dir disk = Dir.Open(Path.Combine(_disk.FullName, "links"), AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+
+        Exception onDisk = Assert.ThrowsAny<Exception>(() => disk.CreateNewFile(name));
+        Exception inMemory = Assert.ThrowsAny<Exception>(() => memory.CreateNewFile(name));
 
         Assert.Equal(onDisk.GetType(), inMemory.GetType());
         Assert.Equal(CapIOException.KindOf(onDisk), CapIOException.KindOf(inMemory));
