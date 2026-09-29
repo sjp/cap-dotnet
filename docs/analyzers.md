@@ -10,7 +10,10 @@ capability confines.
 
 **It is not a security boundary.** A compiler diagnostic stops only code that is compiled
 with the analyzer and does not suppress it, and it sees only what is written in source,
-not what reflection or a dependency does at run time. It is a tool for cooperating code:
+not what reflection or a dependency does at run time. A call bound at run time is invisible
+to it too: `File.Exists((dynamic)path)` is chosen by the runtime binder, so there is no
+member in the compilation to compare with the lists, and `typeof(File).GetMethod(...)` is
+just reflection. It is a tool for cooperating code:
 it keeps a codebase honest about where its authority comes from. Untrusted *code* needs
 an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 
@@ -18,7 +21,7 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 
 | ID | Reports | Default |
 |---|---|---|
-| `CAP0001` | The filesystem reached by path: `File`, `Directory`, `FileInfo`, `DirectoryInfo`, `FileSystemWatcher`, `DriveInfo`, `ZipFile`, the path constructors of `FileStream`, `StreamReader` and `StreamWriter`, `Environment.CurrentDirectory`, `Path.GetFullPath(string)`, `Path.GetTempPath`, `Path.GetTempFileName`, and the constructors of the ambient `IFileSystem` implementations: System.IO.Abstractions' `FileSystem`, `FileWrapper`, `DirectoryWrapper`, `FileInfoWrapper`, `DirectoryInfoWrapper`, `DriveInfoWrapper`, `PathWrapper`, `FileSystemWatcherWrapper` and `FileSystemWatcherFactory`, and Testably's `RealFileSystem` | off |
+| `CAP0001` | The filesystem reached by path: `File`, `Directory`, `FileInfo`, `DirectoryInfo`, `FileSystemWatcher`, `DriveInfo`, `ZipFile`, the path constructors of `FileStream`, `StreamReader` and `StreamWriter`, `Environment.CurrentDirectory`, `Path.GetFullPath(string)`, `Path.GetTempPath`, `Path.GetTempFileName`, `Environment.GetFolderPath`; archives extracted to or filled from a path (`TarFile`, `TarEntry.ExtractToFile`, `ZipFileExtensions.ExtractToDirectory`, `ExtractToFile`, `CreateEntryFromFile` and their async forms); programs and code run or loaded by path (every `Process.Start`, `Assembly.LoadFrom`/`LoadFile`/`UnsafeLoadFrom`, `AssemblyLoadContext.LoadFromAssemblyPath`/`LoadFromNativeImagePath`/`LoadUnmanagedDllFromPath`, `NativeLibrary.Load`/`TryLoad`); the path overloads of `XDocument`, `XElement` and `XStreamingElement` `Load`/`Save`, `XmlReader.Create`, `XmlWriter.Create`, `XmlDocument.Load`/`Save`, `XmlTextReader`, `XmlTextWriter`, `XPathDocument` and `XslCompiledTransform.Load`/`Transform`; the path overloads of `MemoryMappedFile.CreateFromFile`; the name-taking constructors of `NamedPipeClientStream` and `NamedPipeServerStream`, and `NamedPipeServerStreamAcl.Create`; `Socket.SendFile`, `SendFileAsync` and `BeginSendFile`; certificates read by path (`X509CertificateLoader.*FromFile`, the path constructors of `X509Certificate` and `X509Certificate2`, `CreateFromCertFile`, `CreateFromSignedFile`, `CreateFromPemFile`, `CreateFromEncryptedPemFile`, `GetCertContentType(string)`, and the path overloads of `X509Certificate2Collection.Import` and `ImportFromPemFile`); and the constructors of the ambient `IFileSystem` implementations: System.IO.Abstractions' `FileSystem`, `FileWrapper`, `DirectoryWrapper`, `FileInfoWrapper`, `DirectoryInfoWrapper`, `DriveInfoWrapper`, `PathWrapper`, `FileSystemWatcherWrapper` and `FileSystemWatcherFactory`, and Testably's `RealFileSystem` | off |
 | `CAP0002` | The network reached by address: `Socket.Bind`, `Connect`, `ConnectAsync`, `SendTo`, `SendToAsync`, `TcpListener`, `TcpClient`, `UdpClient`, and `Dns` | off |
 | `CAP0003` | `AmbientAuthority.Acquire()` called outside a composition root | warning |
 | `CAP0004` | A raw handle taken out of a capability: `Dir.UnsafeGetHandle()`, `CapFile.UnsafeGetHandle()` | info |
@@ -29,7 +32,10 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 
 The exact lists behind `CAP0001`, `CAP0002`, `CAP0006` and `CAP0007` are in
 [`src/Cap.Analyzers/Lists`](../src/Cap.Analyzers/Lists), and each diagnostic's message says
-what to use instead.
+what to use instead. Where a member has overloads over a `Stream`, a reader or writer, or a
+handle the caller already holds, only the overloads that take a path or name are listed:
+`XDocument.Load(stream)` and `new NamedPipeServerStream(direction, isAsync, isConnected, handle)`
+reach nothing themselves.
 
 A type in a list covers every class derived from it, including their constructors and
 overrides. So `CAP0007` reports `new RNGCryptoServiceProvider()` (derived from
@@ -197,6 +203,9 @@ that parse and resolve paths also ban `System.IO.Path` outright, through
 places are allowed to reach the real thing, and each one suppresses the rule at that line and
 says why. `CapClock` and `CapRandom` are where the clock and entropy enter, behind a token.
 The socket calls in `Cap.Net` come after the address has been checked against a pool.
+`Cap.Directories` reads `Environment.GetFolderPath` only inside `ProjectDirs.From`, after its
+token has been demanded, and the Windows backend loads `ntdll.dll` by module name to probe
+for an export.
 
 ## Why not BannedApiAnalyzers
 

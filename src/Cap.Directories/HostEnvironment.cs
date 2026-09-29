@@ -47,10 +47,14 @@ internal sealed class HostEnvironment
             : OperatingSystem.IsMacOS() ? DirectoryConvention.Apple
             : DirectoryConvention.Xdg,
         Environment.GetEnvironmentVariable,
-        // The runtime's answer rather than HOME alone: it reads HOME first, as every other
-        // program does, and falls back to the account database when HOME is unset.
+        // The one ambient read in this package, and it is only made inside ProjectDirs.From,
+        // after the token has been demanded. The runtime's answer rather than HOME alone: it
+        // reads HOME first, as every other program does, and falls back to the account
+        // database when HOME is unset.
+#pragma warning disable CAP0001
         () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         folder => Environment.GetFolderPath(folder));
+#pragma warning restore CAP0001
 
     /// <summary>Which rules apply.</summary>
     internal DirectoryConvention Convention { get; }

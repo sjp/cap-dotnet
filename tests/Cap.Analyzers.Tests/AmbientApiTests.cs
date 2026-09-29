@@ -91,6 +91,23 @@ public sealed class AmbientApiTests
     [InlineData("new FileStream(\"x\", FileMode.Open)", "CAP0001")]
     [InlineData("new StreamReader(\"x\")", "CAP0001")]
     [InlineData("new StreamWriter(\"x\", true)", "CAP0001")]
+    [InlineData("Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)", "CAP0001")]
+    [InlineData("System.Reflection.Assembly.LoadFrom(\"x\")", "CAP0001")]
+    [InlineData("System.Reflection.Assembly.LoadFile(\"x\")", "CAP0001")]
+    [InlineData("System.Runtime.Loader.AssemblyLoadContext.Default.LoadFromAssemblyPath(\"x\")", "CAP0001")]
+    [InlineData("System.Runtime.InteropServices.NativeLibrary.Load(\"x\")", "CAP0001")]
+    [InlineData("System.Xml.Linq.XDocument.Load(\"x\")", "CAP0001")]
+    [InlineData("System.Xml.Linq.XElement.Load(\"x\", System.Xml.Linq.LoadOptions.None)", "CAP0001")]
+    [InlineData("System.Xml.XmlReader.Create(\"x\")", "CAP0001")]
+    [InlineData("System.Xml.XmlWriter.Create(\"x\")", "CAP0001")]
+    [InlineData("new System.Xml.XmlTextReader(\"x\")", "CAP0001")]
+    [InlineData("new System.Xml.XPath.XPathDocument(\"x\")", "CAP0001")]
+    [InlineData("System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(\"x\")", "CAP0001")]
+    [InlineData("new System.IO.Pipes.NamedPipeClientStream(\"x\")", "CAP0001")]
+    [InlineData("new System.IO.Pipes.NamedPipeServerStream(\"x\")", "CAP0001")]
+    [InlineData("System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificateFromFile(\"x\")", "CAP0001")]
+    [InlineData("new System.Security.Cryptography.X509Certificates.X509Certificate2(\"x\")", "CAP0001")]
+    [InlineData("System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(\"x\")", "CAP0001")]
     [InlineData("new TcpClient(\"example.com\", 80)", "CAP0002")]
     [InlineData("new TcpListener(IPAddress.Any, 80)", "CAP0002")]
     [InlineData("Dns.GetHostAddresses(\"example.com\")", "CAP0002")]
@@ -122,6 +139,12 @@ public sealed class AmbientApiTests
     [InlineData("Path.GetFileName(\"a\")")]
     [InlineData("new FileStream(new SafeFileHandle(), FileAccess.Read)")]
     [InlineData("new StreamReader(Stream.Null)")]
+    [InlineData("Process.GetCurrentProcess().Id")]
+    [InlineData("System.Xml.Linq.XDocument.Load(Stream.Null)")]
+    [InlineData("System.Xml.XmlReader.Create(Stream.Null)")]
+    [InlineData("new System.IO.Pipes.NamedPipeServerStream(System.IO.Pipes.PipeDirection.In, false, false, new SafePipeHandle())")]
+    [InlineData("System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(new SafeFileHandle(), null, 0, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.Read, HandleInheritability.None, false)")]
+    [InlineData("System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificate(new byte[0])")]
     [InlineData("Task.Delay(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
     [InlineData("Task.CompletedTask.WaitAsync(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
     [InlineData("new CancellationTokenSource(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
@@ -148,6 +171,64 @@ public sealed class AmbientApiTests
             Wrap("(Func<string, string>)File.ReadAllText"), severities: AllAmbientRulesOn);
 
         Assert.Equal("CAP0001", Assert.Single(diagnostics).Id);
+    }
+
+    [Fact]
+    public async Task Path_based_extraction_loading_and_sending_are_reported()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            """
+            using System.Diagnostics;
+            using System.Formats.Tar;
+            using System.IO.Compression;
+            using System.Net.Sockets;
+            using System.Xml.Linq;
+
+            public static class Uses
+            {
+                public static void Reach(ZipArchive archive, TarEntry tar, XDocument document, Socket socket, string path)
+                {
+                    TarFile.ExtractToDirectory(path, path, false);
+                    archive.ExtractToDirectory(path);
+                    ZipFileExtensions.ExtractToDirectory(archive, path, true);
+                    archive.Entries[0].ExtractToFile(path);
+                    archive.CreateEntryFromFile(path, "entry");
+                    tar.ExtractToFile(path, false);
+                    document.Save(path);
+                    Process.Start(path);
+                    Process.Start(new ProcessStartInfo(path));
+                    socket.SendFile(path);
+                }
+            }
+            """,
+            severities: AllAmbientRulesOn);
+
+        Assert.Equal(
+            [
+                "TarFile.ExtractToDirectory(path, path, false)",
+                "archive.ExtractToDirectory(path)",
+                "ZipFileExtensions.ExtractToDirectory(archive, path, true)",
+                "archive.Entries[0].ExtractToFile(path)",
+                "archive.CreateEntryFromFile(path, \"entry\")",
+                "tar.ExtractToFile(path, false)",
+                "document.Save(path)",
+                "Process.Start(path)",
+                "Process.Start(new ProcessStartInfo(path))",
+                "socket.SendFile(path)",
+            ],
+            diagnostics.Select(d => d.Flagged()));
+        Assert.All(diagnostics, d => Assert.Equal("CAP0001", d.Id));
+    }
+
+    [Fact]
+    public async Task A_call_bound_at_run_time_through_dynamic_is_not_seen()
+    {
+        // Documented as a blind spot in docs/analyzers.md: the overload is chosen by the
+        // runtime binder, so there is no member in the compilation to compare with the lists.
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            Wrap("File.Exists((dynamic)\"x\")"), severities: AllAmbientRulesOn);
+
+        Assert.Empty(diagnostics);
     }
 
     [Fact]

@@ -47,6 +47,9 @@ internal static class DirectoryQueryEntryPoint
     /// nothing to free afterwards that would ever be unloaded.
     /// </remarks>
     internal static bool IsExported(string name) =>
+        // A module name, not a path, and the one module the loader always has mapped.
+#pragma warning disable CAP0001
         NativeLibrary.TryLoad(LibraryName, out nint library) &&
+#pragma warning restore CAP0001
         NativeLibrary.TryGetExport(library, name, out _);
 }

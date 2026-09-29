@@ -36,6 +36,122 @@ P:System.Environment.CurrentDirectory;The process's working directory is reachab
 M:System.IO.Path.GetFullPath(System.String);Resolves against the process's working directory and collapses `..` without looking at the filesystem, which is the wrong answer whenever the component before it is a symbolic link.
 M:System.IO.Path.GetTempPath;Names the system's scratch directory, reachable from anywhere in the process. Use Cap.Std.CapTempDir.
 M:System.IO.Path.GetTempFileName;Creates a file in the system's scratch directory by path, and hands back a name another process can race. Use Cap.Std.CapTempFile.
+M:System.Environment.GetFolderPath;Names one of the account's or the machine's well-known directories, reachable from anywhere in the process. Use Cap.Directories.ProjectDirs, or pass a Cap.Std.Dir down.
+
+# Archives. ZipFile is listed above; these are the members that extract to, or add from, a path
+# while the archive itself came in as a stream. ZipFileExtensions are extension methods, and are
+# reported written either way (archive.ExtractToDirectory(path) or the static call).
+T:System.Formats.Tar.TarFile;Creates and extracts by path, against the whole filesystem. Read the archive with a TarReader over a stream, and write each entry through a Cap.Std.Dir.
+M:System.Formats.Tar.TarEntry.ExtractToFile;Writes the entry by path, against the whole filesystem. Create the file through a Cap.Std.Dir and copy the entry's DataStream into it.
+M:System.Formats.Tar.TarEntry.ExtractToFileAsync;Writes the entry by path, against the whole filesystem. Create the file through a Cap.Std.Dir and copy the entry's DataStream into it.
+M:System.IO.Compression.ZipFileExtensions.ExtractToDirectory;Extracts by path, against the whole filesystem. Create each entry's file through a Cap.Std.Dir and copy ZipArchiveEntry.Open() into it.
+M:System.IO.Compression.ZipFileExtensions.ExtractToDirectoryAsync;Extracts by path, against the whole filesystem. Create each entry's file through a Cap.Std.Dir and copy ZipArchiveEntry.Open() into it.
+M:System.IO.Compression.ZipFileExtensions.ExtractToFile;Writes the entry by path, against the whole filesystem. Create the file through a Cap.Std.Dir and copy ZipArchiveEntry.Open() into it.
+M:System.IO.Compression.ZipFileExtensions.ExtractToFileAsync;Writes the entry by path, against the whole filesystem. Create the file through a Cap.Std.Dir and copy ZipArchiveEntry.Open() into it.
+M:System.IO.Compression.ZipFileExtensions.CreateEntryFromFile;Reads the file by path, against the whole filesystem. Open it through a Cap.Std.Dir and copy its stream into ZipArchive.CreateEntry(name).Open().
+M:System.IO.Compression.ZipFileExtensions.CreateEntryFromFileAsync;Reads the file by path, against the whole filesystem. Open it through a Cap.Std.Dir and copy its stream into ZipArchive.CreateEntry(name).Open().
+
+# Running and loading code by path. Every overload of Process.Start is listed: the ones that
+# take a ProcessStartInfo run its FileName, which is a path like any other. The rest of Process
+# (GetCurrentProcess, Id, WaitForExit) reaches nothing by path and is left alone.
+M:System.Diagnostics.Process.Start;Runs a program named by path, found against the whole filesystem and the process's PATH. Nothing a capability grants covers starting a process, so keep this in a composition root and suppress it there.
+M:System.Reflection.Assembly.LoadFrom;Loads code by path, against the whole filesystem. Read the bytes through a Cap.Std.Dir and load them with AssemblyLoadContext.LoadFromStream.
+M:System.Reflection.Assembly.LoadFile;Loads code by path, against the whole filesystem. Read the bytes through a Cap.Std.Dir and load them with AssemblyLoadContext.LoadFromStream.
+M:System.Reflection.Assembly.UnsafeLoadFrom;Loads code by path, against the whole filesystem. Read the bytes through a Cap.Std.Dir and load them with AssemblyLoadContext.LoadFromStream.
+M:System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyPath;Loads code by path, against the whole filesystem. Read the bytes through a Cap.Std.Dir and load them with AssemblyLoadContext.LoadFromStream.
+M:System.Runtime.Loader.AssemblyLoadContext.LoadFromNativeImagePath;Loads code by path, against the whole filesystem. Read the bytes through a Cap.Std.Dir and load them with AssemblyLoadContext.LoadFromStream.
+M:System.Runtime.Loader.AssemblyLoadContext.LoadUnmanagedDllFromPath;Loads native code by path, against the whole filesystem and the loader's search path. Nothing a capability grants covers loading a native library, so keep this in a composition root and suppress it there.
+M:System.Runtime.InteropServices.NativeLibrary.Load;Loads native code by path, against the whole filesystem and the loader's search path. Nothing a capability grants covers loading a native library, so keep this in a composition root and suppress it there.
+M:System.Runtime.InteropServices.NativeLibrary.TryLoad;Loads native code by path, against the whole filesystem and the loader's search path. Nothing a capability grants covers loading a native library, so keep this in a composition root and suppress it there.
+
+# XML read or written by path or URI. Only the overloads whose string is a location are listed;
+# the ones over a Stream, TextReader, TextWriter or XmlReader/XmlWriter reach nothing themselves.
+# XmlTextReader's (string, Stream) and (string, TextReader) forms use the string only as a base
+# URI and are left out.
+M:System.Xml.Linq.XDocument.Load(System.String);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and load its stream.
+M:System.Xml.Linq.XDocument.Load(System.String,System.Xml.Linq.LoadOptions);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and load its stream.
+M:System.Xml.Linq.XDocument.Save(System.String);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.Linq.XDocument.Save(System.String,System.Xml.Linq.SaveOptions);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.Linq.XElement.Load(System.String);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and load its stream.
+M:System.Xml.Linq.XElement.Load(System.String,System.Xml.Linq.LoadOptions);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and load its stream.
+M:System.Xml.Linq.XElement.Save(System.String);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.Linq.XElement.Save(System.String,System.Xml.Linq.SaveOptions);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.Linq.XStreamingElement.Save(System.String);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.Linq.XStreamingElement.Save(System.String,System.Xml.Linq.SaveOptions);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.XmlReader.Create(System.String);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.XmlReader.Create(System.String,System.Xml.XmlReaderSettings);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.XmlReader.Create(System.String,System.Xml.XmlReaderSettings,System.Xml.XmlParserContext);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.XmlWriter.Create(System.String);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and write its stream.
+M:System.Xml.XmlWriter.Create(System.String,System.Xml.XmlWriterSettings);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and write its stream.
+M:System.Xml.XmlDocument.Load(System.String);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and load its stream.
+M:System.Xml.XmlDocument.Save(System.String);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and save to its stream.
+M:System.Xml.XmlTextReader.#ctor(System.String);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.XmlTextReader.#ctor(System.String,System.Xml.XmlNameTable);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.XmlTextWriter.#ctor(System.String,System.Text.Encoding);Writes by path, against the whole filesystem. Create the file through a Cap.Std.Dir and write its stream.
+M:System.Xml.XPath.XPathDocument.#ctor(System.String);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.XPath.XPathDocument.#ctor(System.String,System.Xml.XmlSpace);Reads by path or URI, against the whole filesystem. Open the file through a Cap.Std.Dir and read its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Load(System.String);Reads the stylesheet by path or URI, against the whole filesystem. Open it through a Cap.Std.Dir and load it from an XmlReader over its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Load(System.String,System.Xml.Xsl.XsltSettings,System.Xml.XmlResolver);Reads the stylesheet by path or URI, against the whole filesystem. Open it through a Cap.Std.Dir and load it from an XmlReader over its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Transform(System.String,System.Xml.XmlWriter);Reads the input by path or URI, against the whole filesystem. Open it through a Cap.Std.Dir and transform an XmlReader over its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Transform(System.String,System.Xml.Xsl.XsltArgumentList,System.Xml.XmlWriter);Reads the input by path or URI, against the whole filesystem. Open it through a Cap.Std.Dir and transform an XmlReader over its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Transform(System.String,System.Xml.Xsl.XsltArgumentList,System.IO.TextWriter);Reads the input by path or URI, against the whole filesystem. Open it through a Cap.Std.Dir and transform an XmlReader over its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Transform(System.String,System.Xml.Xsl.XsltArgumentList,System.IO.Stream);Reads the input by path or URI, against the whole filesystem. Open it through a Cap.Std.Dir and transform an XmlReader over its stream.
+M:System.Xml.Xsl.XslCompiledTransform.Transform(System.String,System.String);Reads the input and writes the result by path, against the whole filesystem. Open both through a Cap.Std.Dir and transform between their streams.
+
+# Mapping, piping and sending files by name. The overloads of MemoryMappedFile.CreateFromFile
+# and the pipe constructors that take a handle or a FileStream are left out, as FileStream's
+# handle constructors are: they reach only what the caller already holds. A named pipe is an
+# entry in the filesystem on Unix and a machine-wide name on Windows (\\server\pipe\name on the
+# client), reachable from anywhere in the process either way.
+M:System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(System.String);Maps by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and map its handle.
+M:System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(System.String,System.IO.FileMode);Maps by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and map its handle.
+M:System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(System.String,System.IO.FileMode,System.String);Maps by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and map its handle.
+M:System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(System.String,System.IO.FileMode,System.String,System.Int64);Maps by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and map its handle.
+M:System.IO.MemoryMappedFiles.MemoryMappedFile.CreateFromFile(System.String,System.IO.FileMode,System.String,System.Int64,System.IO.MemoryMappedFiles.MemoryMappedFileAccess);Maps by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and map its handle.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String,System.String);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String,System.String,System.IO.Pipes.PipeDirection);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String,System.String,System.IO.Pipes.PipeDirection,System.IO.Pipes.PipeOptions);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String,System.String,System.IO.Pipes.PipeDirection,System.IO.Pipes.PipeOptions,System.Security.Principal.TokenImpersonationLevel);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String,System.String,System.IO.Pipes.PipeDirection,System.IO.Pipes.PipeOptions,System.Security.Principal.TokenImpersonationLevel,System.IO.HandleInheritability);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeClientStream.#ctor(System.String,System.String,System.IO.Pipes.PipeAccessRights,System.IO.Pipes.PipeOptions,System.Security.Principal.TokenImpersonationLevel,System.IO.HandleInheritability);Connects to a pipe by name, reachable from anywhere in the process. Take a connected PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStream.#ctor(System.String);Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStream.#ctor(System.String,System.IO.Pipes.PipeDirection);Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStream.#ctor(System.String,System.IO.Pipes.PipeDirection,System.Int32);Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStream.#ctor(System.String,System.IO.Pipes.PipeDirection,System.Int32,System.IO.Pipes.PipeTransmissionMode);Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStream.#ctor(System.String,System.IO.Pipes.PipeDirection,System.Int32,System.IO.Pipes.PipeTransmissionMode,System.IO.Pipes.PipeOptions);Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStream.#ctor(System.String,System.IO.Pipes.PipeDirection,System.Int32,System.IO.Pipes.PipeTransmissionMode,System.IO.Pipes.PipeOptions,System.Int32,System.Int32);Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.IO.Pipes.NamedPipeServerStreamAcl.Create;Creates a pipe by name, reachable from anywhere in the process. Take a PipeStream, or its SafePipeHandle, from the code that owns the pipe.
+M:System.Net.Sockets.Socket.SendFile;Reads the file by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and send its contents.
+M:System.Net.Sockets.Socket.SendFileAsync;Reads the file by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and send its contents.
+M:System.Net.Sockets.Socket.BeginSendFile;Reads the file by path, against the whole filesystem. Open a Cap.Std.CapFile through a Dir and send its contents.
+
+# Certificates read by path. The (string) constructors of X509Certificate and X509Certificate2 are
+# listed separately because a constructor is not an override. X509Certificate.Import and
+# X509Certificate2.Import throw PlatformNotSupportedException on .NET and are left out.
+M:System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificateFromFile;Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.LoadCertificate.
+M:System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12FromFile;Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.LoadPkcs12.
+M:System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12CollectionFromFile;Reads the certificates by path, against the whole filesystem. Read their bytes through a Cap.Std.Dir and use X509CertificateLoader.LoadPkcs12Collection.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.#ctor(System.String);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.#ctor(System.String,System.String);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.#ctor(System.String,System.Security.SecureString);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.#ctor(System.String,System.String,System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.#ctor(System.String,System.Security.SecureString,System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromCertFile;Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile;Reads the signed file by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.#ctor(System.String);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.#ctor(System.String,System.String);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.#ctor(System.String,System.Security.SecureString);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.#ctor(System.String,System.String,System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.#ctor(System.String,System.Security.SecureString,System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.#ctor(System.String,System.ReadOnlySpan{System.Char},System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and use X509CertificateLoader.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile;Reads the certificate and key by path, against the whole filesystem. Read their text through a Cap.Std.Dir and use X509Certificate2.CreateFromPem.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromEncryptedPemFile;Reads the certificate and key by path, against the whole filesystem. Read their text through a Cap.Std.Dir and use X509Certificate2.CreateFromEncryptedPem.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2.GetCertContentType(System.String);Reads the certificate by path, against the whole filesystem. Read its bytes through a Cap.Std.Dir and pass them instead.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2Collection.Import(System.String);Reads the certificates by path, against the whole filesystem. Read their bytes through a Cap.Std.Dir and use X509CertificateLoader.LoadPkcs12Collection or ImportFromPem.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2Collection.Import(System.String,System.String,System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificates by path, against the whole filesystem. Read their bytes through a Cap.Std.Dir and use X509CertificateLoader.LoadPkcs12Collection or ImportFromPem.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2Collection.Import(System.String,System.ReadOnlySpan{System.Char},System.Security.Cryptography.X509Certificates.X509KeyStorageFlags);Reads the certificates by path, against the whole filesystem. Read their bytes through a Cap.Std.Dir and use X509CertificateLoader.LoadPkcs12Collection or ImportFromPem.
+M:System.Security.Cryptography.X509Certificates.X509Certificate2Collection.ImportFromPemFile;Reads the certificates by path, against the whole filesystem. Read their text through a Cap.Std.Dir and use ImportFromPem.
 
 # System.IO.Abstractions' FileSystem, and the wrappers it is assembled from, pass every call
 # straight to System.IO: they are the whole filesystem behind an interface. Only construction
