@@ -226,7 +226,7 @@ internal static class PortableResolver
                     return rootInfo;
                 }
 
-                stack.SetRootVolumeId(info.VolumeId);
+                stack.SetRootMountId(info.MountId);
             }
 
             while (pending.TryNext(out ReadOnlySpan<char> component))
@@ -320,10 +320,10 @@ internal static class PortableResolver
             return opened.Error;
         }
 
-        ulong volumeId = 0;
+        ulong mountId = 0;
         if ((options & ConfinedResolveOptions.RefuseMountCrossing) != 0)
         {
-            CapError crossing = CheckVolume(ops, in stack, opened.Value, out volumeId);
+            CapError crossing = CheckMount(ops, in stack, opened.Value, out mountId);
             if (crossing.IsFailure)
             {
                 opened.Value.Dispose();
@@ -331,7 +331,7 @@ internal static class PortableResolver
             }
         }
 
-        if (!stack.TryPush(opened.Value, volumeId))
+        if (!stack.TryPush(opened.Value, mountId))
         {
             opened.Value.Dispose();
             return CapError.FromCategory(CapErrorCategory.PathTooDeep);
@@ -417,7 +417,7 @@ internal static class PortableResolver
 
             if ((options & ConfinedResolveOptions.RefuseMountCrossing) != 0)
             {
-                CapError crossing = CheckVolume(ops, in stack, opened.Value, out _);
+                CapError crossing = CheckMount(ops, in stack, opened.Value, out _);
                 if (crossing.IsFailure)
                 {
                     opened.Value.Dispose();
@@ -456,7 +456,7 @@ internal static class PortableResolver
                     return info;
                 }
             }
-            else if (child.VolumeId != stack.TopVolumeId)
+            else if (child.MountId != stack.TopMountId)
             {
                 return CapError.FromCategory(CapErrorCategory.CrossDevice);
             }
@@ -528,7 +528,7 @@ internal static class PortableResolver
         {
             if ((options & ConfinedResolveOptions.RefuseMountCrossing) != 0)
             {
-                CapError crossing = CheckVolume(ops, in stack, directory, out _);
+                CapError crossing = CheckMount(ops, in stack, directory, out _);
                 if (crossing.IsFailure)
                 {
                     directory.Dispose();
@@ -788,30 +788,32 @@ internal static class PortableResolver
     };
 
     /// <summary>
-    /// Confirms that a newly opened directory is on the same filesystem as the one it was
-    /// found in.
+    /// Confirms that a newly opened directory was reached through the same mount as the one
+    /// it was found in.
     /// </summary>
     /// <remarks>
     /// Asked of the open handle rather than of the name, so that the answer is about the
     /// object resolution actually reached. A mount inside the sandbox is a piece of an
     /// unrelated filesystem grafted in by whoever controls the mount table, who is outside
-    /// the trust boundary, which is why a caller may ask not to cross one.
+    /// the trust boundary, which is why a caller may ask not to cross one. The mount rather
+    /// than the device is compared, because a bind mount from the same filesystem keeps the
+    /// device number of the directory it is mounted on.
     /// </remarks>
-    private static CapError CheckVolume(
+    private static CapError CheckMount(
         IPlatformOps ops,
         in DirectoryStack stack,
         SafeDirHandle opened,
-        out ulong volumeId)
+        out ulong mountId)
     {
         CapError error = ops.StatHandle(opened, out CapNodeInfo info);
         if (error.IsFailure)
         {
-            volumeId = 0;
+            mountId = 0;
             return error;
         }
 
-        volumeId = info.VolumeId;
-        return info.VolumeId == stack.TopVolumeId
+        mountId = info.MountId;
+        return info.MountId == stack.TopMountId
             ? CapError.Success
             : CapError.FromCategory(CapErrorCategory.CrossDevice);
     }

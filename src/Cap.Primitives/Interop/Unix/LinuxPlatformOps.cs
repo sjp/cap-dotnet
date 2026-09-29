@@ -1904,7 +1904,8 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                     directoryFd,
                     name,
                     flags | LinuxConstants.AT_STATX_DONT_SYNC,
-                    LinuxConstants.STATX_TYPE | LinuxConstants.STATX_MODE | LinuxConstants.STATX_INO,
+                    LinuxConstants.STATX_TYPE | LinuxConstants.STATX_MODE | LinuxConstants.STATX_INO |
+                    LinuxConstants.STATX_MNT_ID,
                     &buffer);
                 if (result < 0)
                 {
@@ -1928,7 +1929,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, LinuxErrno.EOPNOTSUPP);
         }
 
-        info = new CapNodeInfo(buffer.NodeType, buffer.VolumeId, buffer.Inode);
+        // A kernel older than 5.8 has no mount id to give, and a mount crossing is then
+        // recognised only where the device number changes, as it was before the field existed.
+        ulong? mountId = (buffer.Mask & LinuxConstants.STATX_MNT_ID) != 0 ? buffer.MountId : null;
+        info = new CapNodeInfo(buffer.NodeType, buffer.VolumeId, buffer.Inode, mountId: mountId);
         return CapError.Success;
     }
 

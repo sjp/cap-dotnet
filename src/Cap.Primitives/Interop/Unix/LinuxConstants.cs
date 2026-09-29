@@ -424,6 +424,12 @@ internal static class LinuxConstants
     public const uint STATX_SIZE = 0x0200;
 
     /// <summary>
+    /// Ask for the id of the mount the node was reached through. Linux 5.8 and later; an
+    /// older kernel leaves it out of the reply's mask rather than failing the call.
+    /// </summary>
+    public const uint STATX_MNT_ID = 0x1000;
+
+    /// <summary>
     /// Ask for the creation time. Set apart from the rest because it is the one field the
     /// kernel routinely declines: several filesystems do not record when a file was created,
     /// and the reply's own mask is the only way to find out whether this one did.

@@ -32,7 +32,7 @@ internal ref struct DirectoryStack
     private readonly SafeDirHandle _root;
     private Entry[]? _entries;
     private int _depth;
-    private ulong _rootVolumeId;
+    private ulong _rootMountId;
 
     /// <summary>Starts a stack whose base is <paramref name="root"/>.</summary>
     public DirectoryStack(SafeDirHandle root)
@@ -40,7 +40,7 @@ internal ref struct DirectoryStack
         _root = root;
         _entries = null;
         _depth = 0;
-        _rootVolumeId = 0;
+        _rootMountId = 0;
     }
 
     /// <summary>
@@ -53,15 +53,16 @@ internal ref struct DirectoryStack
     public readonly SafeDirHandle Top => _depth == 0 ? _root : _entries![_depth - 1].Handle;
 
     /// <summary>
-    /// Which filesystem the top directory is on, or zero when the walk was not asked to care.
+    /// Which mount the top directory was reached through, or zero when the walk was not asked
+    /// to care.
     /// </summary>
-    public readonly ulong TopVolumeId => _depth == 0 ? _rootVolumeId : _entries![_depth - 1].VolumeId;
+    public readonly ulong TopMountId => _depth == 0 ? _rootMountId : _entries![_depth - 1].MountId;
 
     /// <summary>
-    /// Records which filesystem the root is on, so that a step onto another one can be
-    /// recognised as having crossed a mount point.
+    /// Records which mount the root was reached through, so that a step onto another one can
+    /// be recognised as having crossed a mount point.
     /// </summary>
-    public void SetRootVolumeId(ulong volumeId) => _rootVolumeId = volumeId;
+    public void SetRootMountId(ulong mountId) => _rootMountId = mountId;
 
     /// <summary>
     /// Takes ownership of <paramref name="handle"/> and makes it the new top.
@@ -70,7 +71,7 @@ internal ref struct DirectoryStack
     /// False when the depth limit is reached, in which case the handle is not taken and the
     /// caller still owns it.
     /// </returns>
-    public bool TryPush(SafeDirHandle handle, ulong volumeId)
+    public bool TryPush(SafeDirHandle handle, ulong mountId)
     {
         if (_depth == PortableResolver.MaxDepth)
         {
@@ -78,7 +79,7 @@ internal ref struct DirectoryStack
         }
 
         EnsureCapacity(_depth + 1);
-        _entries![_depth] = new Entry(handle, volumeId);
+        _entries![_depth] = new Entry(handle, mountId);
         _depth++;
         return true;
     }
@@ -154,17 +155,17 @@ internal ref struct DirectoryStack
         _entries = grown;
     }
 
-    /// <summary>One directory the walk is standing on, and the filesystem it is on.</summary>
+    /// <summary>One directory the walk is standing on, and the mount it was reached through.</summary>
     private readonly struct Entry
     {
-        public Entry(SafeDirHandle handle, ulong volumeId)
+        public Entry(SafeDirHandle handle, ulong mountId)
         {
             Handle = handle;
-            VolumeId = volumeId;
+            MountId = mountId;
         }
 
         public SafeDirHandle Handle { get; }
 
-        public ulong VolumeId { get; }
+        public ulong MountId { get; }
     }
 }

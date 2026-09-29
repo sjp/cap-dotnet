@@ -16,21 +16,22 @@ namespace Cap.Primitives.Interop;
 /// answer to "is this the same object", and they are stable across a rename.
 /// </para>
 /// <para>
-/// <see cref="VolumeId"/> also answers whether a step crossed a mount point, which a
-/// sandbox may want to refuse: a mount appearing inside the subtree is a piece of an
-/// unrelated filesystem grafted in, and whoever controls the mount table is outside the
-/// trust boundary.
+/// <see cref="MountId"/> answers whether a step crossed a mount point, which a sandbox may
+/// want to refuse: a mount appearing inside the subtree is a piece of an unrelated
+/// filesystem — or of another part of the same one — grafted in, and whoever controls the
+/// mount table is outside the trust boundary.
 /// </para>
 /// </remarks>
 internal readonly struct CapNodeInfo
 {
     /// <summary>Creates node information.</summary>
-    public CapNodeInfo(CapNodeType type, ulong volumeId, ulong nodeId, uint reparseTag = 0)
+    public CapNodeInfo(CapNodeType type, ulong volumeId, ulong nodeId, uint reparseTag = 0, ulong? mountId = null)
     {
         Type = type;
         VolumeId = volumeId;
         NodeId = nodeId;
         ReparseTag = reparseTag;
+        MountId = mountId ?? volumeId;
     }
 
     /// <summary>What the node is.</summary>
@@ -51,6 +52,19 @@ internal readonly struct CapNodeInfo
     public ulong NodeId { get; }
 
     /// <summary>
+    /// The mount the node was reached through: the Linux <c>statx</c> mount id where the
+    /// kernel reports one, and otherwise <see cref="VolumeId"/>.
+    /// </summary>
+    /// <remarks>
+    /// Not the same question as <see cref="VolumeId"/>. A bind mount of a directory on the
+    /// same filesystem keeps its device number, so a walk comparing volumes steps into it
+    /// without noticing, where the kernel's own refusal to cross a mount does not. Two
+    /// values from different sources are never compared: one host either reports mount ids
+    /// for every node or for none.
+    /// </remarks>
+    public ulong MountId { get; }
+
+    /// <summary>
     /// Windows only, and zero elsewhere: the reparse tag, when the node has one. That is
     /// always so when <see cref="Type"/> is <see cref="CapNodeType.SymbolicLink"/> or
     /// <see cref="CapNodeType.UnknownReparsePoint"/>, and can be so for a
@@ -63,6 +77,9 @@ internal readonly struct CapNodeInfo
 
     /// <summary>True when the node is on a different filesystem from <paramref name="other"/>.</summary>
     public bool CrossesVolumeBoundaryFrom(in CapNodeInfo other) => VolumeId != other.VolumeId;
+
+    /// <summary>True when the node was reached through a different mount from <paramref name="other"/>.</summary>
+    public bool CrossesMountFrom(in CapNodeInfo other) => MountId != other.MountId;
 
     /// <summary>True when this and <paramref name="other"/> name the same filesystem object.</summary>
     public bool IsSameNodeAs(in CapNodeInfo other) =>
