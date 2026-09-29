@@ -104,6 +104,29 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// A macOS process is one of the two architectures the stat and variadic imports are
+    /// chosen between.
+    /// </summary>
+    /// <remarks>
+    /// The layouts above are the same on both, but which C library entry points fill them is
+    /// not: the Intel process reaches them through the <c>$INODE64</c> spellings and passes a
+    /// variadic argument in a register. CI runs the suite in an Intel process under Rosetta as
+    /// well as natively, and names the architecture it meant each run to have; see
+    /// <c>ProcessArchitectureGuard</c>, which fails a run that landed on the other one. An
+    /// architecture outside these two would have neither import set tested for it.
+    /// </remarks>
+    [Fact]
+    public void Macos_process_architecture_is_one_the_imports_are_chosen_for()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            Assert.Skip("The imports chosen by architecture are macOS ones.");
+        }
+
+        Assert.Contains(RuntimeInformation.ProcessArchitecture, new[] { Architecture.Arm64, Architecture.X64 });
+    }
+
+    /// <summary>
     /// The macOS directory record is the 64-bit-inode layout, with the name starting at the
     /// twenty-first byte.
     /// </summary>

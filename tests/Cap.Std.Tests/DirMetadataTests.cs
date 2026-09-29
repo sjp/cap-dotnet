@@ -402,6 +402,53 @@ public sealed class DirMetadataTests : IDisposable
     }
 
     /// <summary>
+    /// A name, an open handle and a directory entry for one file report the length it was
+    /// written with, one link, and one identity.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Aimed at macOS, where each of the three is read through a different C library entry
+    /// point, and on Intel through a different one again: the undecorated names there still
+    /// fill in the original layout with a 32-bit inode number, and the 64-bit-inode layout the
+    /// library declares is reached only through the <c>$INODE64</c> spellings. A call to the
+    /// wrong one does not fail. It fills the buffer with a layout in which the size and the
+    /// link count sit elsewhere, and the inode number is half as wide, so what comes back is a
+    /// plausible file with the wrong length and an identity the walk would compare wrongly.
+    /// CI runs this in an Intel process under Rosetta as well as natively, so both spellings
+    /// are asked.
+    /// </para>
+    /// <para>
+    /// The length is chosen to fill more than two bytes, so a read from a neighbouring field or
+    /// a truncated one cannot happen to agree with it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_stat_reply_is_read_from_the_sixty_four_bit_layout()
+    {
+        HostFile.WriteAllBytes(Host("measured"), new byte[1_234_567]);
+
+        using Dir root = OpenRoot();
+        CapMetadata byName = root.GetMetadata("measured");
+
+        using CapFile file = root.OpenFile("measured");
+        CapMetadata byHandle = file.GetMetadata();
+
+        Assert.Equal(1_234_567, byName.Length);
+        Assert.Equal(1, byName.LinkCount);
+        Assert.Equal(1_234_567, byHandle.Length);
+        Assert.Equal(1, byHandle.LinkCount);
+        Assert.Equal(byName.FileId, byHandle.FileId);
+
+        // Only where the entry's identity is known to repeat the description's: a container's
+        // union filesystem may record numbers in its directories that no description repeats.
+        if (OperatingSystem.IsMacOS())
+        {
+            DirEntry entry = Assert.Single(root.EnumerateEntries(), candidate => candidate.Name == "measured");
+            Assert.Equal(byName.FileId, entry.FileId);
+        }
+    }
+
+    /// <summary>
     /// A handle keeps describing the object it was opened on after the name it was opened by
     /// has been given to something else.
     /// </summary>

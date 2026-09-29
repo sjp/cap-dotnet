@@ -203,6 +203,47 @@ jobs:
             echo "::endgroup::"
           done
 
+      # ---------------------------------------------------------------------------------
+      # The macOS backend is two sets of imports chosen by architecture: on Intel the stat and
+      # directory calls go through their $INODE64 spellings and the variadic openat and fcntl
+      # take their last argument in a register, where Apple silicon uses the plain names and the
+      # stack. A wrong spelling or a wrong choice does not fail at build time, and on the wrong
+      # layout does not fail at all -- it reads a plausible size and a half-width inode. So the
+      # suites that reach those calls run again here as an Intel process, under Rosetta, which
+      # runs the C library's Intel entry points and calling convention as an Intel Mac would.
+      #
+      # The assemblies built above are architecture-neutral; what decides the process's
+      # architecture is the host that starts them. `dotnet test` would start each project's own
+      # launcher, which the build made native, so each assembly is started through an Intel
+      # `dotnet` instead, and CAPDOTNET_EXPECT_PROCESS_ARCHITECTURE fails the run if it came up
+      # as anything else.
+      # ---------------------------------------------------------------------------------
+      - name: Run the suites as an Intel process under Rosetta
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'macOS' && !matrix.passes_only }}
+        shell: bash
+        env:
+          CAPDOTNET_EXPECT_PROCESS_ARCHITECTURE: X64
+        run: |
+          set -euo pipefail
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+
+          x64="$RUNNER_TEMP/dotnet-x64"
+          curl -sSfL https://dot.net/v1/dotnet-install.sh -o "$RUNNER_TEMP/dotnet-install.sh"
+          bash "$RUNNER_TEMP/dotnet-install.sh" --jsonfile global.json --architecture x64 \
+            --install-dir "$x64" --no-path
+          export DOTNET_ROOT="$x64" DOTNET_ROOT_X64="$x64"
+          arch -x86_64 "$x64/dotnet" --info | grep -E '^[[:space:]]*(Architecture|RID):'
+
+          status=0
+          for project in Cap.Primitives.Tests Cap.Std.Tests Cap.Fs.Ext.Tests Cap.Escape.Tests; do
+            echo "::group::$project (x64)"
+            arch -x86_64 "$x64/dotnet" exec "tests/$project/bin/Release/net10.0/$project.dll" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
       - name: Upload coverage
         if: ${{ always() && !matrix.passes_only }}
         uses: actions/upload-artifact@v7

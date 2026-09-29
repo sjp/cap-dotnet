@@ -508,3 +508,10 @@ differ between x86-64, AArch64 and 32-bit ARM are asserted per table on every le
 it runs on, and the 32-bit ARM build runs the Linux backend's tests nightly under QEMU; any
 other architecture is refused outright (see
 [platforms.md](platforms.md#linux-architectures)).
+
+macOS has the same shape. The stat and directory calls are imported under both the Apple
+silicon names and Intel's `$INODE64` ones, and `openat` and `fcntl` under both variadic
+calling conventions, with the choice made by the process's architecture; the wrong one reads
+a plausible size and a half-width inode rather than failing. So the macOS leg runs the
+Primitives, Std, Fs.Ext and escape suites a second time as an Intel process under Rosetta,
+and `CAPDOTNET_EXPECT_PROCESS_ARCHITECTURE` fails that run if it came up as anything else.
