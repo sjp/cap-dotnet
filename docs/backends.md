@@ -373,7 +373,14 @@ Every generated alias contains a tilde, which makes the presence of one a cheap 
 trigger: a component without one cannot be a generated alias and costs nothing, and a
 component with one is opened and then asked what it is actually called, the handle being
 dropped if the two names disagree. A file genuinely named `plain~1` answers with its own name
-and is opened — the check is a comparison, not a refusal of the character. The alternative,
+and is opened — the check is a comparison, not a refusal of the character. The real name is
+asked for in its normalised form, which many redirectors and user-mode filesystems do not
+implement; there the entry's short name is asked for instead, and the name is refused only if
+it is that short name. An entry with no short name, or on a filesystem that cannot report one,
+has no alias and is opened. Where the short name alone cannot tell an alias from a genuine
+eight-plus-three name such as `PLAIN~1`, the refusal is the side erred on. Any other failure
+of either question fails the open, since a check that stood aside there would stand aside
+silently. The alternative,
 requiring short-name generation to be turned off on the volume and documenting the rest as
 residual risk, was rejected: it makes the guarantee depend on how the host was configured,
 which is not something a library can verify or a caller can usually change.

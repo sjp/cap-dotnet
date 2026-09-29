@@ -512,6 +512,18 @@ internal static class NtConstants
     /// </remarks>
     public const uint FileNormalizedNameInformationClass = 48;
 
+    /// <summary>
+    /// Asks for the generated eight-plus-three alias of an open object's entry, in the same
+    /// reply shape as the name queries.
+    /// </summary>
+    /// <remarks>
+    /// Far older than the normalised query and implemented much more widely, so it is what
+    /// the alias check falls back to on a filesystem that cannot answer that one. It answers
+    /// only with the alias, never with the long name beside it, so by itself it cannot tell
+    /// an entry reached through its alias from one whose own name already is eight-plus-three.
+    /// </remarks>
+    public const uint FileAlternateNameInformationClass = 21;
+
     /// <summary>Asks for the access rights a handle was granted.</summary>
     public const uint FileAccessInformationClass = 8;
 

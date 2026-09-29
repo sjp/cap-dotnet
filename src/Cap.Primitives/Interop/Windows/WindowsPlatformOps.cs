@@ -2472,66 +2472,37 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// Refuses a handle that was reached by a name that is not the object's own.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// A filesystem that generates short names records two names for the same entry — the one
-    /// it was created with and an eight-plus-three alias derived from it — and an open by
-    /// either reaches the same object. Nothing about that leaves the directory the name was
-    /// looked up in, so it is not an escape; what it defeats is any rule a caller states about
-    /// names. A caller that refuses to serve <c>secret documents</c> is not refusing
-    /// <c>SECRET~1</c>, and both are the same file.
-    /// </para>
-    /// <para>
-    /// So the object is asked what it is called. Every generated alias contains a tilde, which
-    /// makes the presence of one a cheap and complete trigger: a component without one cannot
-    /// be a generated alias, and the query is skipped. A component genuinely named with a
-    /// tilde answers with itself and is allowed through — which is why the test is a
-    /// comparison and not a refusal of the character.
-    /// </para>
-    /// <para>
-    /// The name is asked for in its normalised form, in which every component is the one the
-    /// filesystem stores; the plain form repeats the spelling the object was opened by, alias
-    /// and all. A filesystem that cannot answer the normalised query fails the open rather
-    /// than having the check skipped, since a check that stood aside there would stand aside
-    /// silently.
-    /// </para>
-    /// <para>
-    /// The comparison ignores case because the filesystem does, and a name differing from the
-    /// stored one only in case is the same name by the only definition that matters here.
-    /// </para>
+    /// The decision, and why it is made the way it is, is <see cref="AliasedNameCheck"/>'s;
+    /// this supplies it with the two questions it asks of the handle.
     /// </remarks>
-    private static CapError RefuseAliasedName(nint handle, ReadOnlySpan<char> requested)
-    {
-        if (!requested.Contains('~'))
-        {
-            return CapError.Success;
-        }
-
-        CapError error = QueryNormalizedName(handle, out string full);
-        if (error.IsFailure)
-        {
-            return error;
-        }
-
-        int separator = full.LastIndexOf('\\');
-        ReadOnlySpan<char> stored = separator < 0 ? full : full.AsSpan(separator + 1);
-
-        return stored.Equals(requested, StringComparison.OrdinalIgnoreCase)
-            ? CapError.Success
-            : CapError.FromCategory(CapErrorCategory.AliasedName);
-    }
+    private static CapError RefuseAliasedName(nint handle, ReadOnlySpan<char> requested) =>
+        AliasedNameCheck.Refuse(handle, requested, QueryNormalizedName, QueryAlternateName);
 
     /// <summary>
     /// The name of an open object as a path from the root of its volume, with every component
     /// spelled as the filesystem stores it.
     /// </summary>
-    private static unsafe CapError QueryNormalizedName(nint handle, out string name)
+    internal static CapError QueryNormalizedName(nint handle, out string name) =>
+        QueryNameInformation(handle, NtConstants.FileNormalizedNameInformationClass, out name);
+
+    /// <summary>
+    /// The generated eight-plus-three alias of an open object's entry, or a failure where the
+    /// entry has none or the filesystem cannot say.
+    /// </summary>
+    internal static CapError QueryAlternateName(nint handle, out string name) =>
+        QueryNameInformation(handle, NtConstants.FileAlternateNameInformationClass, out name);
+
+    /// <summary>
+    /// Asks an open object one of the questions whose reply is a counted name.
+    /// </summary>
+    private static unsafe CapError QueryNameInformation(nint handle, uint informationClass, out string name)
     {
         name = string.Empty;
 
-        // The reply is a path from the volume root, so its length is bounded by the depth of
-        // the object rather than by any one component. Rented rather than stacked for that
-        // reason, and affordable because it is asked only when a component could be an alias
-        // or a refusal needs explaining.
+        // The normalised reply is a path from the volume root, so its length is bounded by the
+        // depth of the object rather than by any one component. Rented rather than stacked for
+        // that reason, and affordable because it is asked only when a component could be an
+        // alias or a refusal needs explaining.
         byte[] buffer = ArrayPool<byte>.Shared.Rent(1024);
         try
         {
@@ -2542,7 +2513,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 fixed (byte* raw = buffer)
                 {
                     nt = NtNative.NtQueryInformationFile(
-                        handle, &status, raw, (uint)buffer.Length, NtConstants.FileNormalizedNameInformationClass);
+                        handle, &status, raw, (uint)buffer.Length, informationClass);
                 }
 
                 if (nt == NtStatusCodes.STATUS_BUFFER_OVERFLOW && attempt == 0)

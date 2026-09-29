@@ -244,7 +244,7 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
         // A filesystem that does not offer the wider class says so on the first call, before
         // anything has been read, so falling back to the older one there loses nothing and
         // the scan simply starts again in the other shape.
-        if (_restart && _wideIdentifiers && IsUnsupportedClass(result))
+        if (_restart && _wideIdentifiers && NtStatusCodes.IsUnsupportedClass(result))
         {
             _wideIdentifiers = false;
             status = default;
@@ -308,18 +308,4 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
                     restartScan: _restart ? (byte)1 : (byte)0);
         }
     }
-
-    /// <summary>
-    /// Whether a status is a filesystem declining the information class rather than failing
-    /// the read.
-    /// </summary>
-    /// <remarks>
-    /// More than one status, because filesystems and redirectors do not agree on how to say
-    /// it: the one defined for the purpose, a general refusal, and the invalid-parameter
-    /// reply some older drivers give for any class they were not written to know.
-    /// </remarks>
-    private static bool IsUnsupportedClass(int status) =>
-        status is NtStatusCodes.STATUS_INVALID_INFO_CLASS
-            or NtStatusCodes.STATUS_NOT_SUPPORTED
-            or NtStatusCodes.STATUS_INVALID_PARAMETER;
 }

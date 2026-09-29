@@ -39,10 +39,10 @@ form when a system or filesystem does not offer it:
 | `FileIdExtdDirectoryInformation` (128-bit identifiers in a directory listing) | `FileIdFullDirectoryInformation` |
 | `FileDispositionInformationEx` (a removed name disappears at once, as on Unix) | `FileDispositionInformation`: the name lingers until the last handle closes |
 | `FileRenameInformationEx` (replacing a name that is open, as on Unix) | `FileRenameInformation` |
+| `FileNormalizedNameInformation` (the stored name, for the check on names containing `~`) | `FileAlternateNameInformation`: the entry's short name (see below) |
 
-Two classes have no fallback yet: `FileIdInformation`, which every metadata call reads, and
-`FileNormalizedNameInformation`, which the check on names containing `~` reads. On a filesystem
-that does not offer one, the calls that read it fail. No hosted CI runner is older than 1709, so the older
+One class has no fallback yet: `FileIdInformation`, which every metadata call reads. On a
+filesystem that does not offer it, the calls that read it fail. No hosted CI runner is older than 1709, so the older
 directory query is exercised by forcing it on the Windows leg rather than on an old system.
 
 **Reserved device names are refused, in every disguise.** `CON`, `PRN`, `AUX`, `NUL`,
@@ -62,6 +62,15 @@ body of the same file — and `CON::$DATA` is a device reached through one.
 **Short names are refused as aliases.** `PROGRA~1` names the same directory as
 `Program Files`. A component containing `~` is opened, then asked its real name; if the two
 differ the handle is dropped. A file whose actual name contains a tilde is allowed.
+
+Many network redirectors (older Samba among them) and user-mode filesystems (WinFsp, Dokan)
+cannot say what an object's real name is. There the entry is asked for its short name instead.
+If it has none, or the filesystem can't answer that either, the name is accepted: a filesystem
+that doesn't generate short names has no alias to refuse. If the short name is some other
+spelling, the name is accepted. If the short name is the very name that was asked for, the
+name is refused. That includes a file whose real name is already an eight-plus-three name
+with a tilde, like `PLAIN~1`, since the short name alone cannot tell the two apart. Names such
+as `~$report.docx` or `notes.txt~` are never eight-plus-three, so they are always accepted.
 
 **Case is not a boundary, and containment never relies on it.** `Secret` and `SECRET` are
 one file, and every open this library issues matches case-insensitively, as the rest of

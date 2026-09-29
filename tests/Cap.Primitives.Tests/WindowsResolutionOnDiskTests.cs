@@ -252,6 +252,84 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     }
 
     /// <summary>
+    /// Where the normalised-name query is declined, the alias NTFS reports for an entry still
+    /// refuses that alias and still lets a genuine tilde name through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The fallback exists for filesystems that decline the normalised query, and NTFS never
+    /// does, so the decline is supplied here and only the alias query is asked of the volume.
+    /// What that proves is the part no build agent without Windows can: that the alias query
+    /// is issued correctly and its reply read as the alias the volume generated.
+    /// </para>
+    /// <para>
+    /// The genuine name is long and not eight-plus-three, like the Office lock files and
+    /// editor backups that motivated the fallback, so its alias is some other spelling.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_alias_fallback_refuses_an_alias_and_passes_a_tilde_name_on_disk()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Short names exist only on Windows.");
+            return;
+        }
+
+        const string LongName = "a long directory name";
+        const string TildeName = "~$a long lock name.docx";
+        Directory.CreateDirectory(Path.Join(Sandbox, LongName));
+        Directory.CreateDirectory(Path.Join(Sandbox, TildeName));
+
+        string? alias = ShortNameOf(Path.Join(Sandbox, LongName));
+        if (alias is null || alias.Equals(LongName, StringComparison.OrdinalIgnoreCase))
+        {
+            Assert.False(
+                Environment.GetEnvironmentVariable("CAPDOTNET_EXPECT_SHORT_NAMES") == "1",
+                $"no short name was generated for '{LongName}', but this host was set up to generate them.");
+
+            Assert.Skip("This volume does not generate short names, so there is no alias to refuse.");
+            return;
+        }
+
+        AliasedNameCheck.NameQuery declined = (nint _, out string name) =>
+        {
+            name = string.Empty;
+            return CapError.Create(
+                CapErrorCategory.NotSupported, CapErrorSource.NtStatus, NtStatusCodes.STATUS_INVALID_INFO_CLASS);
+        };
+
+        using SafeDirHandle root = OpenSandbox();
+
+        using (SafeDirHandle aliased = OpenDirectory(root, LongName))
+        using (HandleLease lease = aliased.Lease())
+        {
+            CapError error = WindowsPlatformOps.QueryAlternateName(lease.Raw, out string reported);
+            Assert.True(error.IsSuccess, error.FailureDescription);
+            Assert.Equal(alias, reported, ignoreCase: true);
+
+            Assert.Equal(
+                CapErrorCategory.AliasedName,
+                AliasedNameCheck.Refuse(lease.Raw, alias, declined, WindowsPlatformOps.QueryAlternateName).Category);
+        }
+
+        using (SafeDirHandle genuine = OpenDirectory(root, TildeName))
+        using (HandleLease lease = genuine.Lease())
+        {
+            CapError error = AliasedNameCheck.Refuse(lease.Raw, TildeName, declined, WindowsPlatformOps.QueryAlternateName);
+            Assert.True(error.IsSuccess, error.FailureDescription);
+        }
+    }
+
+    private static SafeDirHandle OpenDirectory(SafeDirHandle root, string name)
+    {
+        CapResult<SafeDirHandle> opened = PortableResolver.OpenDirectory(
+            root, Parse(name), CapAccess.Read, ConfinedResolveOptions.None);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        return opened.Value!;
+    }
+
+    /// <summary>
     /// The one open that takes a user-facing path refuses what is not a directory on a
     /// filesystem.
     /// </summary>

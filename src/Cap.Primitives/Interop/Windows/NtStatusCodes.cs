@@ -86,6 +86,12 @@ internal static class NtStatusCodes
     /// </remarks>
     public const int STATUS_INVALID_INFO_CLASS = unchecked((int)0xC0000003);
 
+    /// <summary>
+    /// The driver has no handler for the request at all. What some third-party filesystems
+    /// answer for an information class they were written before.
+    /// </summary>
+    public const int STATUS_NOT_IMPLEMENTED = unchecked((int)0xC0000002);
+
     /// <summary>The object is not a reparse point, so there is no link to read.</summary>
     public const int STATUS_NOT_A_REPARSE_POINT = unchecked((int)0xC0000275);
 
@@ -111,6 +117,22 @@ internal static class NtStatusCodes
 
     /// <summary>True when the status indicates failure.</summary>
     public static bool IsFailure(int status) => status < 0;
+
+    /// <summary>
+    /// Whether a status is a filesystem declining the information class rather than failing
+    /// the query.
+    /// </summary>
+    /// <remarks>
+    /// More than one status, because filesystems and redirectors do not agree on how to say
+    /// it: the one defined for the purpose, a general refusal, the invalid-parameter reply
+    /// some older drivers give for any class they were not written to know, and the
+    /// not-implemented reply of a driver with no handler for the request at all.
+    /// </remarks>
+    public static bool IsUnsupportedClass(int status) =>
+        status is STATUS_INVALID_INFO_CLASS
+            or STATUS_NOT_SUPPORTED
+            or STATUS_INVALID_PARAMETER
+            or STATUS_NOT_IMPLEMENTED;
 
     /// <summary>Reads an <c>NTSTATUS</c> as a portable category.</summary>
     public static CapErrorCategory Classify(int status)
@@ -146,6 +168,7 @@ internal static class NtStatusCodes
                 return CapErrorCategory.InvalidArgument;
             case STATUS_NOT_SUPPORTED:
             case STATUS_INVALID_INFO_CLASS:
+            case STATUS_NOT_IMPLEMENTED:
                 return CapErrorCategory.NotSupported;
             case STATUS_NOT_SAME_DEVICE:
                 return CapErrorCategory.CrossDevice;
