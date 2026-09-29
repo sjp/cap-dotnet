@@ -17,8 +17,7 @@ on:
         description: BenchmarkDotNet filter
         default: "*"
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
   DOTNET_NOLOGO: true
@@ -30,6 +29,8 @@ jobs:
   benchmarks:
     name: benchmarks (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     timeout-minutes: 240
     strategy:
       fail-fast: false

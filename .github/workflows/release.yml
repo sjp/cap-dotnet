@@ -23,8 +23,7 @@ concurrency:
   group: release
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
   DOTNET_NOLOGO: true
@@ -93,6 +92,8 @@ jobs:
     name: packages install (${{ matrix.name }})
     needs: pack
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:

@@ -31,8 +31,7 @@ concurrency:
   group: nightly
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 env:
   DOTNET_NOLOGO: true
@@ -44,6 +43,8 @@ jobs:
   stress:
     name: stress (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -102,6 +103,8 @@ jobs:
   fuzz:
     name: fuzz (${{ matrix.target }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -189,6 +192,8 @@ jobs:
   linux-arm:
     name: linux-arm (${{ matrix.libc }}, emulated)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 240
     strategy:
       fail-fast: false
@@ -246,6 +251,8 @@ jobs:
   properties:
     name: properties at full size
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     timeout-minutes: 60
 
     steps:
