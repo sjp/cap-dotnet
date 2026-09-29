@@ -62,9 +62,11 @@ public sealed partial class Dir
     /// changes both, and both need flushing.
     /// </para>
     /// <para>
-    /// <strong>Per platform.</strong> On Linux and macOS this is <c>fsync</c> on the
-    /// directory's handle. On macOS <c>fsync</c> hands the change to the drive, which may
-    /// still hold it in its own cache for a while. On Windows it returns false. There,
+    /// <strong>Per platform.</strong> On Linux this is <c>fsync</c> on the directory's handle.
+    /// On macOS it is <c>F_FULLFSYNC</c>, which pushes the change through the drive's own
+    /// cache as the file commit there does; a volume that does not take that request gets
+    /// <c>fsync</c>, which hands the change to the drive and no further. On Windows it
+    /// returns false. There,
     /// committing a directory's entries means flushing the whole volume, which needs a
     /// privilege an ordinary process does not hold and would stall every other writer on the
     /// disk. Reporting that it did nothing is more honest than doing that under this name, or

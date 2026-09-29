@@ -137,6 +137,13 @@ internal static class DarwinConstants
     public const int F_GETPATH = 50;
 
     /// <summary>
+    /// Commit a descriptor's changes through the drive's own cache to permanent storage.
+    /// Plain <c>fsync</c> on this platform stops at the drive, which may still hold the
+    /// change in volatile memory.
+    /// </summary>
+    public const int F_FULLFSYNC = 51;
+
+    /// <summary>
     /// Reserve space for a file. This platform's stand-in for the portable reservation call,
     /// which it does not have.
     /// </summary>

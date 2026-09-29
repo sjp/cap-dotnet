@@ -97,6 +97,10 @@ The default is the correct-but-slower one. A caller writing a cache, a rendered 
 an extracted archive should say `None` and get the speed; a caller who has not thought about
 it gets the answer that does not lose data.
 
+On macOS both commits are full flushes (`F_FULLFSYNC`), carried through the drive's own
+cache, so the name is as durable as the contents. A volume that refuses the full flush, such
+as some network filesystems, gets plain `fsync` for both.
+
 **Windows does not commit directories.** Doing so needs a volume-level privilege an ordinary
 process does not hold, and would stall every other writer on the disk. `FileAndDirectory`
 there does what `File` does, and is not refused — refusing would make the safe default

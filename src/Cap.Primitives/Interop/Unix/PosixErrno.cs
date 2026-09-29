@@ -36,6 +36,10 @@ internal static class PosixErrno
     public const int EINVAL = 22;
     public const int ENFILE = 23;
     public const int EMFILE = 24;
+
+    /// <summary>The descriptor does not take this control request.</summary>
+    public const int ENOTTY = 25;
+
     /// <summary>The file would grow past what the filesystem can represent.</summary>
     public const int EFBIG = 27;
 

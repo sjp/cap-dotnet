@@ -671,9 +671,23 @@ internal sealed class DarwinPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     /// <remarks>
-    /// One call, and no retry. A commit that reports a failure has left the kernel's record
-    /// of what went wrong in a state the next attempt cannot be trusted to report again, so
-    /// the answer is passed on rather than second-guessed.
+    /// <para>
+    /// <c>F_FULLFSYNC</c>, the request that carries the change through the drive's own cache.
+    /// Plain <c>fsync</c> here stops at the drive, and the runtime already commits file
+    /// contents with <c>F_FULLFSYNC</c>, so a directory committed with anything less would
+    /// be the weak half of every publish: the contents surviving a power loss and the name
+    /// that reaches them not.
+    /// </para>
+    /// <para>
+    /// A volume that does not take the request — some network and FUSE filesystems, each
+    /// declining it with its own code — gets <c>fsync</c> instead, which is the most it
+    /// offers. Any other failure is the commit failing, and is reported.
+    /// </para>
+    /// <para>
+    /// No retry. A commit that reports a failure has left the kernel's record of what went
+    /// wrong in a state the next attempt cannot be trusted to report again, so the answer is
+    /// passed on rather than second-guessed.
+    /// </para>
     /// </remarks>
     public CapError SyncDirectory(SafeDirHandle directory)
     {
@@ -681,6 +695,18 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         if (!lease.IsValid)
         {
             return HandleLease.ClosedError;
+        }
+
+        if (DarwinNative.Fcntl(lease.Descriptor, DarwinConstants.F_FULLFSYNC, 0) >= 0)
+        {
+            return CapError.Success;
+        }
+
+        int errno = Marshal.GetLastPInvokeError();
+        if (errno is not (DarwinErrno.ENOTSUP or DarwinErrno.EOPNOTSUPP
+            or PosixErrno.EINVAL or PosixErrno.ENOTTY))
+        {
+            return DarwinErrno.ToError(errno);
         }
 
         return DarwinNative.FSync(lease.Descriptor) < 0
