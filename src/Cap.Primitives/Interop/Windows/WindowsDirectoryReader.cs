@@ -193,14 +193,16 @@ internal sealed unsafe class WindowsDirectoryReader : DirectoryReader
 
     /// <summary>Reads what an entry is from the attributes the query returned.</summary>
     /// <remarks>
-    /// A tag this library does not recognise is reported as a redirection of an unknown kind
-    /// and never as a link. Reparse tags are an extension mechanism — new ones arrive with
-    /// new features — so treating an unrecognised one as a link would mean reading a
-    /// structure of unknown shape as if it held a path.
+    /// A redirecting tag this library does not recognise is reported as a redirection of an
+    /// unknown kind and never as a link. Reparse tags are an extension mechanism — new ones
+    /// arrive with new features — so treating an unrecognised one as a link would mean reading
+    /// a structure of unknown shape as if it held a path. A tag that only says which filter
+    /// serves the entry — a compressed file, a cloud placeholder — leaves it the file or
+    /// directory it is, which is what opening it produces.
     /// </remarks>
     private static CapFileType Classify(uint attributes, uint tag)
     {
-        if ((attributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        if ((attributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0 && ReparseTags.Redirects(tag))
         {
             return ReparseTags.IsFilesystemLink(tag) ? CapFileType.Symlink : CapFileType.ReparsePoint;
         }

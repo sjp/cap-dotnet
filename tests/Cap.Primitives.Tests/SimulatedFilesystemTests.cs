@@ -1,6 +1,8 @@
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Windows;
 using Cap.Std.Testing;
 using Cap.Tests.Fakes;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
 
@@ -37,13 +39,14 @@ public sealed class SimulatedFilesystemTests
     }
 
     /// <summary>
-    /// A reparse point that is not a filesystem link is refused rather than read as one.
+    /// A reparse point that redirects by a means other than a filesystem link is refused
+    /// rather than read as one.
     /// </summary>
     [Fact]
-    public void An_opaque_reparse_point_is_refused()
+    public void An_opaque_redirecting_reparse_point_is_refused()
     {
         FakeFileSystem fs = new();
-        fs.AddOpaqueReparsePoint("alias", 0x8000001B);
+        fs.AddOpaqueReparsePoint("alias", ReparseTags.WciLink);
 
         FakePlatformOps ops = new(fs);
         using SafeDirHandle root = OpenRoot(ops, fs);
@@ -51,6 +54,31 @@ public sealed class SimulatedFilesystemTests
         CapResult<SafeDirHandle> result = ops.OpenChildDirectory(root, "alias", CapAccess.Read);
         Assert.False(result.IsSuccess);
         Assert.Equal(CapErrorCategory.Reparse, result.Error.Category);
+    }
+
+    /// <summary>
+    /// A reparse point whose tag only says which filter serves the entry is the file it is:
+    /// opened as one, described as one, and still carrying its tag.
+    /// </summary>
+    [Theory]
+    [InlineData(0x80000017u)] // compressed with compact /exe
+    [InlineData(0x9000001Au)] // a cloud placeholder
+    [InlineData(ReparseTags.AppExecLink)]
+    public void A_reparse_point_a_filter_serves_is_opened_as_the_file_it_is(uint tag)
+    {
+        FakeFileSystem fs = new();
+        fs.AddOpaqueReparsePoint("served", tag);
+
+        FakePlatformOps ops = new(fs);
+        using SafeDirHandle root = OpenRoot(ops, fs);
+
+        CapResult<SafeFileHandle> file = ops.OpenChildFile(root, "served", FileOpenRequest.Existing(FileAccess.Read));
+        Assert.True(file.IsSuccess, file.Error.FailureDescription);
+        file.Value!.Dispose();
+
+        Assert.True(ops.StatChild(root, "served", out CapNodeInfo info).IsSuccess);
+        Assert.Equal(CapNodeType.File, info.Type);
+        Assert.Equal(tag, info.ReparseTag);
     }
 
     /// <summary>A mount point is a different volume, and can be refused as one.</summary>

@@ -404,8 +404,9 @@ internal enum SymlinkTreeFeature
     None = 0,
 
     /// <summary>
-    /// A reparse point whose tag is not a filesystem link. Creating one needs privileges and
-    /// interfaces no test has, so only a simulated filesystem offers this.
+    /// A reparse point whose tag redirects by a means other than a filesystem link. Creating
+    /// one needs privileges and interfaces no test has, so only a simulated filesystem offers
+    /// this.
     /// </summary>
     NonLinkReparsePoint = 1,
 

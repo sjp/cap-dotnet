@@ -63,7 +63,15 @@ internal sealed class MemoryNode
     /// </summary>
     public bool LinkIsDirectory { get; set; }
 
-    /// <summary>The reparse tag, for modelling a Windows link that is not a filesystem link.</summary>
+    /// <summary>The reparse tag, for modelling a Windows reparse point that is not a filesystem link.</summary>
+    /// <remarks>
+    /// Modelled as the Windows backend reads a tag. A node of type
+    /// <see cref="CapNodeType.UnknownReparsePoint"/> stands for a tag that redirects to another
+    /// object, which every operation refuses. A tag that only says which filter serves the
+    /// object — a compressed file, a cloud placeholder — is carried by a
+    /// <see cref="CapNodeType.File"/> or <see cref="CapNodeType.Directory"/> node, which behaves
+    /// as the file or directory it is.
+    /// </remarks>
     public uint ReparseTag { get; set; }
 
     /// <summary>True when every operation on this object, and every lookup inside it, is refused.</summary>

@@ -51,11 +51,13 @@ internal readonly struct CapNodeInfo
     public ulong NodeId { get; }
 
     /// <summary>
-    /// Windows only, and zero elsewhere: the reparse tag, when <see cref="Type"/> is
-    /// <see cref="CapNodeType.SymbolicLink"/> or
-    /// <see cref="CapNodeType.UnknownReparsePoint"/>. The tag is what separates a symbolic
-    /// link from a junction from something that is not a link at all, and treating an
-    /// unrecognised tag as a link is the failure this field exists to prevent.
+    /// Windows only, and zero elsewhere: the reparse tag, when the node has one. That is
+    /// always so when <see cref="Type"/> is <see cref="CapNodeType.SymbolicLink"/> or
+    /// <see cref="CapNodeType.UnknownReparsePoint"/>, and can be so for a
+    /// <see cref="CapNodeType.File"/> or <see cref="CapNodeType.Directory"/> whose contents a
+    /// filter serves, such as a compressed file or a cloud placeholder. The tag is what
+    /// separates a symbolic link from a junction from something that is not a link at all,
+    /// and treating an unrecognised tag as a link is the failure this field exists to prevent.
     /// </summary>
     public uint ReparseTag { get; }
 

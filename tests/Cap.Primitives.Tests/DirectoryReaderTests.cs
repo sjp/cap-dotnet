@@ -34,8 +34,14 @@ public sealed class DirectoryReaderTests : IDisposable
     private static IPlatformOps Ops => PlatformOps.Host;
 
     /// <summary>
-    /// The tag of an application execution alias: something that redirects, by a mechanism
-    /// that has nothing to do with paths.
+    /// The tag of a container link: something that redirects, by a mechanism that has nothing
+    /// to do with paths.
+    /// </summary>
+    private const uint ContainerLinkTag = 0xA0000027;
+
+    /// <summary>
+    /// The tag of an application execution alias: a stub the process launcher reads, which
+    /// redirects nothing on the filesystem.
     /// </summary>
     private const uint AppExecutionAliasTag = 0x8000001B;
 
@@ -341,7 +347,7 @@ public sealed class DirectoryReaderTests : IDisposable
     {
         FakeFileSystem fs = new();
         fs.AddSymbolicLink("link", "elsewhere");
-        fs.AddOpaqueReparsePoint("alias", AppExecutionAliasTag);
+        fs.AddOpaqueReparsePoint("container-link", ContainerLinkTag);
 
         FakePlatformOps ops = new(fs);
         using SafeDirHandle root = OpenSimulatedRoot(ops);
@@ -349,7 +355,28 @@ public sealed class DirectoryReaderTests : IDisposable
         Dictionary<string, CapFileType> kinds = Kinds(ops, root);
 
         Assert.Equal(CapFileType.Symlink, kinds["link"]);
-        Assert.Equal(CapFileType.ReparsePoint, kinds["alias"]);
+        Assert.Equal(CapFileType.ReparsePoint, kinds["container-link"]);
+    }
+
+    /// <summary>
+    /// An entry whose reparse point only says which filter serves it is reported as the file
+    /// it is, not as a redirection.
+    /// </summary>
+    /// <remarks>
+    /// Reporting it as a redirection would leave every caller that branches on the kind —
+    /// a walk, a copy, an existence check — treating a compressed file or a cloud placeholder
+    /// as something it must not touch.
+    /// </remarks>
+    [Fact]
+    public void An_entry_a_filter_serves_is_reported_as_what_it_is()
+    {
+        FakeFileSystem fs = new();
+        fs.AddOpaqueReparsePoint("alias", AppExecutionAliasTag);
+
+        FakePlatformOps ops = new(fs);
+        using SafeDirHandle root = OpenSimulatedRoot(ops);
+
+        Assert.Equal(CapFileType.File, Kinds(ops, root)["alias"]);
     }
 
     // --- helpers -------------------------------------------------------------------------------

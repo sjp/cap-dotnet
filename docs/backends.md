@@ -123,8 +123,9 @@ semantics:
 | Absolute link target, in any of its spellings | Refused as an escape |
 | Chain within budget, all inside | Followed |
 | Chain exceeding the budget, or a cycle | Refused as a link loop |
-| Reparse point whose tag is not a filesystem link | Refused, never read as a link |
-| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one. A Windows junction is not this case: it is a reparse point, and is refused |
+| Reparse point whose tag stands for another object but is not a filesystem link | Refused, never read as a link |
+| Reparse point whose tag only names the filter serving the entry (a compressed file, a cloud placeholder) | Opened as the file or directory it is, through its filter; never read as a link |
+| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one. A Windows junction is not this case: it is a reparse point that redirects, and is refused |
 | Any link at all, where the handle's policy refuses them | Refused as a link, without being read — so which way it pointed is never learned |
 
 The last row is the one caller-visible choice. It is fixed when a sandbox root is opened and
@@ -363,7 +364,35 @@ are a general extension mechanism and most tags have nothing to do with paths: a
 execution alias holds a series of counted strings, a container link is meaningful only to a
 filter driver, and new tags arrive with new Windows features. A blocklist would treat every
 tag invented after it was written as a link and read a structure of unknown shape as a
-destination, so anything unrecognised is refused instead.
+destination, so only those two tags are ever read as a path.
+
+**Whether an entry with any other tag is opened is a separate question, and the tag answers
+it.** Windows reserves one bit of a tag, the name-surrogate bit, for reparse points that stand
+for another named object. A tag with the bit set — a container link, a tag invented later that
+redirects — is refused, and so is the distributed file system link, which redirects without
+setting it. A tag without it belongs to a filter that serves the entry's own contents: the
+Windows Overlay Filter behind `compact /exe`, Data Deduplication, OneDrive and every other
+Files-On-Demand placeholder (folders included), ProjFS. Such an entry is an ordinary file or
+directory of the sandbox — it was found beneath the parent handle without following anything
+— and refusing it would make very common layouts unusable while calling the refusal an
+escape. So it is described as the file or directory it is, with its tag still in the node's
+description for a caller who wants it.
+
+Opening one takes a second open. The first, like every open here, asks for the reparse point
+itself, and a handle got that way sees the entry without its filter: a compressed file's
+stream is empty, a placeholder's contents are not on the disk. So the object is opened again
+through that handle with an empty name and without asking for the reparse point, which lets
+the filter take part and names nothing a rename could redirect. What that cannot rule out is
+the entry having been turned into a link in place between the two opens, which the second
+would follow; so the second is kept only if it reached the same volume and file identifier as
+the first, and otherwise refused as a redirection. A file handle carries the caller's sharing,
+which may exclude the second open's own access, so the second open goes through an
+intermediate handle that can only ask what the object is — except under delete-on-close,
+where it goes through the first handle so that closing that handle leaves the deletion to the
+one handed back. A truncating open empties the file through the handle handed back, after all
+of this, so the filter sees the change. A tag no filter on the system serves — an application
+execution alias, which only the process launcher reads, or a placeholder whose provider was
+uninstalled — cannot be opened this way and fails as unsupported, not as an escape.
 
 Within a symbolic link, whether the target is relative is taken from the structure's own flag
 and never inferred from how the stored name is spelled, because the flag is what the
@@ -424,8 +453,9 @@ every entry in it is not has found this, and the difference is the network round
 Windows needs more than one query because no single reply combines the times, the length,
 the attributes and the identity. The times, the length and the attributes come together, so
 those describe one instant; the identity is a second query; and the reparse tag is asked for
-only when the attributes say the entry redirects, which is what separates a symbolic link
-from a structure of unknown shape that merely looks like one.
+only when the attributes say the entry has a reparse point, which is what separates a
+symbolic link from a structure of unknown shape that merely looks like one, and either from
+a file or directory a filter merely serves.
 
 **The identity is carried at 128 bits.** Windows issues identifiers that wide because the
 64-bit ones it used to issue are not unique on every filesystem it supports, so a reader that

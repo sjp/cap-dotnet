@@ -230,7 +230,7 @@ internal static class ResolutionWalkTarget
                 VolumeId = entry.Kind == EntryKind.MountPoint ? nextVolume++ : parent.VolumeId,
                 NodeId = fs.NextNodeId(),
                 LinkTarget = entry.Kind == EntryKind.SymbolicLink ? entry.Target ?? string.Empty : null,
-                ReparseTag = entry.Kind == EntryKind.OpaqueReparsePoint ? AppExecLinkTag : 0,
+                ReparseTag = entry.Kind == EntryKind.OpaqueReparsePoint ? ContainerLinkTag : 0,
             };
 
             parent.Entries[entry.Name] = node;
@@ -244,10 +244,15 @@ internal static class ResolutionWalkTarget
     }
 
     /// <summary>
-    /// The tag of an application execution alias, one of the reparse points that is not a
-    /// link and holds no path.
+    /// The tag of a container link, one of the reparse points that redirects without being a
+    /// link or holding a path.
     /// </summary>
-    private const uint AppExecLinkTag = 0x8000001B;
+    /// <remarks>
+    /// A redirecting tag, because that is what an opaque node models: a reparse point whose tag
+    /// only names the filter serving the entry is the file or directory it is, and the tree
+    /// already has those.
+    /// </remarks>
+    private const uint ContainerLinkTag = 0xA0000027;
 
     /// <summary>
     /// Everything reachable from <paramref name="top"/> by entries alone, without following

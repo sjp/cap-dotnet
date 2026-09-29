@@ -3,18 +3,50 @@ using System.Buffers.Binary;
 namespace Cap.Primitives.Interop.Windows;
 
 /// <summary>
-/// The reparse tags this library is prepared to interpret.
+/// The reparse tags this library is prepared to interpret, and how it tells the ones that
+/// redirect from the ones that do not.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A reparse point is a general extension mechanism, not a link type: the tag says which
 /// component owns the data, and only two of them describe something a path walk could
 /// meaningfully follow. Everything else — an application execution alias, a container image
 /// link, a cloud-storage placeholder, a tag introduced after this was written — is a
 /// structure this library does not know the shape of, and reading it as if it held a path
 /// would mean interpreting arbitrary bytes as a destination.
+/// </para>
+/// <para>
+/// Not reading a tag as a path is a separate question from whether the entry carrying it may
+/// be opened at all. Most tags belong to a filter driver that serves the entry's own contents
+/// — a compressed file, a deduplicated one, a cloud placeholder, a projected directory — and
+/// never name another object. The tag says which kind it is, in a bit the system reserves for
+/// the purpose: see <see cref="Redirects"/>.
+/// </para>
 /// </remarks>
 internal static class ReparseTags
 {
+    /// <summary>
+    /// The bit of a tag that says the reparse point stands for another named object.
+    /// </summary>
+    /// <remarks>
+    /// The Windows SDK's <c>IsReparseTagNameSurrogate</c> tests this bit. Every tag that moves
+    /// resolution somewhere else — a link, a junction, a container link, a tag of that kind
+    /// introduced later — sets it; a tag whose filter acts on the file it is attached to does
+    /// not.
+    /// </remarks>
+    public const uint NameSurrogateBit = 0x20000000;
+
+    /// <summary>
+    /// A distributed file system link: a folder in a DFS namespace that the DFS client sends
+    /// elsewhere, usually to another server.
+    /// </summary>
+    /// <remarks>
+    /// Named because it redirects without setting <see cref="NameSurrogateBit"/>. It predates
+    /// the convention, and what it names is a share rather than anything beneath a directory
+    /// handle.
+    /// </remarks>
+    public const uint Dfs = 0x8000000A;
+
     /// <summary>A directory junction. Its target is always absolute, so it can never stay inside a sandbox.</summary>
     public const uint MountPoint = 0xA0000003;
 
@@ -26,12 +58,14 @@ internal static class ReparseTags
     /// search path so that typing a package's name launches it.
     /// </summary>
     /// <remarks>
-    /// Named here although it is refused, because refusing it for the right reason matters.
-    /// Its data is a sequence of counted strings — a package family name, an application
-    /// identifier, a target executable — and the offsets a link's data carries are not where
-    /// this structure keeps anything. A reader that assumed every reparse point held a link
-    /// would take whichever of those strings happened to land at the offset it expected and
-    /// use it as a path.
+    /// Named here because reading it for the right reason matters. Its data is a sequence of
+    /// counted strings — a package family name, an application identifier, a target
+    /// executable — and the offsets a link's data carries are not where this structure keeps
+    /// anything. A reader that assumed every reparse point held a link would take whichever of
+    /// those strings happened to land at the offset it expected and use it as a path. It does
+    /// not set <see cref="NameSurrogateBit"/>: it is the process launcher, not the filesystem,
+    /// that acts on it, so the entry is opened as the stub it is, and no filter on the volume
+    /// answers for it.
     /// </remarks>
     public const uint AppExecLink = 0x8000001B;
 
@@ -43,9 +77,10 @@ internal static class ReparseTags
     /// Acted on by a filter driver rather than by the filesystem, and meaningful only to
     /// that driver. Whatever it points at is outside anything a directory handle in this
     /// process confers authority over, so there is nothing a sandbox could usefully do with
-    /// it but refuse it.
+    /// it but refuse it — which <see cref="Redirects"/> does, since it sets
+    /// <see cref="NameSurrogateBit"/>.
     /// </remarks>
-    public const uint WciLink = 0x80000018;
+    public const uint WciLink = 0xA0000027;
 
     /// <summary>
     /// True when the tag describes something that can be read as a path.
@@ -58,6 +93,31 @@ internal static class ReparseTags
     /// as a destination, so the only safe default is to refuse what is not recognised.
     /// </remarks>
     public static bool IsFilesystemLink(uint tag) => tag is MountPoint or SymbolicLink;
+
+    /// <summary>
+    /// True when the tag stands for another named object, which opening the entry through
+    /// its filter would reach instead of the entry itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This decides whether an entry is refused or opened as itself, never whether its data is
+    /// read as a path: that is <see cref="IsFilesystemLink"/>'s question alone, and a tag
+    /// answering false here is still never read as one.
+    /// </para>
+    /// <para>
+    /// The system's bit rather than a list, for the reason the link allowlist is a list: a tag
+    /// introduced after this was written has to land on the safe side. A new redirecting tag
+    /// sets the bit and is refused. One that does not is served by a filter attached to the
+    /// entry, and the backend opens it through that filter only after checking that the open
+    /// reached the object it had already found beneath the directory — so a filter that
+    /// redirected anyway would be caught there rather than trusted here. The one tag known to
+    /// redirect without the bit is <see cref="Dfs"/>, which is refused by name.
+    /// </para>
+    /// </remarks>
+    public static bool Redirects(uint tag) => IsNameSurrogate(tag) || tag == Dfs;
+
+    /// <summary>Whether the tag sets <see cref="NameSurrogateBit"/>.</summary>
+    public static bool IsNameSurrogate(uint tag) => (tag & NameSurrogateBit) != 0;
 }
 
 /// <summary>

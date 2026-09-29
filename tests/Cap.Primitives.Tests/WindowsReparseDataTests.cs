@@ -178,6 +178,55 @@ public sealed class WindowsReparseDataTests
     }
 
     /// <summary>
+    /// Tags that stand for another object are recognised as redirections, and refused.
+    /// </summary>
+    /// <remarks>
+    /// The two links, a container link, a container tombstone, a made-up tag with the bit the
+    /// system reserves for redirections — standing for every such tag invented after this was
+    /// written — and the distributed file system link, which redirects without the bit.
+    /// </remarks>
+    [Theory]
+    [InlineData(ReparseTags.SymbolicLink, true)]
+    [InlineData(ReparseTags.MountPoint, true)]
+    [InlineData(ReparseTags.WciLink, true)]
+    [InlineData(0xA000001Fu, true)]
+    [InlineData(0x2000_0123u, true)]
+    [InlineData(ReparseTags.Dfs, false)]
+    public void A_redirecting_tag_is_recognised_as_one(uint tag, bool surrogate)
+    {
+        Assert.Equal(surrogate, ReparseTags.IsNameSurrogate(tag));
+        Assert.True(ReparseTags.Redirects(tag));
+    }
+
+    /// <summary>
+    /// Tags whose filter serves the entry's own contents do not redirect, so the entry is
+    /// opened as itself — and none of them is read as a link either.
+    /// </summary>
+    /// <remarks>
+    /// A file compressed with <c>compact /exe</c>, a deduplicated file, a cloud placeholder and
+    /// one of its numbered variants, a projected directory, a hierarchical storage placeholder
+    /// and an application execution alias.
+    /// </remarks>
+    [Theory]
+    [InlineData(0x80000017u)]
+    [InlineData(0x80000013u)]
+    [InlineData(0x9000001Au)]
+    [InlineData(0x9000301Au)]
+    [InlineData(0x9000001Cu)]
+    [InlineData(0xC0000004u)]
+    [InlineData(ReparseTags.AppExecLink)]
+    public void A_tag_a_filter_serves_does_not_redirect(uint tag)
+    {
+        Assert.False(ReparseTags.IsNameSurrogate(tag));
+        Assert.False(ReparseTags.Redirects(tag));
+        Assert.False(ReparseTags.IsFilesystemLink(tag));
+
+        byte[] buffer = SymbolicLink("inside\\target", relative: true);
+        BinaryPrimitives.WriteUInt32LittleEndian(buffer, tag);
+        Assert.False(ReparseData.TryReadTarget(buffer, out _, out _));
+    }
+
+    /// <summary>
     /// A header claiming more data than the filesystem returned. Believing it would read
     /// past the buffer.
     /// </summary>

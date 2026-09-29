@@ -46,7 +46,7 @@ This runs on every platform, because it depends on bytes alone.
 
 **The walk** (`resolution`). The component-at-a-time resolver runs over a simulated tree the
 input builds: directories, files, symbolic links whose targets the input writes, mount points,
-and reparse points that are not links. The sandbox sits beside a directory that stands for
+and reparse points that redirect without being links. The sandbox sits beside a directory that stands for
 everything outside it. Whatever the tree and whatever the path, the walk must:
 
 - never look up a name in a directory outside the sandbox;

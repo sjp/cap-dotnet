@@ -2018,9 +2018,11 @@ public sealed partial class Dir : IDir
                 return CapError.Success;
             }
 
-            // A reparse point whose tag is not a filesystem link has nothing to follow that
-            // means a place, and resolution refuses one it meets on the way; following one on
-            // request is refused the same way rather than quietly acting on it as a name.
+            // A reparse point that stands for another object by a means other than a
+            // filesystem link has nothing to follow that means a place, and resolution refuses
+            // one it meets on the way; following one on request is refused the same way rather
+            // than quietly acting on it as a name. One that only says which filter serves the
+            // object is described as the file or directory it is, and is not stopped here.
             if (info.Type == CapNodeType.UnknownReparsePoint)
             {
                 return CapError.FromCategory(CapErrorCategory.Reparse);

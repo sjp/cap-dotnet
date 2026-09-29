@@ -112,8 +112,9 @@ internal static class FailureTranslation
             CapErrorCategory.NotSupported =>
                 new CapIOException(KindOf(error.Category),
                     $"'{path}' could not be operated on: the filesystem does not implement what " +
-                    $"the operation needs, such as a kind of entry it cannot hold or a way of " +
-                    $"performing the operation as one step. ({error})"),
+                    $"the operation needs, such as a kind of entry it cannot hold, a way of " +
+                    $"performing the operation as one step, or a filter serving a reparse point " +
+                    $"the entry carries. ({error})"),
 
             // The name turned out to be a symbolic link where the operation needed the thing
             // itself. Inside the subtree, so not an escape -- only a step the operation will not
@@ -138,8 +139,9 @@ internal static class FailureTranslation
 
             CapErrorCategory.Reparse =>
                 new SandboxEscapeException(
-                    $"'{path}' passes through a reparse point that is not a filesystem link, so " +
-                    $"following it would leave the subtree entirely. ({error})"),
+                    $"'{path}' passes through a reparse point that stands for another object " +
+                    $"by a means other than a filesystem link, so following it would leave the " +
+                    $"subtree entirely. ({error})"),
 
             // Not an escape. The chain may be a genuine loop, an honestly long one, or a link
             // the policy in force declines to follow -- and in every case it named something

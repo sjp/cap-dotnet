@@ -54,17 +54,26 @@ public sealed class WindowsTopologyTests
     }
 
     /// <summary>
-    /// An application execution alias — a reparse point that is not a filesystem link — is
-    /// refused as a way out rather than read as one.
+    /// An application execution alias — a reparse point that is not a filesystem link, and
+    /// that redirects nothing on the filesystem — is never read as a link, and failing to open
+    /// it is not reported as a way out.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The alias is a stub only the process launcher reads; no filter on the volume serves
+    /// it. So it is described as the file it is, opening it fails because nothing can serve
+    /// its contents, and reading it as a link yields no target. None of those is an escape,
+    /// and reporting one would put noise into the one log worth reading closely.
+    /// </para>
+    /// <para>
     /// Such aliases cannot be created without the store's installer, so the ones the system
     /// already has are used where the running account has any.
+    /// </para>
     /// </remarks>
     [Fact]
-    [Defends("S9")]
+    [Defends("S18")]
     [NotInMemory("The alias is one the host's system installed.")]
-    public void An_application_execution_alias_is_refused_rather_than_followed()
+    public void An_application_execution_alias_is_never_read_as_a_link_nor_reported_as_an_escape()
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -87,8 +96,16 @@ public sealed class WindowsTopologyTests
         using BackendScope scope = Backends.Enter(Backends.Windows);
         using Dir root = Dir.Open(aliases, AmbientAuthority.Acquire());
 
-        Assert.Throws<SandboxEscapeException>(() => root.OpenFile(alias).Dispose());
-        Assert.Throws<SandboxEscapeException>(() => root.OpenDir(alias).Dispose());
+        Assert.Equal(CapFileType.File, root.GetMetadata(alias).Type);
+
+        IOException opened = Assert.ThrowsAny<IOException>(() => root.OpenFile(alias).Dispose());
+        Assert.Equal(CapErrorKind.NotSupported, CapIOException.KindOf(opened));
+
+        IOException entered = Assert.ThrowsAny<IOException>(() => root.OpenDir(alias).Dispose());
+        Assert.NotEqual(CapErrorKind.Escaped, CapIOException.KindOf(entered));
+
+        IOException read = Assert.ThrowsAny<IOException>(() => root.ReadLink(alias));
+        Assert.Equal(CapErrorKind.NotALink, CapIOException.KindOf(read));
     }
 
     /// <summary>

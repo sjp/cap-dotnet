@@ -45,15 +45,24 @@ public enum CapFileType
 
     /// <summary>
     /// Windows only: something that redirects, by a mechanism that is not a filesystem link
-    /// — an application execution alias, a container image link, a tag introduced after this
-    /// was written.
+    /// — a container link, a distributed file system link, a redirecting tag introduced after
+    /// this was written.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Distinct from <see cref="Symlink"/> because the difference is the whole of the safety
     /// here. What such an entry stores is a structure of unknown shape, and reading it as if
     /// it held a path would mean taking whichever bytes happened to land at the offset a
     /// link keeps its target at and using them as a destination. Nothing follows one, and
     /// the kind is reported so that a caller does not either.
+    /// </para>
+    /// <para>
+    /// A reparse point that only says which filter serves the entry's own contents — a file
+    /// compressed with <c>compact /exe</c>, a deduplicated file, a OneDrive or other cloud
+    /// placeholder, a projected directory, an application execution alias — does not redirect
+    /// and is not reported as this. It is the <see cref="File"/> or <see cref="Directory"/> it
+    /// is, and is opened, read and listed through its filter like any other.
+    /// </para>
     /// </remarks>
     ReparsePoint,
 

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
 
@@ -324,7 +325,232 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
         AssertFails(CapErrorCategory.Escaped, root, "rooted");
     }
 
+    /// <summary>
+    /// A file the Windows Overlay Filter compressed is opened, read and described as the file
+    /// it is, and is never read as a link.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>compact /exe</c> gives the file a reparse point whose tag says the overlay filter
+    /// serves its contents, and moves those contents out of the file's own stream. The tag
+    /// does not redirect anywhere, so refusing the file as a way out would be refusing an
+    /// ordinary file of the sandbox — and reading it without the filter would read the empty
+    /// stream the volume stores rather than the text.
+    /// </para>
+    /// <para>
+    /// Needs no privilege, but not every volume or edition will compress a file this way, so
+    /// the case stands aside where the file comes back without the reparse point.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_file_the_overlay_filter_compressed_is_read_through_the_filter()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        string path = Path.Join(Sandbox, "packed.txt");
+        string content = string.Concat(Enumerable.Repeat("a line the overlay filter will compress\n", 512));
+        File.WriteAllText(path, content);
+
+        RunCompact(path);
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) == 0)
+        {
+            Assert.Skip("This volume would not compress a file with the overlay filter.");
+        }
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapResult<SafeFileHandle> opened = PortableResolver.OpenFile(
+            root, Parse("packed.txt"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using (SafeFileHandle file = opened.Value!)
+        {
+            Assert.Equal(content, System.Text.Encoding.UTF8.GetString(ReadAll(file)));
+        }
+
+        Assert.True(PlatformOps.Host.StatChild(root, "packed.txt", out CapNodeInfo info).IsSuccess);
+        Assert.Equal(CapNodeType.File, info.Type);
+        Assert.Equal(OverlayFilterTag, info.ReparseTag);
+
+        CapError described = PlatformOps.Host.DescribeChild(root, "packed.txt", out CapNodeStat stat);
+        Assert.True(described.IsSuccess, described.FailureDescription);
+        Assert.Equal(CapFileType.File, stat.Type);
+
+        CapResult<string> link = PlatformOps.Host.ReadChildLink(root, "packed.txt");
+        Assert.False(link.IsSuccess, $"a compressed file was read as a link to '{link.Value}'.");
+        Assert.Equal(CapErrorCategory.NotALink, link.Error.Category);
+    }
+
+    /// <summary>
+    /// A reparse point whose tag stands for another object, by a means that is not a
+    /// filesystem link, is refused and never read as a link.
+    /// </summary>
+    /// <remarks>
+    /// The tag is a made-up one with the bit the system reserves for redirections, standing
+    /// for every such tag this library does not know. A tag outside Microsoft's range needs no
+    /// privilege to set; the case stands aside where the volume will not take one.
+    /// </remarks>
+    [Fact]
+    public void A_redirecting_reparse_point_of_an_unknown_kind_is_refused()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        string path = Path.Join(Sandbox, "elsewhere");
+        File.WriteAllText(path, "x");
+        if (!TrySetReparsePoint(path, 0x2000_0123))
+        {
+            Assert.Skip("This volume would not take a reparse point from this process.");
+        }
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapResult<SafeFileHandle> opened = PortableResolver.OpenFile(
+            root, Parse("elsewhere"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+        if (opened.IsSuccess)
+        {
+            opened.Value!.Dispose();
+            Assert.Fail("a redirecting reparse point was opened.");
+        }
+
+        Assert.Equal(CapErrorCategory.Reparse, opened.Error.Category);
+        AssertFails(CapErrorCategory.Reparse, root, "elsewhere");
+
+        Assert.True(PlatformOps.Host.StatChild(root, "elsewhere", out CapNodeInfo info).IsSuccess);
+        Assert.Equal(CapNodeType.UnknownReparsePoint, info.Type);
+
+        CapResult<string> link = PlatformOps.Host.ReadChildLink(root, "elsewhere");
+        Assert.False(link.IsSuccess, $"a redirecting reparse point was read as a link to '{link.Value}'.");
+        Assert.Equal(CapErrorCategory.Reparse, link.Error.Category);
+    }
+
+    /// <summary>
+    /// A reparse point whose tag redirects nothing, but which no filter on this system
+    /// serves, cannot be opened — and is reported as unsupported, not as an escape.
+    /// </summary>
+    /// <remarks>
+    /// The same situation as a cloud placeholder whose provider has been uninstalled, or an
+    /// application execution alias, which only the process launcher reads. Nothing about the
+    /// entry points anywhere, so calling the failure an attempt to leave would be false.
+    /// </remarks>
+    [Fact]
+    public void A_reparse_point_no_filter_serves_is_unsupported_rather_than_an_escape()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        string path = Path.Join(Sandbox, "orphan");
+        File.WriteAllText(path, "x");
+        if (!TrySetReparsePoint(path, 0x0000_0123))
+        {
+            Assert.Skip("This volume would not take a reparse point from this process.");
+        }
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapResult<SafeFileHandle> opened = PortableResolver.OpenFile(
+            root, Parse("orphan"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+        if (opened.IsSuccess)
+        {
+            opened.Value!.Dispose();
+            Assert.Fail("a reparse point no filter serves was opened.");
+        }
+
+        Assert.Equal(CapErrorCategory.NotSupported, opened.Error.Category);
+
+        Assert.True(PlatformOps.Host.StatChild(root, "orphan", out CapNodeInfo info).IsSuccess);
+        Assert.Equal(CapNodeType.File, info.Type);
+
+        CapResult<string> link = PlatformOps.Host.ReadChildLink(root, "orphan");
+        Assert.False(link.IsSuccess, $"a reparse point no filter serves was read as a link to '{link.Value}'.");
+        Assert.Equal(CapErrorCategory.NotALink, link.Error.Category);
+    }
+
+    /// <summary>The tag the Windows Overlay Filter puts on a file it compressed.</summary>
+    private const uint OverlayFilterTag = 0x80000017;
+
     private string Sandbox => Path.Join(_root, "sandbox");
+
+    private static byte[] ReadAll(SafeFileHandle file)
+    {
+        byte[] buffer = new byte[RandomAccess.GetLength(file)];
+        int total = 0;
+        while (total < buffer.Length)
+        {
+            int read = RandomAccess.Read(file, buffer.AsSpan(total), total);
+            Assert.NotEqual(0, read);
+            total += read;
+        }
+
+        return buffer;
+    }
+
+    /// <summary>
+    /// Compresses a file with the Windows Overlay Filter, leaving it uncompressed where the
+    /// volume or the edition will not.
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static void RunCompact(string path)
+    {
+        using Process? process = Process.Start(new ProcessStartInfo("compact.exe")
+        {
+            Arguments = $"/c /exe:xpress4k \"{path}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        });
+
+        Assert.NotNull(process);
+
+        // Both streams drained before waiting, for the reason CreateJunction gives.
+        _ = process.StandardOutput.ReadToEnd();
+        _ = process.StandardError.ReadToEnd();
+        process.WaitForExit();
+    }
+
+    /// <summary>
+    /// Gives a file a reparse point with a tag outside Microsoft's range, reporting whether
+    /// the volume allowed it rather than throwing.
+    /// </summary>
+    /// <remarks>
+    /// A tag outside Microsoft's range carries a GUID naming its owner ahead of its data. The
+    /// data is four bytes of nothing: no filter will ever read it.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static bool TrySetReparsePoint(string path, uint tag)
+    {
+        const uint SetReparsePoint = 0x000900A4;
+        const int DataLength = 4;
+
+        byte[] buffer = new byte[24 + DataLength];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buffer, tag);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(4), DataLength);
+        new Guid("6f1c8f1e-3c1e-4b8e-9d55-5a0f8a3e2b71").TryWriteBytes(buffer.AsSpan(8));
+
+        using SafeFileHandle file = File.OpenHandle(path, FileMode.Open, FileAccess.ReadWrite);
+        return DeviceIoControl(file, SetReparsePoint, buffer, (uint)buffer.Length, 0, 0, out _, 0);
+    }
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DeviceIoControl(
+        SafeFileHandle device,
+        uint code,
+        byte[] input,
+        uint inputLength,
+        nint output,
+        uint outputLength,
+        out uint returned,
+        nint overlapped);
 
     /// <summary>A directory outside the sandbox, for a refusal to have somewhere to aim at.</summary>
     private void BuildOutsideTarget()

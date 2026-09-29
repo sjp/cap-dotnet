@@ -1,4 +1,5 @@
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Windows;
 using Cap.Std.Testing;
 
 namespace Cap.Tests.Fakes;
@@ -18,7 +19,8 @@ namespace Cap.Tests.Fakes;
 /// <para>
 /// It models the three things resolution has to reason about beyond plain names: links,
 /// which redirect; volume boundaries, which mark where an unrelated filesystem has been
-/// grafted in; and reparse tags that are not links at all, which must never be followed.
+/// grafted in; and reparse tags that are not links at all, which must never be followed
+/// and, when they redirect, never opened either.
 /// </para>
 /// <para>
 /// Paths in the building methods use <c>/</c> as a separator on every platform. They are
@@ -89,11 +91,21 @@ internal sealed class FakeFileSystem
         Create(path, CapNodeType.SymbolicLink, target, 0);
 
     /// <summary>
-    /// Creates a reparse point whose tag is not a filesystem link, which resolution must
-    /// refuse rather than interpret.
+    /// Creates a reparse point whose tag is not a filesystem link, which is never read as
+    /// one.
     /// </summary>
-    public MemoryNode AddOpaqueReparsePoint(string path, uint tag) =>
-        Create(path, CapNodeType.UnknownReparsePoint, null, tag);
+    /// <remarks>
+    /// Modelled as the Windows backend describes such an entry. A tag that stands for another
+    /// object is a redirection resolution must refuse. A tag that only says which filter
+    /// serves the entry — a compressed file, a cloud placeholder, an application execution
+    /// alias — leaves it the file or directory it is, carrying its tag, and resolution opens
+    /// it as one. <paramref name="directory"/> says which of the two; a redirection has no
+    /// kind of its own to be.
+    /// </remarks>
+    public MemoryNode AddOpaqueReparsePoint(string path, uint tag, bool directory = false) =>
+        ReparseTags.Redirects(tag)
+            ? Create(path, CapNodeType.UnknownReparsePoint, null, tag)
+            : Create(path, directory ? CapNodeType.Directory : CapNodeType.File, null, tag);
 
     /// <summary>
     /// Creates a directory on a different simulated volume, as a mount point would be.

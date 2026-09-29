@@ -234,7 +234,7 @@ public sealed class SymlinkPolicyTests
         public void AddLink(string path, string target) => _ = _fileSystem.AddSymbolicLink(Inside(path), target);
 
         public void AddNonLinkReparsePoint(string path) =>
-            _ = _fileSystem.AddOpaqueReparsePoint(Inside(path), ReparseTags.AppExecLink);
+            _ = _fileSystem.AddOpaqueReparsePoint(Inside(path), ReparseTags.WciLink);
 
         public void AddOutsideFile(string name) =>
             _ = _fileSystem.AddFile($"{SymlinkPolicyCorpus.OutsideDirectoryName}/{name}");

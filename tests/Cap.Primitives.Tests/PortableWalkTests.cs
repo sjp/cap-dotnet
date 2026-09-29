@@ -711,6 +711,39 @@ public sealed class PortableWalkTests
     }
 
     /// <summary>
+    /// A directory whose reparse point only says which filter serves it — a cloud
+    /// placeholder, a projected directory — is a directory like any other: the walk steps
+    /// through it and it can be listed.
+    /// </summary>
+    [Fact]
+    public void A_directory_a_filter_serves_is_walked_through_and_listed()
+    {
+        FakeFileSystem fs = Sandbox();
+        MemoryNode placeholder = fs.AddOpaqueReparsePoint("sandbox/placeholder", 0x9000_001A, directory: true);
+        _ = fs.AddFile("sandbox/placeholder/report");
+
+        Run(fs, (ops, root) =>
+        {
+            using SafeDirHandle opened = OpenDirectory(ops, root, "placeholder");
+            AssertIs(ops, placeholder, opened);
+
+            CapResult<DirectoryReader> reader = ops.OpenDirectoryReader(opened);
+            Assert.True(reader.IsSuccess, reader.Error.FailureDescription);
+            using (DirectoryReader entries = reader.Value)
+            {
+                Assert.True(entries.Read(out bool advanced).IsSuccess);
+                Assert.True(advanced);
+                Assert.Equal("report", entries.CurrentName.ToString());
+            }
+
+            CapResult<SafeFileHandle> file = PortableResolver.OpenFile(
+                root, Parse("placeholder/report"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+            Assert.True(file.IsSuccess, file.Error.FailureDescription);
+            file.Value!.Dispose();
+        });
+    }
+
+    /// <summary>
     /// A path naming nothing is refused rather than read as naming the directory the caller
     /// already holds.
     /// </summary>

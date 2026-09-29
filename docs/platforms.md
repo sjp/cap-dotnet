@@ -67,6 +67,20 @@ filesystem acts on, which for a rooted one is spelled the way the filesystem sto
 (`\??\C:\...`) rather than the way it is displayed. A directory-kind link and a junction are
 directory entries here, so `CreateHardLink` cannot give one a second name, as it can on Unix.
 
+**Other reparse points are split by whether they redirect.** A reparse point whose tag stands
+for another object — a container link, a distributed file system link, or any tag with the
+name-surrogate bit set — throws `SandboxEscapeException`. One whose tag only names the filter
+serving the entry works like any other file or directory: files compressed with
+`compact /exe` or by CompactOS, files on a deduplicated volume, OneDrive and other
+Files-On-Demand placeholders (folders included), and ProjFS trees such as a VFS for Git checkout
+can be opened, read, listed, walked and copied, and `GetMetadata` reports them as `File` or
+`Directory`. Opening one costs a second open and an identity check (see
+[backends.md](backends.md#what-the-windows-walk-does-differently)), and reading a placeholder
+lets its provider download the contents, as it would for any other program. `ReadLink` on one
+throws with `CapErrorKind.NotALink`. A tag nothing on the machine serves — an application
+execution alias in `WindowsApps`, or a placeholder whose sync client has been uninstalled —
+cannot be opened, and fails with `CapErrorKind.NotSupported` rather than as an escape.
+
 **Opening a name without saying which kind takes two opens.** A directory and a file are
 opened with different options, so `OpenAny` opens the name once with the right to ask what it
 is and nothing more, then opens that object again through the handle it got, with an empty

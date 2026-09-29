@@ -29,10 +29,14 @@ namespace Cap.Primitives.Interop.Windows;
 /// learned a link existed.
 /// </para>
 /// <para>
-/// A name that is not a filesystem link is refused rather than interpreted. Reparse points
-/// are a general extension mechanism and most tags have nothing to do with paths; reading an
+/// A reparse point that is not a filesystem link is never interpreted. Reparse points are a
+/// general extension mechanism and most tags have nothing to do with paths; reading an
 /// unrecognised one as a link would mean treating a structure of unknown shape as a
-/// destination.
+/// destination. One whose tag says it stands for another object is refused. One whose tag
+/// only says which filter serves the object — a compressed file, a cloud placeholder — is an
+/// entry of the directory like any other, and is opened again through its filter so that
+/// what the caller gets is what the rest of the system sees, after checking that the second
+/// open reached the same object as the first.
 /// </para>
 /// <para>
 /// <strong>Names are matched without regard to case</strong>, which is what the rest of the
@@ -239,20 +243,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             NtConstants.FILE_OPEN_REPARSE_POINT,
             out nint raw);
 
-        if (error.IsFailure)
-        {
-            return CapResult<SafeDirHandle>.Fail(error);
-        }
-
-        SafeDirHandle handle = new(raw, this, access);
-        CapError linkCheck = RefuseIfReparsePoint(handle);
-        if (linkCheck.IsFailure)
-        {
-            handle.Dispose();
-            return CapResult<SafeDirHandle>.Fail(linkCheck);
-        }
-
-        return CapResult<SafeDirHandle>.Ok(handle);
+        error = error.IsFailure ? error : AdmitDirectory(ref raw, mask);
+        return error.IsFailure
+            ? CapResult<SafeDirHandle>.Fail(error)
+            : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, this, access));
     }
 
     /// <inheritdoc/>
@@ -263,24 +257,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     {
         Interlocked.Increment(ref _componentOpens);
         CapError error = OpenFileRelative(parent, name, in request, out nint raw);
-        if (error.IsFailure)
-        {
-            return CapResult<SafeFileHandle>.Fail(error);
-        }
-
-        SafeFileHandle handle = new(raw, ownsHandle: true);
-
-        // Asked after the open, and of the object rather than of the name. A reparse point
-        // opened as itself is a link this library will not hand back as a file, whatever the
-        // name said and whatever appeared at that name in the meantime.
-        CapError linkCheck = RefuseIfReparsePoint(handle);
-        if (linkCheck.IsFailure)
-        {
-            handle.Dispose();
-            return CapResult<SafeFileHandle>.Fail(linkCheck);
-        }
-
-        return CapResult<SafeFileHandle>.Ok(handle);
+        return error.IsFailure
+            ? CapResult<SafeFileHandle>.Fail(error)
+            : CapResult<SafeFileHandle>.Ok(new SafeFileHandle(raw, ownsHandle: true));
     }
 
     /// <inheritdoc/>
@@ -348,20 +327,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             NtConstants.FILE_OPEN_REPARSE_POINT,
             out nint raw);
 
-        if (error.IsFailure)
-        {
-            return CapResult<OpenedNode>.Fail(error);
-        }
-
-        SafeDirHandle directory = new(raw, this, CapAccess.Read);
-        CapError linkCheck = RefuseIfReparsePoint(directory);
-        if (linkCheck.IsFailure)
-        {
-            directory.Dispose();
-            return CapResult<OpenedNode>.Fail(linkCheck);
-        }
-
-        return CapResult<OpenedNode>.Ok(new OpenedNode(directory));
+        error = error.IsFailure ? error : AdmitDirectory(ref raw, DirectoryAccess);
+        return error.IsFailure
+            ? CapResult<OpenedNode>.Fail(error)
+            : CapResult<OpenedNode>.Ok(new OpenedNode(new SafeDirHandle(raw, this, CapAccess.Read)));
     }
 
     /// <summary>
@@ -371,20 +340,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     private CapResult<OpenedNode> ReopenNodeAsFile(SafeDirHandle found, in FileOpenRequest request)
     {
         CapError error = OpenFileRelative(found, ReadOnlySpan<char>.Empty, in request, out nint raw);
-        if (error.IsFailure)
-        {
-            return CapResult<OpenedNode>.Fail(error);
-        }
-
-        SafeFileHandle file = new(raw, ownsHandle: true);
-        CapError linkCheck = RefuseIfReparsePoint(file);
-        if (linkCheck.IsFailure)
-        {
-            file.Dispose();
-            return CapResult<OpenedNode>.Fail(linkCheck);
-        }
-
-        return CapResult<OpenedNode>.Ok(new OpenedNode(file, this));
+        return error.IsFailure
+            ? CapResult<OpenedNode>.Fail(error)
+            : CapResult<OpenedNode>.Ok(new OpenedNode(new SafeFileHandle(raw, ownsHandle: true), this));
     }
 
     /// <inheritdoc/>
@@ -424,7 +382,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // The empty name with the handle as the resolution root re-opens the object the
         // handle already refers to. Nothing is named a second time, so nothing a concurrent
         // rename could do changes what comes back -- and the new object carries a scan
-        // position of its own, where a duplicated handle would share the original's.
+        // position of its own, where a duplicated handle would share the original's. It is
+        // settled as a directory reached by name is, because a directory a filter serves
+        // lists what the filter says it holds only to a handle the filter took part in.
         CapError error = OpenRelative(
             directory,
             ReadOnlySpan<char>.Empty,
@@ -433,6 +393,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             NtConstants.FILE_OPEN_REPARSE_POINT,
             out nint raw);
 
+        error = error.IsFailure ? error : AdmitDirectory(ref raw, DirectoryAccess);
         if (error.IsFailure)
         {
             return CapResult<DirectoryReader>.Fail(error);
@@ -487,18 +448,35 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             if (!ok)
             {
                 // Not a reparse point at all, as opposed to one whose tag is not a link: the
-                // second is refused as a reparse point, the first is simply not a link.
-                return CapResult<string>.Fail(win32 == Win32Errors.ERROR_NOT_A_REPARSE_POINT
-                    ? CapError.Create(CapErrorCategory.NotALink, CapErrorSource.Win32, win32)
-                    : Win32Errors.ToError(win32));
+                // second is refused as a reparse point, the first is simply not a link. A
+                // filter serving the object may also decline to hand its data over, and the
+                // object is then asked for its tag, which it has no reason to withhold.
+                if (win32 == Win32Errors.ERROR_NOT_A_REPARSE_POINT ||
+                    (QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo).IsSuccess &&
+                     !Redirects(in tagInfo)))
+                {
+                    return CapResult<string>.Fail(
+                        CapError.Create(CapErrorCategory.NotALink, CapErrorSource.Win32, win32));
+                }
+
+                return CapResult<string>.Fail(Win32Errors.ToError(win32));
             }
 
-            if (!ReparseData.TryReadTarget(
-                    buffer.AsSpan(0, (int)returned), out string target, out bool isRelative))
+            ReadOnlySpan<byte> data = buffer.AsSpan(0, (int)returned);
+            if (!ReparseData.TryReadTarget(data, out string target, out bool isRelative))
             {
-                // Either the tag is not one that names a path, or the structure did not
-                // describe itself consistently. Both mean the same thing here: there is no
-                // link target that can be trusted, so none is produced.
+                // A tag that only says which filter serves the object: it is not a link, and
+                // is reported as the file or directory it is everywhere else.
+                if (ReparseData.TryReadTag(data, out uint tag) && !ReparseTags.Redirects(tag))
+                {
+                    return CapResult<string>.Fail(CapError.Create(
+                        CapErrorCategory.NotALink, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NOT_A_REPARSE_POINT));
+                }
+
+                // Either the tag stands for another object by a means that is not a path, or
+                // the structure did not describe itself consistently. Both mean the same
+                // thing here: there is no link target that can be trusted, so none is
+                // produced.
                 return CapResult<string>.Fail(CapError.Create(
                     CapErrorCategory.Reparse,
                     CapErrorSource.NtStatus,
@@ -942,7 +920,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         // The empty name with the handle as the resolution root re-opens the object the
         // handle already refers to. Nothing is named a second time, so nothing a concurrent
-        // rename could do changes what comes back.
+        // rename could do changes what comes back. Settled as a directory reached by name is,
+        // so that a directory a filter serves keeps the filter's view of it.
         if (!TryDirectoryAccessMask(access, out uint mask))
         {
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
@@ -956,6 +935,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             NtConstants.FILE_OPEN_REPARSE_POINT,
             out nint raw);
 
+        error = error.IsFailure ? error : AdmitDirectory(ref raw, mask);
         return error.IsFailure
             ? CapResult<SafeDirHandle>.Fail(error)
             : CapResult<SafeDirHandle>.Ok(new SafeDirHandle(raw, this, access));
@@ -1258,10 +1238,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <inheritdoc/>
     /// <remarks>
     /// The open constrains nothing about what kind of object the name holds, and then the
-    /// answer decides. A plain directory is refused, because removing one is the other
-    /// operation; everything else — a file, a symbolic link of either kind, a junction — is
-    /// a name this removes, which is the same set the Unix call removes and for the same
-    /// reason. A link is unlinked as itself: the open asks for the reparse point rather than
+    /// answer decides. A directory is refused, because removing one is the other operation,
+    /// and that includes a directory whose reparse point only says which filter serves it;
+    /// everything else — a file, a symbolic link of either kind, a junction — is a name this
+    /// removes, which is the same set the Unix call removes and for the same reason. A link is unlinked as itself: the open asks for the reparse point rather than
     /// what it points at, so nothing about the target is reached or even read.
     /// </remarks>
     public CapError RemoveChildFile(SafeDirHandle parent, ReadOnlySpan<char> name)
@@ -1286,10 +1266,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return kind;
             }
 
-            bool isReparsePoint = (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
             bool isDirectory = (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0;
 
-            return isDirectory && !isReparsePoint
+            return isDirectory && !Redirects(in info)
                 ? CapError.Create(
                     CapErrorCategory.IsADirectory, CapErrorSource.NtStatus, NtStatusCodes.STATUS_FILE_IS_A_DIRECTORY)
                 : MarkForRemoval(raw);
@@ -1302,11 +1281,13 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
     /// <inheritdoc/>
     /// <remarks>
-    /// A reparse point is refused here even when it is a directory one, which is the same
-    /// answer the Unix call gives: a link that happens to point at a directory is still a
-    /// link, and removing it is removing a name rather than removing a directory. Emptiness
-    /// is left to the filesystem to enforce, because only the filesystem can decide it
-    /// without a window in which something is added.
+    /// A reparse point that stands for another object is refused here even when it is a
+    /// directory one, which is the same answer the Unix call gives: a link that happens to
+    /// point at a directory is still a link, and removing it is removing a name rather than
+    /// removing a directory. A directory whose reparse point only says which filter serves it
+    /// — a cloud placeholder, a projected directory — is a directory, and is removed as one.
+    /// Emptiness is left to the filesystem to enforce, because only the filesystem can decide
+    /// it without a window in which something is added.
     /// </remarks>
     public CapError RemoveChildDirectory(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
@@ -1331,7 +1312,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return kind;
             }
 
-            return (info.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0
+            return Redirects(in info)
                 ? CapError.Create(
                     CapErrorCategory.NotADirectory, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NOT_A_DIRECTORY)
                 : MarkForRemoval(raw);
@@ -1637,8 +1618,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The creating twin of <see cref="OpenRelative"/>, with the same counted name and the
-    /// same directory handle as the resolution root, and the same refusal of anything that
+    /// The creating twin of
+    /// <see cref="OpenRelative(SafeDirHandle, ReadOnlySpan{char}, uint, uint, out nint)"/>, with
+    /// the same counted name and the same directory handle as the resolution root, and the
+    /// same refusal of anything that
     /// is not a filesystem object. It does not ask whether the name reached its object
     /// through an alias, because there was no object: a create either takes a free name or
     /// fails.
@@ -1989,7 +1972,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         // there without touching it.
         if (request.Truncates && request.Creates)
         {
-            CapError claimed = CreateFileRelative(lease.Raw, name, in request, NtConstants.FILE_CREATE, out handle);
+            CapError claimed = CreateFileRelative(
+                lease.Raw, name, in request, NtConstants.FILE_CREATE, throughFilter: false, out handle);
             if (claimed.Category != CapErrorCategory.AlreadyExists)
             {
                 return claimed;
@@ -1998,22 +1982,27 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
         uint disposition = request.Truncates ? NtConstants.FILE_OPEN : FileRequestDisposition(request.Mode);
 
-        CapError opened = CreateFileRelative(lease.Raw, name, in request, disposition, out handle);
+        CapError opened = CreateFileRelative(lease.Raw, name, in request, disposition, throughFilter: false, out handle);
         if (opened.IsFailure)
         {
             return opened;
         }
 
-        if (!request.Truncates)
+        // Asked after the open, and of the object rather than of the name. A reparse point
+        // standing for another object is a link this library will not hand back as a file,
+        // whatever the name said and whatever appeared at that name in the meantime; one a
+        // filter serves is exchanged for a handle the filter takes part in.
+        CapError admitted = AdmitFile(ref handle, in request);
+        if (admitted.IsFailure || !request.Truncates)
         {
-            return CapError.Success;
+            return admitted;
         }
 
-        // Only now, with the object open and known not to be a link, is it emptied. A file
-        // something else substituted for this one between the two halves is emptied instead,
-        // which is the same outcome the single atomic call would have produced.
-        CapError kind = RefuseIfReparsePoint(handle);
-        CapError emptied = kind.IsFailure ? kind : TruncateThrough(handle, request.PreallocationSize);
+        // Only now, with the object open and known not to be a link, is it emptied — through
+        // the handle that will be handed back, so a filter serving the file sees the change.
+        // A file something else substituted for this one between the two halves is emptied
+        // instead, which is the same outcome the single atomic call would have produced.
+        CapError emptied = TruncateThrough(handle, request.PreallocationSize);
         if (emptied.IsFailure)
         {
             _ = NtNative.NtClose(handle);
@@ -2028,18 +2017,27 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// One native open of a name beneath a directory handle, with the checks every handle
     /// this backend produces is subject to.
     /// </summary>
+    /// <remarks>
+    /// <c>throughFilter</c> is set for the reopen <see cref="AdmitFile"/> makes of an object a
+    /// filter serves: the reparse point is not asked for, so the filter takes part, and
+    /// deletion on close is not asked for either, because the object reached is not yet known
+    /// to be the one intended.
+    /// </remarks>
     private static unsafe CapError CreateFileRelative(
         nint parent,
         ReadOnlySpan<char> name,
         in FileOpenRequest request,
         uint disposition,
+        bool throughFilter,
         out nint handle)
     {
         handle = 0;
 
         uint desiredAccess = FileRequestAccessMask(in request);
-        uint createOptions = NtConstants.FILE_NON_DIRECTORY_FILE | NtConstants.FILE_OPEN_REPARSE_POINT |
-                             FileRequestOptions(in request);
+        uint createOptions = NtConstants.FILE_NON_DIRECTORY_FILE | FileRequestOptions(in request);
+        createOptions = throughFilter
+            ? createOptions & ~NtConstants.FILE_DELETE_ON_CLOSE
+            : createOptions | NtConstants.FILE_OPEN_REPARSE_POINT;
 
         uint attributes = (request.Options & FileOptions.Encrypted) != 0
             ? NtConstants.FILE_ATTRIBUTE_ENCRYPTED
@@ -2274,7 +2272,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// path parser refuses those long before they arrive here, and this refuses them again
     /// because a single missed case would be an escape rather than a bug.
     /// </remarks>
-    private static unsafe CapError OpenRelative(
+    private static CapError OpenRelative(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
         uint desiredAccess,
@@ -2283,22 +2281,54 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     {
         handle = 0;
 
-        if (name.Length > short.MaxValue)
+        CapError refusal = RefuseUnlessSingleName(name);
+        if (refusal.IsFailure)
         {
-            return CapError.Create(
-                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
-        }
-
-        if (name.Contains('\\') || name.Contains('/') || name.Contains('\0'))
-        {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+            return refusal;
         }
 
         using HandleLease lease = parent.Lease();
         if (!lease.IsValid)
         {
             return HandleLease.ClosedError;
+        }
+
+        return OpenRelative(lease.Raw, name, desiredAccess, openOptions, out handle);
+    }
+
+    /// <summary>
+    /// Refuses a name that is too long to pass, or that is not a single component.
+    /// </summary>
+    private static CapError RefuseUnlessSingleName(ReadOnlySpan<char> name)
+    {
+        if (name.Length > short.MaxValue)
+        {
+            return CapError.Create(
+                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
+        }
+
+        return name.Contains('\\') || name.Contains('/') || name.Contains('\0')
+            ? CapError.Create(
+                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID)
+            : CapError.Success;
+    }
+
+    /// <summary>
+    /// The same open made relative to a raw handle, for the operations that hold one directly.
+    /// </summary>
+    private static unsafe CapError OpenRelative(
+        nint parent,
+        ReadOnlySpan<char> name,
+        uint desiredAccess,
+        uint openOptions,
+        out nint handle)
+    {
+        handle = 0;
+
+        CapError refusal = RefuseUnlessSingleName(name);
+        if (refusal.IsFailure)
+        {
+            return refusal;
         }
 
         fixed (char* characters = name)
@@ -2313,7 +2343,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             ObjectAttributes attributes = new()
             {
                 Length = (uint)ObjectAttributes.StructSize,
-                RootDirectory = lease.Raw,
+                RootDirectory = parent,
                 ObjectName = (nint)(&objectName),
                 Attributes = (uint)ObjectAttributeFlags.CaseInsensitive,
                 SecurityDescriptor = 0,
@@ -2333,7 +2363,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             if (NtStatusCodes.IsFailure(result))
             {
                 return (openOptions & NtConstants.FILE_OPEN_REPARSE_POINT) != 0
-                    ? ExplainKindMismatch(lease.Raw, name, result)
+                    ? ExplainKindMismatch(parent, name, result)
                     : NtStatusCodes.ToError(result);
             }
 
@@ -2641,7 +2671,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <summary>
-    /// Refuses a handle that turned out to be a reparse point, and says which kind.
+    /// Refuses a handle that turned out to be a reparse point standing for another object,
+    /// and says which kind.
     /// </summary>
     /// <remarks>
     /// The open asked for the reparse point itself rather than its target, so it succeeds on
@@ -2650,36 +2681,223 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// what it got was a link, and hand it back rather than treat it as the directory or file
     /// the caller asked for.
     /// </remarks>
-    private static CapError RefuseIfReparsePoint(SafeHandle handle) =>
-        Classify(QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo), tagInfo);
-
-    /// <summary>
-    /// The same refusal asked of a raw handle, for the operations that hold one directly
-    /// because they are about to close it themselves.
-    /// </summary>
     private static CapError RefuseIfReparsePoint(nint handle) =>
         Classify(QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo), tagInfo);
 
+    /// <summary>
+    /// Reads what an object's reparse point, if it has one, means for opening it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A tag that names a path is a link the caller can read and re-resolve. A tag that
+    /// stands for another object by some other means is refused outright rather than reported
+    /// as something that could be followed, since what it leads to is known only to the
+    /// component that owns it.
+    /// </para>
+    /// <para>
+    /// Any other tag belongs to a filter serving this object's own contents — a compressed or
+    /// deduplicated file, a cloud placeholder, a projected directory — and is no reason to
+    /// refuse it: the open that found it was made beneath the parent handle without following
+    /// anything, so the object is an entry of that directory. It is not success for the
+    /// handle in hand, though, which sees the object without its filter;
+    /// <see cref="ConfirmReopenedThroughFilter"/> is how an open gets the one the caller asked for.
+    /// </para>
+    /// </remarks>
     private static CapError Classify(CapError error, in FileAttributeTagInformation tagInfo)
     {
-        if (error.IsFailure)
+        if (error.IsFailure || !Redirects(in tagInfo))
         {
             return error;
         }
 
-        if ((tagInfo.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) == 0)
-        {
-            return CapError.Success;
-        }
-
-        // A tag that names a path is a link the caller can read and re-resolve. Any other tag
-        // describes a structure this library does not know the shape of, so it is refused
-        // outright rather than reported as something that could be followed.
         return ReparseTags.IsFilesystemLink(tagInfo.ReparseTag)
             ? CapError.Create(
                 CapErrorCategory.SymbolicLink, CapErrorSource.NtStatus, NtStatusCodes.STATUS_REPARSE_POINT_ENCOUNTERED)
             : CapError.Create(
                 CapErrorCategory.Reparse, CapErrorSource.NtStatus, NtStatusCodes.STATUS_IO_REPARSE_TAG_NOT_HANDLED);
+    }
+
+    /// <summary>
+    /// Whether an object carries a reparse point that stands for another object — a link, a
+    /// junction, or a redirection of a kind this library does not read.
+    /// </summary>
+    /// <remarks>Both link tags carry the bit that marks a redirection, so they are included.</remarks>
+    private static bool Redirects(in FileAttributeTagInformation tagInfo) =>
+        (tagInfo.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+        ReparseTags.Redirects(tagInfo.ReparseTag);
+
+    /// <summary>
+    /// Whether an object carries a reparse point that only says which filter serves it.
+    /// </summary>
+    private static bool IsServedByFilter(in FileAttributeTagInformation tagInfo) =>
+        (tagInfo.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+        !ReparseTags.Redirects(tagInfo.ReparseTag);
+
+    /// <summary>
+    /// Settles a directory handle opened as its own reparse point: refuses it if the reparse
+    /// point stands for another object, and reopens it through its filter if one serves it.
+    /// </summary>
+    /// <param name="handle">
+    /// The handle, replaced on success by the one to use and closed on failure.
+    /// </param>
+    /// <param name="access">The rights the handle was opened with, asked for again by a reopen.</param>
+    private static CapError AdmitDirectory(ref nint handle, uint access)
+    {
+        CapError error = Classify(QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo), tagInfo);
+        if (error.IsSuccess && IsServedByFilter(in tagInfo))
+        {
+            // Every directory handle here shares everything, so reopening through this one
+            // while it is still open conflicts with nothing.
+            error = OpenRelative(
+                handle,
+                ReadOnlySpan<char>.Empty,
+                access,
+                NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT,
+                out nint through);
+            error = ConfirmReopenedThroughFilter(handle, error, ref through);
+
+            if (error.IsSuccess)
+            {
+                _ = NtNative.NtClose(handle);
+                handle = through;
+                return error;
+            }
+        }
+
+        if (error.IsFailure)
+        {
+            _ = NtNative.NtClose(handle);
+            handle = 0;
+        }
+
+        return error;
+    }
+
+    /// <summary>
+    /// Settles a file handle opened as its own reparse point, as
+    /// <see cref="AdmitDirectory"/> does a directory's, with the rights, sharing and options
+    /// the request asked for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A file handle carries the caller's sharing, which may exclude the very access a reopen
+    /// asks for, so the reopen cannot be made through it while it is open. It is exchanged
+    /// first for one that can only ask what the object is — a right sharing never restricts —
+    /// and the reopen is made through that.
+    /// </para>
+    /// <para>
+    /// A request to delete the file on close is the exception, and is not repeated on the
+    /// reopen: if that reached some other object, closing it after refusing it would delete
+    /// that object. The reopen is made instead while the first handle, which carries the
+    /// request, is still open. Closing that handle afterwards marks the file for deletion,
+    /// which happens when the reopened handle closes, as the request asked. Under a sharing
+    /// mode that excludes the reopen's own access the reopen is refused as a sharing
+    /// conflict, which is what it is.
+    /// </para>
+    /// </remarks>
+    private static CapError AdmitFile(ref nint handle, in FileOpenRequest request)
+    {
+        CapError error = Classify(QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo), tagInfo);
+        if (error.IsFailure || !IsServedByFilter(in tagInfo))
+        {
+            if (error.IsFailure)
+            {
+                _ = NtNative.NtClose(handle);
+                handle = 0;
+            }
+
+            return error;
+        }
+
+        nint source = handle;
+        if ((request.Options & FileOptions.DeleteOnClose) == 0)
+        {
+            error = OpenRelative(
+                handle,
+                ReadOnlySpan<char>.Empty,
+                QueryAccess,
+                NtConstants.FILE_SYNCHRONOUS_IO_NONALERT | NtConstants.FILE_OPEN_REPARSE_POINT,
+                out source);
+
+            _ = NtNative.NtClose(handle);
+            handle = 0;
+            if (error.IsFailure)
+            {
+                return error;
+            }
+        }
+
+        error = CreateFileRelative(
+            source, ReadOnlySpan<char>.Empty, in request, NtConstants.FILE_OPEN, throughFilter: true, out nint through);
+        error = ConfirmReopenedThroughFilter(source, error, ref through);
+
+        _ = NtNative.NtClose(source);
+        handle = through;
+        return error;
+    }
+
+    /// <summary>
+    /// Checks the result of opening an object again through a handle to it, this time
+    /// letting the filter that owns its reparse point take part, and refuses it unless it is
+    /// the same object.
+    /// </summary>
+    /// <param name="source">The handle the reopen was made through.</param>
+    /// <param name="opened">What the reopen reported.</param>
+    /// <param name="through">The reopened handle, closed and zeroed on failure.</param>
+    /// <remarks>
+    /// <para>
+    /// A handle opened as the reparse point itself sees the object as the volume stores it,
+    /// which for a filter-served object is not what anybody else sees: a compressed file's
+    /// stored stream is empty and its contents are elsewhere, a placeholder's contents are
+    /// not on the disk at all. So the object is opened again without asking for the reparse
+    /// point, and that open names nothing — the name is empty and the handle is the root — so
+    /// a rename in between cannot redirect it.
+    /// </para>
+    /// <para>
+    /// What it cannot rule out is the object having been turned into a link in place since it
+    /// was looked at, which an open that follows reparse points would follow. So the object
+    /// reached is compared with the one the handle refers to, by volume and identifier, and a
+    /// different one is closed and refused as the redirection it was. The same comparison
+    /// catches a filter that redirected despite its tag saying it does not.
+    /// </para>
+    /// <para>
+    /// A tag no filter on this system handles cannot be opened this way at all, and says so
+    /// with a status of its own. That is reported as unsupported rather than as a refusal to
+    /// leave the sandbox: nothing was reached, and nothing about the object points anywhere.
+    /// </para>
+    /// </remarks>
+    private static CapError ConfirmReopenedThroughFilter(nint source, CapError opened, ref nint through)
+    {
+        if (opened.IsFailure)
+        {
+            through = 0;
+            return opened.Source == CapErrorSource.NtStatus &&
+                   opened.RawCode == NtStatusCodes.STATUS_IO_REPARSE_TAG_NOT_HANDLED
+                ? CapError.Create(CapErrorCategory.NotSupported, opened.Source, opened.RawCode)
+                : opened;
+        }
+
+        CapError error = QueryId(source, out FileIdInformation expected);
+        if (error.IsSuccess)
+        {
+            error = QueryId(through, out FileIdInformation reached);
+            if (error.IsSuccess &&
+                (reached.VolumeSerialNumber != expected.VolumeSerialNumber ||
+                 reached.FileIdLow != expected.FileIdLow ||
+                 reached.FileIdHigh != expected.FileIdHigh))
+            {
+                error = CapError.Create(
+                    CapErrorCategory.Reparse, CapErrorSource.NtStatus, NtStatusCodes.STATUS_IO_REPARSE_TAG_NOT_HANDLED);
+            }
+        }
+
+        if (error.IsFailure)
+        {
+            _ = NtNative.NtClose(through);
+            through = 0;
+        }
+
+        return error;
     }
 
     private static CapError Describe(SafeHandle handle, out CapNodeInfo info)
@@ -2698,11 +2916,15 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return error;
         }
 
+        // A reparse point that only says which filter serves the object is described as the
+        // file or directory it is, since that is what opening it produces; its tag is still
+        // carried, for a caller that wants to know.
         CapNodeType type;
-        uint tag = 0;
-        if ((tagInfo.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        uint tag = (tagInfo.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0
+            ? tagInfo.ReparseTag
+            : 0;
+        if (Redirects(in tagInfo))
         {
-            tag = tagInfo.ReparseTag;
             type = ReparseTags.IsFilesystemLink(tag)
                 ? CapNodeType.SymbolicLink
                 : CapNodeType.UnknownReparsePoint;
@@ -2761,12 +2983,13 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Three requests in the ordinary case and four when the object redirects. The first
+    /// Three requests in the ordinary case and four when the object has a reparse point. The first
     /// carries the times, the length and the attributes together, so those describe one
     /// instant rather than several; the second carries the identity and the third the link
     /// count, neither of which any single reply combines with the rest. The reparse tag is asked for only when the attributes say
     /// there is one, because the whole reason to want it — telling a symbolic link from a
-    /// structure of unknown shape that merely looks like one — does not arise otherwise.
+    /// redirection of unknown shape, and either from an object a filter merely serves — does
+    /// not arise otherwise.
     /// </para>
     /// <para>
     /// The identifier is carried at its full width here, unlike in the description
@@ -2799,7 +3022,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return error;
         }
 
-        CapFileType type;
+        CapFileType type = (basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0
+            ? CapFileType.Directory
+            : CapFileType.File;
+
         if ((basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
         {
             error = QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo);
@@ -2808,15 +3034,14 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 return error;
             }
 
-            type = ReparseTags.IsFilesystemLink(tagInfo.ReparseTag)
-                ? CapFileType.Symlink
-                : CapFileType.ReparsePoint;
-        }
-        else
-        {
-            type = (basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0
-                ? CapFileType.Directory
-                : CapFileType.File;
+            // Only a reparse point that stands for another object changes the answer. One
+            // that says which filter serves the object leaves it the file or directory it is.
+            if (Redirects(in tagInfo))
+            {
+                type = ReparseTags.IsFilesystemLink(tagInfo.ReparseTag)
+                    ? CapFileType.Symlink
+                    : CapFileType.ReparsePoint;
+            }
         }
 
         stat = new CapNodeStat(
@@ -2895,20 +3120,29 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         return CapError.Success;
     }
 
-    private static unsafe CapError QueryId(SafeHandle handle, out FileIdInformation result)
+    private static CapError QueryId(SafeHandle handle, out FileIdInformation result)
     {
-        result = default;
-
         using HandleLease lease = new(handle);
         if (!lease.IsValid)
         {
+            result = default;
             return HandleLease.ClosedError;
         }
+
+        return QueryId(lease.Raw, out result);
+    }
+
+    /// <summary>
+    /// The same question asked of a raw handle, for the operations that hold one directly.
+    /// </summary>
+    private static unsafe CapError QueryId(nint handle, out FileIdInformation result)
+    {
+        result = default;
 
         IoStatusBlock status = default;
         FileIdInformation value = default;
         int nt = NtNative.NtQueryInformationFile(
-            lease.Raw,
+            handle,
             &status,
             &value,
             (uint)sizeof(FileIdInformation),

@@ -27,10 +27,18 @@ internal enum CapNodeType
     SymbolicLink,
 
     /// <summary>
-    /// Windows only: a reparse point whose tag is not a filesystem link — an app execution
-    /// alias, a container image link, or a tag this library has never heard of. These are
-    /// not links, must not be read as if they were, and are never traversed.
+    /// Windows only: a reparse point that stands for another object by a means that is not a
+    /// filesystem link — a container link, a distributed file system link, or a redirecting
+    /// tag this library has never heard of. These are not links, must not be read as if they
+    /// were, and are never traversed.
     /// </summary>
+    /// <remarks>
+    /// A reparse point that only says which filter serves the object's own contents — a
+    /// compressed or deduplicated file, a cloud placeholder, a projected directory, an
+    /// application execution alias — is not this: it is described as the
+    /// <see cref="File"/> or <see cref="Directory"/> it is, with its tag in
+    /// <see cref="CapNodeInfo.ReparseTag"/>.
+    /// </remarks>
     UnknownReparsePoint,
 
     /// <summary>
