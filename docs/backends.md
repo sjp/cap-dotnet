@@ -125,7 +125,7 @@ semantics:
 | Chain exceeding the budget, or a cycle | Refused as a link loop |
 | Reparse point whose tag stands for another object but is not a filesystem link | Refused, never read as a link |
 | Reparse point whose tag only names the filter serving the entry (a compressed file, a cloud placeholder) | Opened as the file or directory it is, through its filter; never read as a link |
-| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one. A Windows junction is not this case: it is a reparse point that redirects, and is refused |
+| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one; then refused as crossing a device, not as an escape. A Windows junction is not this case: it is a reparse point that redirects, and is refused |
 | Any link at all, where the handle's policy refuses them | Refused as a link, without being read — so which way it pointed is never learned |
 
 The last row is the one caller-visible choice. It is fixed when a sandbox root is opened and
@@ -142,6 +142,16 @@ the kernel-atomic backend looks at the name again, confined and without followin
 reports a link it finds there as the refused link it was. A path ending in a separator asks
 for what a final link leads to, and the kernel follows it even when told not to; the walk
 does the same, so the two agree.
+
+A mount the caller asked not to cross is refused by the kernel with the code it uses for a
+path that leaves the root, so the kernel-atomic backend resolves the path again, confined as
+before but allowed across mounts, and reports an escape only if that second look leaves the
+root too; otherwise it reports the crossing, as the walk does. The one place the two differ is
+a path that crosses the mount and then leaves the root — `mnt/../..`, or a link inside the
+mount that climbs out. The walk stops at the mount and reports the crossing; the kernel cannot
+say which refusal it met first, and the kernel-atomic backend reports the escape. Both refuse
+the path, and the mount table is outside the sandbox's control, so the difference is in which
+failure is named and never in what is reached. `SymlinkPolicyOnDiskTests` pins both answers.
 
 Describing, setting times and hard-linking act on a name with one call that never follows a
 link, on both backends. Asked per call to follow a final link, they read it, put its target

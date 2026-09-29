@@ -1954,8 +1954,76 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 continue;
             }
 
+            if (errno == PosixErrno.EXDEV && (options & ConfinedResolveOptions.RefuseMountCrossing) != 0)
+            {
+                return ClassifyRefusedCrossing(lease.Descriptor, encoded.Bytes, flags, options);
+            }
+
             return TranslateConfinedFailure(errno);
         }
+    }
+
+    /// <summary>
+    /// Reads a confined open that was told not to cross a mount and said "cross-device".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The kernel gives one code for a path that would leave the root and for one that would
+    /// cross a mount the request forbade. The first is an escape; the second is a policy
+    /// refusal of something beneath the root, which the walk reports as crossing a device.
+    /// The path is resolved again, confined as before but allowed across mounts, and only a
+    /// path that would still leave the root is reported as an escape. Anything else — the
+    /// object found, or refused for another reason — means the mount was what stopped it.
+    /// </para>
+    /// <para>
+    /// A path that crosses a mount and then leaves the root is reported as an escape here,
+    /// where the walk stops at the mount and reports the crossing. Both refuse it; the kernel
+    /// cannot say which of the two it met first.
+    /// </para>
+    /// <para>
+    /// A second call on the failure path only, made through the root descriptor the first one
+    /// used. It opens a path descriptor that is closed at once, and the caller's choice about
+    /// the final link is kept, so it asks only about where resolution would have gone. Either
+    /// way the open has already failed: the answer decides which failure is reported and
+    /// never what may be reached.
+    /// </para>
+    /// </remarks>
+    private CapError ClassifyRefusedCrossing(
+        int root,
+        ReadOnlySpan<byte> path,
+        int flags,
+        ConfinedResolveOptions options)
+    {
+        OpenHow how = new()
+        {
+            Flags = (ulong)(uint)(LinuxConstants.O_PATH | LinuxConstants.O_CLOEXEC | (flags & LinuxConstants.O_NOFOLLOW)),
+            Resolve = (ulong)ResolveFor(options & ~ConfinedResolveOptions.RefuseMountCrossing),
+        };
+
+        Interlocked.Increment(ref _confinedOpenAttempts);
+
+        long result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* name = path)
+            {
+                result = LinuxNative.OpenAt2(LinuxConstants.SYS_openat2, root, name, &how, OpenHow.Size);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        if (result >= 0)
+        {
+            LinuxNative.Close((int)result);
+        }
+
+        return errno == PosixErrno.EXDEV
+            ? CapError.Create(CapErrorCategory.Escaped, CapErrorSource.Errno, PosixErrno.EXDEV)
+            : CapError.Create(CapErrorCategory.CrossDevice, CapErrorSource.Errno, PosixErrno.EXDEV);
     }
 
     private static ResolveFlags ResolveFor(ConfinedResolveOptions options)
@@ -1981,8 +2049,9 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// <remarks>
     /// The cross-device code means something different here from what it means anywhere
     /// else. Ordinarily it reports a rename between filesystems; under confined resolution it
-    /// is how the kernel says the path tried to leave the subtree, or tried to cross a mount
-    /// the request forbade. Both are refusals to escape, so both are reported as one.
+    /// is how the kernel says the path tried to leave the subtree. When the request also
+    /// forbade crossing a mount, the same code may mean that instead, and
+    /// <see cref="ClassifyRefusedCrossing"/> tells the two apart before this is reached.
     /// </remarks>
     private static CapError TranslateConfinedFailure(int errno) =>
         errno == PosixErrno.EXDEV

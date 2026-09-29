@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prepares the bind mount the escape corpus attacks, and prints the directory to hand it in
-# CAPDOTNET_TEST_BIND_MOUNT.
+# Prepares the bind mount the escape corpus attacks and the resolver tests refuse to cross,
+# and prints the directory to hand them in CAPDOTNET_TEST_BIND_MOUNT.
 #
 # Mounting needs a privilege the corpus must not hold -- it refuses to run in a process that
 # could bypass file permissions -- so the mount is made here, with sudo, before the tests run

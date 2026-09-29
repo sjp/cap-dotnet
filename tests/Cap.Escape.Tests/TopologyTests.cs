@@ -12,18 +12,6 @@ namespace Cap.Escape.Tests;
 [Collection(CorpusGroup.Name)]
 public sealed class TopologyTests
 {
-    /// <summary>
-    /// The environment variable naming a directory prepared with a bind mount inside it.
-    /// </summary>
-    /// <remarks>
-    /// Mounting needs a privilege the corpus must not hold, so the mount is made by whoever
-    /// runs the suite and handed over by path. The directory holds a subdirectory
-    /// <c>mnt</c> onto which another directory has been bind-mounted; that directory holds a
-    /// file <c>file</c>, a link <c>climb</c> stored as <c>../..</c> and a link <c>up</c> stored
-    /// as <c>..</c>. The CI workflow builds exactly this.
-    /// </remarks>
-    public const string BindMountVariable = "CAPDOTNET_TEST_BIND_MOUNT";
-
     public static TheoryData<string, SymlinkPolicy> BackendsAndPolicies
     {
         get
@@ -198,19 +186,7 @@ public sealed class TopologyTests
     [Defends("T1")]
     public void A_mount_inside_the_root_is_crossed_but_cannot_be_climbed_out_of(string backend, SymlinkPolicy policy)
     {
-        string? prepared = Environment.GetEnvironmentVariable(BindMountVariable);
-        if (string.IsNullOrEmpty(prepared))
-        {
-            Assert.Skip(
-                $"No bind mount was prepared for this run. Mounting needs a privilege the corpus " +
-                $"must not hold, so it is made beforehand and named in {BindMountVariable}.");
-        }
-
-        string mountPoint = Path.Join(prepared, "mnt");
-        Assert.True(
-            IsMountPoint(mountPoint),
-            $"{BindMountVariable} names '{prepared}', but '{mountPoint}' is not a mount point. The run " +
-            "was set up to test a mount and would otherwise test an ordinary directory.");
+        string prepared = BindMountFixture.Require();
 
         using BackendScope scope = Backends.Enter(backend);
         using Dir root = Dir.Open(prepared, AmbientAuthority.Acquire(), policy);
@@ -249,27 +225,6 @@ public sealed class TopologyTests
 
         oracle.AssertContained(observation, $"{operation} on '{path}'");
         return observation;
-    }
-
-    private static bool IsMountPoint(string path)
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return false;
-        }
-
-        string full = Path.GetFullPath(path);
-        foreach (string line in File.ReadLines("/proc/self/mountinfo"))
-        {
-            // The fifth field is where the mount sits. Spaces in it are written as octal escapes.
-            string[] fields = line.Split(' ');
-            if (fields.Length > 4 && fields[4].Replace("\\040", " ", StringComparison.Ordinal) == full)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static void RequireFeatures(HostFeature needed) =>

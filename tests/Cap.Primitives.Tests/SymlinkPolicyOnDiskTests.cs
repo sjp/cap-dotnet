@@ -59,6 +59,128 @@ public sealed class SymlinkPolicyOnDiskTests : IDisposable
         Run(SymlinkPolicyBackend.ConfinedOpen, caseName);
     }
 
+    /// <summary>Every row of the mount table, one theory case each.</summary>
+    public static TheoryData<string> MountCases => [.. MountRows.Select(row => row.Name)];
+
+    /// <summary>
+    /// The walk answers the mount table against the bind mount prepared for the run.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from the policy table because a tree with a mount in it cannot be built by
+    /// the test: mounting needs a privilege the suite must not hold. The rows are resolved in
+    /// the directory named in <see cref="BindMountFixture.Variable"/> instead.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(MountCases))]
+    public void The_hosts_walk_answers_the_mount_table(string rowName) =>
+        RunMount(SymlinkPolicyBackend.Walk, rowName);
+
+    /// <summary>So does the host's confined open, where it has one.</summary>
+    [Theory]
+    [MemberData(nameof(MountCases))]
+    public void The_hosts_confined_open_answers_the_mount_table(string rowName)
+    {
+        if (!PlatformOps.Host.Capabilities.SupportsConfinedOpen)
+        {
+            Assert.Skip("This kernel has no confined, atomic open; the walk theory covers the host.");
+        }
+
+        RunMount(SymlinkPolicyBackend.ConfinedOpen, rowName);
+    }
+
+    /// <summary>
+    /// A path into the mount, resolved with and without the refusal to cross one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A refused crossing is a policy refusal of something beneath the root and is reported
+    /// as crossing a device on every backend; only a path that leaves the root is an escape.
+    /// </para>
+    /// <para>
+    /// A path that crosses the mount and then leaves the root is the one place the two
+    /// disagree, and the row says so rather than letting either answer pass: the walk stops at
+    /// the mount, while the kernel refuses the crossing with the code it uses for an escape,
+    /// and the confined open can only tell the two apart by asking whether the path would
+    /// leave the root with crossing allowed — which it would. Both refuse it.
+    /// </para>
+    /// </remarks>
+    private static readonly MountRow[] MountRows =
+    [
+        new("mount-crossed", "mnt", ResolvedKind.Directory, ConfinedResolveOptions.None, CapErrorCategory.None),
+        new("mount-refused", "mnt", ResolvedKind.Directory, ConfinedResolveOptions.RefuseMountCrossing, CapErrorCategory.CrossDevice),
+        new("file-in-mount-refused", "mnt/file", ResolvedKind.File, ConfinedResolveOptions.RefuseMountCrossing, CapErrorCategory.CrossDevice),
+        new("missing-in-mount-refused", "mnt/missing", ResolvedKind.File, ConfinedResolveOptions.RefuseMountCrossing, CapErrorCategory.CrossDevice),
+        new("escape-without-mount", "../outside", ResolvedKind.Directory, ConfinedResolveOptions.RefuseMountCrossing, CapErrorCategory.Escaped),
+        new(
+            "link-out-of-mount-denied",
+            "mnt/climb",
+            ResolvedKind.Directory,
+            ConfinedResolveOptions.RefuseMountCrossing | ConfinedResolveOptions.RefuseSymlinks,
+            CapErrorCategory.CrossDevice),
+        new(
+            "link-out-of-mount-followed",
+            "mnt/climb",
+            ResolvedKind.Directory,
+            ConfinedResolveOptions.RefuseMountCrossing,
+            CapErrorCategory.CrossDevice,
+            ConfinedExpected: CapErrorCategory.Escaped),
+    ];
+
+    private static void RunMount(SymlinkPolicyBackend backend, string rowName)
+    {
+        MountRow row = MountRows.Single(candidate => candidate.Name == rowName);
+        string prepared = BindMountFixture.Require();
+
+        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(prepared, CapAccess.Read);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using SafeDirHandle root = opened.Value!;
+
+        CapError error = backend == SymlinkPolicyBackend.ConfinedOpen
+            ? row.Kind == ResolvedKind.Directory
+                ? Close(root.Backend.OpenConfinedDirectory(root, row.Path, CapAccess.Read, row.Options))
+                : Close(root.Backend.OpenConfinedFile(root, row.Path, FileOpenRequest.Existing(FileAccess.Read), row.Options))
+            : Walk(root, row);
+
+        CapErrorCategory expected = backend == SymlinkPolicyBackend.ConfinedOpen
+            ? row.ConfinedExpected ?? row.Expected
+            : row.Expected;
+        Assert.Equal(expected, error.Category);
+    }
+
+    private static CapError Walk(SafeDirHandle root, MountRow row)
+    {
+        Assert.True(
+            CapPath.TryParse(row.Path, CapPath.HostSyntax, ParentLinkPolicy.Preserve, out CapPath path, out CapPathError pathError),
+            $"'{row.Path}' did not parse ({pathError}).");
+
+        return row.Kind == ResolvedKind.Directory
+            ? Close(PortableResolver.OpenDirectory(root, in path, CapAccess.Read, row.Options))
+            : Close(PortableResolver.OpenFile(root, in path, FileOpenRequest.Existing(FileAccess.Read), row.Options));
+    }
+
+    private static CapError Close<T>(CapResult<T> result)
+        where T : System.Runtime.InteropServices.SafeHandle
+    {
+        if (!result.IsSuccess)
+        {
+            return result.Error;
+        }
+
+        result.Value!.Dispose();
+        return CapError.Success;
+    }
+
+    /// <param name="ConfinedExpected">
+    /// Where the confined open is documented to answer differently, what it answers.
+    /// </param>
+    private sealed record MountRow(
+        string Name,
+        string Path,
+        ResolvedKind Kind,
+        ConfinedResolveOptions Options,
+        CapErrorCategory Expected,
+        CapErrorCategory? ConfinedExpected = null);
+
     private void Run(SymlinkPolicyBackend backend, string caseName)
     {
         SymlinkPolicyCase entry = SymlinkPolicyCorpus.Named(caseName);
