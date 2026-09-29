@@ -293,7 +293,8 @@ public sealed partial class DirEnumerationTests : IDisposable
             return;
         }
 
-        string planted = @"\\?\" + Path.GetFullPath(Host(name));
+        // Only the directory goes through normalisation: it would strip the name's own dot or space.
+        string planted = @"\\?\" + Path.Join(Path.GetFullPath(Host()), name);
         File.WriteAllText(planted, "x");
 
         try
