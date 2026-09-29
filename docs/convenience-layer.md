@@ -126,12 +126,35 @@ foreach (WalkEntry entry in root.Walk(new WalkOptions { SkipHidden = true }))
 | `MaxDepth` | 256 | How far below the start the walk descends. A deeper tree stops the walk with a failure rather than being quietly cut short. |
 | `FollowSymlinks` | off | Whether a link naming a directory is entered. Off, every descent is an open that refuses a link, so a link is not entered even when the directory read called it a directory or could not say what it was; the directories entered keep the starting handle's policy. On, it cannot widen that policy: a handle that refuses links keeps refusing them. |
 | `SkipHidden` | off | Leaves out names beginning with a dot, and on Windows anything carrying the hidden attribute. A skipped directory is not entered. |
+| `OnError` | null | Called with the entry and the exception when a directory is there and cannot be opened. Return true to leave it out and carry on, false to fail the walk. Null fails the walk. |
 
 The walk keeps its own stack rather than calling itself, so a tree built to be deep ends as a
 refusal rather than as a stack overflow — which cannot be caught and takes the process with
 it. Turning on `FollowSymlinks` also turns on a cycle check: a link pointing at a directory
 above it makes an infinite tree out of a finite filesystem, so the identity of every directory
 on the way down is remembered and one already on that path is reported but not entered again.
+
+Nothing is left out silently. A name that is not a directory to enter is yielded and not
+descended into: one that has gone since it was listed, is not a directory, is a link not being
+followed, is a chain of links that never arrives, leads out of the subtree, or changed while it
+was being opened. A directory that is there and cannot be opened, for want of permission, of
+handles or of a working device, fails the walk with `UnauthorizedAccessException` or
+`CapIOException`, unless `OnError` says to go on without it. `OnError` covers only that open: a
+directory that fails part-way through being read, or a tree deeper than `MaxDepth`, fails the
+walk whatever it says. `Glob` behaves the same for the directories it tries to enter, and never
+opens one the pattern could not match through.
+
+```csharp
+var skipped = new List<string>();
+var options = new WalkOptions
+{
+    OnError = (entry, exception) =>
+    {
+        skipped.Add(entry.Name);
+        return exception is UnauthorizedAccessException; // leave out what we may not read
+    },
+};
+```
 
 ## Removing a tree
 

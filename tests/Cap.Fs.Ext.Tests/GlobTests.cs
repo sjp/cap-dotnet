@@ -134,6 +134,41 @@ public sealed class GlobTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// An unreadable directory the pattern has to search through fails the search, while one
+    /// the pattern steers away from still cannot.
+    /// </summary>
+    [Fact]
+    public void An_unreadable_directory_on_the_pattern_path_fails_the_search()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Making a directory unreadable here needs a security descriptor this test does not build.");
+            return;
+        }
+
+        if (HostTree.InMemory || Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("Mode bits do not stop this process reading a directory here.");
+            return;
+        }
+
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "sealed"));
+        HostFile.SetUnixFileMode(Path.Combine(_tree.HostPath, "sealed"), UnixFileMode.None);
+
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(() => Matches(Path.Combine("**", "*.txt")));
+            Assert.Equal(["b", "one.txt", "two.md"], Matches(Path.Combine("a", "*")).Order());
+        }
+        finally
+        {
+            HostFile.SetUnixFileMode(
+                Path.Combine(_tree.HostPath, "sealed"),
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
     /// <summary>A match carries the handle it was found through, and no path.</summary>
     [Fact]
     public void A_match_can_be_opened_through_the_handle_it_came_from()

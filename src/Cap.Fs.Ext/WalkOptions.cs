@@ -104,4 +104,32 @@ public sealed class WalkOptions
     /// </para>
     /// </remarks>
     public bool SkipHidden { get; init; }
+
+    /// <summary>
+    /// What happens when a directory the walk means to enter is there and cannot be opened.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null, the default, fails the walk with the exception the open produced — an
+    /// <see cref="UnauthorizedAccessException"/> for a directory the filesystem will not let
+    /// this process read, a <see cref="Cap.Std.CapIOException"/> for anything else — for the
+    /// reason <see cref="MaxDepth"/> gives: a tree with a subtree missing is not the tree.
+    /// </para>
+    /// <para>
+    /// Given, it is called with the entry that could not be entered and the exception, while
+    /// that entry is still current. Returning true leaves that directory out and carries on
+    /// with the rest; returning false fails the walk with the exception as though no handler
+    /// were there. The entry has already been yielded either way, so a caller that goes on can
+    /// still act on the directory itself.
+    /// </para>
+    /// <para>
+    /// A name that is not something to enter is not an error and never reaches it: one that
+    /// has gone, is not a directory, is a link the walk is not following, is a chain of links
+    /// that never arrives, leads out of the subtree, or changed while it was being opened. It
+    /// covers only the open of a directory. A directory that opened and then failed part-way
+    /// through being read, and a tree deeper than <see cref="MaxDepth"/>, fail the walk
+    /// whatever this says.
+    /// </para>
+    /// </remarks>
+    public Func<WalkEntry, Exception, bool>? OnError { get; init; }
 }

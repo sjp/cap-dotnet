@@ -85,6 +85,17 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public bool IssuesKernelHandles => false;
 
+    /// <summary>
+    /// Decides, per directory, a failure its open reports in place of opening it;
+    /// <see cref="CapErrorCategory.None"/> lets the open go ahead.
+    /// </summary>
+    /// <remarks>
+    /// For the failures a real filesystem produces only under conditions a test cannot arrange
+    /// on demand — the process out of descriptors, a device that stopped answering — at one
+    /// directory rather than everywhere.
+    /// </remarks>
+    public Func<MemoryNode, CapErrorCategory>? DirectoryOpenFault { get; set; }
+
     /// <inheritdoc/>
     /// <remarks>
     /// Can run on the finalizer thread for a handle a test forgot, which is why the table is
@@ -169,7 +180,7 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         return node.Type == CapNodeType.Directory
-            ? CapResult<SafeDirHandle>.Ok(Register(node, access))
+            ? OpenDirectoryNode(node, access)
             : CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotADirectory));
     }
 
@@ -284,8 +295,17 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         return node!.Type == CapNodeType.Directory
-            ? CapResult<SafeDirHandle>.Ok(Register(node, access))
+            ? OpenDirectoryNode(node, access)
             : CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.NotADirectory));
+    }
+
+    /// <summary>Opens a directory already resolved, unless <see cref="DirectoryOpenFault"/> refuses it.</summary>
+    private CapResult<SafeDirHandle> OpenDirectoryNode(MemoryNode node, CapAccess access)
+    {
+        CapErrorCategory fault = DirectoryOpenFault?.Invoke(node) ?? CapErrorCategory.None;
+        return fault == CapErrorCategory.None
+            ? CapResult<SafeDirHandle>.Ok(Register(node, access))
+            : CapResult<SafeDirHandle>.Fail(CapError.FromCategory(fault));
     }
 
     /// <inheritdoc/>

@@ -312,6 +312,102 @@ public sealed class WalkTests : IDisposable
         Assert.Throws<ArgumentOutOfRangeException>(() => _tree.Directory.Walk(options));
     }
 
+    /// <summary>
+    /// A directory the process may not read fails the walk, rather than its contents going
+    /// missing from an answer that looks complete.
+    /// </summary>
+    [Fact]
+    public void An_unreadable_directory_fails_the_walk_rather_than_being_left_out()
+    {
+        Make("top.txt");
+        Make("sealed", "inside.txt");
+
+        using (Seal("sealed"))
+        {
+            Assert.Throws<UnauthorizedAccessException>(() => _tree.Directory.Walk().ToList());
+        }
+    }
+
+    /// <summary>
+    /// The same directory is yielded and not entered when the caller says to go on, and the
+    /// caller is told which one it was.
+    /// </summary>
+    [Fact]
+    public void An_unreadable_directory_is_skipped_when_the_caller_asks()
+    {
+        Make("top.txt");
+        Make("sealed", "inside.txt");
+        List<string> reported = [];
+        WalkOptions options = new()
+        {
+            OnError = (entry, exception) =>
+            {
+                reported.Add(entry.Name);
+                return exception is UnauthorizedAccessException;
+            },
+        };
+
+        using (Seal("sealed"))
+        {
+            List<string> names = [.. _tree.Directory.Walk(options).Select(e => e.Name)];
+
+            Assert.Equal(["sealed", "top.txt"], names.Order());
+            Assert.Equal(["sealed"], reported);
+        }
+    }
+
+    /// <summary>The asynchronous walk fails on an unreadable directory the same way.</summary>
+    [Fact]
+    public async Task The_asynchronous_walk_fails_the_same_way()
+    {
+        Make("top.txt");
+        Make("sealed", "inside.txt");
+
+        using (Seal("sealed"))
+        {
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            {
+                await foreach (WalkEntry _ in _tree.Directory.WalkAsync(
+                    cancellationToken: TestContext.Current.CancellationToken))
+                {
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Takes every permission off a directory in the scratch tree until disposed, or skips the
+    /// test where that would not stop this process reading it.
+    /// </summary>
+    private Sealed Seal(string name)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Making a directory unreadable here needs a security descriptor this test does not build.");
+        }
+
+        if (HostTree.InMemory)
+        {
+            Assert.Skip("The filesystem held in memory does not act on mode bits; InterfaceHandleTests covers it with SetUnreadable.");
+        }
+
+        if (Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("A privileged process reads a directory whatever its mode says.");
+        }
+
+        string path = Path.Combine(_tree.HostPath, name);
+        HostFile.SetUnixFileMode(path, UnixFileMode.None);
+        return new Sealed(path);
+    }
+
+    /// <summary>Gives a sealed directory its permissions back, so the scratch tree can be removed.</summary>
+    private readonly struct Sealed(string path) : IDisposable
+    {
+        public void Dispose() =>
+            HostFile.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+    }
+
     /// <summary>Creates a file, and whatever directories it needs, under the scratch tree.</summary>
     private void Make(params string[] parts)
     {

@@ -77,9 +77,9 @@ public sealed class InterfaceHandleTests
         Assert.Equal(
             [".: EnumerateEntries()", "./a: EnumerateEntries()", "./a/b: EnumerateEntries()", "./a/empty: EnumerateEntries()"],
             root.Log.Where(call => call.EndsWith("EnumerateEntries()", StringComparison.Ordinal)).Order());
-        Assert.Contains(".: TryOpenDir(a, True)", root.Log);
-        Assert.Contains("./a: TryOpenDir(b, True)", root.Log);
-        Assert.Contains("./a: TryOpenDir(empty, True)", root.Log);
+        Assert.Contains(".: OpenDir(a, True)", root.Log);
+        Assert.Contains("./a: OpenDir(b, True)", root.Log);
+        Assert.Contains("./a: OpenDir(empty, True)", root.Log);
         AssertEveryNameIsOneComponent(root);
     }
 
@@ -131,6 +131,32 @@ public sealed class InterfaceHandleTests
 
         Assert.Single(names, "secret.txt");
         Assert.Contains("link", names);
+    }
+
+    [Fact]
+    public void A_walk_through_the_interface_fails_on_an_unreadable_directory()
+    {
+        Tree();
+        _fs.SetUnreadable("a/b");
+        using RecordingDir root = Root();
+
+        Assert.Throws<UnauthorizedAccessException>(() => root.Walk().ToList());
+        Assert.Throws<UnauthorizedAccessException>(() => root.Glob("**/*.txt").ToList());
+
+        List<string> skipped = [];
+        WalkOptions options = new()
+        {
+            OnError = (entry, _) =>
+            {
+                skipped.Add(entry.Name);
+                return true;
+            },
+        };
+        List<string> names = [.. root.Walk(options).Select(e => e.Name)];
+
+        Assert.Equal(["b"], skipped);
+        Assert.Contains("b", names);
+        Assert.DoesNotContain("two.txt", names);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Std;
@@ -69,15 +70,25 @@ public static partial class DirExtensions
     /// listed, or a link on a filesystem that does not say what its entries are, is yielded
     /// and not descended into.
     /// </para>
+    /// <para>
+    /// <strong>Nothing is left out silently.</strong> A name that is not a directory to enter
+    /// — gone since it was listed, a link not being followed, one leading out of the subtree —
+    /// is yielded and not descended into. A directory that is there and cannot be opened, for
+    /// want of permission, of handles or of a working device, fails the walk, unless
+    /// <see cref="WalkOptions.OnError"/> says to go on without it.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="WalkOptions.MaxDepth"/> is less than one.
     /// </exception>
-    /// <exception cref="UnauthorizedAccessException">A directory could not be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
     /// <exception cref="CapIOException">
     /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
-    /// read.
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IEnumerable<WalkEntry> Walk(this IDir dir, WalkOptions? options = null)
@@ -108,7 +119,8 @@ public static partial class DirExtensions
     /// <c>MoveNextAsync</c> must not be started before the previous one has completed.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="Walk"/> treats them.
+    /// <strong>Symbolic links</strong>, and directories that cannot be opened, are treated
+    /// exactly as <see cref="Walk"/> treats them.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
@@ -116,10 +128,13 @@ public static partial class DirExtensions
     /// <see cref="WalkOptions.MaxDepth"/> is less than one.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
-    /// <exception cref="UnauthorizedAccessException">A directory could not be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
     /// <exception cref="CapIOException">
     /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
-    /// read.
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IAsyncEnumerable<WalkEntry> WalkAsync(
@@ -269,7 +284,9 @@ public static partial class DirExtensions
         /// reported. That kind is a snapshot taken earlier and several filesystems decline to
         /// give one at all, so it is used only to avoid opening the names that plainly are not
         /// directories; a name that claims to be one and is not fails the open, which is the
-        /// same answer arrived at without trusting the claim.
+        /// same answer arrived at without trusting the claim. What the open refused with is
+        /// what separates such a name from a directory that is there and could not be
+        /// opened, which is never skipped without the caller's say.
         /// </para>
         /// <para>
         /// The same holds for links. When they are not being followed the open itself refuses
@@ -376,29 +393,91 @@ public static partial class DirExtensions
             _ => false,
         };
 
-        /// <summary>Opens an entry as the next level down, following a link only when asked to.</summary>
+        /// <summary>
+        /// Opens an entry as the next level down, or says there is nothing there to enter.
+        /// </summary>
         /// <remarks>
-        /// A <see cref="Dir"/> refuses a link anywhere in the resolution. Any other handle is
-        /// asked not to follow one at the last component, which for the single name used here
-        /// is the whole of the resolution.
+        /// A directory that is there and could not be opened fails the walk, unless
+        /// <see cref="WalkOptions.OnError"/> is given the failure and says to go on without it.
         /// </remarks>
         private bool TryOpen(in ListedEntry entry, [NotNullWhen(true)] out IDir? child)
         {
-            if (_options.FollowSymlinks)
+            Exception? failure = Open(in entry, out child);
+            if (failure is null)
             {
-                return entry.TryOpenDir(out child);
+                return child is not null;
             }
 
+            if (failure is IOException or UnauthorizedAccessException &&
+                _options.OnError is { } onError &&
+                onError(new WalkEntry(_levels[^1].Directory, entry, Depth), failure))
+            {
+                return false;
+            }
+
+            ExceptionDispatchInfo.Capture(failure).Throw();
+            return false;
+        }
+
+        /// <summary>Opens an entry as a directory, following a link only when asked to.</summary>
+        /// <returns>
+        /// Null, with <paramref name="child"/> set when the entry was opened and null when it
+        /// is not something to enter; otherwise why a directory that is there did not open.
+        /// </returns>
+        /// <remarks>
+        /// When links are not followed a <see cref="Dir"/> refuses one anywhere in the
+        /// resolution. Any other handle is asked not to follow one at the last component, which
+        /// for the single name used here is the whole of the resolution.
+        /// </remarks>
+        private Exception? Open(in ListedEntry entry, out IDir? child)
+        {
+            child = null;
             IDir directory = _levels[^1].Directory;
+
             if (directory is Dir concrete)
             {
-                bool opened = concrete.TryOpenDirRefusingLinks(entry.Name, out Dir? strict);
-                child = strict;
-                return opened;
+                CapError error = concrete.OpenDirForWalk(entry.Name, refuseLinks: !_options.FollowSymlinks, out Dir? opened);
+                if (error.IsSuccess)
+                {
+                    child = opened;
+                    return null;
+                }
+
+                return LeavesNothingToEnter(FailureTranslation.KindOf(error.Category))
+                    ? null
+                    : FailureTranslation.ToException(error, entry.Name, ExpectedTarget.Directory);
             }
 
-            return directory.TryOpenDir(entry.Name, noFollow: true, out child);
+            try
+            {
+                child = directory.OpenDir(entry.Name, noFollow: !_options.FollowSymlinks);
+                return null;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return LeavesNothingToEnter(CapIOException.KindOf(exception)) ? null : exception;
+            }
         }
+
+        /// <summary>
+        /// Whether a failed open means the name is not a directory the walk should enter,
+        /// rather than one it could not.
+        /// </summary>
+        /// <remarks>
+        /// The name has gone, is not a directory, is a link the walk is not following, is a
+        /// chain of links that never arrives, leads out of the subtree, or changed while it
+        /// was being opened. Each is a name that was never going to add entries beneath it,
+        /// and each is still yielded as an entry of its own. Anything else — the filesystem
+        /// refused, the process ran out of handles, the device failed — is a directory whose
+        /// contents are missing from the answer.
+        /// </remarks>
+        private static bool LeavesNothingToEnter(CapErrorKind kind) => kind is
+            CapErrorKind.NotFound or
+            CapErrorKind.NotADirectory or
+            CapErrorKind.SymbolicLink or
+            CapErrorKind.LinkNotFollowed or
+            CapErrorKind.Escaped or
+            CapErrorKind.ConcurrentChange;
 
         /// <summary>Opens a directory's entries and makes it the level the walk is reading.</summary>
         private void Push(IDir directory, bool owned, int[]? states)

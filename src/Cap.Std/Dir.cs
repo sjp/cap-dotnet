@@ -1574,19 +1574,27 @@ public sealed partial class Dir : IDir
     internal bool SharesBackendWith(Dir other) => _handle.SharesBackendWith(other._handle);
 
     /// <summary>
-    /// Opens a directory beneath this one without following a symbolic link anywhere on the
-    /// way, the last component included, and hands it back under this handle's own policy.
+    /// Opens a directory beneath this one for a tree walk, reporting the platform's own answer.
     /// </summary>
-    /// <param name="path">A relative path. See <see cref="OpenDir"/>.</param>
-    /// <param name="dir">The handle, when this returns true.</param>
-    /// <returns>True when a directory was opened; false for every refusal and failure.</returns>
+    /// <param name="name">A single component.</param>
+    /// <param name="refuseLinks">
+    /// Whether a symbolic link anywhere on the way, the last component included, is refused
+    /// rather than followed under this handle's policy.
+    /// </param>
+    /// <param name="dir">The handle, when this succeeds.</param>
     /// <remarks>
     /// <para>
-    /// For a tree walk that has promised not to pass through links. Deciding that from the
-    /// kind a directory read reported is not enough: the kind is a snapshot taken before the
-    /// open, some filesystems do not report one at all, and a directory can be swapped for a
-    /// link between the two. Refusing links in the open itself is the only answer that holds
-    /// whatever happened in between.
+    /// A walk has to tell the names that are simply not directories to enter — gone, a link,
+    /// a file — from the directories it could not open, because the first are skipped and
+    /// the second are a hole in the answer. The public members say that either with an
+    /// exception or not at all.
+    /// </para>
+    /// <para>
+    /// With <paramref name="refuseLinks"/> set this is for a walk that has promised not to
+    /// pass through links. Deciding that from the kind a directory read reported is not
+    /// enough: the kind is a snapshot taken before the open, some filesystems do not report
+    /// one at all, and a directory can be swapped for a link between the two. Refusing links
+    /// in the open itself is the only answer that holds whatever happened in between.
     /// </para>
     /// <para>
     /// The resolution is stricter than this handle's policy, but the handle produced is not.
@@ -1596,9 +1604,15 @@ public sealed partial class Dir : IDir
     /// the handles it is given, depending only on how deep they are.
     /// </para>
     /// </remarks>
-    internal bool TryOpenDirRefusingLinks(string path, [NotNullWhen(true)] out Dir? dir) =>
-        OpenDirCore(path, out dir, out CapError error, ConfinedResolveOptions.RefuseSymlinks) == CapPathError.None &&
-        error.IsSuccess;
+    internal CapError OpenDirForWalk(string name, bool refuseLinks, out Dir? dir)
+    {
+        CapPathError pathError = OpenDirCore(
+            name,
+            out dir,
+            out CapError error,
+            refuseLinks ? ConfinedResolveOptions.RefuseSymlinks : ConfinedResolveOptions.None);
+        return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
+    }
 
     /// <summary>
     /// Removes a name beneath this handle, reporting the platform's own answer.

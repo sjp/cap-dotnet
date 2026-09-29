@@ -58,16 +58,25 @@ public static partial class DirExtensions
     /// <see cref="WalkOptions.FollowSymlinks"/>, the handle's policy and the subtree's bounds —
     /// and only when some piece of the pattern is still live beneath it.
     /// </para>
+    /// <para>
+    /// <strong>Directories that cannot be opened</strong> fail the search as they fail a
+    /// walk, unless <see cref="WalkOptions.OnError"/> says to go on without them — but only
+    /// the ones the search tries to enter. A directory no piece of the pattern could match
+    /// through is never opened, so it cannot fail.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">The pattern is not one that can be matched.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="WalkOptions.MaxDepth"/> is less than one.
     /// </exception>
-    /// <exception cref="UnauthorizedAccessException">A directory could not be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
     /// <exception cref="CapIOException">
     /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
-    /// read.
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IEnumerable<WalkEntry> Glob(this IDir dir, string pattern, WalkOptions? options = null) =>
@@ -99,18 +108,21 @@ public static partial class DirExtensions
     /// at a time.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links.</strong> Treated exactly as the form taking the pattern as text
-    /// treats them.
+    /// <strong>Symbolic links</strong>, and directories that cannot be opened, are treated
+    /// exactly as the form taking the pattern as text treats them.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <see cref="WalkOptions.MaxDepth"/> is less than one.
     /// </exception>
-    /// <exception cref="UnauthorizedAccessException">A directory could not be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
     /// <exception cref="CapIOException">
     /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
-    /// read.
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IEnumerable<WalkEntry> Glob(this IDir dir, GlobPattern pattern, WalkOptions? options = null)
