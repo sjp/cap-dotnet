@@ -243,6 +243,10 @@ public sealed class CapTempDir : IDisposable
     /// handle on a directory that is about to disappear.
     /// </para>
     /// <para>
+    /// The holder may dispose it. That closes their handle and nothing more: disposing this
+    /// object still removes the directory, going back to it by its name.
+    /// </para>
+    /// <para>
     /// Safe to read from any thread, and the handle it returns is itself safe for concurrent
     /// use; see <see cref="Dir"/>.
     /// </para>
@@ -312,7 +316,10 @@ public sealed class CapTempDir : IDisposable
     /// inside the scratch tree — and its name is unlinked as the link.
     /// </para>
     /// <para>
-    /// Disposing twice does nothing the second time.
+    /// Disposing twice does nothing the second time, and disposal does not depend on
+    /// <see cref="Directory"/> still being open: if its holder closed it, the directory is
+    /// opened again by its name, as a directory and never through a link, and removed from
+    /// there.
     /// </para>
     /// <para>
     /// <strong>Not thread-safe.</strong> Two disposals racing each other are not guarded
@@ -332,20 +339,44 @@ public sealed class CapTempDir : IDisposable
         _disposed = true;
         bool remove = !_keep && !PersistRequested;
 
-        // Emptied through the handle this has held since the directory was created, so the
-        // work starts from the object itself rather than from a fresh lookup of its name.
-        // The handle is closed before the directory is removed because Windows will not
-        // remove a directory anything still has open.
-        CapError emptied = remove ? TreeRemoval.Empty(_directory) : CapError.Success;
-        _directory.Dispose();
-
-        if (remove && emptied.IsSuccess)
+        try
         {
-            _ = TreeRemoval.RemoveEmpty(_parent, _name);
-        }
+            if (remove && _directory.Handle.IsClosed)
+            {
+                // Whoever was handed the directory has closed it, which is theirs to do. The
+                // name in the parent is what has to go, so the work starts from that instead,
+                // through the same removal that refuses a link at the name and beneath it.
+                _ = TreeRemoval.Remove(_parent, _name);
+            }
+            else if (remove)
+            {
+                // Emptied through the handle this has held since the directory was created, so
+                // the work starts from the object itself rather than from a fresh lookup of
+                // its name. The handle is closed before the directory is removed because
+                // Windows will not remove a directory anything still has open.
+                CapError emptied = TreeRemoval.Empty(_directory);
+                _directory.Dispose();
 
-        _parent.Dispose();
+                if (emptied.IsSuccess)
+                {
+                    _ = TreeRemoval.RemoveEmpty(_parent, _name);
+                }
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // The holder closed the directory while the check above was being passed. What is
+            // left behind is left silently, as the remarks promise.
+        }
+        finally
+        {
+            _directory.Dispose();
+            _parent.Dispose();
+        }
     }
+
+    /// <summary>The clone of the directory the scratch directory was made in.</summary>
+    internal Dir Parent => _parent;
 
     /// <summary>Whether something has asked for scratch directories to be left behind.</summary>
     private static bool PersistRequested =>

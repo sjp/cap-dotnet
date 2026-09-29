@@ -281,6 +281,56 @@ public sealed class CapTempDirTests
         Assert.False(enclosing.Directory.Exists(inner.Name));
     }
 
+    /// <summary>A holder closing the handle it was given does not stop the cleanup.</summary>
+    /// <remarks>
+    /// Wrapping a <see cref="Dir"/> in <c>using</c> is the natural thing to do with one, so
+    /// the handle this hands out is often closed before this is. Disposal has to go back to
+    /// the directory by its name then, and still close the handle it holds on the parent.
+    /// </remarks>
+    [Fact]
+    public void Disposal_still_removes_the_tree_when_the_handle_was_disposed_by_its_holder()
+    {
+        using CapTempDir enclosing = CapTempDir.New(AmbientAuthority.Acquire());
+
+        CapTempDir temp = CapTempDir.NewIn(enclosing.Directory);
+        temp.Directory.WriteAllBytes("top", "contents"u8);
+        using (Dir nested = temp.Directory.CreateDir("nested"))
+        {
+            nested.WriteAllBytes("inner", "contents"u8);
+        }
+
+        temp.Directory.Dispose();
+        temp.Dispose();
+
+        Assert.False(enclosing.Directory.Exists(temp.Name));
+        Assert.True(temp.Parent.Handle.IsClosed);
+    }
+
+    /// <summary>A closed handle and a kept directory together are quiet, and the directory stays.</summary>
+    [Fact]
+    public void Disposal_does_not_throw_when_the_handle_was_disposed_and_persistence_is_on()
+    {
+        using CapTempDir enclosing = CapTempDir.New(AmbientAuthority.Acquire());
+        AppContext.SetSwitch(CapTempDir.PersistSwitchName, true);
+        CapTempDir temp;
+
+        try
+        {
+            temp = CapTempDir.NewIn(enclosing.Directory);
+            temp.Directory.WriteAllBytes("evidence", "contents"u8);
+
+            temp.Directory.Dispose();
+            temp.Dispose();
+        }
+        finally
+        {
+            AppContext.SetSwitch(CapTempDir.PersistSwitchName, false);
+        }
+
+        Assert.True(enclosing.Directory.Exists(temp.Name));
+        Assert.True(temp.Parent.Handle.IsClosed);
+    }
+
     /// <summary>Disposing twice does nothing the second time.</summary>
     [Fact]
     [NotInMemory("Reads the directory's path back from its handle, which only the host's filesystem can answer.")]
