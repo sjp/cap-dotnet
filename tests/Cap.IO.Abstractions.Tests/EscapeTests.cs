@@ -23,6 +23,19 @@ public enum Outcome
 
     /// <summary>Only works on the text, and reaches nothing.</summary>
     Lexical,
+
+    /// <summary>
+    /// Stores the path as a link target, beneath the root at <c>link</c>, or refuses it with
+    /// <see cref="SandboxEscapeException"/> when it is rooted; either way, following the link
+    /// is refused.
+    /// </summary>
+    Stored,
+
+    /// <summary>
+    /// Answers what <c>System.IO</c> answers for a path that names nothing; the call returns
+    /// whether it did.
+    /// </summary>
+    Absent,
 }
 
 /// <summary>Whether an entry point's path names a file or a directory beyond the way out.</summary>
@@ -34,6 +47,12 @@ public enum Names
 
 /// <summary>One path parameter of one member, and how to call the member with a path there.</summary>
 public sealed record EntryPoint(string Key, Names Names, Outcome Outcome, Func<IFileSystem, string, object?> Call)
+{
+    public override string ToString() => Key;
+}
+
+/// <summary>One member of an info, and how to call it on an info made over a path.</summary>
+public sealed record ReceiverEntry(string Key, Outcome Outcome, Func<IFileSystemInfo, object?> Call)
 {
     public override string ToString() => Key;
 }
@@ -57,21 +76,25 @@ public interface IEscapeFixture : IDisposable
 }
 
 /// <summary>
-/// That no path-taking entry point of <see cref="IFile"/>, <see cref="IDirectory"/> or
-/// <see cref="IFileStreamFactory"/> reaches outside the root.
+/// That no path-taking entry point of the file system, its infos or its factories reaches
+/// outside the root, that no member of an info made over a path outside does either, and that
+/// scratch space is made beneath the root.
 /// </summary>
 /// <remarks>
-/// The table of entry points is checked against the interfaces by reflection, so a member
-/// added in a later version of System.IO.Abstractions, or a path parameter missed here, fails
-/// <see cref="Every_path_parameter_is_covered"/> rather than going untested.
+/// The tables of entry points and of info members are checked against the interfaces by
+/// reflection, so a member added in a later version of System.IO.Abstractions, or a path
+/// parameter missed here, fails <see cref="Every_path_parameter_is_covered"/> or
+/// <see cref="Every_info_member_is_covered"/> rather than going untested.
 /// </remarks>
 public abstract class EscapeTests : IDisposable
 {
     private static readonly string[] PathParameterNames =
     [
         "path", "fileName", "linkPath", "sourceFileName", "destFileName", "destinationFileName",
-        "destinationBackupFileName", "sourceDirName", "destDirName",
+        "destinationBackupFileName", "sourceDirName", "destDirName", "pathToTarget",
     ];
+
+    private static readonly string[] Spellings = ["above-root", "relative", "through-link"];
 
     private readonly IEscapeFixture _fixture;
     private readonly string _before;
@@ -92,7 +115,22 @@ public abstract class EscapeTests : IDisposable
         TheoryData<string, string> cases = [];
         foreach (EntryPoint entry in EntryPoints())
         {
-            foreach (string spelling in new[] { "above-root", "relative", "through-link" })
+            foreach (string spelling in Spellings)
+            {
+                cases.Add(entry.Key, spelling);
+            }
+        }
+
+        return cases;
+    }
+
+    /// <summary>Each info member, with each of the three ways out for the info's own path.</summary>
+    public static TheoryData<string, string> ReceiverCases()
+    {
+        TheoryData<string, string> cases = [];
+        foreach (ReceiverEntry entry in ReceiverEntries())
+        {
+            foreach (string spelling in Spellings)
             {
                 cases.Add(entry.Key, spelling);
             }
@@ -114,23 +152,38 @@ public abstract class EscapeTests : IDisposable
     [MemberData(nameof(Cases))]
     public void Every_entry_point_stays_inside(string key, string spelling)
     {
-        EntryPoint entry = Find(key);
+        EntryPoint entry = EntryPoints().Single(entry => entry.Key == key);
         IFileSystem fs = _fixture.FileSystem;
-        if (spelling == "through-link")
-        {
-            TestLinks.Require(_fixture.SupportsLinks);
-        }
+        string path = Outside(spelling, entry.Names);
 
-        string outside = spelling switch
-        {
-            "above-root" => fs.Path.Combine(fs.Path.GetPathRoot(fs.Directory.GetCurrentDirectory())!, "..", "outside"),
-            "relative" => fs.Path.Combine("..", "outside"),
-            _ => fs.Path.Combine("escape"),
-        };
-        string path = fs.Path.Combine(outside, entry.Names == Names.File ? "secret.txt" : "sub");
-
-        AssertOutcome(entry, () => entry.Call(fs, path));
+        AssertOutcome(fs, entry.Names, entry.Outcome, () => entry.Call(fs, path));
         Assert.Equal(_before, _fixture.Snapshot());
+    }
+
+    /// <summary>
+    /// That an info made over a path outside reaches nothing there, whichever member is used:
+    /// a member of <see cref="IFileSystemInfo"/> is called on both a file and a directory info.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReceiverCases))]
+    public void Every_info_member_stays_inside(string key, string spelling)
+    {
+        ReceiverEntry entry = ReceiverEntries().Single(entry => entry.Key == key);
+        IFileSystem fs = _fixture.FileSystem;
+        foreach (Names names in new[] { Names.File, Names.Directory })
+        {
+            if ((names == Names.File && key.StartsWith(nameof(IDirectoryInfo), StringComparison.Ordinal))
+                || (names == Names.Directory && key.StartsWith(nameof(IFileInfo), StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            string path = Outside(spelling, names);
+            IFileSystemInfo info = names == Names.File ? fs.FileInfo.New(path) : fs.DirectoryInfo.New(path);
+
+            AssertOutcome(fs, names, entry.Outcome, () => entry.Call(info));
+            Assert.Equal(_before, _fixture.Snapshot());
+        }
     }
 
     [Fact]
@@ -140,11 +193,59 @@ public abstract class EscapeTests : IDisposable
         Collect(typeof(IFile), expected);
         Collect(typeof(IDirectory), expected);
         Collect(typeof(IFileStreamFactory), expected);
+        Collect(typeof(IFileSystemInfo), expected);
+        Collect(typeof(IFileInfo), expected);
+        Collect(typeof(IDirectoryInfo), expected);
+        Collect(typeof(IFileInfoFactory), expected);
+        Collect(typeof(IDirectoryInfoFactory), expected);
+        Collect(typeof(IFileSystemWatcherFactory), expected);
+        Collect(typeof(IFileVersionInfoFactory), expected);
 
         HashSet<string> covered = [.. EntryPoints().Select(entry => entry.Key)];
 
         Assert.Empty(expected.Except(covered).Order(StringComparer.Ordinal));
         Assert.Empty(covered.Except(expected).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void Every_info_member_is_covered()
+    {
+        HashSet<string> expected = [];
+        CollectMembers(typeof(IFileSystemInfo), expected);
+        CollectMembers(typeof(IFileInfo), expected);
+        CollectMembers(typeof(IDirectoryInfo), expected);
+
+        HashSet<string> covered = [.. ReceiverEntries().Select(entry => entry.Key)];
+
+        Assert.Empty(expected.Except(covered).Order(StringComparer.Ordinal));
+        Assert.Empty(covered.Except(expected).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// That the scratch space <see cref="IPath.GetTempPath"/>, <see cref="IPath.GetTempFileName"/>
+    /// and <see cref="IDirectory.CreateTempSubdirectory"/> make, which no path of the caller's
+    /// names, is made beneath the root and nowhere else.
+    /// </summary>
+    [Fact]
+    public void Scratch_space_is_made_beneath_the_root_only()
+    {
+        IFileSystem fs = _fixture.FileSystem;
+        string root = fs.Path.GetPathRoot(fs.Directory.GetCurrentDirectory())!;
+
+        string temp = fs.Path.GetTempPath();
+#pragma warning disable CS0618 // The adapter's own GetTempFileName is what is under test.
+        string file = fs.Path.GetTempFileName();
+#pragma warning restore CS0618
+        IDirectoryInfo directory = fs.Directory.CreateTempSubdirectory();
+
+        Assert.Equal(_before, _fixture.Snapshot());
+        Assert.StartsWith(root, temp, StringComparison.Ordinal);
+        Assert.True(fs.Directory.Exists(temp));
+        Assert.True(fs.File.Exists(file));
+        Assert.StartsWith(temp, file, StringComparison.Ordinal);
+        Assert.True(directory.Exists);
+        Assert.StartsWith(temp, directory.FullName, StringComparison.Ordinal);
+        Assert.Contains(fs.Path.GetFileName(fs.Path.TrimEndingDirectorySeparator(temp)), fs.Directory.GetDirectories(root).Select(fs.Path.GetFileName));
     }
 
     /// <summary>
@@ -192,14 +293,22 @@ public abstract class EscapeTests : IDisposable
         }
     }
 
+    private static void CollectMembers([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicMethods)] Type type, HashSet<string> keys)
+    {
+        foreach (MethodInfo method in type.GetMethods())
+        {
+            keys.Add(Key(type, method.Name, method.GetParameters(), "receiver"));
+        }
+    }
+
     private static EntryPoint Find(string key) => EntryPoints().Single(entry => entry.Key == key);
 
     private static string Key(Type type, string method, ParameterInfo[] parameters, string parameter) =>
         $"{type.Name}.{method}({string.Join(", ", parameters.Select(p => p.ParameterType.Name))}) {parameter}";
 
-    private static void AssertOutcome(EntryPoint entry, Func<object?> call)
+    private static void AssertOutcome(IFileSystem fs, Names names, Outcome outcome, Func<object?> call)
     {
-        switch (entry.Outcome)
+        switch (outcome)
         {
             case Outcome.Refused:
                 Assert.ThrowsAny<SandboxEscapeException>(() => Drain(call()));
@@ -213,7 +322,43 @@ public abstract class EscapeTests : IDisposable
             case Outcome.Lexical:
                 Drain(call());
                 break;
+            case Outcome.Stored:
+                try
+                {
+                    Drain(call());
+                }
+                catch (SandboxEscapeException)
+                {
+                    Assert.False(fs.File.Exists("link") || fs.Directory.Exists("link"));
+                    break;
+                }
+
+                Assert.ThrowsAny<SandboxEscapeException>(() => Drain(names == Names.File
+                    ? fs.File.ReadAllText("link")
+                    : fs.Directory.GetFileSystemEntries("link")));
+                break;
+            case Outcome.Absent:
+                Assert.Equal(true, call());
+                break;
         }
+    }
+
+    /// <summary>The path to the file or directory outside, spelled the given way.</summary>
+    private string Outside(string spelling, Names names)
+    {
+        IFileSystem fs = _fixture.FileSystem;
+        if (spelling == "through-link")
+        {
+            TestLinks.Require(_fixture.SupportsLinks);
+        }
+
+        string outside = spelling switch
+        {
+            "above-root" => fs.Path.Combine(fs.Path.GetPathRoot(fs.Directory.GetCurrentDirectory())!, "..", "outside"),
+            "relative" => fs.Path.Combine("..", "outside"),
+            _ => fs.Path.Combine("escape"),
+        };
+        return fs.Path.Combine(outside, names == Names.File ? "secret.txt" : "sub");
     }
 
     /// <summary>Waits for a task, runs an enumeration and disposes a stream, so that a lazy result does its work.</summary>
@@ -307,6 +452,7 @@ public abstract class EscapeTests : IDisposable
         yield return E("IFile.Create(String, Int32) path", F, R, (fs, p) => fs.File.Create(p, 4096));
         yield return E("IFile.Create(String, Int32, FileOptions) path", F, R, (fs, p) => fs.File.Create(p, 4096, FileOptions.None));
         yield return E("IFile.CreateSymbolicLink(String, String) path", F, R, (fs, p) => fs.File.CreateSymbolicLink(p, "a.txt"));
+        yield return E("IFile.CreateSymbolicLink(String, String) pathToTarget", F, Outcome.Stored, (fs, p) => fs.File.CreateSymbolicLink("link", p));
         yield return E("IFile.CreateText(String) path", F, R, (fs, p) => fs.File.CreateText(p));
         yield return E("IFile.Decrypt(String) path", F, Outcome.Unsupported, Do((fs, p) => fs.File.Decrypt(p)));
         yield return E("IFile.Delete(String) path", F, R, Do((fs, p) => fs.File.Delete(p)));
@@ -384,6 +530,7 @@ public abstract class EscapeTests : IDisposable
         yield return E("IDirectory.CreateDirectory(String) path", D, R, (fs, p) => fs.Directory.CreateDirectory(fs.Path.Combine(p, "new")));
         yield return E("IDirectory.CreateDirectory(String, UnixFileMode) path", D, Outcome.Unsupported, (fs, p) => fs.Directory.CreateDirectory(p, UnixFileMode.UserRead));
         yield return E("IDirectory.CreateSymbolicLink(String, String) path", D, R, (fs, p) => fs.Directory.CreateSymbolicLink(fs.Path.Combine(p, "new"), "d"));
+        yield return E("IDirectory.CreateSymbolicLink(String, String) pathToTarget", D, Outcome.Stored, (fs, p) => fs.Directory.CreateSymbolicLink("link", p));
         yield return E("IDirectory.Delete(String) path", D, R, Do((fs, p) => fs.Directory.Delete(p)));
         yield return E("IDirectory.Delete(String, Boolean) path", D, R, Do((fs, p) => fs.Directory.Delete(p, true)));
         foreach (string kind in new[] { "Directories", "Files", "FileSystemEntries" })
@@ -426,9 +573,160 @@ public abstract class EscapeTests : IDisposable
         yield return E("IFileStreamFactory.New(String, FileMode, FileAccess, FileShare, Int32, Boolean) path", F, R, (fs, p) => fs.FileStream.New(p, FileMode.Truncate, FileAccess.Write, FileShare.None, 4096, true));
         yield return E("IFileStreamFactory.New(String, FileMode, FileAccess, FileShare, Int32, FileOptions) path", F, R, (fs, p) => fs.FileStream.New(p, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.None));
         yield return E("IFileStreamFactory.New(String, FileStreamOptions) path", F, R, (fs, p) => fs.FileStream.New(p, createOptions));
+
+        // IFileSystemInfo, IFileInfo and IDirectoryInfo, over a path inside and given one outside
+        yield return E("IFileSystemInfo.CreateAsSymbolicLink(String) pathToTarget", F, Outcome.Stored, Do((fs, p) => fs.FileInfo.New("link").CreateAsSymbolicLink(p)));
+        yield return E("IFileInfo.CopyTo(String) destFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").CopyTo(p));
+        yield return E("IFileInfo.CopyTo(String, Boolean) destFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").CopyTo(p, true));
+        yield return E("IFileInfo.MoveTo(String) destFileName", F, R, Do((fs, p) => fs.FileInfo.New("a.txt").MoveTo(p)));
+        yield return E("IFileInfo.MoveTo(String, Boolean) destFileName", F, R, Do((fs, p) => fs.FileInfo.New("a.txt").MoveTo(p, true)));
+        yield return E("IFileInfo.Replace(String, String) destinationFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").Replace(p, "backup.txt"));
+        yield return E("IFileInfo.Replace(String, String) destinationBackupFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").Replace("b.txt", p));
+        yield return E("IFileInfo.Replace(String, String, Boolean) destinationFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").Replace(p, "backup.txt", false));
+        yield return E("IFileInfo.Replace(String, String, Boolean) destinationBackupFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").Replace("b.txt", p, false));
+
+        // CreateSubdirectory refuses a rooted path before looking at it, so the way out is taken
+        // from the directory's parent: every spelling then climbs above the root or through the link.
+        yield return E("IDirectoryInfo.CreateSubdirectory(String) path", D, R, (fs, p) => fs.DirectoryInfo.New("d").CreateSubdirectory(fs.Path.Join("..", p, "new")));
+        yield return E("IDirectoryInfo.MoveTo(String) destDirName", D, R, Do((fs, p) => fs.DirectoryInfo.New("d").MoveTo(fs.Path.Combine(p, "moved"))));
+
+        // The factories: an info over a path outside finds nothing there. What each of its
+        // members does is the business of ReceiverEntries.
+        yield return E("IFileInfoFactory.New(String) fileName", F, Outcome.False, (fs, p) => fs.FileInfo.New(p).Exists);
+        yield return E("IDirectoryInfoFactory.New(String) path", D, Outcome.False, (fs, p) => fs.DirectoryInfo.New(p).Exists);
+        yield return E("IFileSystemWatcherFactory.New(String) path", D, Outcome.Unsupported, (fs, p) => fs.FileSystemWatcher.New(p));
+        yield return E("IFileSystemWatcherFactory.New(String, String) path", D, Outcome.Unsupported, (fs, p) => fs.FileSystemWatcher.New(p, "*"));
+        yield return E("IFileVersionInfoFactory.GetVersionInfo(String) fileName", F, Outcome.Unsupported, (fs, p) => fs.FileVersionInfo.GetVersionInfo(p));
+    }
+
+    /// <summary>
+    /// Every member of <see cref="IFileSystemInfo"/>, <see cref="IFileInfo"/> and
+    /// <see cref="IDirectoryInfo"/>, property accessors included, keyed as <see cref="Key"/>
+    /// spells it with <c>receiver</c> for the parameter, for calling on an info made over a
+    /// path outside the root.
+    /// </summary>
+    /// <remarks>
+    /// An info's getters describe what the path names as <c>System.IO</c>'s do, never throwing:
+    /// what is outside is described as nothing, so they are <see cref="Outcome.Absent"/>.
+    /// A getter that hands back another info is checked through that info's <c>Exists</c>.
+    /// </remarks>
+    public static IEnumerable<ReceiverEntry> ReceiverEntries()
+    {
+        const Outcome R = Outcome.Refused;
+        const Outcome A = Outcome.Absent;
+        const Outcome L = Outcome.Lexical;
+        const Outcome U = Outcome.Unsupported;
+        DateTime when = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        FileStreamOptions createOptions = new() { Mode = FileMode.Create, Access = FileAccess.Write };
+
+        static ReceiverEntry E(string key, Outcome outcome, Func<IFileSystemInfo, object?> call) =>
+            new($"{key} receiver", outcome, call);
+
+        static Func<IFileSystemInfo, object?> Do(Action<IFileSystemInfo> action) =>
+            info =>
+            {
+                action(info);
+                return null;
+            };
+
+        static IFileInfo File(IFileSystemInfo info) => (IFileInfo)info;
+
+        static IDirectoryInfo Directory(IFileSystemInfo info) => (IDirectoryInfo)info;
+
+        static IFileSystemInfo Missing(IFileSystemInfo info) =>
+            info is IFileInfo ? info.FileSystem.FileInfo.New("missing") : info.FileSystem.DirectoryInfo.New("missing");
+
+        // IFileSystemInfo
+        yield return E("IFileSystemInfo.CreateAsSymbolicLink(String)", R, Do(info => info.CreateAsSymbolicLink(info is IFileInfo ? "a.txt" : "d")));
+        yield return E("IFileSystemInfo.Delete()", R, Do(info => info.Delete()));
+        yield return E("IFileSystemInfo.Refresh()", L, Do(info => info.Refresh()));
+        yield return E("IFileSystemInfo.ResolveLinkTarget(Boolean)", R, info => info.ResolveLinkTarget(true));
+        yield return E("IFileSystemInfo.get_Attributes()", A, info => info.Attributes == Missing(info).Attributes);
+        yield return E("IFileSystemInfo.set_Attributes(FileAttributes)", U, Do(info => info.Attributes = FileAttributes.Normal));
+        yield return E("IFileSystemInfo.get_CreationTime()", A, info => info.CreationTime == Missing(info).CreationTime);
+        yield return E("IFileSystemInfo.set_CreationTime(DateTime)", U, Do(info => info.CreationTime = when));
+        yield return E("IFileSystemInfo.get_CreationTimeUtc()", A, info => info.CreationTimeUtc == Missing(info).CreationTimeUtc);
+        yield return E("IFileSystemInfo.set_CreationTimeUtc(DateTime)", U, Do(info => info.CreationTimeUtc = when));
+        yield return E("IFileSystemInfo.get_Exists()", Outcome.False, info => info.Exists);
+        yield return E("IFileSystemInfo.get_Extension()", L, info => info.Extension);
+        yield return E("IFileSystemInfo.get_FileSystem()", L, info => info.FileSystem);
+        yield return E("IFileSystemInfo.get_FullName()", L, info => info.FullName);
+        yield return E("IFileSystemInfo.get_LastAccessTime()", A, info => info.LastAccessTime == Missing(info).LastAccessTime);
+        yield return E("IFileSystemInfo.set_LastAccessTime(DateTime)", R, Do(info => info.LastAccessTime = when));
+        yield return E("IFileSystemInfo.get_LastAccessTimeUtc()", A, info => info.LastAccessTimeUtc == Missing(info).LastAccessTimeUtc);
+        yield return E("IFileSystemInfo.set_LastAccessTimeUtc(DateTime)", R, Do(info => info.LastAccessTimeUtc = when));
+        yield return E("IFileSystemInfo.get_LastWriteTime()", A, info => info.LastWriteTime == Missing(info).LastWriteTime);
+        yield return E("IFileSystemInfo.set_LastWriteTime(DateTime)", R, Do(info => info.LastWriteTime = when));
+        yield return E("IFileSystemInfo.get_LastWriteTimeUtc()", A, info => info.LastWriteTimeUtc == Missing(info).LastWriteTimeUtc);
+        yield return E("IFileSystemInfo.set_LastWriteTimeUtc(DateTime)", R, Do(info => info.LastWriteTimeUtc = when));
+        yield return E("IFileSystemInfo.get_LinkTarget()", A, info => info.LinkTarget is null);
+        yield return E("IFileSystemInfo.get_Name()", L, info => info.Name);
+        yield return E("IFileSystemInfo.get_UnixFileMode()", A, info => info.UnixFileMode == Missing(info).UnixFileMode);
+        yield return E("IFileSystemInfo.set_UnixFileMode(UnixFileMode)", U, Do(info => info.UnixFileMode = UnixFileMode.UserRead));
+
+        // IFileInfo
+        yield return E("IFileInfo.AppendText()", R, info => File(info).AppendText());
+        yield return E("IFileInfo.CopyTo(String)", R, info => File(info).CopyTo("copy.txt"));
+        yield return E("IFileInfo.CopyTo(String, Boolean)", R, info => File(info).CopyTo("copy.txt", true));
+        yield return E("IFileInfo.Create()", R, info => File(info).Create());
+        yield return E("IFileInfo.CreateText()", R, info => File(info).CreateText());
+        yield return E("IFileInfo.Decrypt()", U, Do(info => File(info).Decrypt()));
+        yield return E("IFileInfo.Encrypt()", U, Do(info => File(info).Encrypt()));
+        yield return E("IFileInfo.MoveTo(String)", R, Do(info => File(info).MoveTo("moved.txt")));
+        yield return E("IFileInfo.MoveTo(String, Boolean)", R, Do(info => File(info).MoveTo("moved.txt", true)));
+        yield return E("IFileInfo.Open(FileMode)", R, info => File(info).Open(FileMode.OpenOrCreate));
+        yield return E("IFileInfo.Open(FileMode, FileAccess)", R, info => File(info).Open(FileMode.OpenOrCreate, FileAccess.ReadWrite));
+        yield return E("IFileInfo.Open(FileMode, FileAccess, FileShare)", R, info => File(info).Open(FileMode.Open, FileAccess.Read, FileShare.Read));
+        yield return E("IFileInfo.Open(FileStreamOptions)", R, info => File(info).Open(createOptions));
+        yield return E("IFileInfo.OpenRead()", R, info => File(info).OpenRead());
+        yield return E("IFileInfo.OpenText()", R, info => File(info).OpenText());
+        yield return E("IFileInfo.OpenWrite()", R, info => File(info).OpenWrite());
+        yield return E("IFileInfo.Replace(String, String)", R, info => File(info).Replace("b.txt", null));
+        yield return E("IFileInfo.Replace(String, String, Boolean)", R, info => File(info).Replace("b.txt", "backup.txt", false));
+        yield return E("IFileInfo.get_Directory()", Outcome.False, info => File(info).Directory!.Exists);
+        yield return E("IFileInfo.get_DirectoryName()", L, info => File(info).DirectoryName);
+        yield return E("IFileInfo.get_IsReadOnly()", A, info => File(info).IsReadOnly == ((IFileInfo)Missing(info)).IsReadOnly);
+        yield return E("IFileInfo.set_IsReadOnly(Boolean)", U, Do(info => File(info).IsReadOnly = false));
+        yield return E("IFileInfo.get_Length()", A, info =>
+        {
+            try
+            {
+                _ = File(info).Length;
+                return false;
+            }
+            catch (FileNotFoundException)
+            {
+                return true;
+            }
+        });
+
+        // IDirectoryInfo
+        yield return E("IDirectoryInfo.Create()", R, Do(info => Directory(info).Create()));
+        yield return E("IDirectoryInfo.CreateSubdirectory(String)", R, info => Directory(info).CreateSubdirectory("new"));
+        yield return E("IDirectoryInfo.Delete(Boolean)", R, Do(info => Directory(info).Delete(true)));
+        yield return E("IDirectoryInfo.MoveTo(String)", R, Do(info => Directory(info).MoveTo("moved")));
+        yield return E("IDirectoryInfo.get_Parent()", Outcome.False, info => Directory(info).Parent!.Exists);
+        yield return E("IDirectoryInfo.get_Root()", L, info => Directory(info).Root);
+        foreach (string kind in new[] { "Directories", "Files", "FileSystemInfos" })
+        {
+            foreach (string verb in new[] { "Enumerate", "Get" })
+            {
+                string name = verb + kind;
+                yield return E($"IDirectoryInfo.{name}()", R, info => Infos(Directory(info), name));
+                yield return E($"IDirectoryInfo.{name}(String)", R, info => Infos(Directory(info), name, "*"));
+                yield return E($"IDirectoryInfo.{name}(String, SearchOption)", R, info => Infos(Directory(info), name, "*", SearchOption.AllDirectories));
+                yield return E($"IDirectoryInfo.{name}(String, EnumerationOptions)", R, info => Infos(Directory(info), name, "*", new EnumerationOptions { RecurseSubdirectories = true }));
+            }
+        }
     }
 
 #pragma warning restore CA1416
+
+    /// <summary>Calls one of the enumerating members of a directory info by name.</summary>
+    private static object? Infos(IDirectoryInfo directory, string member, params object[] arguments) =>
+        typeof(IDirectoryInfo)
+            .GetMethod(member, [.. arguments.Select(argument => argument.GetType())])!
+            .Invoke(directory, BindingFlags.DoNotWrapExceptions, binder: null, arguments, culture: null);
 
     private static object Enumerate(IFileSystem fs, string member, string path, string? pattern, object? option) =>
         (member, pattern, option) switch
