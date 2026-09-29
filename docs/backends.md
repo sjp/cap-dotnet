@@ -16,6 +16,15 @@ On the kernel-atomic backend a path costs exactly one syscall however many names
 which is what leaves no window between components. The other two spend one open per name;
 [benchmarks.md](benchmarks.md) has what that costs, measured against `System.IO` on each.
 
+That one syscall is the resolution. On Linux a file open then makes one more call on the
+descriptor it got, on either backend, and nothing after the open resolves anything. A read-only
+open asks the descriptor what it reached (`statx`), so a directory is never handed back as
+a file. Opens that write, create or truncate skip that question, because the kernel has
+already refused a directory for them, and make one `fcntl` to clear the `O_NONBLOCK` every
+file open is issued with, so that naming a FIFO cannot hang the calling thread. A FIFO,
+socket or device reached read-only pays that `fcntl` as well. A regular file or directory
+keeps the flag, since it changes nothing on either.
+
 ## Forcing the fallback
 
 `openat2` is not always available: it needs Linux 5.6, and a seccomp filter can make it

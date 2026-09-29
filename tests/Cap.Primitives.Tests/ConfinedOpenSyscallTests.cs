@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
 
@@ -92,42 +93,19 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
             return;
         }
 
-        if (!TryFindTracer(out string tracer))
-        {
-            Assert.Skip("No syscall tracer on this host, so the syscalls cannot be watched from outside.");
-        }
-
         string marker = "trace-" + Guid.NewGuid().ToString("N");
-        string canary = "canary-" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(Path.Combine(_root, marker, "inner"));
 
         using SafeDirHandle root = OpenRoot(ops);
-        string log = Path.Combine(_root, "trace.log");
-
-        using Process trace = StartTracer(tracer, log);
-        try
+        string[] log = Trace(ops, root, () =>
         {
-            // Attaching is not instant, and a trace that began after the interesting call
-            // would report nothing and look exactly like a call that was never made. So the
-            // process makes a deliberately recognisable one until it shows up in the log.
-            if (!WaitForTracing(ops, root, canary, log))
-            {
-                Assert.Skip(
-                    "The tracer attached but reported no syscalls, which this host does not " +
-                    "permit. Whether the confined open is a single syscall is unverified here.");
-            }
-
             CapResult<SafeDirHandle> result = ops.OpenConfinedDirectory(
                 root, marker + "/inner", CapAccess.Read, ConfinedResolveOptions.None);
             Assert.True(result.IsSuccess, result.Error.FailureDescription);
             result.Value.Dispose();
-        }
-        finally
-        {
-            StopTracer(trace);
-        }
+        });
 
-        string[] observed = File.ReadAllLines(log)
+        string[] observed = log
             .Where(line => line.Contains(marker, StringComparison.Ordinal))
             .ToArray();
 
@@ -141,7 +119,185 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
     }
 
     /// <summary>
-    /// Runs a tracer over this process, recording only the calls that open something.
+    /// A regular file opened for reading costs the open and one question about what it
+    /// reached, and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// The question is the one that keeps a directory from being handed back as a file, and
+    /// it cannot be dropped. What must not come back is the flag work around it: a regular
+    /// file is indifferent to the non-blocking flag the open was issued with, so clearing it
+    /// is two syscalls spent on every open for nothing.
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void A_regular_file_open_costs_one_confined_open_and_one_stat()
+    {
+        (LinuxPlatformOps ops, string marker) = PrepareFileTrace();
+        File.WriteAllText(Path.Combine(_root, marker), "content");
+
+        using SafeDirHandle root = OpenRoot(ops);
+        string[] log = Trace(ops, root, () =>
+        {
+            CapResult<SafeFileHandle> result = ops.OpenConfinedFile(
+                root, marker, FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
+            Assert.True(result.IsSuccess, result.Error.FailureDescription);
+            result.Value.Dispose();
+        });
+
+        string[] after = CallsBetweenOpenAndClose(log, marker);
+        Assert.True(
+            Count(after, "statx(") == 1 && Count(after, "fcntl(") == 0,
+            "A read-only open of a regular file should be followed by exactly one statx and " +
+            "no fcntl before its handle is closed. Calls:\n" + string.Join('\n', after));
+    }
+
+    /// <summary>
+    /// A file opened to be written is not asked what it is at all, and has the flag cleared
+    /// in one call.
+    /// </summary>
+    /// <remarks>
+    /// The kernel refuses to open a directory for writing, creating or truncating, so the
+    /// descriptor cannot be one and the question that guards against it has nothing to find.
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void A_writing_file_open_costs_one_confined_open_and_at_most_one_fcntl()
+    {
+        (LinuxPlatformOps ops, string marker) = PrepareFileTrace();
+
+        using SafeDirHandle root = OpenRoot(ops);
+        string[] log = Trace(ops, root, () =>
+        {
+            FileOpenRequest request = new(
+                FileMode.Create, FileAccess.Write, FileShare.None, FileOptions.None, preallocationSize: 0);
+            CapResult<SafeFileHandle> result = ops.OpenConfinedFile(
+                root, marker, in request, ConfinedResolveOptions.None);
+            Assert.True(result.IsSuccess, result.Error.FailureDescription);
+            result.Value.Dispose();
+        });
+
+        string[] after = CallsBetweenOpenAndClose(log, marker);
+        Assert.True(
+            Count(after, "statx(") == 0 &&
+            Count(after, "fcntl(") <= 1 &&
+            !after.Any(line => line.Contains("F_GETFL", StringComparison.Ordinal)),
+            "A creating open of a regular file should be followed by no statx and at most one " +
+            "fcntl, which sets the flags without reading them first. Calls:\n" +
+            string.Join('\n', after));
+    }
+
+    [SupportedOSPlatform("linux")]
+    private static (LinuxPlatformOps Ops, string Marker) PrepareFileTrace()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The syscalls counted here are the Linux backend's.");
+        }
+
+        LinuxPlatformOps ops = new();
+        if (!ops.Capabilities.SupportsConfinedOpen)
+        {
+            Assert.Skip("This host has no confined open: " + ops.ConfinedOpenUnavailableReason);
+        }
+
+        return (ops, "trace-" + Guid.NewGuid().ToString("N"));
+    }
+
+    /// <summary>
+    /// Runs one action under the tracer and returns what the tracer saw.
+    /// </summary>
+    [SupportedOSPlatform("linux")]
+    private string[] Trace(LinuxPlatformOps ops, SafeDirHandle root, Action action)
+    {
+        if (!TryFindTracer(out string tracer))
+        {
+            Assert.Skip("No syscall tracer on this host, so the syscalls cannot be watched from outside.");
+        }
+
+        string canary = "canary-" + Guid.NewGuid().ToString("N");
+        string log = Path.Combine(_root, "trace.log");
+
+        using Process trace = StartTracer(tracer, log);
+        try
+        {
+            // Attaching is not instant, and a trace that began after the interesting call
+            // would report nothing and look exactly like a call that was never made. So the
+            // process makes a deliberately recognisable one until it shows up in the log.
+            if (!WaitForTracing(ops, root, canary, log))
+            {
+                Assert.Skip(
+                    "The tracer attached but reported no syscalls, which this host does not " +
+                    "permit. What the open costs in syscalls is unverified here.");
+            }
+
+            action();
+        }
+        finally
+        {
+            StopTracer(trace);
+        }
+
+        return File.ReadAllLines(log);
+    }
+
+    /// <summary>
+    /// The calls the thread that opened the marked name made on the way from that open to
+    /// the close of the descriptor it returned.
+    /// </summary>
+    /// <remarks>
+    /// Every thread of the process is traced, and each line starts with the number of the
+    /// thread that made it, so the calls of the one thread that matters are picked out by
+    /// that. A call the tracer saw interrupted is split over two lines, the second of which
+    /// carries its result; only the line that begins a call is counted.
+    /// </remarks>
+    private static string[] CallsBetweenOpenAndClose(string[] log, string marker)
+    {
+        int open = Array.FindIndex(
+            log,
+            line => line.Contains("openat2(", StringComparison.Ordinal) &&
+                    line.Contains(marker, StringComparison.Ordinal));
+        Assert.True(open >= 0, "The traced open never appeared in the log.");
+
+        string thread = log[open][..log[open].IndexOf(' ', StringComparison.Ordinal)] + " ";
+        int returned = Array.FindIndex(
+            log,
+            open,
+            line => line.StartsWith(thread, StringComparison.Ordinal) &&
+                    line.Contains(") = ", StringComparison.Ordinal));
+        Assert.True(returned >= 0, "The traced open never returned in the log.");
+
+        string result = log[returned][(log[returned].LastIndexOf(") = ", StringComparison.Ordinal) + 4)..];
+        string fd = new(result.TakeWhile(char.IsAsciiDigit).ToArray());
+        Assert.True(fd.Length > 0, "The traced open failed: " + log[returned]);
+
+        List<string> calls = [];
+        foreach (string line in log.Skip(returned + 1))
+        {
+            if (!line.StartsWith(thread, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string call = line[thread.Length..];
+            if (call.StartsWith("close(" + fd + ")", StringComparison.Ordinal) ||
+                call.StartsWith("close(" + fd + " ", StringComparison.Ordinal))
+            {
+                return [.. calls];
+            }
+
+            calls.Add(call);
+        }
+
+        Assert.Fail("The descriptor the traced open returned was never closed in the log.");
+        return [];
+    }
+
+    private static int Count(string[] calls, string name) =>
+        calls.Count(call => call.StartsWith(name, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Runs a tracer over this process, recording the calls that open or close something and
+    /// those an open makes of its descriptor afterwards.
     /// </summary>
     private static Process StartTracer(string tracer, string log)
     {
@@ -155,7 +311,7 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
         foreach (string argument in new[]
                  {
                      "-f",
-                     "-e", "trace=openat,openat2",
+                     "-e", "trace=openat,openat2,fcntl,statx,close",
                      "-p", Environment.ProcessId.ToString(CultureInfo.InvariantCulture),
                      "-o", log,
                  })

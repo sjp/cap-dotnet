@@ -247,7 +247,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 TranslateOpenFailure(lease.Descriptor, encoded.Bytes, errno, noFollow: true));
         }
 
-        return FinishFileOpen(fd, in request);
+        return FinishFileOpen(fd, flags, in request);
     }
 
     /// <inheritdoc/>
@@ -300,7 +300,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 TranslateOpenFailure(lease.Descriptor, encoded.Bytes, errno, noFollow: true));
         }
 
-        return FinishNodeOpen(fd);
+        return FinishNodeOpen(fd, flags);
     }
 
     /// <inheritdoc/>
@@ -481,7 +481,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(error);
         }
 
-        return FinishFileOpen(fd, in request);
+        return FinishFileOpen(fd, flags, in request);
     }
 
     /// <inheritdoc/>
@@ -508,7 +508,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<OpenedNode>.Fail(error);
         }
 
-        return FinishNodeOpen(fd);
+        return FinishNodeOpen(fd, flags);
     }
 
     /// <inheritdoc/>
@@ -1577,11 +1577,21 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// waits, not about the descriptor. So the request's asynchrony is carried by the layer
     /// that hands the handle to a caller and changes nothing about the open itself.
     /// </remarks>
-    private static CapResult<SafeFileHandle> FinishFileOpen(int fd, in FileOpenRequest request)
+    private static CapResult<SafeFileHandle> FinishFileOpen(int fd, int flags, in FileOpenRequest request)
     {
-        ClearNonBlocking(fd);
+        CapError kind;
+        if (CanReachDirectory(in request))
+        {
+            kind = RefuseIfDirectory(fd, flags);
+        }
+        else
+        {
+            // The kind is not asked, so a FIFO cannot be told from a file and the flag is
+            // cleared on both. One call either way: the question would cost the same.
+            ClearNonBlocking(fd, flags);
+            kind = CapError.Success;
+        }
 
-        CapError kind = RefuseIfDirectory(fd);
         CapError reserved = kind.IsFailure ? kind : Preallocate(fd, in request);
         if (reserved.IsFailure)
         {
@@ -1611,25 +1621,41 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// about.
     /// </para>
     /// </remarks>
-    private static CapError RefuseIfDirectory(int fd)
+    private static CapError RefuseIfDirectory(int fd, int flags)
     {
-        CapError error = IsDirectory(fd, out bool isDirectory);
+        CapError error = KindOf(fd, out CapNodeType type);
         if (error.IsFailure)
         {
             return error;
         }
 
-        return isDirectory
-            ? CapError.FromCategory(CapErrorCategory.IsADirectory)
-            : CapError.Success;
+        if (type == CapNodeType.Directory)
+        {
+            return CapError.FromCategory(CapErrorCategory.IsADirectory);
+        }
+
+        ClearNonBlockingUnlessFile(fd, flags, type);
+        return CapError.Success;
     }
 
-    /// <summary>Asks an open descriptor whether it refers to a directory.</summary>
-    private static CapError IsDirectory(int fd, out bool isDirectory)
+    /// <summary>
+    /// Says whether an open issued for this request can have succeeded on a directory.
+    /// </summary>
+    /// <remarks>
+    /// Only a read-only open that neither creates nor empties can. Asking to write, to
+    /// create or to truncate is refused by the kernel on a directory before any descriptor
+    /// exists, so a descriptor from any of those is already known not to be one, and asking
+    /// it again would be a syscall spent on an answer that cannot change.
+    /// </remarks>
+    private static bool CanReachDirectory(in FileOpenRequest request) =>
+        request.Access == FileAccess.Read && !request.Creates && !request.Truncates;
+
+    /// <summary>Asks an open descriptor what kind of object it refers to.</summary>
+    private static CapError KindOf(int fd, out CapNodeType type)
     {
         ReadOnlySpan<byte> empty = [0];
         CapError error = StatInto(fd, empty, LinuxConstants.AT_EMPTY_PATH, out CapNodeInfo info);
-        isDirectory = error.IsSuccess && info.Type == CapNodeType.Directory;
+        type = error.IsSuccess ? info.Type : CapNodeType.Unknown;
         return error;
     }
 
@@ -1643,18 +1669,18 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// the authority a directory opened for reading carries, which is what the read-only
     /// descriptor already is.
     /// </remarks>
-    private CapResult<OpenedNode> FinishNodeOpen(int fd)
+    private CapResult<OpenedNode> FinishNodeOpen(int fd, int flags)
     {
-        ClearNonBlocking(fd);
-
-        CapError error = IsDirectory(fd, out bool isDirectory);
+        CapError error = KindOf(fd, out CapNodeType type);
         if (error.IsFailure)
         {
             new SafeFileHandle(fd, ownsHandle: true).Dispose();
             return CapResult<OpenedNode>.Fail(error);
         }
 
-        return CapResult<OpenedNode>.Ok(isDirectory
+        ClearNonBlockingUnlessFile(fd, flags, type);
+
+        return CapResult<OpenedNode>.Ok(type == CapNodeType.Directory
             ? new OpenedNode(new SafeDirHandle(fd, this, CapAccess.Read))
             : new OpenedNode(new SafeFileHandle(fd, ownsHandle: true), this));
     }
@@ -1745,17 +1771,39 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// Removes the non-blocking flag the open was issued with.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The flag is set on the open so that naming a FIFO cannot hang the calling thread
     /// forever waiting for a writer -- a name inside the sandbox must not be able to stop
     /// the program that resolved it. It is cleared immediately afterwards so that the handle
     /// the caller receives reads and writes like any other.
+    /// </para>
+    /// <para>
+    /// The flags written are the ones the open was issued with, less this one, rather than
+    /// ones read back from the descriptor. Nothing has touched the descriptor since the open,
+    /// and of what the open passed the kernel keeps only the flags this call can change, so
+    /// the two are the same word and reading it first would be a syscall spent to learn it.
+    /// </para>
     /// </remarks>
-    private static void ClearNonBlocking(int fd)
+    private static void ClearNonBlocking(int fd, int flags) =>
+        _ = LinuxNative.Fcntl(fd, LinuxConstants.F_SETFL, flags & ~LinuxConstants.O_NONBLOCK);
+
+    /// <summary>
+    /// Removes the non-blocking flag from a descriptor of a kind whose reads and writes it
+    /// would change.
+    /// </summary>
+    /// <remarks>
+    /// A regular file and a directory are left with it. On either, the kernel never waits in
+    /// a read or a write for anyone else to act, so there is no wait for the flag to cut
+    /// short and nothing it changes; the framework, too, reports such a handle as the
+    /// synchronous one it is. Everything else — FIFOs, sockets, devices, and a kind the
+    /// platform would not name — can wait, and is given back the blocking behaviour a
+    /// handle is expected to have.
+    /// </remarks>
+    private static void ClearNonBlockingUnlessFile(int fd, int flags, CapNodeType type)
     {
-        int current = LinuxNative.Fcntl(fd, LinuxConstants.F_GETFL, 0);
-        if (current >= 0 && (current & LinuxConstants.O_NONBLOCK) != 0)
+        if (type is not (CapNodeType.File or CapNodeType.Directory))
         {
-            _ = LinuxNative.Fcntl(fd, LinuxConstants.F_SETFL, current & ~LinuxConstants.O_NONBLOCK);
+            ClearNonBlocking(fd, flags);
         }
     }
 
