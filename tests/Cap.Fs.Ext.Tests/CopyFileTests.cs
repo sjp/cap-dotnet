@@ -64,6 +64,24 @@ public sealed class CopyFileTests : IDisposable
         Assert.Equal(["data.txt"], _fs.GetEntries());
     }
 
+    /// <summary>
+    /// Under Windows rules, where a file open without delete sharing cannot be replaced, a file
+    /// copied onto itself with replacement still keeps what it held.
+    /// </summary>
+    [Fact]
+    public void A_file_copied_onto_itself_under_Windows_rules_keeps_its_contents()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        fs.AddFile("data.txt", "same");
+        using Dir root = fs.OpenRoot();
+
+        root.CopyFile("data.txt", root, "data.txt", overwrite: true);
+
+        Assert.Equal("same", fs.ReadAllText("data.txt"));
+        Assert.Equal(["data.txt"], fs.GetEntries());
+        Assert.Equal(1, fs.OpenHandleCount);
+    }
+
     /// <summary>A directory at the destination is never replaced by a file.</summary>
     [Fact]
     public void A_directory_at_the_destination_is_refused()

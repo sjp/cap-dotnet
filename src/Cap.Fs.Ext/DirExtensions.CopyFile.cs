@@ -121,6 +121,9 @@ public static partial class DirExtensions
                 copied = FillCopy(source, target, metadata, directory);
             }
 
+            // Windows refuses to replace a file open without FileShare.Delete, and the
+            // source is the file being replaced when a file is copied onto itself.
+            source.Dispose();
             MoveOnto(directory, scratch, location.Name, quoted: to);
             scratch = null;
             return copied;
