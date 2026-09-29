@@ -1928,6 +1928,7 @@ public sealed partial class Dir : IDir
     /// for reading and writing.
     /// </summary>
     /// <param name="name">A single component, which must not already be taken.</param>
+    /// <param name="options">How the file is opened, such as for asynchronous writes.</param>
     /// <param name="file">A handle on the new file, on success.</param>
     /// <returns>
     /// The platform's answer, so that a caller can tell the name being taken from every
@@ -1939,13 +1940,13 @@ public sealed partial class Dir : IDir
     /// The creation is exclusive, so a link already holding the name counts as the name being
     /// taken and is never followed.
     /// </remarks>
-    internal CapError CreateOwnedFile(string name, out CapFile? file)
+    internal CapError CreateOwnedFile(string name, FileOptions options, out CapFile? file)
     {
         FileOpenRequest request = new(
             FileMode.CreateNew,
             FileAccess.ReadWrite,
             FileShare.Read,
-            FileOptions.None,
+            options,
             preallocationSize: 0,
             visibility: CreationVisibility.OwnerOnly);
 

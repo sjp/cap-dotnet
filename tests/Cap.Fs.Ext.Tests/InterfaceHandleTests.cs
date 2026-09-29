@@ -204,18 +204,23 @@ public sealed class InterfaceHandleTests
         Assert.Equal(["report.txt"], _fs.GetEntries("out"));
 
         // The path ahead of the name is resolved once, and everything else happens against
-        // the directory that reached: create the scratch name exclusively, write it, commit it,
-        // move it onto the name, commit the directory.
+        // the directory that reached: describe what the name holds, create the scratch name
+        // exclusively, write it, give it the replaced file's permissions, commit it, move it
+        // onto the name, commit the directory.
         Assert.Equal(".: OpenDir(out/, False)", root.Log[0]);
         string created = Assert.Single(root.Log, call => call.StartsWith("./out: TryOpenFile(", StringComparison.Ordinal));
         Assert.EndsWith(", CreateNew)", created, StringComparison.Ordinal);
         string scratch = created["./out: TryOpenFile(".Length..created.IndexOf(',', StringComparison.Ordinal)];
+        string carried = Assert.Single(
+            root.Log, call => call.StartsWith($"./out/{scratch}: SetPermissions(", StringComparison.Ordinal));
 
         List<string> expected =
         [
             ".: OpenDir(out/, False)",
+            "./out: TryGetMetadata(report.txt)",
             created,
             $"./out/{scratch}: Write(3, 0)",
+            carried,
         ];
         if (durability != Durability.None)
         {
@@ -229,6 +234,81 @@ public sealed class InterfaceHandleTests
         }
 
         Assert.Equal(expected, root.Log);
+    }
+
+    /// <summary>
+    /// Asked not to keep the replaced file's permissions, an atomic write neither describes the
+    /// name nor sets any permissions.
+    /// </summary>
+    [Fact]
+    public void An_atomic_write_through_the_interface_that_keeps_no_permissions_does_not_look_at_the_name()
+    {
+        _fs.AddFile("report.txt", "old");
+        using RecordingDir root = Root();
+
+        root.WriteAllTextAtomic("report.txt", "new", new AtomicWriteOptions { PreservePermissions = false });
+
+        Assert.Equal("new", _fs.ReadAllText("report.txt"));
+        Assert.DoesNotContain(root.Log, call => call.Contains("TryGetMetadata(", StringComparison.Ordinal));
+        Assert.DoesNotContain(root.Log, call => call.Contains("SetPermissions(", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Through the interface the replaced file's mode reaches the published file, which is
+    /// created as any file is and given the mode once its contents are written.
+    /// </summary>
+    [Fact]
+    public void An_atomic_write_through_the_interface_keeps_the_replaced_files_mode()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Unix });
+        const UnixFileMode Private = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        fs.AddFile("report.txt", "old");
+        fs.SetUnixMode("report.txt", Private);
+        using RecordingDir root = new(fs.OpenRoot());
+
+        root.WriteAllTextAtomic("report.txt", "new");
+
+        Assert.Equal("new", fs.ReadAllText("report.txt"));
+        Assert.True(root.GetMetadata("report.txt").Permissions.TryGetUnixMode(out UnixFileMode mode));
+        Assert.Equal(Private, mode);
+        Assert.Contains(root.Log, call => call.EndsWith($": SetPermissions({Private})", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Under Windows rules the replaced file's attribute flags are what is carried.
+    /// </summary>
+    [Fact]
+    public void An_atomic_write_under_windows_rules_keeps_the_replaced_files_attributes()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        fs.AddFile("report.txt", "old");
+        fs.SetAttributes("report.txt", FileAttributes.Hidden);
+        using Dir root = fs.OpenRoot();
+
+        root.WriteAllTextAtomic("report.txt", "new");
+
+        Assert.Equal("new", fs.ReadAllText("report.txt"));
+        Assert.True(root.GetMetadata("report.txt").Permissions.TryGetWindowsAttributes(out FileAttributes attributes));
+        Assert.True(attributes.HasFlag(FileAttributes.Hidden), attributes.ToString());
+    }
+
+    /// <summary>
+    /// Under Windows rules a read-only file cannot be replaced by moving another onto it, so
+    /// the publish is refused and the file and its contents are left as they were.
+    /// </summary>
+    [Fact]
+    public void An_atomic_write_under_windows_rules_is_refused_by_a_read_only_file()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        fs.AddFile("report.txt", "old");
+        fs.SetAttributes("report.txt", FileAttributes.ReadOnly);
+        using Dir root = fs.OpenRoot();
+
+        Exception? refused = Record.Exception(() => root.WriteAllTextAtomic("report.txt", "new"));
+
+        Assert.True(refused is UnauthorizedAccessException or IOException, refused?.ToString());
+        Assert.Equal("old", fs.ReadAllText("report.txt"));
+        Assert.Equal(["report.txt"], fs.GetEntries());
     }
 
     [Fact]

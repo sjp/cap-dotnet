@@ -1,4 +1,5 @@
 using System.Text;
+using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Std;
 
@@ -77,6 +78,14 @@ public static partial class DirExtensions
     /// <see cref="IDir.Flush"/>, whose answer that it cannot commit one is accepted as it is
     /// on Windows.
     /// </para>
+    /// <para>
+    /// <strong>Permissions, ownership and hard links.</strong> The published file is a new
+    /// object, not the old one rewritten. When a file already holds the name it is given that
+    /// file's permissions — the mode on Unix, the attribute flags on Windows — as
+    /// <see cref="AtomicWriteOptions.PreservePermissions"/> describes; ownership is not
+    /// carried, and any other hard link to the old file keeps the old contents. On Windows a
+    /// read-only file holding the name refuses the publish.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
@@ -93,26 +102,43 @@ public static partial class DirExtensions
         this IDir dir,
         string path,
         ReadOnlySpan<byte> bytes,
-        Durability durability = Durability.FileAndDirectory)
+        Durability durability = Durability.FileAndDirectory) =>
+        WriteAllBytesAtomicCore(dir, path, bytes, durability, preservePermissions: true);
+
+    /// <summary>
+    /// Writes a file beneath this handle so that no reader ever sees it half-written, with
+    /// the settings given.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">A relative path to the file to publish.</param>
+    /// <param name="bytes">The contents to store.</param>
+    /// <param name="options">How far the write is pushed, and what it carries from a file it replaces.</param>
+    /// <remarks>
+    /// The same operation as
+    /// <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/>, which
+    /// is this with <see cref="AtomicWriteOptions.Default"/> and the durability it was given.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
+    /// <exception cref="CapIOException">
+    /// The write, the permissions or the move failed, or on Windows a link to a directory
+    /// holds the name.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static void WriteAllBytesAtomic(
+        this IDir dir,
+        string path,
+        ReadOnlySpan<byte> bytes,
+        AtomicWriteOptions options)
     {
-        using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
+        ArgumentNullException.ThrowIfNull(options);
 
-        string? scratch = Claim(location.Directory, asynchronous: false, out ICapFile file);
-        try
-        {
-            using (file)
-            {
-                file.Write(bytes, 0);
-                Commit(file, durability);
-            }
-
-            Publish(location.Directory, scratch, location.Name, durability);
-            scratch = null;
-        }
-        finally
-        {
-            Abandon(location.Directory, scratch);
-        }
+        WriteAllBytesAtomicCore(dir, path, bytes, options.Durability, options.PreservePermissions);
     }
 
     /// <summary>
@@ -129,13 +155,17 @@ public static partial class DirExtensions
     /// caller who needs some other encoding encodes it themselves and publishes the bytes.
     /// </para>
     /// <para>
-    /// Safe to call from any thread, on the terms <see cref="WriteAllBytesAtomic"/> gives.
+    /// Safe to call from any thread, on the terms <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/> gives.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic"/>
+    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/>
     /// treats them: followed ahead of the last component as the policy allows, and replaced,
     /// never followed, as the last — except that on Windows a link to a directory there makes
     /// the publish fail instead.
+    /// </para>
+    /// <para>
+    /// <strong>Permissions, ownership and hard links.</strong> As
+    /// <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/> treats them.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
@@ -157,7 +187,45 @@ public static partial class DirExtensions
     {
         ArgumentNullException.ThrowIfNull(contents);
 
-        WriteAllBytesAtomic(dir, path, Encoding.UTF8.GetBytes(contents), durability);
+        WriteAllBytesAtomicCore(dir, path, Encoding.UTF8.GetBytes(contents), durability, preservePermissions: true);
+    }
+
+    /// <summary>
+    /// Writes a text file beneath this handle so that no reader ever sees it half-written,
+    /// with the settings given.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">A relative path to the file to publish.</param>
+    /// <param name="contents">The text to store.</param>
+    /// <param name="options">How far the write is pushed, and what it carries from a file it replaces.</param>
+    /// <remarks>
+    /// The same operation as <see cref="WriteAllTextAtomic(IDir, string, string, Durability)"/>,
+    /// which is this with <see cref="AtomicWriteOptions.Default"/> and the durability it was
+    /// given.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
+    /// <exception cref="CapIOException">
+    /// The write, the permissions or the move failed, or on Windows a link to a directory
+    /// holds the name.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static void WriteAllTextAtomic(
+        this IDir dir,
+        string path,
+        string contents,
+        AtomicWriteOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        ArgumentNullException.ThrowIfNull(options);
+
+        WriteAllBytesAtomicCore(
+            dir, path, Encoding.UTF8.GetBytes(contents), options.Durability, options.PreservePermissions);
     }
 
     /// <summary>
@@ -209,6 +277,14 @@ public static partial class DirExtensions
     /// <see cref="IDir.Flush"/>, whose answer that it cannot commit one is accepted as it is
     /// on Windows.
     /// </para>
+    /// <para>
+    /// <strong>Permissions, ownership and hard links.</strong> The published file is a new
+    /// object, not the old one rewritten. When a file already holds the name it is given that
+    /// file's permissions — the mode on Unix, the attribute flags on Windows — as
+    /// <see cref="AtomicWriteOptions.PreservePermissions"/> describes; ownership is not
+    /// carried, and any other hard link to the old file keeps the old contents. On Windows a
+    /// read-only file holding the name refuses the publish.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
@@ -222,31 +298,53 @@ public static partial class DirExtensions
     /// The write or the move failed, or on Windows a link to a directory holds the name.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static async Task WriteAllBytesAtomicAsync(
+    public static Task WriteAllBytesAtomicAsync(
         this IDir dir,
         string path,
         ReadOnlyMemory<byte> bytes,
         Durability durability = Durability.FileAndDirectory,
+        CancellationToken cancellationToken = default) =>
+        WriteAllBytesAtomicCoreAsync(dir, path, bytes, durability, preservePermissions: true, cancellationToken);
+
+    /// <summary>
+    /// Publishes a file beneath this handle without holding the calling thread, with the
+    /// settings given.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">A relative path to the file to publish.</param>
+    /// <param name="bytes">The contents to store.</param>
+    /// <param name="options">How far the write is pushed, and what it carries from a file it replaces.</param>
+    /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
+    /// <remarks>
+    /// The same operation as
+    /// <see cref="WriteAllBytesAtomicAsync(IDir, string, ReadOnlyMemory{byte}, Durability, CancellationToken)"/>,
+    /// which is this with <see cref="AtomicWriteOptions.Default"/> and the durability it was
+    /// given.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="CapIOException">
+    /// The write, the permissions or the move failed, or on Windows a link to a directory
+    /// holds the name.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static Task WriteAllBytesAtomicAsync(
+        this IDir dir,
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        AtomicWriteOptions options,
         CancellationToken cancellationToken = default)
     {
-        using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
+        ArgumentNullException.ThrowIfNull(options);
 
-        string? scratch = Claim(location.Directory, asynchronous: true, out ICapFile file);
-        try
-        {
-            using (file)
-            {
-                await file.WriteAsync(bytes, 0, cancellationToken).ConfigureAwait(false);
-                Commit(file, durability);
-            }
-
-            Publish(location.Directory, scratch, location.Name, durability);
-            scratch = null;
-        }
-        finally
-        {
-            Abandon(location.Directory, scratch);
-        }
+        return WriteAllBytesAtomicCoreAsync(
+            dir, path, bytes, options.Durability, options.PreservePermissions, cancellationToken);
     }
 
     /// <summary>
@@ -258,16 +356,20 @@ public static partial class DirExtensions
     /// <param name="durability">How far the write is pushed before it is treated as done.</param>
     /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
     /// <remarks>
-    /// <para>Encoded as <see cref="WriteAllTextAtomic"/> describes.</para>
+    /// <para>Encoded as <see cref="WriteAllTextAtomic(IDir, string, string, Durability)"/> describes.</para>
     /// <para>
-    /// Safe to call from any thread, on the terms <see cref="WriteAllBytesAtomicAsync"/>
+    /// Safe to call from any thread, on the terms <see cref="WriteAllBytesAtomicAsync(IDir, string, ReadOnlyMemory{byte}, Durability, CancellationToken)"/>
     /// gives.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic"/>
+    /// <strong>Symbolic links.</strong> Treated exactly as <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/>
     /// treats them: followed ahead of the last component as the policy allows, and replaced,
     /// never followed, as the last — except that on Windows a link to a directory there makes
     /// the publish fail instead.
+    /// </para>
+    /// <para>
+    /// <strong>Permissions, ownership and hard links.</strong> As
+    /// <see cref="WriteAllBytesAtomic(IDir, string, ReadOnlySpan{byte}, Durability)"/> treats them.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
@@ -291,7 +393,186 @@ public static partial class DirExtensions
     {
         ArgumentNullException.ThrowIfNull(contents);
 
-        return WriteAllBytesAtomicAsync(dir, path, Encoding.UTF8.GetBytes(contents), durability, cancellationToken);
+        return WriteAllBytesAtomicCoreAsync(
+            dir, path, Encoding.UTF8.GetBytes(contents), durability, preservePermissions: true, cancellationToken);
+    }
+
+    /// <summary>
+    /// Publishes a text file beneath this handle without holding the calling thread, with the
+    /// settings given.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">A relative path to the file to publish.</param>
+    /// <param name="contents">The text to store.</param>
+    /// <param name="options">How far the write is pushed, and what it carries from a file it replaces.</param>
+    /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
+    /// <remarks>
+    /// The same operation as
+    /// <see cref="WriteAllTextAtomicAsync(IDir, string, string, Durability, CancellationToken)"/>,
+    /// which is this with <see cref="AtomicWriteOptions.Default"/> and the durability it was
+    /// given.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name for a file.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the write.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="CapIOException">
+    /// The write, the permissions or the move failed, or on Windows a link to a directory
+    /// holds the name.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static Task WriteAllTextAtomicAsync(
+        this IDir dir,
+        string path,
+        string contents,
+        AtomicWriteOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+        ArgumentNullException.ThrowIfNull(options);
+
+        return WriteAllBytesAtomicCoreAsync(
+            dir, path, Encoding.UTF8.GetBytes(contents), options.Durability, options.PreservePermissions,
+            cancellationToken);
+    }
+
+    /// <summary>The synchronous publish, whichever form it was asked for through.</summary>
+    private static void WriteAllBytesAtomicCore(
+        IDir dir, string path, ReadOnlySpan<byte> bytes, Durability durability, bool preservePermissions)
+    {
+        using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
+
+        CapPermissions? carried = preservePermissions ? Replaced(location.Directory, location.Name) : null;
+        string? scratch = Claim(location.Directory, asynchronous: false, OwnerOnlyFor(carried), out ICapFile file);
+        try
+        {
+            using (file)
+            {
+                file.Write(bytes, 0);
+                Carry(file, carried, location.Name);
+                Commit(file, durability);
+            }
+
+            Publish(location.Directory, scratch, location.Name, durability);
+            scratch = null;
+        }
+        finally
+        {
+            Abandon(location.Directory, scratch);
+        }
+    }
+
+    /// <summary>The asynchronous publish, whichever form it was asked for through.</summary>
+    private static async Task WriteAllBytesAtomicCoreAsync(
+        IDir dir,
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        Durability durability,
+        bool preservePermissions,
+        CancellationToken cancellationToken)
+    {
+        using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: false);
+
+        CapPermissions? carried = preservePermissions ? Replaced(location.Directory, location.Name) : null;
+        string? scratch = Claim(location.Directory, asynchronous: true, OwnerOnlyFor(carried), out ICapFile file);
+        try
+        {
+            using (file)
+            {
+                await file.WriteAsync(bytes, 0, cancellationToken).ConfigureAwait(false);
+                Carry(file, carried, location.Name);
+                Commit(file, durability);
+            }
+
+            Publish(location.Directory, scratch, location.Name, durability);
+            scratch = null;
+        }
+        finally
+        {
+            Abandon(location.Directory, scratch);
+        }
+    }
+
+    /// <summary>
+    /// The permissions of the file a publish is about to replace, if a file holds the name.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The name is described without following it, so a symbolic link holding it answers as
+    /// the link, which is not a file: the link is what the move replaces, and the mode of
+    /// whatever it points at is none of this write's business.
+    /// </para>
+    /// <para>
+    /// The answer can be out of date by the time the move is made. That is harmless: the
+    /// worst it can do is give the new file the mode of whatever held the name for a moment,
+    /// and that is a mode this process could have set on its own file anyway. Nothing holding
+    /// the name, or the name being impossible to describe, means nothing to carry.
+    /// </para>
+    /// <para>
+    /// <strong>The Windows read-only flag is left behind.</strong> A read-only file on Windows
+    /// refuses to be replaced by a rename, so a publish over one fails whatever the scratch
+    /// file carries — and a scratch file that carried the flag would then refuse to be
+    /// removed as well, leaving it behind as litter. The flag can only ever reach a published
+    /// file by losing that race, so it is not carried.
+    /// </para>
+    /// </remarks>
+    private static CapPermissions? Replaced(IDir directory, string name)
+    {
+        if (!directory.TryGetMetadata(name, out CapMetadata existing) || existing.Type != CapFileType.File)
+        {
+            return null;
+        }
+
+        CapPermissions permissions = existing.Permissions;
+        if (permissions.TryGetWindowsAttributes(out FileAttributes attributes))
+        {
+            return CapPermissions.FromWindowsAttributes(attributes & ~FileAttributes.ReadOnly);
+        }
+
+        return permissions.TryGetUnixMode(out _) ? permissions : null;
+    }
+
+    /// <summary>
+    /// Whether the scratch file is created so that only its owner can read it: when the file it
+    /// replaces carries a Unix mode, which is given to it afterwards.
+    /// </summary>
+    /// <remarks>
+    /// Without a mode to give it afterwards the scratch file must be created as any new file
+    /// is, because what a new file gets is what the published one is meant to have.
+    /// </remarks>
+    private static bool OwnerOnlyFor(CapPermissions? carried) =>
+        carried is { } permissions && permissions.TryGetUnixMode(out _);
+
+    /// <summary>
+    /// Gives the scratch file the permissions of the file it will replace, once its contents
+    /// are written.
+    /// </summary>
+    /// <remarks>
+    /// After the contents, so that a mode forbidding writes cannot get in their way, and
+    /// before the commit, so that the mode is committed with them.
+    /// </remarks>
+    private static void Carry(ICapFile file, CapPermissions? carried, string name)
+    {
+        if (carried is not { } permissions)
+        {
+            return;
+        }
+
+        if (file is not CapFile concrete)
+        {
+            file.SetPermissions(permissions);
+            return;
+        }
+
+        CapError error = concrete.SetPermissionsCore(permissions);
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToException(error, name, ExpectedTarget.Name);
+        }
     }
 
     /// <summary>
@@ -318,10 +599,21 @@ public static partial class DirExtensions
     /// refusing every creation for some other reason — no permission, no space, a read-only
     /// mount — is reported as that reason rather than as an improbable run of collisions.
     /// </para>
+    /// <para>
+    /// Asked for <paramref name="ownerOnly"/>, a <see cref="Dir"/> creates the file so that no
+    /// other account can read it, in the creating open itself, as a scratch file of the
+    /// library's own is made. Any other handle has no way to ask for that and creates it as it
+    /// creates any file.
+    /// </para>
     /// </remarks>
-    private static string Claim(IDir directory, bool asynchronous, out ICapFile file)
+    private static string Claim(IDir directory, bool asynchronous, bool ownerOnly, out ICapFile file)
     {
         FileOptions options = asynchronous ? FileOptions.Asynchronous : FileOptions.None;
+
+        if (ownerOnly && directory is Dir concrete)
+        {
+            return ClaimOwned(concrete, options, out file);
+        }
 
         for (int attempt = 1; attempt < TemporaryNames.Attempts; attempt++)
         {
@@ -339,6 +631,38 @@ public static partial class DirExtensions
         file = directory.OpenFile(last, FileMode.CreateNew, FileAccess.Write, FileShare.Read, options);
         return last;
     }
+
+    /// <summary>
+    /// Claims a scratch name as <see cref="Claim"/> does, creating the file so that only its
+    /// owner can read it.
+    /// </summary>
+    private static string ClaimOwned(Dir directory, FileOptions options, out ICapFile file)
+    {
+        CapError error = CapError.FromCategory(CapErrorCategory.AlreadyExists);
+
+        for (int attempt = 0; attempt < TemporaryNames.Attempts; attempt++)
+        {
+            string candidate = TemporaryNames.Next();
+            error = directory.CreateOwnedFile(candidate, options, out CapFile? created);
+            if (error.IsSuccess)
+            {
+                file = created!;
+                return candidate;
+            }
+
+            // Only a name already taken is worth another draw; any other refusal would be
+            // repeated under every name.
+            if (error.Category != CapErrorCategory.AlreadyExists)
+            {
+                break;
+            }
+        }
+
+        throw FailureTranslation.ToException(error, ScratchDescription, ExpectedTarget.Parent);
+    }
+
+    /// <summary>How a scratch file is described in a failure message.</summary>
+    private const string ScratchDescription = "a scratch file";
 
     /// <summary>Commits the contents, if the caller asked for the contents to be committed.</summary>
     private static void Commit(ICapFile file, Durability durability)

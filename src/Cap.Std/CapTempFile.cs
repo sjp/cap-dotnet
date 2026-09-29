@@ -293,7 +293,7 @@ public sealed class CapTempFile : IDisposable
             // scratch file is written and then read back, and reopening it by name to read it
             // would put a lookup where the handle already is. Owner-only, as mkstemp makes
             // it, because the name was drawn here rather than chosen by the caller.
-            error = parent.CreateOwnedFile(name, out CapFile? file);
+            error = parent.CreateOwnedFile(name, FileOptions.None, out CapFile? file);
 
             if (error.IsSuccess)
             {

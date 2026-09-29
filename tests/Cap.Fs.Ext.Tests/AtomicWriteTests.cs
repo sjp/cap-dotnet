@@ -85,6 +85,131 @@ public sealed class AtomicWriteTests : IDisposable
     }
 
     /// <summary>
+    /// Publishing over a file kept private leaves it private: the new file is given the mode
+    /// of the one it replaces.
+    /// </summary>
+    /// <remarks>
+    /// The case the setting exists for. A new file gets the mode a new file gets, which for
+    /// the usual umask is readable by everyone, so without it a secrets file would be opened
+    /// to every account the first time it was republished.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Publishing_over_a_private_file_keeps_its_mode(bool asynchronous)
+    {
+        SkipWithoutModeBits();
+        string published = Path.Combine(_tree.HostPath, "secret");
+        HostFile.WriteAllText(published, "old");
+        HostFile.SetUnixFileMode(published, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        await Publish(_tree.Directory, "secret", "new", asynchronous);
+
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, HostFile.GetUnixFileMode(published));
+        Assert.Equal(["secret"], Names());
+    }
+
+    /// <summary>
+    /// Publishing over a file whose mode forbids writing succeeds, and the new file forbids
+    /// writing too.
+    /// </summary>
+    /// <remarks>
+    /// The mode is given to the new file after its contents are written, so a mode with no
+    /// write bit cannot stop the write; and a Unix rename needs the directory to be writable,
+    /// not the file it replaces.
+    /// </remarks>
+    [Fact]
+    public void Publishing_over_a_read_only_file_keeps_its_mode()
+    {
+        SkipWithoutModeBits();
+        const UnixFileMode ReadOnly = UnixFileMode.UserRead | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+        string published = Path.Combine(_tree.HostPath, "frozen");
+        HostFile.WriteAllText(published, "old");
+        HostFile.SetUnixFileMode(published, ReadOnly);
+
+        _tree.Directory.WriteAllTextAtomic("frozen", "new");
+
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal(ReadOnly, HostFile.GetUnixFileMode(published));
+    }
+
+    /// <summary>
+    /// Asked not to keep the replaced file's permissions, the published file has the mode any
+    /// newly created file gets.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Publishing_over_a_file_without_preserving_gives_a_new_files_mode(bool asynchronous)
+    {
+        SkipWithoutModeBits();
+        string published = Path.Combine(_tree.HostPath, "secret");
+        HostFile.WriteAllText(published, "old");
+        HostFile.SetUnixFileMode(published, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        _tree.Directory.WriteAllText("fresh", "");
+        AtomicWriteOptions options = new() { PreservePermissions = false };
+
+        if (asynchronous)
+        {
+            await _tree.Directory.WriteAllTextAtomicAsync(
+                "secret", "new", options, TestContext.Current.CancellationToken);
+        }
+        else
+        {
+            _tree.Directory.WriteAllTextAtomic("secret", "new", options);
+        }
+
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal(HostFile.GetUnixFileMode(Path.Combine(_tree.HostPath, "fresh")), HostFile.GetUnixFileMode(published));
+    }
+
+    /// <summary>
+    /// Publishing over a name that is one of several hard links to a file replaces that name
+    /// only: the other names keep the old file and its old contents.
+    /// </summary>
+    /// <remarks>
+    /// Pins the documented behaviour. The published file is a new object, so it cannot be
+    /// the one the other names lead to.
+    /// </remarks>
+    [Fact]
+    public void Publishing_over_a_hard_linked_file_leaves_the_other_name_with_the_old_contents()
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "h1"), "old");
+        HostFile.CreateHardLink(Path.Combine(_tree.HostPath, "h1"), Path.Combine(_tree.HostPath, "h2"));
+
+        _tree.Directory.WriteAllTextAtomic("h1", "new");
+
+        Assert.Equal("new", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "h1")));
+        Assert.Equal("old", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "h2")));
+    }
+
+    /// <summary>
+    /// A link at the name is replaced as a link, so the mode of the file it points at is not
+    /// given to the published file, and that file is left as it was.
+    /// </summary>
+    [Fact]
+    public void Publishing_over_a_link_does_not_copy_the_targets_mode()
+    {
+        SkipWithoutModeBits();
+        const UnixFileMode Private = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        string kept = Path.Combine(_tree.HostPath, "keep");
+        HostFile.WriteAllText(kept, "untouched");
+        HostFile.SetUnixFileMode(kept, Private);
+        HostFile.CreateSymbolicLink(Path.Combine(_tree.HostPath, "report"), "keep");
+        _tree.Directory.WriteAllText("fresh", "");
+
+        _tree.Directory.WriteAllTextAtomic("report", "new");
+
+        string published = Path.Combine(_tree.HostPath, "report");
+        Assert.Null(HostEntry.LinkTarget(published));
+        Assert.Equal("new", HostFile.ReadAllText(published));
+        Assert.Equal(HostFile.GetUnixFileMode(Path.Combine(_tree.HostPath, "fresh")), HostFile.GetUnixFileMode(published));
+        Assert.Equal("untouched", HostFile.ReadAllText(kept));
+        Assert.Equal(Private, HostFile.GetUnixFileMode(kept));
+    }
+
+    /// <summary>
     /// The name resolves to the old contents right up until it resolves to the new ones.
     /// </summary>
     /// <remarks>
@@ -333,6 +458,15 @@ public sealed class AtomicWriteTests : IDisposable
     }
 
     /// <summary>Publishes text through either form of the operation.</summary>
+    /// <summary>Skips a test about Unix mode bits where files do not have them.</summary>
+    private static void SkipWithoutModeBits()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Files here carry attribute flags, not Unix mode bits.");
+        }
+    }
+
     private static Task Publish(Dir directory, string path, string contents, bool asynchronous)
     {
         if (asynchronous)

@@ -112,7 +112,7 @@ public static partial class DirExtensions
                 $"remove the directory first if it is meant to go.");
         }
 
-        string? scratch = Claim(directory, asynchronous: false, out ICapFile target);
+        string? scratch = Claim(directory, asynchronous: false, ownerOnly: false, out ICapFile target);
         try
         {
             long copied;

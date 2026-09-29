@@ -81,6 +81,33 @@ operation promises never to do. The failure is a `CapIOException` whose `Kind` i
 from a permissions problem. `Dir.Rename` with `replaceExisting` reports the same case the
 same way.
 
+### Permissions, ownership and hard links
+
+The published file is a new object, not the old one rewritten. By default it is given the
+permissions of the file it replaces: the mode bits on Linux and macOS, the attribute flags on
+Windows. A file created `0600` stays `0600` when it is republished. On a `Dir` on Linux and
+macOS, the new contents are written into a scratch file only its owner can read and given
+the replaced file's mode afterwards, so a private file's next contents are never readable by
+anyone else, even under the scratch name. Nothing is carried when the name holds nothing,
+holds something other than a file, or holds a symbolic link (the link is what gets replaced,
+so the mode of whatever it points at is ignored).
+
+Some things are not carried:
+
+- **Ownership.** The new file belongs to the account that wrote it. Only a privileged process
+  may give a file away.
+- **Other hard links.** They still name the old file, which keeps the old contents.
+- **ACLs, extended attributes and times.**
+- **The Windows read-only flag.** Windows refuses to rename a file over a read-only one, so a
+  publish over a read-only file fails and leaves it as it was, whatever this setting says.
+  Clear the flag first to replace the file. Unix has no such rule: a `0444` file is replaced,
+  and the new file is `0444` too.
+
+To give the new file the mode a newly created file gets instead, pass
+`new AtomicWriteOptions { PreservePermissions = false }`. `AtomicWriteOptions` also carries
+the `Durability`, and the overloads that take a `Durability` are the same as passing it with
+permissions preserved.
+
 ### Durability
 
 `Durability` decides how far the write is pushed before the call returns. None of the three
