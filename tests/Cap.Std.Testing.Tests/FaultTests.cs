@@ -162,4 +162,92 @@ public sealed class FaultTests
         Assert.Throws<ArgumentOutOfRangeException>(() => fs.Capacity = -1);
         Assert.Throws<ArgumentOutOfRangeException>(() => fs.FailNextWrites(-1));
     }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_read_only_filesystem_refuses_every_change_through_a_handle(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("dir/a.txt", "old");
+        fs.AddFile("dir/b.txt", "b");
+        fs.AddDirectory("empty");
+        using Dir root = fs.OpenRoot();
+        using CapFile writer = root.OpenFile("dir/a.txt", FileMode.Open, FileAccess.ReadWrite);
+        InMemorySnapshot before = fs.Snapshot();
+
+        fs.ReadOnly = true;
+
+        Action[] changes =
+        [
+            () => root.WriteAllText("dir/a.txt", "new"),
+            () => root.WriteAllText("dir/created.txt", "new"),
+            () => root.AppendAllText("dir/a.txt", "more"),
+            () => root.CreateDir("dir/sub").Dispose(),
+            () => root.DeleteFile("dir/b.txt"),
+            () => root.DeleteDir("empty"),
+            () => root.Rename("dir/b.txt", root, "dir/c.txt"),
+            () => root.CreateSymlink("dir/link", "a.txt"),
+            () => root.CreateHardLink("dir/a.txt", root, "dir/second.txt"),
+            () => writer.Write("x"u8, 0),
+            () => writer.SetLength(0),
+            () => writer.SetTimes(lastWrite: CapFileTime.Now),
+            () => writer.SetPermissions(CapPermissions.FromUnixMode(UnixFileMode.UserRead)),
+        ];
+
+        foreach (Action change in changes)
+        {
+            IOException thrown = Assert.ThrowsAny<IOException>(change);
+            Assert.Equal(CapErrorKind.ReadOnlyFilesystem, CapIOException.KindOf(thrown));
+        }
+
+        Assert.True(before.Diff(fs.Snapshot()).IsEmpty);
+        Assert.Equal("old", root.ReadAllText("dir/a.txt"));
+        Assert.Equal(["a.txt", "b.txt"], fs.GetEntries("dir"));
+
+        fs.ReadOnly = false;
+        root.WriteAllText("dir/a.txt", "new");
+        Assert.Equal("new", fs.ReadAllText("dir/a.txt"));
+    }
+
+    [Fact]
+    public void A_read_only_filesystem_reports_a_missing_or_taken_name_first()
+    {
+        InMemoryFileSystem fs = new();
+        fs.AddFile("a.txt", "x");
+        fs.ReadOnly = true;
+        using Dir root = fs.OpenRoot();
+
+        Assert.Throws<FileNotFoundException>(() => root.DeleteFile("missing.txt"));
+        Assert.Equal(CapErrorKind.AlreadyExists, CapIOException.KindOf(Assert.ThrowsAny<IOException>(() => root.CreateDir("a.txt"))));
+
+        fs.WriteAllText("a.txt", "scaffolding is not refused");
+        fs.RemoveFile("a.txt");
+        Assert.True(fs.ReadOnly);
+    }
+
+    [Fact]
+    public void The_mutation_count_counts_changes_through_handles_and_nothing_else()
+    {
+        InMemoryFileSystem fs = new();
+        fs.AddFile("a.txt", "x");
+        fs.WriteAllText("b.txt", "y");
+        fs.RemoveFile("b.txt");
+        Assert.Equal(0, fs.MutationCount);
+
+        using Dir root = fs.OpenRoot();
+        _ = root.ReadAllText("a.txt");
+        _ = root.GetMetadata("a.txt");
+        _ = root.EnumerateEntries().ToList();
+        Assert.Equal(0, fs.MutationCount);
+
+        root.CreateDir("d").Dispose();
+        root.Rename("a.txt", root, "d/a.txt");
+        root.DeleteFile("d/a.txt");
+        Assert.Equal(3, fs.MutationCount);
+
+        Assert.ThrowsAny<IOException>(() => root.DeleteFile("d/a.txt"));
+        fs.ReadOnly = true;
+        Assert.ThrowsAny<IOException>(() => root.DeleteDir("d"));
+        Assert.Equal(3, fs.MutationCount);
+    }
 }

@@ -19,10 +19,13 @@ namespace Cap.Std.Testing;
 /// same reason, as it would be on disk.
 /// </para>
 /// <para>
-/// <strong>Building and inspecting.</strong> The <c>Add</c> and <c>Set</c> members build a
-/// tree before a test runs, and <see cref="Exists"/>, <see cref="ReadAllBytes"/> and their
-/// siblings inspect it afterwards without going through a handle, so an assertion does not
-/// depend on the code it is checking. Their paths are scaffolding rather than input to
+/// <strong>Building and inspecting.</strong> The <c>Add</c>, <c>Set</c>, <c>Write</c> and
+/// <c>Remove</c> members build a tree before a test runs, or change it between two steps of
+/// one, and <see cref="Exists"/>, <see cref="ReadAllBytes"/>, <see cref="GetMetadata"/>,
+/// <see cref="Snapshot"/> and their siblings inspect it afterwards without going through a
+/// handle, so an assertion does not depend on the code it is checking. None of them is
+/// refused by a fault or by <see cref="ReadOnly"/>, and none of them counts towards
+/// <see cref="MutationCount"/>. Their paths are scaffolding rather than input to
 /// anything under test: <c>/</c> separates components under either path syntax, a leading
 /// <c>/</c> is allowed and means the same as none, and they are relative to the top of this
 /// filesystem. They are looked up as written, so a symbolic link on the way is not followed,
@@ -60,8 +63,8 @@ namespace Cap.Std.Testing;
 /// </para>
 /// <para>
 /// <strong>Faults.</strong> <see cref="SetUnreadable"/>, <see cref="SetUndeletable"/>,
-/// <see cref="FailNextWrites"/> and <see cref="Capacity"/> produce, on demand, the failures a
-/// real filesystem produces only in awkward circumstances.
+/// <see cref="FailNextWrites"/>, <see cref="Capacity"/> and <see cref="ReadOnly"/> produce, on
+/// demand, the failures a real filesystem produces only in awkward circumstances.
 /// </para>
 /// <para>
 /// <strong>Authority.</strong> Opening a root needs no <see cref="AmbientAuthority"/> token.
@@ -98,6 +101,8 @@ public sealed class InMemoryFileSystem
     private CapErrorKind _failingWriteKind;
     private long _usedBytes;
     private long? _capacity;
+    private bool _readOnly;
+    private long _mutations;
 
     /// <summary>Creates an empty filesystem that follows the running platform's rules.</summary>
     public InMemoryFileSystem()
@@ -221,6 +226,66 @@ public sealed class InMemoryFileSystem
     /// </remarks>
     public int OpenHandleCount => Backend.OpenHandleCount;
 
+    /// <summary>
+    /// Whether every change through a handle is refused, as on a filesystem mounted read-only.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// While set, anything through a handle that would create, change or remove something
+    /// fails with a <see cref="CapIOException"/> whose <see cref="CapIOException.KindOf"/> is
+    /// <see cref="CapErrorKind.ReadOnlyFilesystem"/>: opening a file for writing or to empty it,
+    /// creating a file, directory or link, writing, appending, changing a length, permissions
+    /// or times, removing, and renaming. A file already open for writing is refused its writes
+    /// too, as on a filesystem the system has turned read-only after an error. Reading,
+    /// listing, describing and opening for reading still work.
+    /// </para>
+    /// <para>
+    /// A refusal that the names alone decide comes first: a name that is missing, or already
+    /// taken where a new one is to go, is reported as such. The building members of this type
+    /// are scaffolding and are not refused.
+    /// </para>
+    /// </remarks>
+    public bool ReadOnly
+    {
+        get
+        {
+            lock (Gate)
+            {
+                return _readOnly;
+            }
+        }
+
+        set
+        {
+            lock (Gate)
+            {
+                _readOnly = value;
+            }
+        }
+    }
+
+    /// <summary>
+    /// How many changes the handles on this filesystem have made since it was created.
+    /// </summary>
+    /// <remarks>
+    /// Counts each call through a handle that created, changed or removed something, whatever
+    /// it changed: an open that created or emptied a file, a write, an append, a change of
+    /// length, permissions or times, a new directory or link, a removal and a rename. A call
+    /// that was refused, or changed nothing, is not counted, and neither is anything the
+    /// building members of this type do. A test reads it before and after the code under test
+    /// to show that code changed nothing, or how many times it did.
+    /// </remarks>
+    public long MutationCount
+    {
+        get
+        {
+            lock (Gate)
+            {
+                return _mutations;
+            }
+        }
+    }
+
     /// <summary>The lock around the whole tree.</summary>
     internal object Gate { get; } = new();
 
@@ -241,6 +306,12 @@ public sealed class InMemoryFileSystem
 
     /// <summary>Whether this filesystem imitates Windows' permissions and removal rules.</summary>
     internal bool WindowsRules => PathSyntax == CapPathSyntax.Windows;
+
+    /// <summary>Whether changes through a handle are refused. Read under <see cref="Gate"/>.</summary>
+    internal bool IsReadOnly => _readOnly;
+
+    /// <summary>Records a change made through a handle. Called under <see cref="Gate"/>.</summary>
+    internal void Mutated() => _mutations++;
 
     /// <summary>Creates a directory, and any missing directories above it.</summary>
     /// <param name="path">Where, as a build path; see the remarks on this type.</param>
@@ -370,6 +441,135 @@ public sealed class InMemoryFileSystem
             Attach(parent, name, existing);
             existing.LinkCount++;
             existing.ChangeTime = Now();
+        }
+    }
+
+    /// <summary>
+    /// Makes the file at <paramref name="path"/> hold <paramref name="contents"/>, creating it
+    /// and any missing directories above it if it is not there.
+    /// </summary>
+    /// <param name="path">The file, as a build path.</param>
+    /// <param name="contents">The bytes the file holds afterwards.</param>
+    /// <remarks>
+    /// A file that exists keeps its identity and is rewritten in place, as a program writing
+    /// to it would rewrite it, so every other name it has sees the new contents; its write and
+    /// change times are stamped. A handle open on it sees the new contents too.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable build path.</exception>
+    /// <exception cref="IOException">Something other than a file holds the name, or something other than a directory is above it.</exception>
+    public void WriteAllBytes(string path, ReadOnlySpan<byte> contents)
+    {
+        lock (Gate)
+        {
+            (MemoryNode parent, string name) = Place(path);
+            if (!parent.Entries.TryGetValue(name, out MemoryNode? file))
+            {
+                file = NewNode(CapNodeType.File);
+                Attach(parent, name, file);
+            }
+            else if (file.Type != CapNodeType.File)
+            {
+                throw new IOException($"'{path}' already exists and is not a file.");
+            }
+            else
+            {
+                DateTimeOffset now = Now();
+                file.LastWriteTime = now;
+                file.ChangeTime = now;
+            }
+
+            long before = file.Length;
+            file.Contents = contents.ToArray();
+            Account(file, before);
+        }
+    }
+
+    /// <summary>
+    /// Makes the file at <paramref name="path"/> hold <paramref name="text"/> as UTF-8 without
+    /// a byte order mark, creating it and any missing directories above it if it is not there.
+    /// </summary>
+    /// <param name="path">The file, as a build path.</param>
+    /// <param name="text">The text the file holds afterwards.</param>
+    /// <remarks>As <see cref="WriteAllBytes"/>.</remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable build path.</exception>
+    /// <exception cref="IOException">Something other than a file holds the name, or something other than a directory is above it.</exception>
+    public void WriteAllText(string path, string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        WriteAllBytes(path, Encoding.UTF8.GetBytes(text));
+    }
+
+    /// <summary>Removes the name at <paramref name="path"/>, which is not a directory's.</summary>
+    /// <param name="path">A file or a link, as a build path. A link is removed, not followed.</param>
+    /// <remarks>
+    /// Scaffolding, so no fault, attribute or open handle refuses it. A file with other names
+    /// keeps them, and one held open stays usable through the handle, as when a program
+    /// removes the name.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable build path.</exception>
+    /// <exception cref="IOException">Nothing is at <paramref name="path"/>, or it is a directory.</exception>
+    public void RemoveFile(string path)
+    {
+        lock (Gate)
+        {
+            (MemoryNode parent, string name, MemoryNode node) = FindEntry(path);
+            if (node.Type == CapNodeType.Directory)
+            {
+                throw new IOException($"'{path}' is a directory.");
+            }
+
+            Detach(parent, name, node);
+        }
+    }
+
+    /// <summary>Removes the directory at <paramref name="path"/>.</summary>
+    /// <param name="path">The directory, as a build path.</param>
+    /// <param name="recursive">
+    /// True to remove everything in it as well; false to refuse a directory that is not empty.
+    /// </param>
+    /// <remarks>
+    /// Scaffolding, so no fault, attribute or open handle refuses it. A handle open on the
+    /// directory, or on anything removed with it, stays usable for what needs no name, as when
+    /// a program removes them.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is not a usable build path, or names the top of the tree.
+    /// </exception>
+    /// <exception cref="IOException">
+    /// Nothing is at <paramref name="path"/>, it is not a directory, or it is not empty and
+    /// <paramref name="recursive"/> is false.
+    /// </exception>
+    public void RemoveDirectory(string path, bool recursive = false)
+    {
+        lock (Gate)
+        {
+            (MemoryNode parent, string name, MemoryNode node) = FindEntry(path);
+            if (node.Type != CapNodeType.Directory)
+            {
+                throw new IOException($"'{path}' is not a directory.");
+            }
+
+            if (node.Entries.Count > 0 && !recursive)
+            {
+                throw new IOException($"'{path}' is not empty.");
+            }
+
+            Empty(node);
+            Detach(parent, name, node);
+        }
+
+        void Empty(MemoryNode directory)
+        {
+            foreach ((string childName, MemoryNode child) in directory.Entries.ToArray())
+            {
+                if (child.Type == CapNodeType.Directory)
+                {
+                    Empty(child);
+                }
+
+                Detach(directory, childName, child);
+            }
         }
     }
 
@@ -603,6 +803,63 @@ public sealed class InMemoryFileSystem
         }
     }
 
+    /// <summary>The description of the object at <paramref name="path"/>, as a handle would report it.</summary>
+    /// <param name="path">
+    /// A build path. Empty or <c>/</c> is the top of the tree. A link at the end is described
+    /// itself, not followed.
+    /// </param>
+    /// <returns>
+    /// What <see cref="Dir.GetMetadata(string, bool)"/> reports for it, a directory's link count
+    /// included.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable build path.</exception>
+    /// <exception cref="IOException">Nothing is at <paramref name="path"/>.</exception>
+    public CapMetadata GetMetadata(string path)
+    {
+        lock (Gate)
+        {
+            return new CapMetadata(Backend.Describe(Find(path)));
+        }
+    }
+
+    /// <summary>A copy of everything in the tree as it is now.</summary>
+    /// <returns>
+    /// Every name beneath the top of the tree, the top itself excepted, with what it names:
+    /// its description, and a file's contents or a link's target. Compare two with
+    /// <see cref="InMemorySnapshot.Diff"/>.
+    /// </returns>
+    /// <remarks>
+    /// Taken at one instant: nothing changes the tree while the copy is made. The copy is the
+    /// caller's and does not change with the tree afterwards.
+    /// </remarks>
+    public InMemorySnapshot Snapshot()
+    {
+        List<KeyValuePair<string, InMemoryEntry>> entries = [];
+        lock (Gate)
+        {
+            Collect(Root, prefix: null);
+        }
+
+        return new InMemorySnapshot(entries, Names);
+
+        void Collect(MemoryNode directory, string? prefix)
+        {
+            foreach ((string name, MemoryNode node) in directory.Entries)
+            {
+                string path = prefix is null ? name : prefix + "/" + name;
+                entries.Add(new(path, new InMemoryEntry(
+                    Backend.Describe(node),
+                    node.Type == CapNodeType.File ? node.Contents : [],
+                    node.Type == CapNodeType.SymbolicLink ? node.LinkTarget : null)));
+
+                if (node.Type == CapNodeType.Directory)
+                {
+                    Collect(node, path);
+                }
+            }
+        }
+    }
+
     /// <summary>
     /// Opens the top of the tree as a directory handle that follows links within it.
     /// </summary>
@@ -761,6 +1018,16 @@ public sealed class InMemoryFileSystem
         }
     }
 
+    /// <summary>Removes a name, and records that the object it named has one fewer.</summary>
+    internal void Detach(MemoryNode directory, string name, MemoryNode node)
+    {
+        _ = directory.Entries.Remove(name);
+        DateTimeOffset now = Now();
+        directory.LastWriteTime = now;
+        directory.ChangeTime = now;
+        Unlinked(node);
+    }
+
     /// <summary>
     /// Records that a name for <paramref name="node"/> has gone, and detaches it once it has
     /// none left.
@@ -830,6 +1097,32 @@ public sealed class InMemoryFileSystem
         }
 
         return (current, components[^1]);
+    }
+
+    /// <summary>
+    /// Finds the entry a build path names: the directory holding it, its name as stored there,
+    /// and what it names.
+    /// </summary>
+    private (MemoryNode Parent, string Name, MemoryNode Node) FindEntry(string path)
+    {
+        string[] components = Split(path);
+        if (components.Length == 0)
+        {
+            throw new ArgumentException("A build path must name something beneath the top of the tree.", nameof(path));
+        }
+
+        MemoryNode parent = Root;
+        MemoryNode? node = Root;
+        foreach (string component in components)
+        {
+            parent = node;
+            if (parent.Type != CapNodeType.Directory || !parent.Entries.TryGetValue(component, out node))
+            {
+                throw new IOException($"Nothing is at '{path}' in the in-memory filesystem.");
+            }
+        }
+
+        return (parent, components[^1], node);
     }
 
     /// <summary>Finds what is at a build path, or throws.</summary>

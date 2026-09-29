@@ -108,9 +108,44 @@ directory that holds it.
 ### Building and inspecting a tree
 
 `AddFile`, `AddDirectory`, `AddSymbolicLink` and `AddHardLink` build the tree before the test
-runs. `SetTimes`, `SetUnixMode` and `SetAttributes` adjust it. `Exists`, `ReadAllBytes`,
-`ReadAllText`, `GetEntries` and `GetSymbolicLinkTarget` inspect it afterwards without going
-through a handle, so an assertion does not depend on the code it checks.
+runs. `SetTimes`, `SetUnixMode` and `SetAttributes` adjust it. `WriteAllBytes` and
+`WriteAllText` create a file or rewrite one in place, so its other names and any handle open on
+it see the new contents. `RemoveFile` and `RemoveDirectory(path, recursive)` take names away,
+for a second arrange step in the middle of a test. `Exists`, `ReadAllBytes`, `ReadAllText`,
+`GetEntries`, `GetSymbolicLinkTarget` and `GetMetadata` inspect the tree afterwards without
+going through a handle, so an assertion does not depend on the code it checks. `GetMetadata`
+returns what `Dir.GetMetadata` would, a directory's link count included.
+
+None of these is refused by a fault or by `ReadOnly`, and none counts towards `MutationCount`.
+An empty path, or `/`, names the top of the tree wherever a member accepts a directory or an
+object to describe or adjust.
+
+`Snapshot()` copies the whole tree at one instant: every name beneath the top, keyed by build
+path, with its description and a file's contents or a link's target. `Diff` compares two
+snapshots and lists the paths added, removed and changed, which is the assertion "this changed
+and nothing else did". An entry counts as changed when anything but its last-access time
+differs. A rename shows as the old path removed and the new one added. Adding or removing a
+name stamps the directory holding it, so under a clock that moves the directory is listed as
+changed too:
+
+```csharp
+var fs = new InMemoryFileSystem();
+fs.AddFile("reports/2026-09-01.json", """{ "total": 3 }""");
+fs.AddFile("config.json", "{}");
+using Dir reports = fs.OpenRoot("reports");
+
+InMemorySnapshot before = fs.Snapshot();
+new ReportStore(reports).Save(new DateOnly(2026, 9, 1), """{ "total": 4 }""");
+InMemorySnapshotDiff diff = before.Diff(fs.Snapshot());
+
+Assert.Empty(diff.Added);                                   // no scratch file left behind
+Assert.Empty(diff.Removed);
+Assert.Equal(["reports/2026-09-01.json"], diff.Changed);    // config.json untouched
+```
+
+`MutationCount` counts every call through a handle that created, changed or removed something.
+A call that was refused or changed nothing is not counted. Reading it before and after the code
+under test shows that the code wrote nothing, or how many times it did.
 
 These paths are scaffolding, not input to the code under test. `/` separates components under
 either path syntax. Missing directories are created on the way. A symbolic link on the way is
@@ -151,6 +186,7 @@ garbage collector has reclaimed it, as a real one is closed by its finalizer.
 | `SetUndeletable(path)` | Removing or replacing the name fails with `UnauthorizedAccessException`, and clearing the read-only attribute does not help. |
 | `FailNextWrites(count, kind)` | The next `count` writes, appends or length changes through any handle fail with the exception the framework throws for `kind`, so `CapIOException.KindOf` reports `kind`. `CapErrorKind.Other` is what a full disk reports. |
 | `Capacity` | Once the files with a name hold this many bytes between them, a write that would grow them fails as a full disk does. `UsedBytes` reports the current total. |
+| `ReadOnly` | Every change through a handle fails as on a filesystem mounted read-only, with `CapIOException.KindOf` reporting `CapErrorKind.ReadOnlyFilesystem`. That covers opening a file for writing or to empty it, creating, writing, changing a length, permissions or times, removing and renaming, and writes through a file already open. A name that is missing, or already taken where a new one is to go, is reported as such first. Reading, listing and describing still work. |
 
 A test that injects a fault checks what the component leaves behind afterwards.
 `ReportStore.Save` writes a new report to a scratch name and renames it over the old one, so a

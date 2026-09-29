@@ -63,6 +63,25 @@ public sealed class ReportStoreInMemoryTests
     }
 
     [Fact]
+    public void A_save_changes_its_own_report_and_nothing_else()
+    {
+        // <snapshot>
+        var fs = new InMemoryFileSystem();
+        fs.AddFile("reports/2026-09-01.json", """{ "total": 3 }""");
+        fs.AddFile("config.json", "{}");
+        using Dir reports = fs.OpenRoot("reports");
+
+        InMemorySnapshot before = fs.Snapshot();
+        new ReportStore(reports).Save(new DateOnly(2026, 9, 1), """{ "total": 4 }""");
+        InMemorySnapshotDiff diff = before.Diff(fs.Snapshot());
+
+        Assert.Empty(diff.Added);                                   // no scratch file left behind
+        Assert.Empty(diff.Removed);
+        Assert.Equal(["reports/2026-09-01.json"], diff.Changed);    // config.json untouched
+        // </snapshot>
+    }
+
+    [Fact]
     public void An_unreadable_report_directory_is_reported_to_the_caller()
     {
         var fs = new InMemoryFileSystem();

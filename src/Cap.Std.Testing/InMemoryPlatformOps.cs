@@ -305,6 +305,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return Fail<SafeFileHandle>(CapErrorCategory.NotFound);
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return Fail<SafeFileHandle>(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             MemoryNode created = _fs.NewNode(CapNodeType.File);
             created.LinkCount = 0;
             created.Detached = true;
@@ -317,6 +322,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 created.UnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             }
 
+            _fs.Mutated();
             return CapResult<SafeFileHandle>.Ok(IssueFile(created, access, FileShare.None));
         }
     }
@@ -578,6 +584,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             if (node!.Unreadable)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
@@ -603,6 +614,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             }
 
             node.ChangeTime = _fs.Now();
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -731,6 +743,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             if (_fs.TakeWriteFault(out CapErrorKind kind))
             {
                 return CapError.FromCategory(CategoryOf(kind));
@@ -745,6 +762,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             node.Append(buffer);
             _fs.Account(node, before);
             Written(node);
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -769,6 +787,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         lock (_fs.Gate)
         {
             MemoryNode node = Demand(handle, FileAccess.Write, out OpenFile file);
+            ThrowIfReadOnly();
             ThrowIfWriteFails();
 
             bool append = file.AppendOnly || file.Description.Appending;
@@ -787,6 +806,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
             _fs.Account(node, before);
             Written(node);
+            _fs.Mutated();
         }
     }
 
@@ -844,6 +864,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         lock (_fs.Gate)
         {
             MemoryNode node = Demand(handle, FileAccess.Write, out _);
+            ThrowIfReadOnly();
             ThrowIfWriteFails();
 
             long before = node.Length;
@@ -851,6 +872,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             node.SetLength(length);
             _fs.Account(node, before);
             Written(node);
+            _fs.Mutated();
         }
     }
 
@@ -891,6 +913,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             MemoryNode created = _fs.NewNode(CapNodeType.Directory);
             if (!_fs.WindowsRules && visibility == CreationVisibility.OwnerOnly)
             {
@@ -898,6 +925,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             }
 
             _fs.Attach(directory, name.ToString(), created);
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -922,6 +950,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return CapError.FromCategory(CapErrorCategory.NotSupported);
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             if (node!.Unreadable)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
@@ -929,6 +962,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
             InMemoryFileSystem.ApplyAttributes(node, (node.WindowsAttributes ?? 0) & ~FileAttributes.ReadOnly);
             node.ChangeTime = _fs.Now();
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -942,6 +976,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (error.IsFailure)
             {
                 return error;
+            }
+
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
             }
 
             if (node!.Type == CapNodeType.Directory)
@@ -960,7 +999,8 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
-            Detach(directory!, name.ToString(), node);
+            _fs.Detach(directory!, name.ToString(), node);
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -974,6 +1014,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (error.IsFailure)
             {
                 return error;
+            }
+
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
             }
 
             if (node!.Type != CapNodeType.Directory)
@@ -997,7 +1042,8 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
-            Detach(directory!, name.ToString(), node);
+            _fs.Detach(directory!, name.ToString(), node);
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -1035,6 +1081,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (destination!.Detached)
             {
                 return CapError.FromCategory(CapErrorCategory.NotFound);
+            }
+
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
             }
 
             if (destination.VolumeId != node!.VolumeId)
@@ -1075,6 +1126,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                         _ = source!.Entries.Remove(from);
                         _fs.Attach(destination, to, node);
                         node.ChangeTime = _fs.Now();
+                        _fs.Mutated();
                     }
 
                     return CapError.Success;
@@ -1091,7 +1143,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                     return error;
                 }
 
-                Detach(destination, to, existing);
+                _fs.Detach(destination, to, existing);
             }
 
             _ = source!.Entries.Remove(from);
@@ -1100,6 +1152,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             source.ChangeTime = now;
             _fs.Attach(destination, to, node);
             node.ChangeTime = now;
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -1133,6 +1186,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             if (tooLong)
             {
                 return CapError.FromCategory(CapErrorCategory.NameTooLong);
@@ -1147,6 +1205,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             }
 
             _fs.Attach(directory, name.ToString(), link);
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -1184,6 +1243,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
+            if (_fs.IsReadOnly)
+            {
+                return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+            }
+
             if (node!.Type == CapNodeType.Directory)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
@@ -1202,6 +1266,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             _fs.Attach(destination, toName.ToString(), node);
             node.LinkCount++;
             node.ChangeTime = _fs.Now();
+            _fs.Mutated();
             return CapError.Success;
         }
     }
@@ -1380,6 +1445,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return Fail<SafeFileHandle>(CapErrorCategory.NotFound);
         }
 
+        if (_fs.IsReadOnly)
+        {
+            return Fail<SafeFileHandle>(CapErrorCategory.ReadOnlyFilesystem);
+        }
+
         MemoryNode created = _fs.NewNode(CapNodeType.File);
         if (!_fs.HasRoomFor(created, request.PreallocationSize) && request.PreallocationSize > 0)
         {
@@ -1392,6 +1462,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         }
 
         _fs.Attach(directory, name, created);
+        _fs.Mutated();
         return CapResult<SafeFileHandle>.Ok(IssueFile(created, request.Access, request.Share));
     }
 
@@ -1427,12 +1498,18 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return Fail<SafeFileHandle>(CapErrorCategory.SymbolicLink);
         }
 
+        // As Linux checks: the filesystem refuses a write before the object's permissions do.
+        bool writes = (request.Access & FileAccess.Write) != 0 || request.Truncates;
+        if (writes && _fs.IsReadOnly)
+        {
+            return Fail<SafeFileHandle>(CapErrorCategory.ReadOnlyFilesystem);
+        }
+
         if (node.Unreadable)
         {
             return Fail<SafeFileHandle>(CapErrorCategory.PermissionDenied);
         }
 
-        bool writes = (request.Access & FileAccess.Write) != 0 || request.Truncates;
         if (writes && _fs.WindowsRules && node.RefusesRemoval)
         {
             return Fail<SafeFileHandle>(CapErrorCategory.PermissionDenied);
@@ -1451,6 +1528,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             node.SetLength(0);
             _fs.Account(node, before);
             Written(node);
+            _fs.Mutated();
         }
 
         if (request.Truncates && request.PreallocationSize > 0 && !_fs.HasRoomFor(node, request.PreallocationSize))
@@ -1537,16 +1615,6 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         ((access & FileAccess.Read) != 0 ? FileShare.Read : FileShare.None) |
         ((access & FileAccess.Write) != 0 ? FileShare.Write : FileShare.None);
 
-    /// <summary>Removes a name, and records that the object it named has one fewer.</summary>
-    private void Detach(MemoryNode directory, string name, MemoryNode node)
-    {
-        _ = directory.Entries.Remove(name);
-        DateTimeOffset now = _fs.Now();
-        directory.LastWriteTime = now;
-        directory.ChangeTime = now;
-        _fs.Unlinked(node);
-    }
-
     /// <summary>Whether something stops a name being removed or replaced.</summary>
     /// <remarks>
     /// Whether the object can be read plays no part: removing a name changes the directory
@@ -1620,7 +1688,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// A Unix directory counts its own entry, its <c>.</c>, and the <c>..</c> of each
     /// directory in it. Windows counts only names.
     /// </remarks>
-    private CapNodeStat Describe(MemoryNode node)
+    internal CapNodeStat Describe(MemoryNode node)
     {
         if (node.Type != CapNodeType.Directory)
         {
@@ -1651,6 +1719,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// </remarks>
     private CapError ApplyTimes(MemoryNode node, CapFileTime lastAccess, CapFileTime lastWrite)
     {
+        if (_fs.IsReadOnly)
+        {
+            return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
+        }
+
         if (_fs.WindowsRules && (BeforeWindowsEpoch(lastAccess) || BeforeWindowsEpoch(lastWrite)))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
@@ -1660,6 +1733,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         node.LastAccessTime = Resolve(lastAccess, node.LastAccessTime);
         node.LastWriteTime = Resolve(lastWrite, node.LastWriteTime);
         node.ChangeTime = now;
+        _fs.Mutated();
 
         return CapError.Success;
 
@@ -1676,6 +1750,15 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         DateTimeOffset now = _fs.Now();
         node.LastWriteTime = now;
         node.ChangeTime = now;
+    }
+
+    /// <summary>Throws as a read-only filesystem refuses a write, while the filesystem is one.</summary>
+    private void ThrowIfReadOnly()
+    {
+        if (_fs.IsReadOnly)
+        {
+            throw new CapIOException(CapErrorKind.ReadOnlyFilesystem, "The in-memory filesystem is read-only.");
+        }
     }
 
     /// <summary>Throws the fault a test asked the next write to fail with, if one is due.</summary>
