@@ -245,6 +245,18 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
                 ban.Message.Length == 0 ? "banned in this project" : ban.Message);
         }
 
+        /// <summary>
+        /// Finds the entry that covers a symbol: the symbol itself, a member it overrides, a
+        /// type it is declared in, a class any of those types derives from, or a namespace.
+        /// </summary>
+        /// <remarks>
+        /// A banned type covers the types derived from it, so that <c>T:System.Random</c>
+        /// reaches <c>new R()</c> for a <c>class R : Random</c>, and
+        /// <c>T:...RandomNumberGenerator</c> reaches <c>new RNGCryptoServiceProvider()</c>.
+        /// Interfaces are not followed: taking an <c>IFileSystem</c> is the way to be handed
+        /// the filesystem, and an implementation of it is not a use of whatever else implements
+        /// it. Nor is <see cref="object"/>, which nothing can usefully ban.
+        /// </remarks>
         private bool TryFindBan(ISymbol symbol, out (DiagnosticDescriptor, string) ban)
         {
             if (bans.TryGetValue(symbol, out ban))
@@ -252,11 +264,22 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
                 return true;
             }
 
-            for (INamedTypeSymbol? type = symbol.ContainingType; type is not null; type = type.ContainingType)
+            for (ISymbol? overridden = Overridden(symbol); overridden is not null; overridden = Overridden(overridden))
             {
-                if (bans.TryGetValue(type.OriginalDefinition, out ban))
+                if (bans.TryGetValue(overridden.OriginalDefinition, out ban))
                 {
                     return true;
+                }
+            }
+
+            for (INamedTypeSymbol? type = symbol.ContainingType; type is not null; type = type.ContainingType)
+            {
+                for (INamedTypeSymbol? self = type; self is not null && self.SpecialType != SpecialType.System_Object; self = self.BaseType)
+                {
+                    if (bans.TryGetValue(self.OriginalDefinition, out ban))
+                    {
+                        return true;
+                    }
                 }
             }
 
@@ -270,6 +293,14 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
 
             return false;
         }
+
+        private static ISymbol? Overridden(ISymbol symbol) => symbol switch
+        {
+            IMethodSymbol method => method.OverriddenMethod,
+            IPropertySymbol property => property.OverriddenProperty,
+            IEventSymbol @event => @event.OverriddenEvent,
+            _ => null,
+        };
 
         private static bool IsInsideNameOf(IOperation operation)
         {

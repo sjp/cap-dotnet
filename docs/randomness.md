@@ -123,9 +123,10 @@ it takes a build rule like the one below.
 Every assembly under `src/` is built with ambient entropy banned, by rule `CAP0007` of the
 analyzer that ships in the `Cap.Std` package (see [analyzers.md](analyzers.md)): the
 `RandomNumberGenerator` type, `Guid.NewGuid`, `Guid.CreateVersion7`,
-`Path.GetRandomFileName` and `System.Random`. A consuming project gets the same rule by
-turning `CAP0007` on, or by marking its assembly `[assembly: CapabilityStrict]`. Two places
-in this library are exempt.
+`Path.GetRandomFileName` and `System.Random`, together with every class derived from
+either type (the obsolete `RNGCryptoServiceProvider` among them). A consuming project gets
+the same rule by turning `CAP0007` on, or by marking its assembly
+`[assembly: CapabilityStrict]`. Two places in this library are exempt.
 
 - **`CapRandom`** is where entropy enters, behind the token.
 - **The scratch-name generator in `Cap.Std`**, which picks names for `CapTempDir` and

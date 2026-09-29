@@ -31,6 +31,13 @@ The exact lists behind `CAP0001`, `CAP0002`, `CAP0006` and `CAP0007` are in
 [`src/Cap.Analyzers/Lists`](../src/Cap.Analyzers/Lists), and each diagnostic's message says
 what to use instead.
 
+A type in a list covers every class derived from it, including their constructors and
+overrides. So `CAP0007` reports `new RNGCryptoServiceProvider()` (derived from
+`RandomNumberGenerator`) and a class of the project's own that derives from `Random`. A
+listed method, property or event also covers the members that override it. Interfaces are
+not followed: an entry for an interface covers calls made through the interface, not the
+classes that implement it.
+
 ### `IFileSystem`
 
 System.IO.Abstractions' `FileSystem` and Testably's `RealFileSystem` pass every call straight
@@ -173,6 +180,11 @@ nothing the project references is ignored, so one list can serve several project
 symbol named in a project's list is reported as `CAP0008` even if a built-in rule also covers
 it, so a project can ban `File` on its own without turning on the rest of `CAP0001`.
 
+An entry here reaches derived classes and overrides in the same way as the built-in lists.
+Derived classes are where the two analyzers read the same list differently: BannedApiAnalyzers
+follows overrides but matches only the type named, while `T:System.IO.Stream` here also
+reports `new MemoryStream()`.
+
 The file name differs from BannedApiAnalyzers' on purpose. A project that uses both
 analyzers would otherwise have every entry reported twice, under two IDs.
 
@@ -206,8 +218,9 @@ here are written in it, and a list written for one analyzer can be read by the o
 
 ## Cost
 
-The analyzer registers for member accesses, calls and object creations, and does one
-dictionary lookup for each. It resolves its lists once per compilation. On a generated project
+The analyzer registers for member accesses, calls and object creations. For each one it does a
+few dictionary lookups: the member, what it overrides, and the types it is declared in and
+derives from. It resolves its lists once per compilation. On a generated project
 of 306,000 lines (1,500 files and 37,500 methods, each calling into `Cap.Std`), `ReportAnalyzer`
 put it at 0.58 s of 4.5 s total analyzer time, spread across the compiler's threads. The
 SDK's own analyzers took the rest. Wall-clock build times with and without it were within

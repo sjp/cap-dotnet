@@ -107,6 +107,7 @@ public sealed class AmbientApiTests
     [InlineData("new Random()", "CAP0007")]
     [InlineData("Random.Shared.Next()", "CAP0007")]
     [InlineData("RandomNumberGenerator.GetInt32(10)", "CAP0007")]
+    [InlineData("new RNGCryptoServiceProvider()", "CAP0007")]
     [InlineData("Path.GetRandomFileName()", "CAP0007")]
     public async Task Each_listed_route_is_reported(string expression, string rule)
     {
@@ -172,6 +173,37 @@ public sealed class AmbientApiTests
     }
 
     [Fact]
+    public async Task A_type_ban_covers_the_types_derived_from_it()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            """
+            using System;
+            using System.Security.Cryptography;
+
+            #pragma warning disable SYSLIB0023
+
+            public sealed class Dice : Random
+            {
+                public override int Next() => 4;
+            }
+
+            public static class Uses
+            {
+                public static Dice Make() => new Dice();
+                public static int Roll(Dice dice) => dice.Next();
+                public static void Fill(RNGCryptoServiceProvider rng, byte[] buffer) => rng.GetBytes(buffer);
+            }
+            """,
+            severities: AllAmbientRulesOn);
+
+        Assert.Collection(
+            diagnostics,
+            d => Assert.Equal(("CAP0007", "new Dice()"), (d.Id, d.Flagged())),
+            d => Assert.Equal(("CAP0007", "dice.Next()"), (d.Id, d.Flagged())),
+            d => Assert.Equal(("CAP0007", "rng.GetBytes(buffer)"), (d.Id, d.Flagged())));
+    }
+
+    [Fact]
     public async Task Every_entry_in_the_built_in_lists_names_something_that_exists()
     {
         var compilation = Microsoft.CodeAnalysis.CSharp.CSharpCompilation.Create(
@@ -204,6 +236,8 @@ public sealed class AmbientApiTests
         using System.Threading;
         using System.Threading.Tasks;
         using Microsoft.Win32.SafeHandles;
+
+        #pragma warning disable SYSLIB0023
 
         public static class Uses
         {
