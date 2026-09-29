@@ -157,6 +157,125 @@ public sealed class UdpGrantTests
             sender.SendTo("ping"u8, new IPEndPoint(IPAddress.Loopback, 9)));
     }
 
+    /// <summary>The spellings of the unspecified address, each with the family that sends to it.</summary>
+    public static TheoryData<string, AddressFamily> Unspecified => new()
+    {
+        { "0.0.0.0", AddressFamily.InterNetwork },
+        { "::", AddressFamily.InterNetworkV6 },
+        { "::ffff:0.0.0.0", AddressFamily.InterNetwork },
+    };
+
+    /// <summary>
+    /// A destination of the unspecified address is refused even by a pool that grants it,
+    /// and nothing reaches the loopback service the system would have delivered to.
+    /// </summary>
+    /// <remarks>
+    /// A grant of the unspecified address is how a listener is permitted to publish on every
+    /// interface. As a destination the system does not refuse it but delivers to loopback, so
+    /// honouring the grant there would reach every local service on the port while the pool
+    /// answered that loopback was not granted.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(Unspecified))]
+    public async Task A_wildcard_destination_is_refused_even_when_granted(
+        string wildcard, AddressFamily receiverFamily)
+    {
+        using Socket receiver = LoopbackReceiver(receiverFamily);
+        int port = ((IPEndPoint)receiver.LocalEndPoint!).Port;
+        var destination = new IPEndPoint(IPAddress.Parse(wildcard), port);
+
+        Pool wildcardOnly = new PoolBuilder()
+            .InsertSocketAddress(destination, AmbientAuthority.Acquire())
+            .Build();
+        Assert.True(wildcardOnly.Allows(destination));
+
+        using CapUdpSocket sender = CapUdpSocket.Open(wildcardOnly, destination.AddressFamily);
+
+        Assert.Throws<EndpointNotGrantedException>(() => sender.SendTo("ping"u8, destination));
+        await Assert.ThrowsAsync<EndpointNotGrantedException>(async () =>
+            await sender.SendToAsync(
+                "ping"u8.ToArray(), destination, TestContext.Current.CancellationToken));
+        Assert.Throws<EndpointNotGrantedException>(() => sender.Connect(destination));
+
+        AssertNothingArrives(receiver);
+    }
+
+    /// <summary>
+    /// A wildcard grant still lets a socket claim every interface, which is what it is for.
+    /// </summary>
+    [Fact]
+    public void A_wildcard_grant_still_lets_a_socket_receive_on_every_interface()
+    {
+        Pool wildcard = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("0.0.0.0/32"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapUdpSocket socket = CapUdpSocket.Bind(wildcard, new IPEndPoint(IPAddress.Any, 0));
+
+        Assert.Equal(IPAddress.Any, socket.LocalEndPoint!.Address);
+    }
+
+    /// <summary>
+    /// A connect whose check of the peer the system reported refuses leaves nothing a send
+    /// without a destination can reach.
+    /// </summary>
+    /// <remarks>
+    /// The system has already pointed the socket at the peer by the time that check runs, so
+    /// a caller that caught the refusal and sent anyway would otherwise reach it. The check
+    /// before the connect leaves the system nothing to rewrite into a refused peer, so the
+    /// reported peer is substituted here to make the second check refuse.
+    /// </remarks>
+    [Fact]
+    public async Task A_refused_connect_leaves_nothing_to_send_to()
+    {
+        using Socket receiver = LoopbackReceiver(AddressFamily.InterNetwork);
+        var peer = (IPEndPoint)receiver.LocalEndPoint!;
+
+        Pool onlyPeer = new PoolBuilder()
+            .InsertSocketAddress(peer, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapUdpSocket sender = CapUdpSocket.Open(onlyPeer, AddressFamily.InterNetwork);
+        var elsewhere = new IPEndPoint(IPAddress.Loopback, 9);
+        sender.PeerReader = _ => elsewhere;
+
+        EndpointNotGrantedException refusal = Assert.Throws<EndpointNotGrantedException>(() =>
+            sender.Connect(peer));
+        Assert.Contains(elsewhere.ToString(), refusal.Message, StringComparison.Ordinal);
+
+        Assert.Throws<EndpointNotGrantedException>(() => sender.Send("ping"u8));
+        await Assert.ThrowsAsync<EndpointNotGrantedException>(async () =>
+            await sender.SendAsync("ping"u8.ToArray(), TestContext.Current.CancellationToken));
+
+        AssertNothingArrives(receiver);
+    }
+
+    /// <summary>A later connect that passes both checks lifts the refusal.</summary>
+    [Fact]
+    public async Task A_later_successful_connect_clears_the_refusal()
+    {
+        using Socket receiver = LoopbackReceiver(AddressFamily.InterNetwork);
+        var peer = (IPEndPoint)receiver.LocalEndPoint!;
+
+        Pool onlyPeer = new PoolBuilder()
+            .InsertSocketAddress(peer, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapUdpSocket sender = CapUdpSocket.Open(onlyPeer, AddressFamily.InterNetwork);
+        Func<Socket, IPEndPoint> honest = sender.PeerReader;
+        sender.PeerReader = _ => new IPEndPoint(IPAddress.Loopback, 9);
+        Assert.Throws<EndpointNotGrantedException>(() => sender.Connect(peer));
+
+        sender.PeerReader = honest;
+        sender.Connect(peer);
+        await sender.SendAsync("ping"u8.ToArray(), TestContext.Current.CancellationToken);
+
+        byte[] buffer = new byte[16];
+        int received = await receiver.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("ping"u8.ToArray(), buffer[..received]);
+    }
+
     /// <summary>What arrives is not checked against the pool.</summary>
     /// <remarks>
     /// Nothing acknowledged the datagram, so the address it claims to come from is a field
@@ -184,5 +303,29 @@ public sealed class UdpGrantTests
 
         Assert.Equal("ping"u8.ToArray(), buffer[..result.ReceivedBytes]);
         Assert.Equal(outsider.LocalEndPoint, result.RemoteEndPoint);
+    }
+
+    /// <summary>A plain socket bound to the loopback address of <paramref name="family"/>.</summary>
+    /// <remarks>
+    /// Deliberately not a <see cref="CapUdpSocket"/>: it stands for a local service the pool
+    /// under test knows nothing about.
+    /// </remarks>
+    private static Socket LoopbackReceiver(AddressFamily family)
+    {
+        var receiver = new Socket(family, SocketType.Dgram, ProtocolType.Udp);
+        receiver.Bind(new IPEndPoint(
+            family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Loopback : IPAddress.Loopback, 0));
+
+        return receiver;
+    }
+
+    /// <summary>Asserts that no datagram reaches <paramref name="receiver"/> within half a second.</summary>
+    private static void AssertNothingArrives(Socket receiver)
+    {
+        receiver.ReceiveTimeout = 500;
+        byte[] buffer = new byte[16];
+
+        SocketException timedOut = Assert.Throws<SocketException>(() => receiver.Receive(buffer));
+        Assert.Equal(SocketError.TimedOut, timedOut.SocketErrorCode);
     }
 }

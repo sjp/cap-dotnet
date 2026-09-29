@@ -144,6 +144,16 @@ until it has. The bind is made, the port the system settled on is checked agains
 and a result the pool does not grant is closed again — between the bind and the `listen`, so
 the socket has a name by then but nothing can have connected to it.
 
+The unspecified address (`0.0.0.0`, `::`, `::ffff:0.0.0.0`) is refused as a destination —
+by `CapTcpStream.Connect`, `CapUdpSocket.Connect` and every `SendTo` — whatever the pool
+grants. As a local endpoint it means every interface, and granting it is how a listener is
+permitted to bind all of them; as a destination it names no host, and the system delivers to
+loopback instead, so honouring the grant there would reach every local service on the port.
+
+A `CapUdpSocket.Connect` whose check of the peer the system reported refuses may leave the
+socket pointed at that peer, so `Send` and `SendAsync` refuse until a later `Connect`
+succeeds.
+
 ## Listening: the pool governs the name, not the callers
 
 Binding publishes an address and a port that anything able to route to them can connect to,

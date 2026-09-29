@@ -141,6 +141,18 @@ internal static class EndpointNormalization
     }
 
     /// <summary>
+    /// Whether the normalized <paramref name="address"/> is the unspecified address of either
+    /// family, which names no host.
+    /// </summary>
+    /// <remarks>
+    /// The mapped spelling of the older family's unspecified address has already been folded
+    /// into it by <see cref="Normalize(IPAddress)"/>, so the two plain forms are all there is
+    /// to test for.
+    /// </remarks>
+    public static bool IsUnspecified(IPAddress address) =>
+        SameAddress(address, IPAddress.Any) || SameAddress(address, IPAddress.IPv6Any);
+
+    /// <summary>
     /// Whether <paramref name="address"/> is one an interface configures for itself rather
     /// than one anybody routes to.
     /// </summary>

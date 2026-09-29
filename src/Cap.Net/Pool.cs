@@ -152,6 +152,32 @@ public sealed class Pool
             throw EndpointNotGrantedException.For(endpoint, operation);
         }
     }
+
+    /// <summary>
+    /// Refuses <paramref name="endpoint"/> as somewhere to send or connect to unless this pool
+    /// grants it and it names a host.
+    /// </summary>
+    /// <param name="endpoint">The peer the operation would reach.</param>
+    /// <param name="operation">
+    /// What the operation would do with it, as a verb phrase for the refusal to quote.
+    /// </param>
+    /// <remarks>
+    /// The unspecified address is refused whatever the grants say. As a local endpoint it
+    /// means every interface, and a grant of it is how a listener is permitted to publish on
+    /// all of them; as a destination it names no host, and the system does not refuse it but
+    /// delivers to loopback instead. A grant written for the first meaning would otherwise
+    /// hand over every local service on that port, while <see cref="Allows(IPAddress, int)"/>
+    /// answered that loopback was not granted.
+    /// </remarks>
+    internal void DemandPeer(IPEndPoint endpoint, string operation)
+    {
+        if (EndpointNormalization.IsUnspecified(EndpointNormalization.Normalize(endpoint.Address)))
+        {
+            throw EndpointNotGrantedException.For(endpoint, operation);
+        }
+
+        Demand(endpoint, operation);
+    }
 }
 
 /// <summary>A range of addresses and the ports granted on them.</summary>

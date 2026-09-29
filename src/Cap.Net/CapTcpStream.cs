@@ -53,7 +53,8 @@ public sealed class CapTcpStream : CapSocketStream
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
-    /// <paramref name="pool"/> grants no authority over <paramref name="endpoint"/>.
+    /// <paramref name="pool"/> grants no authority over <paramref name="endpoint"/>, or it is
+    /// the unspecified address, which names no host.
     /// </exception>
     /// <exception cref="SocketException">The connection could not be made.</exception>
     public static CapTcpStream Connect(Pool pool, IPEndPoint endpoint)
@@ -103,7 +104,7 @@ public sealed class CapTcpStream : CapSocketStream
         ArgumentNullException.ThrowIfNull(pool);
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        pool.Demand(endpoint, "connect to");
+        pool.DemandPeer(endpoint, "connect to");
         return new Socket(endpoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
     }
 

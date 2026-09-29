@@ -60,6 +60,43 @@ public sealed class TcpGrantTests
             CapTcpStream.Connect(pool, new IPEndPoint(IPAddress.Loopback, 10)));
     }
 
+    /// <summary>
+    /// A destination of the unspecified address is refused before a socket is made, and the
+    /// refusal names what was asked for rather than the loopback address it would have reached.
+    /// </summary>
+    [Theory]
+    [InlineData("0.0.0.0")]
+    [InlineData("::")]
+    [InlineData("::ffff:0.0.0.0")]
+    public void A_wildcard_destination_is_refused_before_a_socket_is_made(string wildcard)
+    {
+        var destination = new IPEndPoint(IPAddress.Parse(wildcard), 10);
+        Pool pool = new PoolBuilder()
+            .InsertSocketAddress(destination, AmbientAuthority.Acquire())
+            .InsertIpNet(IPNetwork.Parse("127.0.0.0/8"), PortRange.Every, AmbientAuthority.Acquire())
+            .InsertIpNet(IPNetwork.Parse("::1/128"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        EndpointNotGrantedException refusal = Assert.Throws<EndpointNotGrantedException>(() =>
+            CapTcpStream.Connect(pool, destination));
+
+        Assert.Contains(destination.ToString(), refusal.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("127.0.0.1", refusal.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A wildcard grant still lets a listener publish on every interface.</summary>
+    [Fact]
+    public void A_wildcard_grant_still_lets_a_listener_bind_every_interface()
+    {
+        Pool wildcard = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("0.0.0.0/32"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapTcpListener listener = CapTcpListener.Bind(wildcard, new IPEndPoint(IPAddress.Any, 0));
+
+        Assert.Equal(IPAddress.Any, listener.LocalEndPoint.Address);
+    }
+
     /// <summary>The refusal is about authority and is not a network failure.</summary>
     /// <remarks>
     /// Worth asserting separately, because an application that wants to alert on grants being

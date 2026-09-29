@@ -31,6 +31,16 @@ public sealed class CapUdpSocket : IDisposable
 {
     private readonly Socket _socket;
 
+    /// <summary>
+    /// The peer a <see cref="Connect"/> left this socket pointed at although the pool refused
+    /// it, or null when the socket is pointed nowhere or at a peer the pool granted.
+    /// </summary>
+    /// <remarks>
+    /// The system cannot be relied on to unpoint a datagram socket, so rather than undo the
+    /// connection the sends that would use it refuse while this is set.
+    /// </remarks>
+    private volatile IPEndPoint? _refusedPeer;
+
     private CapUdpSocket(Socket socket, Pool pool)
     {
         _socket = socket;
@@ -56,6 +66,13 @@ public sealed class CapUdpSocket : IDisposable
     /// </para>
     /// </remarks>
     public IPEndPoint? LocalEndPoint => _socket.LocalEndPoint as IPEndPoint;
+
+    /// <summary>Reads back the peer the system pointed the socket at.</summary>
+    /// <remarks>
+    /// Only replaced by tests, to make the check after <see cref="Connect"/> refuse: the
+    /// check before it leaves nothing the system could rewrite into a peer the pool refuses.
+    /// </remarks>
+    internal Func<Socket, IPEndPoint> PeerReader { get; set; } = SocketEndpoints.Remote;
 
     /// <summary>
     /// Opens a socket that claims no endpoint of its own.
@@ -133,6 +150,11 @@ public sealed class CapUdpSocket : IDisposable
     /// differs from the peer. The system also discards what arrives from anywhere else.
     /// </para>
     /// <para>
+    /// The peer the system reports afterwards is checked as well. Should that check refuse,
+    /// the socket may be left pointed at the refused peer, and <see cref="Send"/> and
+    /// <see cref="SendAsync"/> then refuse too until a later call succeeds.
+    /// </para>
+    /// <para>
     /// Safe to call from any thread. A send racing it on another thread may reach the peer
     /// this socket was pointed at before or the one it is pointed at after, but either way
     /// one the pool granted, since nothing is pointed at an endpoint before it is checked.
@@ -140,17 +162,26 @@ public sealed class CapUdpSocket : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="endpoint"/> is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
-    /// The pool grants no authority over <paramref name="endpoint"/>.
+    /// The pool grants no authority over <paramref name="endpoint"/>, or it is the
+    /// unspecified address, which names no host.
     /// </exception>
     public void Connect(IPEndPoint endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        Pool.Demand(endpoint, "send to");
+        Pool.DemandPeer(endpoint, "send to");
 #pragma warning disable CAP0002 // Checked against the pool on the line above.
         _socket.Connect(endpoint);
 #pragma warning restore CAP0002
-        Pool.Demand(SocketEndpoints.Remote(_socket), "send to");
+
+        IPEndPoint reached = PeerReader(_socket);
+        if (!Pool.Allows(reached))
+        {
+            _refusedPeer = reached;
+            throw EndpointNotGrantedException.For(reached, "send to");
+        }
+
+        _refusedPeer = null;
     }
 
     /// <summary>Sends one datagram to <paramref name="destination"/>, if the pool grants it.</summary>
@@ -161,13 +192,14 @@ public sealed class CapUdpSocket : IDisposable
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="destination"/> is null.</exception>
     /// <exception cref="EndpointNotGrantedException">
-    /// The pool grants no authority over <paramref name="destination"/>.
+    /// The pool grants no authority over <paramref name="destination"/>, or it is the
+    /// unspecified address, which names no host.
     /// </exception>
     public int SendTo(ReadOnlySpan<byte> buffer, IPEndPoint destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
 
-        Pool.Demand(destination, "send to");
+        Pool.DemandPeer(destination, "send to");
 #pragma warning disable CAP0002 // Checked against the pool on the line above.
         return _socket.SendTo(buffer, SocketFlags.None, destination);
 #pragma warning restore CAP0002
@@ -184,7 +216,7 @@ public sealed class CapUdpSocket : IDisposable
     {
         ArgumentNullException.ThrowIfNull(destination);
 
-        Pool.Demand(destination, "send to");
+        Pool.DemandPeer(destination, "send to");
 #pragma warning disable CAP0002 // Checked against the pool on the line above.
         return _socket.SendToAsync(buffer, SocketFlags.None, destination, cancellationToken);
 #pragma warning restore CAP0002
@@ -197,18 +229,32 @@ public sealed class CapUdpSocket : IDisposable
     /// The destination was checked by <see cref="Connect"/> and cannot have changed since:
     /// a send that names no destination goes to the socket's peer, and
     /// <see cref="Connect"/>, which checks the pool before it points the socket anywhere,
-    /// is the only way to change that peer.
+    /// is the only way to change that peer. A <see cref="Connect"/> whose check of the peer
+    /// the system reported refused leaves this refusing, so a caller that catches that
+    /// refusal still cannot reach the peer.
     /// </para>
     /// <para>Safe to call from several threads at once; each datagram is sent whole.</para>
     /// </remarks>
-    public int Send(ReadOnlySpan<byte> buffer) => _socket.Send(buffer, SocketFlags.None);
+    /// <exception cref="EndpointNotGrantedException">
+    /// The last <see cref="Connect"/> left the socket pointed at a peer the pool refused.
+    /// </exception>
+    public int Send(ReadOnlySpan<byte> buffer)
+    {
+        RefuseIfPointedAtRefusedPeer();
+
+        return _socket.Send(buffer, SocketFlags.None);
+    }
 
     /// <inheritdoc cref="Send"/>
     /// <param name="buffer">What to send.</param>
     /// <param name="cancellationToken">Abandons the send.</param>
     public ValueTask<int> SendAsync(
-        ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
-        _socket.SendAsync(buffer, SocketFlags.None, cancellationToken);
+        ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        RefuseIfPointedAtRefusedPeer();
+
+        return _socket.SendAsync(buffer, SocketFlags.None, cancellationToken);
+    }
 
     /// <summary>Waits for a datagram, and reports who it claims to be from.</summary>
     /// <remarks>
@@ -264,6 +310,18 @@ public sealed class CapUdpSocket : IDisposable
     /// and fails rather than completing.
     /// </remarks>
     public void Dispose() => _socket.Dispose();
+
+    /// <summary>
+    /// Refuses a send that names no destination while the socket is pointed at a peer the
+    /// pool refused.
+    /// </summary>
+    private void RefuseIfPointedAtRefusedPeer()
+    {
+        if (_refusedPeer is { } refused)
+        {
+            throw EndpointNotGrantedException.For(refused, "send to");
+        }
+    }
 
     /// <summary>
     /// The placeholder a receive is handed for the system to write the sender into.
