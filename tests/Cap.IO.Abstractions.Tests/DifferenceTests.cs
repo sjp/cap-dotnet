@@ -67,6 +67,18 @@ public abstract class DifferenceTests : IDisposable
     }
 
     [Fact]
+    public void Moving_a_directory_into_a_missing_directory_names_the_destination()
+    {
+        Fs.Directory.CreateDirectory("d");
+
+        DirectoryNotFoundException e = Assert.Throws<DirectoryNotFoundException>(
+            () => Fs.Directory.Move("d", Fs.Path.Combine("missing", "e")));
+
+        Assert.Contains(Fs.Path.Combine(Root, "missing", "e"), e.Message, StringComparison.Ordinal);
+        Assert.True(Fs.Directory.Exists("d"));
+    }
+
+    [Fact]
     public void Scratch_space_is_a_directory_beneath_the_root()
     {
         string temp = Fs.Path.GetTempPath();

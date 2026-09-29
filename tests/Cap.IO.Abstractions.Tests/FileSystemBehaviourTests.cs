@@ -216,6 +216,112 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void Copying_into_a_missing_directory_names_the_destination()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "one");
+
+        DirectoryNotFoundException e = Assert.Throws<DirectoryNotFoundException>(
+            () => Fs.File.Copy(P("a.txt"), P("missing", "b.txt")));
+
+        Assert.Contains(P("missing", "b.txt"), e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Copying_a_missing_file_names_the_source()
+    {
+        FileNotFoundException e = Assert.Throws<FileNotFoundException>(
+            () => Fs.File.Copy(P("a.txt"), P("missing", "b.txt")));
+
+        Assert.Contains(P("a.txt"), e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Copying_onto_a_directory_names_the_destination()
+    {
+        MockDiffers("copying a file onto a directory with overwrite: true does not throw.");
+        Fs.File.WriteAllText(P("a.txt"), "one");
+        Fs.Directory.CreateDirectory(P("d"));
+
+        UnauthorizedAccessException denied = Assert.Throws<UnauthorizedAccessException>(
+            () => Fs.File.Copy(P("a.txt"), P("d"), overwrite: true));
+        IOException taken = Assert.ThrowsAny<IOException>(() => Fs.File.Copy(P("a.txt"), P("d")));
+
+        Assert.Contains(P("d"), denied.Message, StringComparison.Ordinal);
+        Assert.Contains(P("d"), taken.Message, StringComparison.Ordinal);
+        Assert.Contains("directory", taken.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Copying_onto_an_existing_file_names_the_destination()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "one");
+        Fs.File.WriteAllText(P("b.txt"), "two");
+
+        IOException e = Assert.ThrowsAny<IOException>(() => Fs.File.Copy(P("a.txt"), P("b.txt")));
+
+        Assert.Contains(P("b.txt"), e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Moving_into_a_missing_directory_names_the_destination()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "one");
+
+        DirectoryNotFoundException e = Assert.Throws<DirectoryNotFoundException>(
+            () => Fs.File.Move(P("a.txt"), P("missing", "b.txt")));
+
+        Assert.Contains(P("missing", "b.txt"), e.Message, StringComparison.Ordinal);
+        Assert.True(Fs.File.Exists(P("a.txt")));
+    }
+
+    [Fact]
+    public void Moving_onto_an_existing_file_names_the_destination()
+    {
+        MockDiffers("the message for moving onto an existing file names no path.");
+        Fs.File.WriteAllText(P("a.txt"), "one");
+        Fs.File.WriteAllText(P("b.txt"), "two");
+
+        IOException e = Assert.ThrowsAny<IOException>(() => Fs.File.Move(P("a.txt"), P("b.txt")));
+
+        Assert.Contains(P("b.txt"), e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Moving_a_missing_directory_names_the_source()
+    {
+        DirectoryNotFoundException e = Assert.Throws<DirectoryNotFoundException>(
+            () => Fs.Directory.Move(P("d"), P("missing", "e")));
+
+        Assert.Contains(P("d"), e.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(P("missing", "e"), e.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Moving_a_directory_onto_a_taken_name_names_the_destination()
+    {
+        Fs.Directory.CreateDirectory(P("d"));
+        Fs.Directory.CreateDirectory(P("e", "f"));
+
+        IOException e = Assert.ThrowsAny<IOException>(() => Fs.Directory.Move(P("d"), P("e")));
+
+        Assert.Contains(P("e"), e.Message, StringComparison.Ordinal);
+        Assert.True(Fs.Directory.Exists(P("d")));
+    }
+
+    [Fact]
+    public void Replacing_with_a_backup_in_a_missing_directory_names_the_backup()
+    {
+        Fs.File.WriteAllText(P("new.txt"), "new");
+        Fs.File.WriteAllText(P("live.txt"), "old");
+
+        DirectoryNotFoundException e = Assert.Throws<DirectoryNotFoundException>(
+            () => Fs.File.Replace(P("new.txt"), P("live.txt"), P("missing", "backup.txt")));
+
+        Assert.Contains(P("missing", "backup.txt"), e.Message, StringComparison.Ordinal);
+        Assert.Equal("old", Fs.File.ReadAllText(P("live.txt")));
+    }
+
+    [Fact]
     public void Deleting_a_missing_file_is_not_an_error()
     {
         Fs.File.Delete(P("missing.txt"));

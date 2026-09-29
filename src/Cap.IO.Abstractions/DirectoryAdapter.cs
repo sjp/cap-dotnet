@@ -75,21 +75,23 @@ internal sealed class DirectoryAdapter(DirFileSystem fs) : IDirectory
     {
         Request source = fs.Resolve(sourceDirName, nameof(sourceDirName));
         Request destination = fs.Resolve(destDirName, nameof(destDirName));
+        if (source.IsRoot)
+        {
+            throw Failures.RootIsFixed(source.Virtual);
+        }
+
+        if (destination.IsRoot)
+        {
+            throw Failures.RootIsFixed(destination.Virtual);
+        }
+
+        // A destination whose directory is missing is named, as for File.Move. System.IO on
+        // Linux names the source there, which sends the reader to a directory that is fine.
         try
         {
-            if (source.IsRoot)
-            {
-                throw Failures.RootIsFixed(source.Virtual);
-            }
-
-            if (destination.IsRoot)
-            {
-                throw Failures.RootIsFixed(destination.Virtual);
-            }
-
             fs.Dir.Rename(source.Relative, fs.Dir, destination.Relative, replaceExisting: false);
         }
-        catch (Exception e) when (fs.Translate(e, source, Expected.Directory) is { } translated)
+        catch (Exception e) when (fs.TranslateRename(e, source, destination, Expected.Directory) is { } translated)
         {
             throw translated;
         }

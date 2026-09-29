@@ -236,6 +236,60 @@ public sealed class DirFileSystem : IFileSystem
         return translated;
     }
 
+    /// <summary>
+    /// The exception <c>System.IO</c> would throw in place of a failure at the destination of
+    /// a copy, move or replace, naming the destination; or null to let it propagate unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Adds to <see cref="Translate"/> the name that is already taken, which a one-path
+    /// operation leaves as the <see cref="Dir"/> reports it.
+    /// </remarks>
+    internal Exception? TranslateDestination(Exception exception, in Request destination, Expected expected)
+    {
+        if (exception is not SandboxEscapeException && CapIOException.KindOf(exception) == CapErrorKind.AlreadyExists)
+        {
+            return expected == Expected.Directory
+                ? Failures.DirectoryExists(destination.Virtual, exception)
+                : Failures.FileExists(destination.Virtual, exception);
+        }
+
+        return Translate(exception, destination, expected);
+    }
+
+    /// <summary>
+    /// The exception <c>System.IO</c> would throw in place of a failed rename, naming the
+    /// end of it that failed; or null to let it propagate unchanged.
+    /// </summary>
+    /// <remarks>
+    /// A rename reports one failure for two names. The source is to blame only when it is not
+    /// there; otherwise what went wrong is at the destination: the directory that would hold
+    /// it is missing, its name is taken, or it is a directory.
+    /// </remarks>
+    internal Exception? TranslateRename(Exception exception, in Request source, in Request destination, Expected expected)
+    {
+        if (exception is SandboxEscapeException)
+        {
+            return null;
+        }
+
+        return IsThere(source)
+            ? TranslateDestination(exception, destination, expected)
+            : Translate(exception, source, expected);
+    }
+
+    /// <summary>Whether a request names something, a link that leads nowhere included.</summary>
+    private bool IsThere(in Request request)
+    {
+        try
+        {
+            return TryDescribe(request, followLink: false, out _);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Whether the directory that would hold a request's last name is there.</summary>
     internal bool HasParentDirectory(in Request request)
     {

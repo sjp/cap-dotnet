@@ -139,6 +139,7 @@ Each of these is deliberate and is covered by the package's tests.
 | Recursive enumeration | does not descend into links | the same. A link that leads to a directory inside the tree is reported as a directory, and one that leads out as a file |
 | `File.Copy` | copies contents and, on Unix, permissions | copies contents only |
 | `DirectoryInfo.CreateSubdirectory("../x")` | refused unless the result is beneath the directory | allowed while it stays beneath the root, which still confines it |
+| `Directory.Move` into a directory that is missing | on Linux, names the source in the `DirectoryNotFoundException` | names the destination, as `File.Move` does. A failure of a copy, move or replace names the path at fault |
 | Removing or moving the root | not applicable | `IOException`. The root is the handle and has no name to remove |
 | Changing permissions or attributes: `SetAttributes`, `SetUnixFileMode`, the `Attributes`, `IsReadOnly` and `UnixFileMode` setters | supported | `NotSupportedException`: `Cap.Std` cannot change them beneath a handle. The `Attributes` and `IsReadOnly` setters accept the value already there |
 | Creating with a Unix mode: `Directory.CreateDirectory(path, mode)`, `FileStreamOptions.UnixCreateMode` | supported | `NotSupportedException`. Ignoring the mode would create something more permissive than asked for |
@@ -162,6 +163,9 @@ test is skipped for it. The skips are:
   `DirectoryNotFoundException`;
 - copying a file onto itself with `overwrite: true` throws `NullReferenceException`, not
   `IOException`;
+- copying a file onto a directory with `overwrite: true` does not throw. `System.IO`, and
+  `DirFileSystem`, throw `UnauthorizedAccessException`;
+- moving a file onto an existing file throws an `IOException` whose message names no path;
 - `Directory.SetCurrentDirectory` accepts a directory that does not exist;
 - a relative symbolic link target is taken against the current directory rather than the
   directory holding the link;

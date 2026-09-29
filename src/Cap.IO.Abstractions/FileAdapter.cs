@@ -104,6 +104,7 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
     {
         Request source = fs.Resolve(sourceFileName, nameof(sourceFileName));
         Request destination = fs.Resolve(destFileName, nameof(destFileName));
+        CapFile from;
         try
         {
             if (source.IsRoot)
@@ -111,12 +112,29 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
                 throw Failures.Denied(source.Virtual);
             }
 
+            from = fs.Dir.OpenFile(source.Relative, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+        catch (Exception e) when (fs.Translate(e, source, Expected.File) is { } translated)
+        {
+            throw translated;
+        }
+
+        // From here the source is open, so what fails is the destination, and a read that
+        // fails part way is reported against it too, as System.IO does.
+        using (from)
+        {
+            CopyInto(from, source, destination, overwrite);
+        }
+    }
+
+    private void CopyInto(CapFile from, in Request source, in Request destination, bool overwrite)
+    {
+        try
+        {
             if (destination.IsRoot)
             {
                 throw Failures.Denied(destination.Virtual);
             }
-
-            using CapFile from = fs.Dir.OpenFile(source.Relative, FileMode.Open, FileAccess.Read, FileShare.Read);
 
             // Creating the destination empties it, so a destination that is the source would
             // be emptied before it was read. System.IO refuses that, and so does this.
@@ -138,11 +156,23 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
             using Stream writing = to.AsStream();
             reading.CopyTo(writing);
         }
-        catch (Exception e) when (fs.Translate(e, source, Expected.File) is { } translated)
+        catch (Exception e) when (CopyFailure(e, destination) is { } translated)
         {
             throw translated;
         }
     }
+
+    /// <summary>
+    /// What <c>System.IO</c> throws for a copy that failed at its destination: a name taken by
+    /// a directory is reported as a directory rather than as a name taken.
+    /// </summary>
+    private Exception? CopyFailure(Exception exception, in Request destination) =>
+        exception is not SandboxEscapeException
+        && CapIOException.KindOf(exception) == CapErrorKind.AlreadyExists
+        && fs.TryDescribeForExistence(destination.Virtual, out CapMetadata taken)
+        && taken.Type == CapFileType.Directory
+            ? Failures.TargetIsDirectory(destination.Virtual, exception)
+            : fs.TranslateDestination(exception, destination, Expected.File);
 
     public void Move(string sourceFileName, string destFileName) => Move(sourceFileName, destFileName, overwrite: false);
 
@@ -161,10 +191,17 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
             {
                 throw Failures.RootIsFixed(destination.Virtual);
             }
-
-            fs.Dir.Rename(source.Relative, fs.Dir, destination.Relative, overwrite);
         }
         catch (Exception e) when (fs.Translate(e, source, Expected.File) is { } translated)
+        {
+            throw translated;
+        }
+
+        try
+        {
+            fs.Dir.Rename(source.Relative, fs.Dir, destination.Relative, overwrite);
+        }
+        catch (Exception e) when (fs.TranslateRename(e, source, destination, Expected.File) is { } translated)
         {
             throw translated;
         }
@@ -184,21 +221,28 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
         RequireFile(source);
         RequireFile(destination);
 
-        try
+        if (backup is { } kept)
         {
-            if (backup is { } kept)
+            if (kept.IsRoot)
             {
-                if (kept.IsRoot)
-                {
-                    throw Failures.RootIsFixed(kept.Virtual);
-                }
-
-                fs.Dir.Rename(destination.Relative, fs.Dir, kept.Relative, replaceExisting: true);
+                throw Failures.RootIsFixed(kept.Virtual);
             }
 
+            try
+            {
+                fs.Dir.Rename(destination.Relative, fs.Dir, kept.Relative, replaceExisting: true);
+            }
+            catch (Exception e) when (fs.TranslateRename(e, destination, kept, Expected.File) is { } translated)
+            {
+                throw translated;
+            }
+        }
+
+        try
+        {
             fs.Dir.Rename(source.Relative, fs.Dir, destination.Relative, replaceExisting: true);
         }
-        catch (Exception e) when (fs.Translate(e, source, Expected.File) is { } translated)
+        catch (Exception e) when (fs.TranslateRename(e, source, destination, Expected.File) is { } translated)
         {
             throw translated;
         }

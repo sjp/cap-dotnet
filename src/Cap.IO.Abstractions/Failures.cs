@@ -77,6 +77,21 @@ internal static class Failures
     public static UnauthorizedAccessException Denied(string path, Exception? inner = null) =>
         new($"Access to the path '{path}' is denied.", inner);
 
+    /// <summary>What <c>System.IO</c> throws when a file is moved or copied onto a name that is taken.</summary>
+    public static IOException FileExists(string path, Exception inner) =>
+        new CapIOException(CapErrorKind.AlreadyExists, $"The file '{path}' already exists.", inner);
+
+    /// <summary>What <c>System.IO</c> throws when a directory is moved onto a name that is taken.</summary>
+    public static IOException DirectoryExists(string path, Exception inner) =>
+        new CapIOException(
+            CapErrorKind.AlreadyExists,
+            $"Cannot create '{path}' because a file or directory with the same name already exists.",
+            inner);
+
+    /// <summary>What <c>System.IO</c> throws when a file is copied onto a directory.</summary>
+    public static IOException TargetIsDirectory(string path, Exception inner) =>
+        new CapIOException(CapErrorKind.IsADirectory, $"The target file '{path}' is a directory, not a file.", inner);
+
     /// <summary>The root of the virtual namespace cannot be removed, renamed or replaced.</summary>
     public static IOException RootIsFixed(string path) =>
         new CapIOException(
