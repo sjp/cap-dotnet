@@ -441,13 +441,22 @@ internal static class PortableResolver
             // is not something this layer can interrogate. The mount table is written by
             // whoever administers the host and not by anything inside the sandbox, so a name
             // changing between this question and the open cannot change the answer to it.
+            //
+            // A name that is not there yet is no answer at all, and an open that may create
+            // it goes ahead: whatever it creates lands in the directory the walk stands in,
+            // whose volume has already been checked. Asking the opened handle instead would
+            // drop this second lookup, but would cost a query on every such open and would
+            // have to undo a creation found to be on the wrong volume; that is the direction
+            // to take if the option is ever exposed publicly.
             CapError info = ops.StatChild(stack.Top, name, out CapNodeInfo child);
             if (info.IsFailure)
             {
-                return info;
+                if (!(request.Creates && info.Category == CapErrorCategory.NotFound))
+                {
+                    return info;
+                }
             }
-
-            if (child.VolumeId != stack.TopVolumeId)
+            else if (child.VolumeId != stack.TopVolumeId)
             {
                 return CapError.FromCategory(CapErrorCategory.CrossDevice);
             }

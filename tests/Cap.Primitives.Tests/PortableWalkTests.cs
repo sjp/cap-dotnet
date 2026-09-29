@@ -686,6 +686,7 @@ public sealed class PortableWalkTests
         FakeFileSystem fs = Sandbox();
         _ = fs.AddMountPoint("sandbox/mnt", volumeId: 2);
         _ = fs.AddDirectory("sandbox/mnt/inner");
+        _ = fs.AddFile("sandbox/mnt/f");
 
         Run(fs, (ops, root) =>
         {
@@ -695,6 +696,94 @@ public sealed class PortableWalkTests
             AssertFails(CapErrorCategory.CrossDevice, ops, root, "mnt", ConfinedResolveOptions.RefuseMountCrossing);
             AssertFails(
                 CapErrorCategory.CrossDevice, ops, root, "mnt/inner", ConfinedResolveOptions.RefuseMountCrossing);
+
+            int baseline = ops.OpenHandleCount;
+            FileOpenRequest read = FileOpenRequest.Existing(FileAccess.Read);
+
+            CapResult<SafeFileHandle> file =
+                PortableResolver.OpenFile(root, Parse("mnt/f"), in read, ConfinedResolveOptions.RefuseMountCrossing);
+            Assert.False(file.IsSuccess);
+            Assert.Equal(CapErrorCategory.CrossDevice, file.Error.Category);
+
+            foreach (string path in (string[])["mnt", "mnt/f"])
+            {
+                CapResult<OpenedNode> node =
+                    PortableResolver.OpenNode(root, Parse(path), in read, ConfinedResolveOptions.RefuseMountCrossing);
+                Assert.False(node.IsSuccess, $"'{path}' opened when it should not have.");
+                Assert.Equal(CapErrorCategory.CrossDevice, node.Error.Category);
+            }
+
+            CapResult<ResolvedParent> parent =
+                PortableResolver.ResolveParent(root, Parse("mnt/x"), ConfinedResolveOptions.RefuseMountCrossing);
+            Assert.False(parent.IsSuccess);
+            Assert.Equal(CapErrorCategory.CrossDevice, parent.Error.Category);
+
+            Assert.Equal(baseline, ops.OpenHandleCount);
+        });
+    }
+
+    /// <summary>
+    /// An open that may create its file still creates it when mount crossings are refused,
+    /// as the kernel's own resolution does: a name not there yet has no volume to be asked
+    /// about, and whatever is created lands in a directory whose volume was already checked.
+    /// </summary>
+    [Theory]
+    [InlineData(FileMode.CreateNew)]
+    [InlineData(FileMode.Create)]
+    [InlineData(FileMode.OpenOrCreate)]
+    [InlineData(FileMode.Append)]
+    public void A_creating_open_under_a_mount_refusing_resolution_creates_the_file(FileMode mode)
+    {
+        FakeFileSystem fs = Sandbox();
+        FileAccess access = mode == FileMode.Append ? FileAccess.Write : FileAccess.ReadWrite;
+        FileOpenRequest request = new(mode, access, FileShare.None, FileOptions.None, 0);
+
+        Run(fs, (ops, root) =>
+        {
+            int baseline = ops.OpenHandleCount;
+
+            CapResult<SafeFileHandle> result =
+                PortableResolver.OpenFile(root, Parse("new"), in request, ConfinedResolveOptions.RefuseMountCrossing);
+
+            Assert.True(result.IsSuccess, result.Error.FailureDescription);
+            result.Value!.Dispose();
+            Assert.Equal(baseline, ops.OpenHandleCount);
+
+            Assert.True(ops.StatChild(root, "new", out CapNodeInfo created).IsSuccess);
+            Assert.Equal(CapNodeType.File, created.Type);
+        });
+    }
+
+    /// <summary>
+    /// Letting a missing name through does not let a creating open past a mount point on the
+    /// way to it, nor onto an existing name that lives on another volume.
+    /// </summary>
+    [Fact]
+    public void A_creating_open_under_a_mount_refusing_resolution_still_refuses_another_volume()
+    {
+        FakeFileSystem fs = Sandbox();
+        _ = fs.AddMountPoint("sandbox/mnt", volumeId: 2);
+        fs.AddFile("sandbox/foreign").VolumeId = 2;
+        FileOpenRequest createNew = new(FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None, FileOptions.None, 0);
+        FileOpenRequest openOrCreate =
+            new(FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, FileOptions.None, 0);
+
+        Run(fs, (ops, root) =>
+        {
+            int baseline = ops.OpenHandleCount;
+
+            CapResult<SafeFileHandle> beyond =
+                PortableResolver.OpenFile(root, Parse("mnt/new"), in createNew, ConfinedResolveOptions.RefuseMountCrossing);
+            Assert.False(beyond.IsSuccess);
+            Assert.Equal(CapErrorCategory.CrossDevice, beyond.Error.Category);
+            Assert.Null(fs.Find("sandbox/mnt/new"));
+
+            CapResult<SafeFileHandle> onto =
+                PortableResolver.OpenFile(root, Parse("foreign"), in openOrCreate, ConfinedResolveOptions.RefuseMountCrossing);
+            Assert.False(onto.IsSuccess);
+            Assert.Equal(CapErrorCategory.CrossDevice, onto.Error.Category);
+
+            Assert.Equal(baseline, ops.OpenHandleCount);
         });
     }
 
