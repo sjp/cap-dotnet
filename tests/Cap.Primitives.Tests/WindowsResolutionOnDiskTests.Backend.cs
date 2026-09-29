@@ -208,7 +208,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         CapError replaced = WindowsPlatformOps.SetDestinationName(
             moving.DangerousGetHandle(), root, "published", NtConstants.FileRenameInformationClass, 1);
         Assert.True(replaced.IsSuccess, replaced.FailureDescription);
-        Assert.Equal("new", File.ReadAllText(destination));
+        Assert.Equal("new", ReadSharingDelete(destination));
         Assert.False(File.Exists(source));
 
         // A one-character destination, which fits in fewer bytes than the declared structure
@@ -216,7 +216,22 @@ public sealed partial class WindowsResolutionOnDiskTests
         CapError shortName = WindowsPlatformOps.SetDestinationName(
             moving.DangerousGetHandle(), root, "p", NtConstants.FileRenameInformationClass, 0);
         Assert.True(shortName.IsSuccess, shortName.FailureDescription);
-        Assert.Equal("new", File.ReadAllText(Path.Join(Sandbox, "p")));
+        Assert.Equal("new", ReadSharingDelete(Path.Join(Sandbox, "p")));
+    }
+
+    /// <summary>
+    /// Reads a file's text alongside a handle that holds delete access to it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="File.ReadAllText(string)"/> does not share delete, and Windows refuses any
+    /// open that does not while another handle on the file has delete access, as the handle
+    /// a rename goes through does.
+    /// </remarks>
+    private static string ReadSharingDelete(string path)
+    {
+        using SafeFileHandle file = File.OpenHandle(
+            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        return System.Text.Encoding.UTF8.GetString(ReadAll(file));
     }
 
     /// <summary>
