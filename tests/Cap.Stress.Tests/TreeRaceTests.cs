@@ -86,12 +86,12 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
                     {
                         if (mode == 0)
                         {
-                            root.DeleteTree(name);
+                            root.DeleteTree(name, TestContext.Current.CancellationToken);
                         }
                         else if (mode == 1)
                         {
                             using Dir tree = root.OpenDir(name);
-                            tree.DeleteTreeContents();
+                            tree.DeleteTreeContents(TestContext.Current.CancellationToken);
                         }
                         else
                         {
@@ -190,7 +190,7 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
                     {
                         using Dir from = root.OpenDir("source");
                         using Dir to = root.OpenDir("destination");
-                        from.CopyTo(to, new CopyOptions { Symlinks = actions[round % actions.Length] });
+                        from.CopyTo(to, new CopyOptions { Symlinks = actions[round % actions.Length] }, cancellationToken: TestContext.Current.CancellationToken);
                         tally.Record(Outcome.Consistent);
                     }
                     catch (Exception e)

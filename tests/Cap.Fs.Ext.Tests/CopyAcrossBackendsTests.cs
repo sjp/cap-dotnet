@@ -41,7 +41,7 @@ public sealed class CopyAcrossBackendsTests : IDisposable
         using Dir source = _tree.Directory.OpenDir("source");
         using Dir destination = Dir.OpenThrough(ops, "/destination", AmbientAuthority.Acquire());
 
-        CopyReport report = source.CopyTo(destination);
+        CopyReport report = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(3, report.Directories);
         Assert.NotNull(fs.Find("/destination/a/b"));
@@ -60,7 +60,7 @@ public sealed class CopyAcrossBackendsTests : IDisposable
         using Dir source = Dir.OpenThrough(ops, "/source", AmbientAuthority.Acquire());
         using Dir destination = _tree.Directory.OpenDir("destination");
 
-        CopyReport report = source.CopyTo(destination);
+        CopyReport report = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, report.Directories);
         Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "destination", "a", "b")));
@@ -94,7 +94,7 @@ public sealed class CopyAcrossBackendsTests : IDisposable
             Assert.Equal(sourceInner.GetMetadata().FileId, destination.GetMetadata().FileId);
         }
 
-        CopyReport report = source.CopyTo(destination);
+        CopyReport report = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Directories);
         Assert.NotNull(destinationFs.Find("/root/inner/inner"));

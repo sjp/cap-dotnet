@@ -96,7 +96,7 @@ public static partial class DirExtensions
         ArgumentNullException.ThrowIfNull(dir);
         WalkOptions settings = Demand(options);
 
-        return Walking(dir, settings);
+        return Walking(dir, pattern: null, settings);
     }
 
     /// <summary>
@@ -145,7 +145,7 @@ public static partial class DirExtensions
         ArgumentNullException.ThrowIfNull(dir);
         WalkOptions settings = Demand(options);
 
-        return WalkingAsync(dir, settings, cancellationToken);
+        return WalkingAsync(dir, pattern: null, settings, cancellationToken);
     }
 
     /// <summary>Checks the settings a walk was given, or supplies the defaults.</summary>
@@ -156,12 +156,24 @@ public static partial class DirExtensions
         return settings;
     }
 
-    private static IEnumerable<WalkEntry> Walking(IDir root, WalkOptions options)
+    /// <summary>
+    /// The walk, and the search a pattern drives, in the form that reads on the calling thread.
+    /// </summary>
+    /// <remarks>
+    /// One iterator for both, and one more for both in the form that reads asynchronously, so
+    /// that what a search does differently from a walk is written once and the two forms of
+    /// each cannot drift apart. Without a pattern every entry is yielded and every directory
+    /// is a candidate to enter; with one, only the entries it matches are yielded and only the
+    /// directories it could still match through are entered.
+    /// </remarks>
+    private static IEnumerable<WalkEntry> Walking(IDir root, GlobPattern? pattern, WalkOptions options)
     {
         Descent descent = new(root, options, asynchronous: false);
 
         try
         {
+            descent.Level!.States = pattern?.Start();
+
             while (descent.Level is { } level)
             {
                 if (!level.Reader.TryNext(out ListedEntry entry))
@@ -177,9 +189,28 @@ public static partial class DirExtensions
 
                 descent.Admit();
 
-                yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                if (pattern is null)
+                {
+                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
 
-                descent.Enter(in entry);
+                    descent.Enter(in entry);
+                    continue;
+                }
+
+                int[]? beneath = pattern.Step(level.States, entry.Name, out bool matched);
+
+                if (matched)
+                {
+                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                }
+
+                if (beneath is not null)
+                {
+                    // Nothing else is entered. A directory no remaining piece of the pattern
+                    // could match through is not read at all, which is the whole difference
+                    // between this and walking the tree and filtering afterwards.
+                    descent.Enter(in entry, beneath);
+                }
             }
         }
         finally
@@ -188,8 +219,13 @@ public static partial class DirExtensions
         }
     }
 
+    /// <summary>
+    /// The walk, and the search a pattern drives, in the form that reads asynchronously.
+    /// </summary>
+    /// <remarks>See <see cref="Walking"/>, which this mirrors step for step.</remarks>
     private static async IAsyncEnumerable<WalkEntry> WalkingAsync(
         IDir root,
+        GlobPattern? pattern,
         WalkOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -197,6 +233,8 @@ public static partial class DirExtensions
 
         try
         {
+            descent.Level!.States = pattern?.Start();
+
             while (descent.Level is { } level)
             {
                 if (!await level.Reader.MoveNextAsync().ConfigureAwait(false))
@@ -213,9 +251,25 @@ public static partial class DirExtensions
 
                 descent.Admit();
 
-                yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                if (pattern is null)
+                {
+                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
 
-                descent.Enter(in entry);
+                    descent.Enter(in entry);
+                    continue;
+                }
+
+                int[]? beneath = pattern.Step(level.States, entry.Name, out bool matched);
+
+                if (matched)
+                {
+                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                }
+
+                if (beneath is not null)
+                {
+                    descent.Enter(in entry, beneath);
+                }
             }
         }
         finally

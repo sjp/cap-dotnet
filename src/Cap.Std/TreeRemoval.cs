@@ -76,9 +76,17 @@ internal static class TreeRemoval
     /// entered beneath it, so one swapped for a link after being listed is not entered and its
     /// name is unlinked as the link.
     /// </para>
+    /// <para>
+    /// <paramref name="cancellationToken"/> is looked at before each entry is removed, and a
+    /// signal stops the work there by throwing rather than by being reported as a failure:
+    /// what had been removed is gone, and what had not is left as it was.
+    /// </para>
     /// </remarks>
-    public static CapError Empty(Dir directory)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    public static CapError Empty(Dir directory, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (!directory.TryRestrict(SymlinkPolicy.Deny, out Dir? strict))
         {
             return CapError.FromCategory(CapErrorCategory.OutOfHandles);
@@ -86,7 +94,7 @@ internal static class TreeRemoval
 
         using (strict)
         {
-            return EmptyOpen(strict, MaximumDepth);
+            return EmptyOpen(strict, MaximumDepth, cancellationToken);
         }
     }
 
@@ -96,6 +104,7 @@ internal static class TreeRemoval
     /// </summary>
     /// <param name="parent">The directory holding the name.</param>
     /// <param name="name">A single component naming the directory to remove.</param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
     /// <returns>Success when the name is gone, or the failure that stopped it going.</returns>
     /// <remarks>
     /// <para>
@@ -116,9 +125,16 @@ internal static class TreeRemoval
     /// than unlinked. Removing a tree is a request about a directory, and quietly deleting
     /// whatever else was found under the name would make it a request about a name.
     /// </para>
+    /// <para>
+    /// <paramref name="cancellationToken"/> is honoured as <see cref="Empty(Dir, CancellationToken)"/>
+    /// honours it.
+    /// </para>
     /// </remarks>
-    public static CapError Remove(Dir parent, string name)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    public static CapError Remove(Dir parent, string name, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (!parent.TryRestrict(SymlinkPolicy.Deny, out Dir? strict))
         {
             return CapError.FromCategory(CapErrorCategory.OutOfHandles);
@@ -134,10 +150,16 @@ internal static class TreeRemoval
             CapError emptied;
             using (directory)
             {
-                emptied = EmptyOpen(directory, MaximumDepth);
+                emptied = EmptyOpen(directory, MaximumDepth, cancellationToken);
             }
 
-            return emptied.IsFailure ? emptied : RemoveEmpty(strict, name);
+            if (emptied.IsFailure)
+            {
+                return emptied;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return RemoveEmpty(strict, name);
         }
     }
 
@@ -177,7 +199,7 @@ internal static class TreeRemoval
     /// Removes everything inside the directory named <paramref name="name"/>, leaving the
     /// directory itself.
     /// </summary>
-    private static CapError Empty(Dir parent, string name, int remainingDepth)
+    private static CapError Empty(Dir parent, string name, int remainingDepth, CancellationToken cancellationToken)
     {
         if (!parent.TryOpenDir(name, out Dir? directory))
         {
@@ -190,7 +212,7 @@ internal static class TreeRemoval
 
         using (directory)
         {
-            return EmptyOpen(directory, remainingDepth);
+            return EmptyOpen(directory, remainingDepth, cancellationToken);
         }
     }
 
@@ -203,7 +225,7 @@ internal static class TreeRemoval
     /// been removed from underneath us — by the very thing we are cleaning up after, or by
     /// somebody else — is an ordinary outcome rather than a fault.
     /// </remarks>
-    private static CapError EmptyOpen(Dir directory, int remainingDepth)
+    private static CapError EmptyOpen(Dir directory, int remainingDepth, CancellationToken cancellationToken)
     {
         if (remainingDepth == 0)
         {
@@ -216,7 +238,9 @@ internal static class TreeRemoval
         {
             foreach (DirEntry entry in directory.EnumerateEntries())
             {
-                CapError removed = RemoveEntry(directory, entry, remainingDepth);
+                cancellationToken.ThrowIfCancellationRequested();
+
+                CapError removed = RemoveEntry(directory, entry, remainingDepth, cancellationToken);
                 if (removed.IsFailure && first.IsSuccess)
                 {
                     // The first failure is the one reported, and the walk carries on past it.
@@ -253,11 +277,12 @@ internal static class TreeRemoval
     /// being wrong the other way is a directory left behind.
     /// </para>
     /// </remarks>
-    private static CapError RemoveEntry(Dir directory, DirEntry entry, int remainingDepth)
+    private static CapError RemoveEntry(
+        Dir directory, DirEntry entry, int remainingDepth, CancellationToken cancellationToken)
     {
         if (entry.Type is CapFileType.Directory or CapFileType.Unknown)
         {
-            CapError emptied = Empty(directory, entry.Name, remainingDepth - 1);
+            CapError emptied = Empty(directory, entry.Name, remainingDepth - 1, cancellationToken);
             if (emptied.IsFailure)
             {
                 return emptied;

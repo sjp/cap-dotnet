@@ -40,6 +40,16 @@ namespace Cap.Fs.Ext;
 /// and left in place, where a <see cref="Dir"/> would clear the mark and remove it. Failures
 /// from such a handle are the exceptions it threw, the first of them rethrown.
 /// </para>
+/// <para>
+/// <strong>Cancellation.</strong> Every form takes a token, looked at before each entry is
+/// removed. A signal stops the removal there with an <see cref="OperationCanceledException"/>,
+/// whichever form was called — the one that reports failure as false included, since being
+/// asked to stop is not a failure to remove. What had been removed is gone and what had not is
+/// left as it was, exactly as for a failure part of the way through. The asynchronous forms do
+/// the same work on a thread-pool thread: no platform this runs on removes a name
+/// asynchronously, so what they offer is a calling thread that is not held, and a removal that
+/// can be stopped.
+/// </para>
 /// </remarks>
 public static partial class DirExtensions
 {
@@ -48,6 +58,7 @@ public static partial class DirExtensions
     /// </summary>
     /// <param name="dir">The handle the path is relative to.</param>
     /// <param name="path">A relative path to the directory to remove.</param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
     /// <remarks>
     /// <para>
     /// The path names a directory, and only a directory. A name holding a file is not removed
@@ -83,11 +94,12 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="DirectoryNotFoundException">There is no such directory.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused a removal.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="CapIOException">
     /// The name holds something that is not a directory, or the tree could not be removed.
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static void DeleteTree(this IDir dir, string path)
+    public static void DeleteTree(this IDir dir, string path, CancellationToken cancellationToken = default)
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: true);
 
@@ -98,7 +110,7 @@ public static partial class DirExtensions
 
         if (location.Directory is not Dir concrete)
         {
-            if (InterfaceTreeRemoval.Remove(location.Directory, location.Name, path) is { } failure)
+            if (InterfaceTreeRemoval.Remove(location.Directory, location.Name, path, cancellationToken) is { } failure)
             {
                 InterfaceTreeRemoval.Rethrow(failure);
             }
@@ -106,7 +118,7 @@ public static partial class DirExtensions
             return;
         }
 
-        CapError error = TreeRemoval.Remove(concrete, location.Name);
+        CapError error = TreeRemoval.Remove(concrete, location.Name, cancellationToken);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToException(error, path, ExpectedTarget.Directory);
@@ -118,7 +130,8 @@ public static partial class DirExtensions
     /// rather than throwing.
     /// </summary>
     /// <param name="dir">The handle the path is relative to.</param>
-    /// <param name="path">A relative path to the directory. See <see cref="DeleteTree"/>.</param>
+    /// <param name="path">A relative path to the directory. See <see cref="DeleteTree(IDir, string, CancellationToken)"/>.</param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
     /// <returns>True when the directory and everything in it are gone.</returns>
     /// <remarks>
     /// <para>
@@ -128,13 +141,18 @@ public static partial class DirExtensions
     /// path that runs most often.
     /// </para>
     /// <para>
-    /// Safe to call from any thread, on the same terms as <see cref="DeleteTree"/>: racing
+    /// Safe to call from any thread, on the same terms as <see cref="DeleteTree(IDir, string, CancellationToken)"/>: racing
     /// removals stay contained, and either may answer false for an entry the other removed.
     /// </para>
     /// <para>
-    /// <strong>Symbolic links.</strong> As for <see cref="DeleteTree"/>: a link ahead of the
+    /// <strong>Symbolic links.</strong> As for <see cref="DeleteTree(IDir, string, CancellationToken)"/>: a link ahead of the
     /// last component is resolved under the handle's policy, a link as the last component
     /// answers false and is left in place, and a link inside the tree is removed as the link.
+    /// </para>
+    /// <para>
+    /// A signal on <paramref name="cancellationToken"/> is thrown rather than answered with
+    /// false: the tree is neither gone nor refused, and a caller told false would take it for
+    /// one of those.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
@@ -142,8 +160,9 @@ public static partial class DirExtensions
     /// <exception cref="SandboxEscapeException">
     /// <paramref name="path"/> named something outside this handle's authority.
     /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static bool TryDeleteTree(this IDir dir, string path)
+    public static bool TryDeleteTree(this IDir dir, string path, CancellationToken cancellationToken = default)
     {
         using ParentLocation location = ParentLocation.Resolve(dir, path, nameof(path), mayNameDirectory: true);
 
@@ -153,14 +172,15 @@ public static partial class DirExtensions
         }
 
         return location.Directory is Dir concrete
-            ? TreeRemoval.Remove(concrete, location.Name).IsSuccess
-            : InterfaceTreeRemoval.Remove(location.Directory, location.Name, path) is null;
+            ? TreeRemoval.Remove(concrete, location.Name, cancellationToken).IsSuccess
+            : InterfaceTreeRemoval.Remove(location.Directory, location.Name, path, cancellationToken) is null;
     }
 
     /// <summary>
     /// Removes everything inside this directory, leaving the directory itself.
     /// </summary>
     /// <param name="dir">The directory to empty.</param>
+    /// <param name="cancellationToken">Stops the emptying before the next entry.</param>
     /// <remarks>
     /// <para>
     /// Takes the directory as a handle rather than as a name beneath one, which is what a
@@ -190,15 +210,16 @@ public static partial class DirExtensions
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused a removal.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="CapIOException">The directory could not be emptied.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
-    public static void DeleteTreeContents(this IDir dir)
+    public static void DeleteTreeContents(this IDir dir, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(dir);
 
         if (dir is not Dir concrete)
         {
-            if (InterfaceTreeRemoval.Empty(dir) is { } failure)
+            if (InterfaceTreeRemoval.Empty(dir, cancellationToken) is { } failure)
             {
                 InterfaceTreeRemoval.Rethrow(failure);
             }
@@ -206,10 +227,106 @@ public static partial class DirExtensions
             return;
         }
 
-        CapError error = TreeRemoval.Empty(concrete);
+        CapError error = TreeRemoval.Empty(concrete, cancellationToken);
         if (error.IsFailure)
         {
             throw FailureTranslation.ToEnumerationException(error);
         }
+    }
+
+    /// <summary>
+    /// Removes a directory beneath this handle, and everything inside it, without holding the
+    /// calling thread.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">
+    /// A relative path to the directory to remove. See <see cref="DeleteTree(IDir, string, CancellationToken)"/>.
+    /// </param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
+    /// <returns>A task that completes when the directory and everything in it are gone.</returns>
+    /// <remarks>
+    /// <para>
+    /// The same removal as <see cref="DeleteTree(IDir, string, CancellationToken)"/>, done on a
+    /// thread-pool thread, with the same treatment of symbolic links and the same partial state
+    /// after a failure or a cancellation. The arguments are checked before the task is made; the
+    /// path is resolved inside it.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, on the terms the synchronous form gives. The handle must
+    /// stay open until the task completes.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">There is no such directory.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused a removal.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds something that is not a directory, or the tree could not be removed.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static Task DeleteTreeAsync(this IDir dir, string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dir);
+        ArgumentNullException.ThrowIfNull(path);
+
+        return Task.Run(() => DeleteTree(dir, path, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes a directory beneath this handle and everything inside it without holding the
+    /// calling thread, reporting failure rather than throwing.
+    /// </summary>
+    /// <param name="dir">The handle the path is relative to.</param>
+    /// <param name="path">
+    /// A relative path to the directory. See <see cref="DeleteTree(IDir, string, CancellationToken)"/>.
+    /// </param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
+    /// <returns>A task whose result is true when the directory and everything in it are gone.</returns>
+    /// <remarks>
+    /// The same removal as <see cref="TryDeleteTree(IDir, string, CancellationToken)"/>, done on a
+    /// thread-pool thread. A signal on <paramref name="cancellationToken"/> cancels the task
+    /// rather than completing it with false, for the reason the synchronous form gives.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> or <paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static Task<bool> TryDeleteTreeAsync(this IDir dir, string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dir);
+        ArgumentNullException.ThrowIfNull(path);
+
+        return Task.Run(() => TryDeleteTree(dir, path, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes everything inside this directory without holding the calling thread, leaving
+    /// the directory itself.
+    /// </summary>
+    /// <param name="dir">The directory to empty.</param>
+    /// <param name="cancellationToken">Stops the emptying before the next entry.</param>
+    /// <returns>A task that completes when the directory is empty.</returns>
+    /// <remarks>
+    /// The same emptying as <see cref="DeleteTreeContents(IDir, CancellationToken)"/>, done on a
+    /// thread-pool thread, with the same treatment of symbolic links. The handle must stay open
+    /// until the task completes.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused a removal.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="CapIOException">The directory could not be emptied.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static Task DeleteTreeContentsAsync(this IDir dir, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dir);
+
+        return Task.Run(() => DeleteTreeContents(dir, cancellationToken), cancellationToken);
     }
 }

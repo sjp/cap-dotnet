@@ -131,51 +131,103 @@ public static partial class DirExtensions
         ArgumentNullException.ThrowIfNull(pattern);
         WalkOptions settings = Demand(options);
 
-        return Globbing(dir, pattern, settings);
+        return Walking(dir, pattern, settings);
     }
 
-    private static IEnumerable<WalkEntry> Globbing(IDir root, GlobPattern pattern, WalkOptions options)
+    /// <summary>
+    /// Finds everything beneath this handle whose name a pattern describes, without holding the
+    /// calling thread.
+    /// </summary>
+    /// <param name="dir">The directory to search.</param>
+    /// <param name="pattern">
+    /// The pattern, read as <see cref="Glob(IDir, string, WalkOptions?)"/> reads it.
+    /// </param>
+    /// <param name="options">How the search descends, or null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the search between batches of entries.</param>
+    /// <returns>The matching entries, as <see cref="Glob(IDir, string, WalkOptions?)"/> produces them.</returns>
+    /// <remarks>
+    /// <para>
+    /// The same search, with each directory read as
+    /// <see cref="WalkAsync(IDir, WalkOptions?, CancellationToken)"/> reads it: on a thread-pool
+    /// thread, with the opens between levels on whichever thread the enumeration resumes on.
+    /// The pattern is read before the sequence is handed back, so a pattern that cannot be
+    /// matched is refused at the call rather than at the first step.
+    /// </para>
+    /// <para>
+    /// As for the synchronous form, the sequence may be enumerated any number of times,
+    /// concurrently included, and each enumerator is for one consumer at a time.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links</strong>, and directories that cannot be opened, are treated
+    /// exactly as the synchronous form treats them.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The pattern is not one that can be matched.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="WalkOptions.MaxDepth"/> is less than one.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="CapIOException">
+    /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static IAsyncEnumerable<WalkEntry> GlobAsync(
+        this IDir dir,
+        string pattern,
+        WalkOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        GlobAsync(dir, ParsePattern(dir, pattern), options, cancellationToken);
+
+    /// <summary>
+    /// Finds everything beneath this handle whose name a pattern read in advance describes,
+    /// without holding the calling thread.
+    /// </summary>
+    /// <param name="dir">The directory to search.</param>
+    /// <param name="pattern">The pattern.</param>
+    /// <param name="options">How the search descends, or null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the search between batches of entries.</param>
+    /// <returns>The matching entries, parents before their children.</returns>
+    /// <remarks>
+    /// <para>
+    /// The form to use when the same pattern is applied more than once, as for
+    /// <see cref="Glob(IDir, GlobPattern, WalkOptions?)"/>; one pattern may drive several
+    /// searches concurrently, in either form.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links</strong>, and directories that cannot be opened, are treated
+    /// exactly as the synchronous form treats them.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="WalkOptions.MaxDepth"/> is less than one.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="CapIOException">
+    /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static IAsyncEnumerable<WalkEntry> GlobAsync(
+        this IDir dir,
+        GlobPattern pattern,
+        WalkOptions? options = null,
+        CancellationToken cancellationToken = default)
     {
-        Descent descent = new(root, options, asynchronous: false);
+        ArgumentNullException.ThrowIfNull(dir);
+        ArgumentNullException.ThrowIfNull(pattern);
+        WalkOptions settings = Demand(options);
 
-        try
-        {
-            descent.Level!.States = pattern.Start();
-
-            while (descent.Level is { } level)
-            {
-                if (!level.Reader.TryNext(out ListedEntry entry))
-                {
-                    descent.Leave();
-                    continue;
-                }
-
-                if (descent.Skips(in entry))
-                {
-                    continue;
-                }
-
-                descent.Admit();
-
-                int[]? beneath = pattern.Step(level.States, entry.Name, out bool matched);
-
-                if (matched)
-                {
-                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
-                }
-
-                if (beneath is not null)
-                {
-                    // Nothing else is entered. A directory no remaining piece of the pattern
-                    // could match through is not read at all, which is the whole difference
-                    // between this and walking the tree and filtering afterwards.
-                    descent.Enter(in entry, beneath);
-                }
-            }
-        }
-        finally
-        {
-            descent.Dispose();
-        }
+        return WalkingAsync(dir, pattern, settings, cancellationToken);
     }
 }

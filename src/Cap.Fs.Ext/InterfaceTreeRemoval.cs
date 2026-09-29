@@ -27,7 +27,8 @@ namespace Cap.Fs.Ext;
 /// <para>
 /// Failures arrive as exceptions from the implementation rather than as values, so the first
 /// one is kept and carried to the caller as it was thrown, and the walk goes on past it as the
-/// core layer's does.
+/// core layer's does. Cancellation is the exception: it is looked at before each entry, as the
+/// core layer looks at it, and a signal is thrown at once rather than kept.
 /// </para>
 /// </remarks>
 internal static class InterfaceTreeRemoval
@@ -49,6 +50,7 @@ internal static class InterfaceTreeRemoval
     /// <param name="parent">The directory holding the name.</param>
     /// <param name="name">A single component naming the directory to remove.</param>
     /// <param name="path">The caller's path, quoted back in a failure this builds itself.</param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
     /// <returns>Null when the name is gone, or the first failure that stopped it going.</returns>
     /// <remarks>
     /// The work is done through a copy of <paramref name="parent"/> restricted to refuse
@@ -56,8 +58,11 @@ internal static class InterfaceTreeRemoval
     /// link at <paramref name="name"/> or anywhere beneath it is removed as the link and what
     /// it points at is not reached.
     /// </remarks>
-    public static Exception? Remove(IDir parent, string name, string path)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    public static Exception? Remove(IDir parent, string name, string path, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         try
         {
             using IDir strict = parent.Restrict(SymlinkPolicy.Deny);
@@ -70,10 +75,16 @@ internal static class InterfaceTreeRemoval
             Exception? emptied;
             using (directory)
             {
-                emptied = EmptyOpen(directory, MaximumDepth, path);
+                emptied = EmptyOpen(directory, MaximumDepth, path, cancellationToken);
             }
 
-            return emptied ?? Unlink(strict, name, directory: true);
+            if (emptied is not null)
+            {
+                return emptied;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return Unlink(strict, name, directory: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -83,17 +94,21 @@ internal static class InterfaceTreeRemoval
 
     /// <summary>Removes everything inside a directory, leaving the directory itself.</summary>
     /// <param name="directory">The directory to empty.</param>
+    /// <param name="cancellationToken">Stops the emptying before the next entry.</param>
     /// <returns>Null when it is empty, or the first failure that stopped it becoming empty.</returns>
     /// <remarks>
     /// Done through a copy of <paramref name="directory"/> restricted to refuse symbolic
     /// links, for the reason <see cref="Remove"/> gives.
     /// </remarks>
-    public static Exception? Empty(IDir directory)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    public static Exception? Empty(IDir directory, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         try
         {
             using IDir strict = directory.Restrict(SymlinkPolicy.Deny);
-            return EmptyOpen(strict, MaximumDepth, path: null);
+            return EmptyOpen(strict, MaximumDepth, path: null, cancellationToken);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -130,7 +145,9 @@ internal static class InterfaceTreeRemoval
     /// <param name="path">
     /// The caller's path, when the removal began from one; null when it began from a handle.
     /// </param>
-    private static Exception? EmptyOpen(IDir directory, int remainingDepth, string? path)
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
+    private static Exception? EmptyOpen(
+        IDir directory, int remainingDepth, string? path, CancellationToken cancellationToken)
     {
         if (remainingDepth == 0)
         {
@@ -146,9 +163,11 @@ internal static class InterfaceTreeRemoval
         {
             foreach (IDirEntry entry in directory.EnumerateEntries())
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // The first failure is the one reported, and the walk carries on past it, so
                 // one entry that cannot be removed does not leave the rest of the tree behind.
-                Exception? removed = RemoveEntry(directory, entry, remainingDepth, path);
+                Exception? removed = RemoveEntry(directory, entry, remainingDepth, path, cancellationToken);
                 first ??= removed;
             }
         }
@@ -166,7 +185,8 @@ internal static class InterfaceTreeRemoval
     /// treated as though it might be a directory: the open that follows refuses it if it is
     /// not, at the cost of one call.
     /// </remarks>
-    private static Exception? RemoveEntry(IDir directory, IDirEntry entry, int remainingDepth, string? path)
+    private static Exception? RemoveEntry(
+        IDir directory, IDirEntry entry, int remainingDepth, string? path, CancellationToken cancellationToken)
     {
         if (entry.Type is CapFileType.Directory or CapFileType.Unknown &&
             directory.TryOpenDir(entry.Name, noFollow: true, out IDir? child))
@@ -174,7 +194,7 @@ internal static class InterfaceTreeRemoval
             Exception? emptied;
             using (child)
             {
-                emptied = EmptyOpen(child, remainingDepth - 1, path);
+                emptied = EmptyOpen(child, remainingDepth - 1, path, cancellationToken);
             }
 
             if (emptied is not null)

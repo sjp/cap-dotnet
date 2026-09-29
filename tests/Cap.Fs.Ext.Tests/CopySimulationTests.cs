@@ -35,7 +35,7 @@ public sealed class CopySimulationTests
         Assert.Equal(SymlinkPolicy.FollowWithinSandbox, source.SymlinkPolicy);
 
         CapIOException thrown = Assert.IsType<CapIOException>(
-            Assert.ThrowsAny<IOException>(() => source.CopyTo(destination)), exactMatch: true);
+            Assert.ThrowsAny<IOException>(() => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken)), exactMatch: true);
 
         Assert.Equal(CapErrorKind.NotSupported, thrown.Kind);
         Assert.Null(fs.Find("/tree/copy/real"));
@@ -49,7 +49,7 @@ public sealed class CopySimulationTests
         using Dir destination = Dir.OpenThrough(ops, "/tree/copy", AmbientAuthority.Acquire());
 
         CapIOException thrown = Assert.IsType<CapIOException>(
-            Assert.ThrowsAny<IOException>(() => source.CopyTo(destination)), exactMatch: true);
+            Assert.ThrowsAny<IOException>(() => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken)), exactMatch: true);
 
         Assert.Equal(CapErrorKind.NotSupported, thrown.Kind);
         Assert.Null(fs.Find("/tree/copy/big.txt"));
@@ -64,7 +64,7 @@ public sealed class CopySimulationTests
         using Dir source = Dir.OpenThrough(ops, "/tree/source", AmbientAuthority.Acquire());
         using Dir destination = Dir.OpenThrough(ops, "/tree/copy", AmbientAuthority.Acquire());
 
-        CopyReport report = source.CopyTo(destination, new CopyOptions { Symlinks = CopyAction.Skip });
+        CopyReport report = source.CopyTo(destination, new CopyOptions { Symlinks = CopyAction.Skip }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Skipped);
         Assert.Equal(0, report.Symlinks);
@@ -81,7 +81,7 @@ public sealed class CopySimulationTests
         using Dir source = Dir.OpenThrough(ops, "/tree/source", AmbientAuthority.Acquire());
         using Dir destination = Dir.OpenThrough(ops, "/tree/copy", AmbientAuthority.Acquire());
 
-        CopyReport report = source.CopyTo(destination, new CopyOptions { Symlinks = CopyAction.Recreate });
+        CopyReport report = source.CopyTo(destination, new CopyOptions { Symlinks = CopyAction.Recreate }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Symlinks);
         MemoryNode made = Assert.IsType<MemoryNode>(fs.Find($"/tree/copy/{swapped}"));
@@ -101,7 +101,7 @@ public sealed class CopySimulationTests
         using Dir destination = Dir.OpenThrough(ops, "/tree/copy", AmbientAuthority.Acquire());
 
         CapIOException thrown = Assert.IsType<CapIOException>(
-            Assert.ThrowsAny<IOException>(() => source.CopyTo(destination)), exactMatch: true);
+            Assert.ThrowsAny<IOException>(() => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken)), exactMatch: true);
 
         Assert.Equal(CapErrorKind.NotSupported, thrown.Kind);
         Assert.Null(fs.Find("/tree/copy/big.txt"));
@@ -114,7 +114,7 @@ public sealed class CopySimulationTests
         using Dir source = Dir.OpenThrough(ops, "/tree/source", AmbientAuthority.Acquire());
         using Dir destination = Dir.OpenThrough(ops, "/tree/copy", AmbientAuthority.Acquire());
 
-        CopyReport report = source.CopyTo(destination, new CopyOptions { OtherKinds = CopyAction.Skip });
+        CopyReport report = source.CopyTo(destination, new CopyOptions { OtherKinds = CopyAction.Skip }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Skipped);
         Assert.Equal(0, report.Bytes);
@@ -133,7 +133,7 @@ public sealed class CopySimulationTests
         using Dir source = Dir.OpenThrough(ops, "/tree/source", AmbientAuthority.Acquire());
         using Dir destination = Dir.OpenThrough(ops, "/tree/copy", AmbientAuthority.Acquire());
 
-        CopyReport report = source.CopyTo(destination);
+        CopyReport report = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Directories);
         Assert.Equal(2, report.Files);

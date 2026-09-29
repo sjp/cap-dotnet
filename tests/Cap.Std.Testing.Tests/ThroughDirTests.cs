@@ -327,7 +327,7 @@ public sealed class ThroughDirTests
         using Dir source = root.OpenDir("src");
         using Dir destination = root.OpenDir("dst");
 
-        _ = source.CopyTo(destination);
+        _ = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
         root.WriteAllBytesAtomic("dst/atomic.txt", [1]);
         string[] found = [.. root.Glob("src/**/*.txt").Select(entry => entry.Name).Order(StringComparer.Ordinal)];
 

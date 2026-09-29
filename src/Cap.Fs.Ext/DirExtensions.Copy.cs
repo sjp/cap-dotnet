@@ -52,6 +52,10 @@ public static partial class DirExtensions
     /// <param name="dir">The directory whose contents are copied.</param>
     /// <param name="destination">The directory they are copied into.</param>
     /// <param name="options">What the copy does with what it finds, or null for the defaults.</param>
+    /// <param name="progress">
+    /// Told what has been copied so far each time an entry is done, or null for no reports.
+    /// </param>
+    /// <param name="cancellationToken">Stops the copy before the next entry or the next piece of a file.</param>
     /// <returns>What was copied, and what was left out.</returns>
     /// <remarks>
     /// <para>
@@ -75,6 +79,26 @@ public static partial class DirExtensions
     /// changed while the copy runs is copied partly as it was and partly as it became, and a
     /// failure part of the way through leaves the destination holding what had been copied
     /// until then.
+    /// </para>
+    /// <para>
+    /// <strong>Cancellation and failure part of the way through a file.</strong> The token is
+    /// looked at before each entry and between the pieces a file is copied in, and a signal
+    /// stops the copy with an <see cref="OperationCanceledException"/>. What stopping leaves is
+    /// what a failure leaves: every entry finished before it is in the destination, and the file
+    /// being written when it came is not. That file is removed rather than left holding part of
+    /// its contents under its real name — or, when <see cref="CopyOptions.Overwrite"/> is on, its
+    /// scratch copy is removed and whatever held the name keeps it — so no name in the
+    /// destination holds a partly written file and no scratch name is left behind. Directories
+    /// already made stay, and, when permissions are being carried, keep the owner-only
+    /// permissions they are given while they are filled.
+    /// </para>
+    /// <para>
+    /// <strong>Progress.</strong> <paramref name="progress"/> is given a report after each
+    /// directory, file and link is made and each entry is skipped, counting everything up to
+    /// and including it, so the counts never go down and the last report equals the one
+    /// returned. It is called on the thread doing the copy, before the copy moves on; a
+    /// <see cref="Progress{T}"/> passes each report on to the context it was made on instead of
+    /// running there. Anything it throws stops the copy, as a failure there would.
     /// </para>
     /// <para>
     /// Safe to call from any thread, and concurrently with other work on either handle; the
@@ -134,8 +158,85 @@ public static partial class DirExtensions
     /// taken, the destination is the source or lies inside it, permissions were to be preserved and the
     /// destination would not take them, or the copy failed otherwise.
     /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
-    public static CopyReport CopyTo(this IDir dir, IDir destination, CopyOptions? options = null)
+    public static CopyReport CopyTo(
+        this IDir dir,
+        IDir destination,
+        CopyOptions? options = null,
+        IProgress<CopyReport>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        CopyOptions settings = Demand(dir, destination, options);
+
+        Copier copier = new(dir, destination, settings, progress, asynchronous: false, cancellationToken);
+        return copier.Run(dir);
+    }
+
+    /// <summary>
+    /// Copies everything beneath this handle into another directory, without holding the
+    /// calling thread.
+    /// </summary>
+    /// <param name="dir">The directory whose contents are copied.</param>
+    /// <param name="destination">The directory they are copied into.</param>
+    /// <param name="options">What the copy does with what it finds, or null for the defaults.</param>
+    /// <param name="progress">
+    /// Told what has been copied so far each time an entry is done, or null for no reports.
+    /// </param>
+    /// <param name="cancellationToken">Stops the copy before the next entry or the next piece of a file.</param>
+    /// <returns>A task whose result is what was copied, and what was left out.</returns>
+    /// <remarks>
+    /// <para>
+    /// The same copy as <see cref="CopyTo"/>, with the same treatment of links, of other kinds,
+    /// of a destination inside the source, of permissions and times, and the same state left
+    /// behind by a failure or a cancellation. What differs is the waiting. Each directory is
+    /// read as <see cref="WalkAsync(IDir, WalkOptions?, CancellationToken)"/> reads it, and
+    /// file contents are moved with reads and writes the operating system can complete by
+    /// itself where it offers that. Opening, creating, describing, renaming and carrying
+    /// permissions and times are short calls no platform here performs asynchronously, and
+    /// happen on whichever thread the copy resumes on.
+    /// </para>
+    /// <para>
+    /// The arguments and options are checked before the task is made; everything else,
+    /// refusing a destination that is the source included, is reported through the task.
+    /// </para>
+    /// <para>
+    /// <strong>Progress</strong> is reported as <see cref="CopyTo"/> reports it, on whichever
+    /// thread the copy is running on at the time. Both handles must stay open until the task
+    /// completes.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <see cref="CopyOptions.OtherKinds"/> asks for objects to be recreated, which is not
+    /// something this can do.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="CopyOptions.MaxDepth"/> is less than one.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused part of the copy.</exception>
+    /// <exception cref="FileNotFoundException">An entry went away while it was being copied.</exception>
+    /// <exception cref="CapIOException">
+    /// The source holds something the options say to refuse, a destination name is already
+    /// taken, the destination is the source or lies inside it, permissions were to be preserved and the
+    /// destination would not take them, or the copy failed otherwise.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
+    public static Task<CopyReport> CopyToAsync(
+        this IDir dir,
+        IDir destination,
+        CopyOptions? options = null,
+        IProgress<CopyReport>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        CopyOptions settings = Demand(dir, destination, options);
+
+        return CopyingAsync(dir, destination, settings, progress, cancellationToken);
+    }
+
+    /// <summary>Checks what a copy was given, or supplies the default options.</summary>
+    private static CopyOptions Demand(IDir dir, IDir destination, CopyOptions? options)
     {
         ArgumentNullException.ThrowIfNull(dir);
         ArgumentNullException.ThrowIfNull(destination);
@@ -152,17 +253,29 @@ public static partial class DirExtensions
                 nameof(options));
         }
 
-        Copier copier = new(dir, destination, settings);
-        return copier.Run(dir);
+        return settings;
+    }
+
+    /// <summary>The asynchronous copy, once its arguments have been checked.</summary>
+    private static async Task<CopyReport> CopyingAsync(
+        IDir dir,
+        IDir destination,
+        CopyOptions settings,
+        IProgress<CopyReport>? progress,
+        CancellationToken cancellationToken)
+    {
+        Copier copier = new(dir, destination, settings, progress, asynchronous: true, cancellationToken);
+        return await copier.RunAsync(dir).ConfigureAwait(false);
     }
 
     /// <summary>Reads a file to its end, writing everything read.</summary>
     /// <remarks>
     /// Position by position rather than through a stream, so the two handles keep no
     /// shared state and a short read is handled as what it is: the amount available now,
-    /// and not a statement about what follows.
+    /// and not a statement about what follows. The token is looked at before each piece, so a
+    /// large file does not hold up a copy that has been asked to stop.
     /// </remarks>
-    private static long Transfer(ICapFile source, ICapFile target)
+    private static long Transfer(ICapFile source, ICapFile target, CancellationToken cancellationToken = default)
     {
         byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
         try
@@ -170,6 +283,8 @@ public static partial class DirExtensions
             long offset = 0;
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 int read = source.Read(buffer, offset);
                 if (read == 0)
                 {
@@ -177,6 +292,35 @@ public static partial class DirExtensions
                 }
 
                 target.Write(buffer.AsSpan(0, read), offset);
+                offset += read;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>Reads a file to its end without holding the calling thread, writing everything read.</summary>
+    /// <remarks>As <see cref="Transfer"/>, a piece at a time and position by position.</remarks>
+    private static async ValueTask<long> TransferAsync(
+        ICapFile source, ICapFile target, CancellationToken cancellationToken)
+    {
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
+        try
+        {
+            long offset = 0;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                int read = await source.ReadAsync(buffer, offset, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    return offset;
+                }
+
+                await target.WriteAsync(buffer.AsMemory(0, read), offset, cancellationToken).ConfigureAwait(false);
                 offset += read;
             }
         }
@@ -200,6 +344,9 @@ public static partial class DirExtensions
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
         private readonly CopyOptions _options;
+        private readonly IProgress<CopyReport>? _progress;
+        private readonly bool _asynchronous;
+        private readonly CancellationToken _cancellationToken;
         private readonly CapFileId? _destinationRoot;
         private readonly List<CopyLevel> _levels = [];
 
@@ -209,9 +356,18 @@ public static partial class DirExtensions
         private int _skipped;
         private long _bytes;
 
-        public Copier(IDir source, IDir destination, CopyOptions options)
+        public Copier(
+            IDir source,
+            IDir destination,
+            CopyOptions options,
+            IProgress<CopyReport>? progress,
+            bool asynchronous,
+            CancellationToken cancellationToken)
         {
             _options = options;
+            _progress = progress;
+            _asynchronous = asynchronous;
+            _cancellationToken = cancellationToken;
 
             // A destination on another backend, such as a tree in memory being filled from
             // one on disk, cannot be inside the source, and the two backends number their
@@ -248,6 +404,8 @@ public static partial class DirExtensions
 
                 while (_levels.Count > 0)
                 {
+                    _cancellationToken.ThrowIfCancellationRequested();
+
                     CopyLevel level = _levels[^1];
                     if (!level.Reader.MoveNext())
                     {
@@ -277,8 +435,72 @@ public static partial class DirExtensions
                 _levels.Clear();
             }
 
-            return new CopyReport(_directories, _files, _symlinks, _skipped, _bytes);
+            return Report;
         }
+
+        /// <summary>Runs the copy in the form that does not hold the calling thread.</summary>
+        /// <remarks>
+        /// <see cref="Run"/> step for step, with each directory read and each file's contents
+        /// moved asynchronously. Everything else an entry needs is the same code both forms
+        /// call, so the two cannot come to disagree about what a copy does.
+        /// </remarks>
+        public async Task<CopyReport> RunAsync(IDir source)
+        {
+            try
+            {
+                Push(source, Destination, ownsSource: false, ownsDestination: false, name: null, metadata: null);
+
+                while (_levels.Count > 0)
+                {
+                    _cancellationToken.ThrowIfCancellationRequested();
+
+                    CopyLevel level = _levels[^1];
+                    if (!await level.Reader.MoveNextAsync().ConfigureAwait(false))
+                    {
+                        _levels.RemoveAt(_levels.Count - 1);
+                        try
+                        {
+                            Finish(level.Destination, level.SourceMetadata, level.Name);
+                        }
+                        finally
+                        {
+                            await level.DisposeAsync().ConfigureAwait(false);
+                        }
+
+                        continue;
+                    }
+
+                    ListedEntry entry = level.Reader.Current;
+                    CapMetadata metadata = entry.GetMetadata();
+
+                    if (metadata.Type == CapFileType.File)
+                    {
+                        await CopyFileAsync(level, entry, metadata).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        CopyOther(level, entry, metadata);
+                    }
+                }
+            }
+            finally
+            {
+                for (int i = _levels.Count - 1; i >= 0; i--)
+                {
+                    await _levels[i].DisposeAsync().ConfigureAwait(false);
+                }
+
+                _levels.Clear();
+            }
+
+            return Report;
+        }
+
+        /// <summary>What has been copied so far.</summary>
+        private CopyReport Report => new(_directories, _files, _symlinks, _skipped, _bytes);
+
+        /// <summary>Tells the caller what has been copied so far, if they asked to be told.</summary>
+        private void Reported() => _progress?.Report(Report);
 
         /// <summary>Copies one entry, by what a fresh description says it is.</summary>
         /// <remarks>
@@ -292,14 +514,27 @@ public static partial class DirExtensions
         {
             CapMetadata metadata = entry.GetMetadata();
 
+            if (metadata.Type == CapFileType.File)
+            {
+                CopyFile(level, entry, metadata);
+            }
+            else
+            {
+                CopyOther(level, entry, metadata);
+            }
+        }
+
+        /// <summary>Copies an entry that is not a file: a directory, a link, or anything else.</summary>
+        /// <remarks>
+        /// Shared by both forms of the copy. Only a file's contents are worth moving
+        /// asynchronously; everything done here is a handful of short calls.
+        /// </remarks>
+        private void CopyOther(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
+        {
             switch (metadata.Type)
             {
                 case CapFileType.Directory:
                     Descend(level, entry, metadata);
-                    break;
-
-                case CapFileType.File:
-                    CopyFile(level, entry, metadata);
                     break;
 
                 case CapFileType.Symlink:
@@ -361,6 +596,7 @@ public static partial class DirExtensions
 
                 Guard(target, metadata, entry.Name);
                 _directories++;
+                Reported();
 
                 if (atLimit)
                 {
@@ -400,9 +636,94 @@ public static partial class DirExtensions
         /// name is written through, so a link there cannot steer the contents into whatever it
         /// points at.
         /// </para>
+        /// <para>
+        /// A file that is not finished — the copy failed or was cancelled while writing it or
+        /// carrying its permissions and times — is removed, under whichever name it was being
+        /// written, so what a stopped copy leaves never includes a partly written file.
+        /// </para>
         /// </remarks>
         private void CopyFile(CopyLevel level, ListedEntry entry, in CapMetadata metadata)
         {
+            using ICapFile? source = OpenSource(level, entry);
+            if (source is null)
+            {
+                return;
+            }
+
+            ICapFile target = Begin(level.Destination, entry.Name, out string? scratch);
+            bool placed = false;
+            try
+            {
+                using (target)
+                {
+                    _bytes += Transfer(source, target, _cancellationToken);
+                    Fill(target, metadata, entry.Name);
+                }
+
+                Place(level.Destination, scratch, entry.Name);
+                placed = true;
+            }
+            finally
+            {
+                if (!placed)
+                {
+                    Discard(level.Destination, scratch, entry.Name);
+                }
+            }
+
+            _files++;
+            Reported();
+        }
+
+        /// <summary>Copies a file's contents into a new file of the same name, without holding the thread.</summary>
+        /// <remarks><see cref="CopyFile"/>, with the contents moved asynchronously.</remarks>
+        private async ValueTask CopyFileAsync(CopyLevel level, ListedEntry entry, CapMetadata metadata)
+        {
+            using ICapFile? source = OpenSource(level, entry);
+            if (source is null)
+            {
+                return;
+            }
+
+            ICapFile target = Begin(level.Destination, entry.Name, out string? scratch);
+            bool placed = false;
+            try
+            {
+                using (target)
+                {
+                    _bytes += await TransferAsync(source, target, _cancellationToken).ConfigureAwait(false);
+                    Fill(target, metadata, entry.Name);
+                }
+
+                Place(level.Destination, scratch, entry.Name);
+                placed = true;
+            }
+            finally
+            {
+                if (!placed)
+                {
+                    Discard(level.Destination, scratch, entry.Name);
+                }
+            }
+
+            _files++;
+            Reported();
+        }
+
+        /// <summary>
+        /// Opens a file in the source for copying, or deals with the name as what it turned out
+        /// to be instead.
+        /// </summary>
+        /// <returns>
+        /// The open file, or null when the name was a link or another kind by the time it was
+        /// opened and has been dealt with as the options say.
+        /// </returns>
+        private ICapFile? OpenSource(CopyLevel level, ListedEntry entry)
+        {
+            FileOptions options = _asynchronous
+                ? FileOptions.SequentialScan | FileOptions.Asynchronous
+                : FileOptions.SequentialScan;
+
             ICapFile opened;
             try
             {
@@ -411,7 +732,7 @@ public static partial class DirExtensions
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.Read,
-                    FileOptions.SequentialScan,
+                    options,
                     0,
                     append: false,
                     noFollow: true);
@@ -423,49 +744,62 @@ public static partial class DirExtensions
                     throw;
                 }
 
-                return;
+                return null;
             }
 
-            using ICapFile source = opened;
-
-            CapMetadata held = source.GetMetadata();
-            if (held.Type != CapFileType.File)
+            bool kept = false;
+            try
             {
-                Irregular(level, entry, held, _options.OtherKinds, recreate: false);
-                return;
-            }
+                CapMetadata held = opened.GetMetadata();
+                if (held.Type != CapFileType.File)
+                {
+                    Irregular(level, entry, held, _options.OtherKinds, recreate: false);
+                    return null;
+                }
 
-            if (_options.Overwrite)
-            {
-                Replace(level.Destination, entry.Name, source, metadata);
+                kept = true;
+                return opened;
             }
-            else
+            finally
             {
-                using ICapFile target = level.Destination.CreateNewFile(entry.Name);
-                Fill(source, target, metadata, entry.Name);
+                if (!kept)
+                {
+                    opened.Dispose();
+                }
             }
-
-            _files++;
         }
 
-        /// <summary>
-        /// Writes a file under a scratch name beside the destination name, then moves it onto
-        /// that name.
-        /// </summary>
+        /// <summary>Creates the file a copied file's contents are written into.</summary>
+        /// <param name="directory">The directory the file is copied into.</param>
+        /// <param name="name">The name it is to have there.</param>
+        /// <param name="scratch">
+        /// The scratch name it was created under, to be moved onto <paramref name="name"/> once
+        /// it is written; null when it was created under <paramref name="name"/> itself.
+        /// </param>
         /// <remarks>
+        /// <para>
+        /// Without replacement the file is created exclusively under its real name. With it, a
+        /// directory at the name is refused before anything is written — the move would refuse
+        /// it too, but each platform reports that in its own way, and a copy that has been told
+        /// to replace files still has no business deciding to replace a directory — and the
+        /// file is created under a scratch name beside it.
+        /// </para>
         /// <para>
         /// A move acts on the name, not on what the name refers to, so whatever was there — a
         /// file, or a link to anything at all — is replaced and never written through. A link
         /// is gone afterwards and its target is left exactly as it was.
         /// </para>
-        /// <para>
-        /// A directory at the name is refused before anything is written. The move would
-        /// refuse it too, but each platform reports that in its own way, and a copy that has
-        /// been told to replace files still has no business deciding to replace a directory.
-        /// </para>
         /// </remarks>
-        private void Replace(IDir directory, string name, ICapFile source, in CapMetadata metadata)
+        private ICapFile Begin(IDir directory, string name, out string? scratch)
         {
+            if (!_options.Overwrite)
+            {
+                scratch = null;
+                return _asynchronous
+                    ? directory.OpenFile(name, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.Asynchronous)
+                    : directory.CreateNewFile(name);
+            }
+
             if (directory.TryGetMetadata(name, out CapMetadata existing) &&
                 existing.Type == CapFileType.Directory)
             {
@@ -476,34 +810,38 @@ public static partial class DirExtensions
                     $"first if it is meant to go.");
             }
 
-            string? scratch = Claim(directory, asynchronous: false, ownerOnly: false, out ICapFile target);
-            try
-            {
-                using (target)
-                {
-                    Fill(source, target, metadata, name);
-                }
+            scratch = Claim(directory, _asynchronous, ownerOnly: false, out ICapFile target);
+            return target;
+        }
 
-                directory.Rename(scratch, directory, name, replaceExisting: true);
-                scratch = null;
-            }
-            finally
+        /// <summary>Moves a file written under a scratch name onto its real name.</summary>
+        private static void Place(IDir directory, string? scratch, string name)
+        {
+            if (scratch is not null)
             {
-                Abandon(directory, scratch);
+                directory.Rename(scratch, directory, name, replaceExisting: true);
             }
         }
 
+        /// <summary>Removes a file the copy did not finish, under whichever name it was written.</summary>
+        /// <remarks>
+        /// Failures are dropped, as <see cref="Abandon"/> drops them: this runs from a
+        /// <c>finally</c>, where the exception worth reporting is the one already on its way out.
+        /// A file created under its real name was created exclusively by this copy, so the name
+        /// removed is one the copy made.
+        /// </remarks>
+        private static void Discard(IDir directory, string? scratch, string name) =>
+            _ = directory.TryDeleteFile(scratch ?? name);
+
         /// <summary>
-        /// Writes the source's contents into a file, and its permissions and times if asked.
+        /// Gives a file whose contents have been written its permissions and times, if asked.
         /// </summary>
         /// <remarks>
         /// The times are set last, after every write, so that nothing written afterwards moves
         /// them on again.
         /// </remarks>
-        private void Fill(ICapFile source, ICapFile target, in CapMetadata metadata, string name)
+        private void Fill(ICapFile target, in CapMetadata metadata, string name)
         {
-            _bytes += Transfer(source, target);
-
             if (_options.PreservePermissions)
             {
                 if (target is CapFile file)
@@ -535,6 +873,7 @@ public static partial class DirExtensions
             {
                 case CopyAction.Skip:
                     _skipped++;
+                    Reported();
                     return;
 
                 case CopyAction.Recreate when recreate:
@@ -647,6 +986,7 @@ public static partial class DirExtensions
             }
 
             _symlinks++;
+            Reported();
         }
 
         /// <summary>
@@ -754,7 +1094,14 @@ public static partial class DirExtensions
 
         private void Push(
             IDir source, IDir destination, bool ownsSource, bool ownsDestination, string? name, CapMetadata? metadata) =>
-            _levels.Add(new CopyLevel(source, destination, ownsSource, ownsDestination, name, metadata));
+            _levels.Add(new CopyLevel(
+                source,
+                destination,
+                ownsSource,
+                ownsDestination,
+                name,
+                metadata,
+                _asynchronous ? EntryReader.OpenAsync(source, _cancellationToken) : EntryReader.Open(source)));
     }
 
     /// <summary>One pair of open directories the copy is working between.</summary>
@@ -764,7 +1111,13 @@ public static partial class DirExtensions
         private readonly bool _ownsDestination;
 
         public CopyLevel(
-            IDir source, IDir destination, bool ownsSource, bool ownsDestination, string? name, CapMetadata? sourceMetadata)
+            IDir source,
+            IDir destination,
+            bool ownsSource,
+            bool ownsDestination,
+            string? name,
+            CapMetadata? sourceMetadata,
+            EntryReader reader)
         {
             Source = source;
             Destination = destination;
@@ -772,7 +1125,7 @@ public static partial class DirExtensions
             SourceMetadata = sourceMetadata;
             _ownsSource = ownsSource;
             _ownsDestination = ownsDestination;
-            Reader = EntryReader.Open(source);
+            Reader = reader;
         }
 
         /// <summary>The directory being read.</summary>
@@ -796,10 +1149,22 @@ public static partial class DirExtensions
         /// <summary>The reading in progress.</summary>
         public EntryReader Reader { get; }
 
+        /// <summary>Stops a reading made on the calling thread and closes what this level opened.</summary>
         public void Dispose()
         {
             Reader.Dispose();
+            Close();
+        }
 
+        /// <summary>Stops a reading of either form, waiting for it to stop, and closes what this level opened.</summary>
+        public async ValueTask DisposeAsync()
+        {
+            await Reader.DisposeAsync().ConfigureAwait(false);
+            Close();
+        }
+
+        private void Close()
+        {
             if (_ownsSource)
             {
                 Source.Dispose();

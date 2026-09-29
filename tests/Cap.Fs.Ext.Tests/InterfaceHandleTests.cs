@@ -344,7 +344,7 @@ public sealed class InterfaceHandleTests
         using RecordingDir source = new(_fs.OpenRoot("a", SymlinkPolicy.FollowWithinSandbox));
         using RecordingDir destination = new(_fs.OpenRoot("copy", SymlinkPolicy.FollowWithinSandbox), [], "dest");
 
-        CopyReport report = source.CopyTo(destination);
+        CopyReport report = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(2, report.Files);
         Assert.Equal(2, report.Directories);
@@ -364,6 +364,36 @@ public sealed class InterfaceHandleTests
     }
 
     [Fact]
+    public async Task An_asynchronous_copy_through_the_interface_reads_and_writes_asynchronously()
+    {
+        Tree();
+        _fs.AddDirectory("copy");
+        using RecordingDir source = new(_fs.OpenRoot("a", SymlinkPolicy.FollowWithinSandbox));
+        using RecordingDir destination = new(_fs.OpenRoot("copy", SymlinkPolicy.FollowWithinSandbox), [], "dest");
+
+        CopyReport report = await source.CopyToAsync(
+            destination, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, report.Files);
+        Assert.Equal(2, report.Directories);
+        Assert.Equal("one", _fs.ReadAllText("copy/one.txt"));
+        Assert.Equal("two", _fs.ReadAllText("copy/b/two.txt"));
+        Assert.Equal(["b", "empty", "one.txt"], _fs.GetEntries("copy"));
+
+        // Directories are read, and contents written, in the forms that do not hold the thread;
+        // the names are still made one component at a time in the directory that holds them.
+        Assert.Contains(".: EnumerateEntriesAsync()", source.Log);
+        Assert.Contains("./b: EnumerateEntriesAsync()", source.Log);
+        Assert.DoesNotContain(source.Log, call => call.EndsWith(": EnumerateEntries()", StringComparison.Ordinal));
+        Assert.Contains("dest/one.txt: WriteAsync(3, 0)", destination.Log);
+        Assert.Contains("dest/b/two.txt: WriteAsync(3, 0)", destination.Log);
+        Assert.DoesNotContain(destination.Log, call => call.Contains(": Write(", StringComparison.Ordinal));
+        Assert.Contains(".: OpenFile(one.txt, Open, True)", source.Log);
+        AssertEveryNameIsOneComponent(source);
+        AssertEveryNameIsOneComponent(destination);
+    }
+
+    [Fact]
     public void A_copy_through_the_interface_opens_each_entry_refusing_links()
     {
         Tree();
@@ -371,7 +401,7 @@ public sealed class InterfaceHandleTests
         using RecordingDir source = new(_fs.OpenRoot("a", SymlinkPolicy.FollowWithinSandbox));
         using RecordingDir destination = new(_fs.OpenRoot("copy", SymlinkPolicy.FollowWithinSandbox), [], "dest");
 
-        _ = source.CopyTo(destination);
+        _ = source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken);
 
         // A name described as a directory or a file may be a link by the time it is opened, so
         // the open itself refuses one rather than following it under the handle's policy.
@@ -393,7 +423,7 @@ public sealed class InterfaceHandleTests
         using RecordingDir source = new(_fs.OpenRoot("src", SymlinkPolicy.FollowWithinSandbox));
         using RecordingDir destination = new(_fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox), [], "dest");
 
-        _ = source.CopyTo(destination, new CopyOptions { Overwrite = true });
+        _ = source.CopyTo(destination, new CopyOptions { Overwrite = true }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("new", _fs.ReadAllText("dst/data.txt"));
         Assert.Contains(destination.Log, call =>
@@ -411,7 +441,7 @@ public sealed class InterfaceHandleTests
         using RecordingDir source = new(_fs.OpenRoot("src", SymlinkPolicy.FollowWithinSandbox));
         using RecordingDir destination = new(_fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox), [], "dest");
 
-        CopyReport report = source.CopyTo(destination, new CopyOptions { PreservePermissions = true });
+        CopyReport report = source.CopyTo(destination, new CopyOptions { PreservePermissions = true }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Files);
         Assert.Contains(destination.Log, call => call.StartsWith("dest/inner: SetPermissions(", StringComparison.Ordinal));
@@ -437,7 +467,7 @@ public sealed class InterfaceHandleTests
         using Dir source = fs.OpenRoot("src", SymlinkPolicy.FollowWithinSandbox);
         using RecordingDir destination = new(fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox), [], "dest");
 
-        _ = source.CopyTo(destination, new CopyOptions { PreservePermissions = true });
+        _ = source.CopyTo(destination, new CopyOptions { PreservePermissions = true }, cancellationToken: TestContext.Current.CancellationToken);
 
         List<string> log = destination.Log;
         int guarded = log.IndexOf($"dest/inner: SetPermissions({UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute})");
@@ -457,7 +487,7 @@ public sealed class InterfaceHandleTests
         using RecordingDir source = new(_fs.OpenRoot("src", SymlinkPolicy.FollowWithinSandbox));
         using Dir destination = _fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox);
 
-        CopyReport report = source.CopyTo(destination, new CopyOptions { PreservePermissions = true });
+        CopyReport report = source.CopyTo(destination, new CopyOptions { PreservePermissions = true }, cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal(1, report.Files);
         Assert.Equal("x", _fs.ReadAllText("dst/data.txt"));
@@ -469,7 +499,7 @@ public sealed class InterfaceHandleTests
         Tree();
         using RecordingDir root = Root();
 
-        root.DeleteTree("a");
+        root.DeleteTree("a", TestContext.Current.CancellationToken);
 
         Assert.Equal(["top.txt"], _fs.GetEntries());
         Assert.Equal(".: Restrict(Deny)", root.Log[0]);
@@ -489,7 +519,7 @@ public sealed class InterfaceHandleTests
         _fs.AddSymbolicLink("doomed/link", "../keep", targetIsDirectory: true);
         using RecordingDir root = Root();
 
-        root.DeleteTree("doomed");
+        root.DeleteTree("doomed", TestContext.Current.CancellationToken);
 
         Assert.False(_fs.Exists("doomed"));
         Assert.Equal("p", _fs.ReadAllText("keep/precious.txt"));
@@ -502,11 +532,11 @@ public sealed class InterfaceHandleTests
         _fs.AddSymbolicLink("link", "a", targetIsDirectory: true);
         using RecordingDir root = Root();
 
-        Assert.Equal(CapErrorKind.NotADirectory, Assert.Throws<CapIOException>(() => root.DeleteTree("top.txt")).Kind);
-        Assert.Equal(CapErrorKind.SymbolicLink, Assert.Throws<CapIOException>(() => root.DeleteTree("link")).Kind);
-        _ = Assert.Throws<DirectoryNotFoundException>(() => root.DeleteTree("missing"));
-        Assert.False(root.TryDeleteTree("top.txt"));
-        Assert.False(root.TryDeleteTree("missing"));
+        Assert.Equal(CapErrorKind.NotADirectory, Assert.Throws<CapIOException>(() => root.DeleteTree("top.txt", TestContext.Current.CancellationToken)).Kind);
+        Assert.Equal(CapErrorKind.SymbolicLink, Assert.Throws<CapIOException>(() => root.DeleteTree("link", TestContext.Current.CancellationToken)).Kind);
+        _ = Assert.Throws<DirectoryNotFoundException>(() => root.DeleteTree("missing", TestContext.Current.CancellationToken));
+        Assert.False(root.TryDeleteTree("top.txt", TestContext.Current.CancellationToken));
+        Assert.False(root.TryDeleteTree("missing", TestContext.Current.CancellationToken));
 
         Assert.True(_fs.Exists("top.txt"));
         Assert.True(_fs.Exists("link"));
@@ -520,7 +550,7 @@ public sealed class InterfaceHandleTests
         _fs.SetUndeletable("a/one.txt");
         using RecordingDir root = Root();
 
-        _ = Assert.Throws<UnauthorizedAccessException>(() => root.DeleteTree("a"));
+        _ = Assert.Throws<UnauthorizedAccessException>(() => root.DeleteTree("a", TestContext.Current.CancellationToken));
 
         Assert.True(_fs.Exists("a/one.txt"));
         Assert.False(_fs.Exists("a/b"));
@@ -534,7 +564,7 @@ public sealed class InterfaceHandleTests
         using RecordingDir root = Root();
         using IDir a = root.OpenDir("a");
 
-        a.DeleteTreeContents();
+        a.DeleteTreeContents(TestContext.Current.CancellationToken);
 
         Assert.True(_fs.Exists("a"));
         Assert.Empty(_fs.GetEntries("a"));

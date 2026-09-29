@@ -496,7 +496,7 @@ public sealed class CopyTests : IDisposable
         using Dir source = _tree.Directory.OpenDir("source");
         using Dir destination = source.OpenDir("destination");
 
-        CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination));
+        CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
     }
 
@@ -517,7 +517,7 @@ public sealed class CopyTests : IDisposable
         using Dir source = _tree.Directory.OpenDir("source");
         using Dir destination = source.OpenDir(Path.Combine("outer", "destination"));
 
-        CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination));
+        CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
         string left = Path.Combine(_tree.HostPath, "source", "outer", "destination");
@@ -551,7 +551,7 @@ public sealed class CopyTests : IDisposable
         CapFileId b = source.GetMetadata(Path.Combine("sub", "b.txt")).FileId;
 
         CapIOException refused = Assert.Throws<CapIOException>(
-            () => source.CopyTo(same, new CopyOptions { Overwrite = overwrite }));
+            () => source.CopyTo(same, new CopyOptions { Overwrite = overwrite }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
         Assert.Equal(a, source.GetMetadata("a.txt").FileId);
@@ -586,7 +586,7 @@ public sealed class CopyTests : IDisposable
         using RecordingDir same = new(_tree.Directory.OpenDir("source"), log, "same");
 
         CapIOException refused = Assert.Throws<CapIOException>(
-            () => source.CopyTo(same, new CopyOptions { Overwrite = true }));
+            () => source.CopyTo(same, new CopyOptions { Overwrite = true }, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
         Assert.Equal(["same: GetMetadata()", "src: GetMetadata()"], log);
@@ -653,6 +653,260 @@ public sealed class CopyTests : IDisposable
         Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "destination", "1", "2", "3")));
     }
 
+    /// <summary>The asynchronous copy reproduces a tree as the synchronous one does.</summary>
+    [Fact]
+    public async Task The_asynchronous_copy_reproduces_the_tree()
+    {
+        Make("source", "top.txt");
+        Make("source", "a", "b", "deep.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+
+        CopyReport report = await Run(asynchronous: true, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("contents", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "destination", "top.txt")));
+        Assert.Equal(
+            "contents",
+            HostFile.ReadAllText(Path.Combine(_tree.HostPath, "destination", "a", "b", "deep.txt")));
+        Assert.Equal(2, report.Files);
+        Assert.Equal(2, report.Directories);
+        Assert.Equal(0, report.Skipped);
+        Assert.Equal(2 * "contents".Length, report.Bytes);
+    }
+
+    /// <summary>
+    /// Progress is reported once per entry, its counts never go down, and the last report is
+    /// the one returned.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Progress_is_reported_monotonically(bool asynchronous)
+    {
+        Make("source", "top.txt");
+        Make("source", "a", "one.txt");
+        Make("source", "a", "b", "two.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        List<CopyReport> reports = [];
+
+        CopyReport report = await Run(asynchronous, progress: new Reports(reports.Add), cancellationToken: TestContext.Current.CancellationToken);
+
+        // Three files and two directories, each reported as it was done.
+        Assert.Equal(5, reports.Count);
+        for (int i = 1; i < reports.Count; i++)
+        {
+            Assert.True(reports[i].Files >= reports[i - 1].Files);
+            Assert.True(reports[i].Directories >= reports[i - 1].Directories);
+            Assert.True(reports[i].Bytes >= reports[i - 1].Bytes);
+            Assert.Equal(
+                Total(reports[i - 1]) + 1,
+                Total(reports[i]));
+        }
+
+        Assert.Equal(Counts(report), Counts(reports[^1]));
+    }
+
+    /// <summary>
+    /// A copy stopped between files keeps the files it finished and leaves no scratch name.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_cancelled_copy_leaves_no_scratch_file_and_keeps_what_was_copied(bool asynchronous)
+    {
+        byte[] contents = Contents(1024 * 1024);
+        for (int i = 0; i < 4; i++)
+        {
+            MakeBytes(contents, "source", $"file{i}.bin");
+        }
+
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        HostDirectory.CreateDirectory(destination);
+        using CancellationTokenSource cancel = new();
+        Reports progress = new(report =>
+        {
+            if (report.Files == 1)
+            {
+                cancel.Cancel();
+            }
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Run(asynchronous, new CopyOptions { Overwrite = true }, progress, cancellationToken: cancel.Token));
+
+        string copied = Assert.Single(HostDirectory.GetFileSystemEntries(destination));
+        Assert.Equal(contents, HostFile.ReadAllBytes(copied));
+    }
+
+    /// <summary>
+    /// A copy stopped part of the way through a file leaves no part of that file under any
+    /// name, and whatever the name held before is left holding it.
+    /// </summary>
+    /// <remarks>
+    /// Stopped from inside the file's second write, which is past the point where a file
+    /// created under its real name has contents in it, and so past the point where leaving it
+    /// would leave a truncated file looking like a copied one.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task A_copy_cancelled_part_way_through_a_file_leaves_no_part_of_it(bool overwrite, bool asynchronous)
+    {
+        MakeBytes(Contents(1024 * 1024), "source", "big.bin");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        HostDirectory.CreateDirectory(destination);
+        if (overwrite)
+        {
+            HostFile.WriteAllText(Path.Combine(destination, "big.bin"), "old");
+        }
+
+        using CancellationTokenSource cancel = new();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Run(
+            asynchronous,
+            new CopyOptions { Overwrite = overwrite },
+            cancellationToken: cancel.Token,
+            observe: call =>
+            {
+                if (IsLaterWrite(call))
+                {
+                    cancel.Cancel();
+                }
+            }));
+
+        AssertNothingHalfWritten(destination, overwrite);
+    }
+
+    /// <summary>
+    /// A copy that fails part of the way through a file removes what it had written of it,
+    /// as a cancelled one does.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task A_copy_that_fails_part_way_through_a_file_leaves_no_part_of_it(bool overwrite, bool asynchronous)
+    {
+        MakeBytes(Contents(1024 * 1024), "source", "big.bin");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        HostDirectory.CreateDirectory(destination);
+        if (overwrite)
+        {
+            HostFile.WriteAllText(Path.Combine(destination, "big.bin"), "old");
+        }
+
+        IOException injected = await Assert.ThrowsAsync<IOException>(() => Run(
+            asynchronous,
+            new CopyOptions { Overwrite = overwrite },
+            observe: call =>
+            {
+                if (IsLaterWrite(call))
+                {
+                    throw new IOException("The device failed part of the way through the file.");
+                }
+            }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("The device failed part of the way through the file.", injected.Message);
+        AssertNothingHalfWritten(destination, overwrite);
+    }
+
+    /// <summary>A copy asked to stop before it starts writes nothing.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_copy_already_cancelled_writes_nothing(bool asynchronous)
+    {
+        Make("source", "top.txt");
+        Make("source", "a", "deep.txt");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        HostDirectory.CreateDirectory(destination);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => Run(asynchronous, cancellationToken: new CancellationToken(canceled: true)));
+
+        Assert.Empty(HostDirectory.GetFileSystemEntries(destination));
+    }
+
+    /// <summary>
+    /// Whether a logged call is a write into a file past its first piece, which only a file
+    /// larger than one piece has.
+    /// </summary>
+    private static bool IsLaterWrite(string call) =>
+        call.Contains(": Write", StringComparison.Ordinal) && !call.EndsWith(", 0)", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Asserts that the destination holds no scratch name, and that <c>big.bin</c> is absent
+    /// or, when it was there to be replaced, still holds what it held.
+    /// </summary>
+    private static void AssertNothingHalfWritten(string destination, bool overwrite)
+    {
+        Assert.DoesNotContain(
+            HostDirectory.GetFileSystemEntries(destination),
+            entry => Path.GetFileName(entry).StartsWith("cap-", StringComparison.Ordinal));
+
+        string big = Path.Combine(destination, "big.bin");
+        if (overwrite)
+        {
+            Assert.Equal("old", HostFile.ReadAllText(big));
+        }
+        else
+        {
+            Assert.False(HostEntry.Exists(big));
+        }
+    }
+
+    /// <summary>
+    /// Copies the scratch tree's source directory into its destination directory, in the form
+    /// asked for, optionally through a destination that shows each call to an observer.
+    /// </summary>
+    private async Task<CopyReport> Run(
+        bool asynchronous,
+        CopyOptions? options = null,
+        IProgress<CopyReport>? progress = null,
+        Action<string>? observe = null,
+        CancellationToken cancellationToken = default)
+    {
+        using Dir source = _tree.Directory.OpenDir("source");
+        using Dir opened = _tree.Directory.OpenDir("destination");
+
+        // Not disposed: disposing it would close the handle beneath it a second time.
+        IDir destination = observe is null ? opened : new RecordingDir(opened, [], "dest", observe);
+
+        return asynchronous
+            ? await source.CopyToAsync(destination, options, progress, cancellationToken)
+            : source.CopyTo(destination, options, progress, cancellationToken);
+    }
+
+    /// <summary>The counts in a report, in a form that compares by value.</summary>
+    private static (int Directories, int Files, int Symlinks, int Skipped, long Bytes) Counts(CopyReport report) =>
+        (report.Directories, report.Files, report.Symlinks, report.Skipped, report.Bytes);
+
+    /// <summary>How many entries a report accounts for.</summary>
+    private static int Total(CopyReport report) =>
+        report.Directories + report.Files + report.Symlinks + report.Skipped;
+
+    /// <summary>Contents that differ from one position to the next, so a misplaced piece shows.</summary>
+    private static byte[] Contents(int length)
+    {
+        byte[] contents = new byte[length];
+        for (int i = 0; i < length; i++)
+        {
+            contents[i] = (byte)(i * 31 % 251);
+        }
+
+        return contents;
+    }
+
+    /// <summary>Creates a file holding the given bytes, and whatever directories it needs.</summary>
+    private void MakeBytes(byte[] contents, params string[] parts)
+    {
+        string path = Path.Combine([_tree.HostPath, .. parts]);
+        HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
+        HostFile.WriteAllBytes(path, contents);
+    }
+
     /// <summary>Copies the scratch tree's source directory into its destination directory.</summary>
     private CopyReport Copy(CopyOptions? options = null)
     {
@@ -693,5 +947,14 @@ public sealed class CopyTests : IDisposable
         {
             throw new InvalidOperationException($"'{program}' failed with {process.ExitCode}.");
         }
+    }
+
+    /// <summary>
+    /// Progress that is handed each report at once, on the copying thread, rather than posted
+    /// elsewhere as <see cref="Progress{T}"/> would post it.
+    /// </summary>
+    private sealed class Reports(Action<CopyReport> report) : IProgress<CopyReport>
+    {
+        public void Report(CopyReport value) => report(value);
     }
 }

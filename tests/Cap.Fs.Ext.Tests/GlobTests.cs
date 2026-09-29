@@ -240,6 +240,71 @@ public sealed class GlobTests : IDisposable
         Assert.Equal("*.txt", pattern.ToString());
     }
 
+    /// <summary>The asynchronous search finds exactly what the synchronous one finds.</summary>
+    [Theory]
+    [InlineData("*")]
+    [InlineData("*.txt")]
+    [InlineData("a/*")]
+    [InlineData("**/*.txt")]
+    [InlineData("a/**")]
+    public async Task The_asynchronous_search_finds_the_same_names(string pattern)
+    {
+        string native = pattern.Replace('/', Path.DirectorySeparatorChar);
+        List<string> found = [];
+        List<int> depths = [];
+
+        await foreach (WalkEntry entry in _tree.Directory.GlobAsync(
+            native, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            found.Add(entry.Name);
+            depths.Add(entry.Depth);
+        }
+
+        Assert.Equal(Matches(native).Order(), found.Order());
+        Assert.Equal(
+            _tree.Directory.Glob(native).Select(e => e.Depth).Order(),
+            depths.Order());
+    }
+
+    /// <summary>A pattern parsed once drives the asynchronous search as it drives the synchronous one.</summary>
+    [Fact]
+    public async Task A_parsed_pattern_drives_the_asynchronous_search()
+    {
+        GlobPattern pattern = GlobPattern.Parse(Path.Combine("**", "*.md"));
+        List<string> found = [];
+
+        await foreach (WalkEntry entry in _tree.Directory.GlobAsync(
+            pattern, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            found.Add(entry.Name);
+        }
+
+        Assert.Equal(Names(pattern).Order(), found.Order());
+    }
+
+    /// <summary>An asynchronous search asked to stop throws rather than finishing.</summary>
+    [Fact]
+    public async Task A_cancelled_asynchronous_search_stops()
+    {
+        CancellationToken cancelled = new(canceled: true);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (WalkEntry entry in _tree.Directory.GlobAsync(
+                Path.Combine("**", "*.txt"), cancellationToken: cancelled))
+            {
+                _ = entry.Name;
+            }
+        });
+    }
+
+    /// <summary>A pattern that cannot be matched is refused when the search is asked for, not when it is read.</summary>
+    [Fact]
+    public void An_unusable_pattern_is_refused_by_the_asynchronous_form_at_the_call()
+    {
+        Assert.Throws<ArgumentException>(() => _tree.Directory.GlobAsync(Path.Combine("..", "*"), cancellationToken: TestContext.Current.CancellationToken));
+    }
+
     /// <summary>The names a pattern matches in the scratch tree.</summary>
     private string[] Matches(string pattern) => Names(GlobPattern.Parse(pattern));
 

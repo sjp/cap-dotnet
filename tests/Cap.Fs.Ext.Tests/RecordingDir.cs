@@ -23,8 +23,15 @@ namespace Cap.Fs.Ext.Tests;
 /// wrapped so their writes and flushes are logged too. A handle passed in as a destination is
 /// unwrapped before it reaches the real one.
 /// </para>
+/// <para>
+/// An observer, when one is given, is shown each call as it is written down, by every handle
+/// and file sharing the log. A test uses it to act at an exact point in an operation — to
+/// cancel a copy part of the way through a file, or to fail one — which no amount of timing
+/// could arrange reliably. A write is written down before it is made, so an observer that
+/// throws stops it.
+/// </para>
 /// </remarks>
-internal sealed class RecordingDir(IDir inner, List<string> log, string label) : IDir
+internal sealed class RecordingDir(IDir inner, List<string> log, string label, Action<string>? observe = null) : IDir
 {
     public RecordingDir(IDir inner)
         : this(inner, [], ".")
@@ -336,18 +343,24 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
 
     private T Record<T>(T result, object? first = null, object? second = null, object? third = null, object? fourth = null, [CallerMemberName] string member = "")
     {
-        log.Add($"{label}: {member}({string.Join(", ", new[] { first, second, third, fourth }.Where(a => a is not null))})");
+        Add($"{label}: {member}({string.Join(", ", new[] { first, second, third, fourth }.Where(a => a is not null))})");
         return result;
     }
 
     private RecordingDir Child(IDir dir, string path) =>
-        new(dir, log, path == "." ? label : $"{label}/{path.TrimEnd('/', '\\')}");
+        new(dir, log, path == "." ? label : $"{label}/{path.TrimEnd('/', '\\')}", observe);
 
-    private RecordingFile File(ICapFile file, string path) => new(file, log, $"{label}/{path}");
+    private RecordingFile File(ICapFile file, string path) => new(file, log, $"{label}/{path}", observe);
+
+    private void Add(string call)
+    {
+        log.Add(call);
+        observe?.Invoke(call);
+    }
 
     private bool Opened(bool opened, [NotNullWhen(true)] ref IDir? dir, string path, string call)
     {
-        log.Add(call);
+        Add(call);
         if (opened)
         {
             dir = Child(dir!, path);
@@ -358,7 +371,7 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
 
     private bool FileOpened(bool opened, [NotNullWhen(true)] ref ICapFile? file, string path, string call)
     {
-        log.Add(call);
+        Add(call);
         if (opened)
         {
             file = File(file!, path);
@@ -369,7 +382,7 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
 }
 
 /// <summary>An <see cref="ICapFile"/> that forwards to a real one and logs its writes and flushes.</summary>
-internal sealed class RecordingFile(ICapFile inner, List<string> log, string label) : ICapFile
+internal sealed class RecordingFile(ICapFile inner, List<string> log, string label, Action<string>? observe = null) : ICapFile
 {
     public FileAccess Access => inner.Access;
 
@@ -389,19 +402,19 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
 
     public void SetTimes(CapFileTime lastAccess = default, CapFileTime lastWrite = default)
     {
-        log.Add($"{label}: SetTimes()");
+        Add($"{label}: SetTimes()");
         inner.SetTimes(lastAccess, lastWrite);
     }
 
     public void SetPermissions(in CapPermissions permissions)
     {
-        log.Add($"{label}: SetPermissions({permissions})");
+        Add($"{label}: SetPermissions({permissions})");
         inner.SetPermissions(permissions);
     }
 
     public void Flush(bool toDisk)
     {
-        log.Add($"{label}: Flush({toDisk})");
+        Add($"{label}: Flush({toDisk})");
         inner.Flush(toDisk);
     }
 
@@ -409,7 +422,7 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
 
     public void Write(ReadOnlySpan<byte> buffer, long fileOffset)
     {
-        log.Add($"{label}: Write({buffer.Length}, {fileOffset})");
+        Add($"{label}: Write({buffer.Length}, {fileOffset})");
         inner.Write(buffer, fileOffset);
     }
 
@@ -418,11 +431,11 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
 
     public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long fileOffset, CancellationToken cancellationToken = default)
     {
-        log.Add($"{label}: WriteAsync({buffer.Length}, {fileOffset})");
+        Add($"{label}: WriteAsync({buffer.Length}, {fileOffset})");
         return inner.WriteAsync(buffer, fileOffset, cancellationToken);
     }
 
-    public ICapFile Clone() => new RecordingFile(inner.Clone(), log, label);
+    public ICapFile Clone() => new RecordingFile(inner.Clone(), log, label, observe);
 
     public bool TryClone([NotNullWhen(true)] out ICapFile? clone)
     {
@@ -432,7 +445,7 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
             return false;
         }
 
-        clone = new RecordingFile(copy, log, label);
+        clone = new RecordingFile(copy, log, label, observe);
         return true;
     }
 
@@ -440,4 +453,10 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
         inner.AsStream(leaveOpen, bufferSize);
 
     public void Dispose() => inner.Dispose();
+
+    private void Add(string call)
+    {
+        log.Add(call);
+        observe?.Invoke(call);
+    }
 }

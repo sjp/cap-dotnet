@@ -35,7 +35,7 @@ public sealed class DeleteTreeTests : IDisposable
         Make("doomed", "top.txt");
         Make("kept.txt");
 
-        _tree.Directory.DeleteTree("doomed");
+        _tree.Directory.DeleteTree("doomed", TestContext.Current.CancellationToken);
 
         Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "doomed")));
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "kept.txt")));
@@ -52,7 +52,7 @@ public sealed class DeleteTreeTests : IDisposable
     {
         Make("a", "b", "doomed", "leaf.txt");
 
-        _tree.Directory.DeleteTree(Path.Combine("a", "b", "doomed"));
+        _tree.Directory.DeleteTree(Path.Combine("a", "b", "doomed"), TestContext.Current.CancellationToken);
 
         Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "a", "b", "doomed")));
         Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "a", "b")));
@@ -75,7 +75,7 @@ public sealed class DeleteTreeTests : IDisposable
         HostDirectory.CreateSymbolicLink(
             Path.Combine(_tree.HostPath, "doomed", "escape"), Path.Combine("..", "elsewhere"));
 
-        _tree.Directory.DeleteTree("doomed");
+        _tree.Directory.DeleteTree("doomed", TestContext.Current.CancellationToken);
 
         Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "doomed")));
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "elsewhere", "precious.txt")));
@@ -93,7 +93,7 @@ public sealed class DeleteTreeTests : IDisposable
         Make("elsewhere", "precious.txt");
         HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "doomed"), "elsewhere");
 
-        Assert.ThrowsAny<IOException>(() => _tree.Directory.DeleteTree("doomed"));
+        Assert.ThrowsAny<IOException>(() => _tree.Directory.DeleteTree("doomed", TestContext.Current.CancellationToken));
 
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "elsewhere", "precious.txt")));
         Assert.True(HostEntry.Exists(Path.Combine(_tree.HostPath, "doomed")));
@@ -105,7 +105,7 @@ public sealed class DeleteTreeTests : IDisposable
     {
         Make("doomed");
 
-        Assert.ThrowsAny<IOException>(() => _tree.Directory.DeleteTree("doomed"));
+        Assert.ThrowsAny<IOException>(() => _tree.Directory.DeleteTree("doomed", TestContext.Current.CancellationToken));
 
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "doomed")));
     }
@@ -114,17 +114,17 @@ public sealed class DeleteTreeTests : IDisposable
     [Fact]
     public void A_missing_tree_is_reported()
     {
-        Assert.Throws<DirectoryNotFoundException>(() => _tree.Directory.DeleteTree("absent"));
+        Assert.Throws<DirectoryNotFoundException>(() => _tree.Directory.DeleteTree("absent", TestContext.Current.CancellationToken));
     }
 
     /// <summary>The reporting form answers false rather than building an exception.</summary>
     [Fact]
     public void The_reporting_form_answers_false_for_a_missing_tree()
     {
-        Assert.False(_tree.Directory.TryDeleteTree("absent"));
+        Assert.False(_tree.Directory.TryDeleteTree("absent", TestContext.Current.CancellationToken));
 
         Make("present", "leaf.txt");
-        Assert.True(_tree.Directory.TryDeleteTree("present"));
+        Assert.True(_tree.Directory.TryDeleteTree("present", TestContext.Current.CancellationToken));
     }
 
     /// <summary>A path that climbs out of the handle's authority is refused.</summary>
@@ -132,7 +132,7 @@ public sealed class DeleteTreeTests : IDisposable
     public void A_path_that_climbs_out_is_refused()
     {
         Assert.Throws<SandboxEscapeException>(
-            () => _tree.Directory.DeleteTree(Path.Combine("..", "elsewhere")));
+            () => _tree.Directory.DeleteTree(Path.Combine("..", "elsewhere"), TestContext.Current.CancellationToken));
     }
 
     /// <summary>A path that climbs and descends again, staying inside, names the tree it reaches.</summary>
@@ -142,7 +142,7 @@ public sealed class DeleteTreeTests : IDisposable
         Make("a", "doomed", "leaf.txt");
         Make("a", "b", "kept.txt");
 
-        _tree.Directory.DeleteTree("a/b/../doomed");
+        _tree.Directory.DeleteTree("a/b/../doomed", TestContext.Current.CancellationToken);
 
         Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "a", "doomed")));
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "a", "b", "kept.txt")));
@@ -161,10 +161,10 @@ public sealed class DeleteTreeTests : IDisposable
     {
         Make("a", "b", "leaf.txt");
 
-        CapIOException thrown = Assert.ThrowsAny<CapIOException>(() => _tree.Directory.DeleteTree("a/b/.."));
+        CapIOException thrown = Assert.ThrowsAny<CapIOException>(() => _tree.Directory.DeleteTree("a/b/..", TestContext.Current.CancellationToken));
         Assert.Equal(CapErrorKind.InvalidArgument, thrown.Kind);
-        Assert.False(_tree.Directory.TryDeleteTree("a/.."));
-        Assert.Throws<SandboxEscapeException>(() => _tree.Directory.TryDeleteTree("a/../.."));
+        Assert.False(_tree.Directory.TryDeleteTree("a/..", TestContext.Current.CancellationToken));
+        Assert.Throws<SandboxEscapeException>(() => _tree.Directory.TryDeleteTree("a/../..", TestContext.Current.CancellationToken));
 
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "a", "b", "leaf.txt")));
     }
@@ -180,10 +180,122 @@ public sealed class DeleteTreeTests : IDisposable
         Make("a", "b", "leaf.txt");
         Make("top.txt");
 
-        _tree.Directory.DeleteTreeContents();
+        _tree.Directory.DeleteTreeContents(TestContext.Current.CancellationToken);
 
         Assert.True(HostDirectory.Exists(_tree.HostPath));
         Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
+    }
+
+    /// <summary>The asynchronous removal removes a tree as the synchronous one does.</summary>
+    [Fact]
+    public async Task An_asynchronous_removal_removes_the_tree()
+    {
+        Make("doomed", "a", "b", "leaf.txt");
+        Make("doomed", "top.txt");
+        Make("kept.txt");
+
+        await _tree.Directory.DeleteTreeAsync("doomed", TestContext.Current.CancellationToken);
+
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "doomed")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "kept.txt")));
+    }
+
+    /// <summary>The asynchronous reporting form answers as the synchronous one does.</summary>
+    [Fact]
+    public async Task The_asynchronous_reporting_form_answers_whether_the_tree_went()
+    {
+        Make("doomed", "leaf.txt");
+
+        Assert.True(await _tree.Directory.TryDeleteTreeAsync("doomed", TestContext.Current.CancellationToken));
+        Assert.False(await _tree.Directory.TryDeleteTreeAsync("doomed", TestContext.Current.CancellationToken));
+        Assert.False(HostDirectory.Exists(Path.Combine(_tree.HostPath, "doomed")));
+    }
+
+    /// <summary>Emptying a directory asynchronously leaves the directory.</summary>
+    [Fact]
+    public async Task Emptying_a_directory_asynchronously_leaves_the_directory_itself()
+    {
+        Make("a", "b", "leaf.txt");
+        Make("top.txt");
+
+        await _tree.Directory.DeleteTreeContentsAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(HostDirectory.Exists(_tree.HostPath));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
+    }
+
+    /// <summary>
+    /// Every form, asked to stop before it starts, throws and removes nothing — the form that
+    /// answers false for a failure included, since being told to stop is not a failure.
+    /// </summary>
+    [Theory]
+    [InlineData("DeleteTree")]
+    [InlineData("TryDeleteTree")]
+    [InlineData("DeleteTreeContents")]
+    [InlineData("DeleteTreeAsync")]
+    [InlineData("TryDeleteTreeAsync")]
+    [InlineData("DeleteTreeContentsAsync")]
+    public async Task A_removal_already_cancelled_removes_nothing(string form)
+    {
+        Make("doomed", "a", "leaf.txt");
+        Make("doomed", "top.txt");
+        CancellationToken cancelled = new(canceled: true);
+        Dir dir = _tree.Directory;
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(form switch
+        {
+            "DeleteTree" => () => Task.Run(() => dir.DeleteTree("doomed", cancelled), TestContext.Current.CancellationToken),
+            "TryDeleteTree" => () => Task.Run(() => dir.TryDeleteTree("doomed", cancelled), TestContext.Current.CancellationToken),
+            "DeleteTreeContents" => () => Task.Run(() => dir.DeleteTreeContents(cancelled), TestContext.Current.CancellationToken),
+            "DeleteTreeAsync" => () => dir.DeleteTreeAsync("doomed", cancelled),
+            "TryDeleteTreeAsync" => () => dir.TryDeleteTreeAsync("doomed", cancelled),
+            _ => () => dir.DeleteTreeContentsAsync(cancelled),
+        });
+
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "doomed", "a", "leaf.txt")));
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "doomed", "top.txt")));
+    }
+
+    /// <summary>
+    /// A removal stopped part of the way through throws, leaves what it had not reached, and
+    /// does not answer false in place of throwing.
+    /// </summary>
+    /// <remarks>
+    /// Through a wrapped handle, whose log shows the first removal as it happens, so the
+    /// signal arrives at an exact point rather than at whatever point a timer lands on.
+    /// </remarks>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task A_removal_cancelled_part_way_leaves_the_rest(bool reporting, bool asynchronous)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            Make("doomed", $"file{i}.txt");
+        }
+
+        using CancellationTokenSource cancel = new();
+        RecordingDir wrapped = new(_tree.Directory, [], ".", call =>
+        {
+            if (call.Contains("DeleteFile(", StringComparison.Ordinal))
+            {
+                cancel.Cancel();
+            }
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>((reporting, asynchronous) switch
+        {
+            (false, false) => () => Task.Run(() => wrapped.DeleteTree("doomed", cancel.Token), TestContext.Current.CancellationToken),
+            (true, false) => () => Task.Run(() => wrapped.TryDeleteTree("doomed", cancel.Token), TestContext.Current.CancellationToken),
+            (false, true) => () => wrapped.DeleteTreeAsync("doomed", cancel.Token),
+            (true, true) => () => wrapped.TryDeleteTreeAsync("doomed", cancel.Token),
+        });
+
+        string doomed = Path.Combine(_tree.HostPath, "doomed");
+        Assert.True(HostDirectory.Exists(doomed));
+        Assert.Equal(3, HostDirectory.GetFileSystemEntries(doomed).Length);
     }
 
     /// <summary>Creates a file, and whatever directories it needs, under the scratch tree.</summary>

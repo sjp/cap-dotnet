@@ -203,7 +203,7 @@ public sealed class WindowsRulesTests
         fs.SetAttributes("tree/locked.txt", FileAttributes.ReadOnly);
 
         using Dir root = fs.OpenRoot();
-        root.DeleteTree("tree");
+        root.DeleteTree("tree", TestContext.Current.CancellationToken);
 
         Assert.Empty(fs.GetEntries());
     }

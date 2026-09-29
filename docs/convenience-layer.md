@@ -209,6 +209,18 @@ It is not atomic and nothing can make it so. It is many operations, and an entry
 it runs may or may not be removed. What it guarantees is that every one of those operations
 lands inside the subtree the handle covers.
 
+Every form takes a `CancellationToken`, looked at before each entry is removed, and
+`DeleteTreeAsync`, `TryDeleteTreeAsync` and `DeleteTreeContentsAsync` do the same work on a
+thread-pool thread — no platform here removes a name asynchronously, so what they offer is a
+calling thread that is not held and a removal that can be stopped. A cancelled removal throws
+`OperationCanceledException`, `TryDeleteTree` included: being told to stop is not a failure to
+remove, and answering false would say it was. What had been removed is gone and what had not
+is left, as after a failure part of the way through.
+
+```csharp
+await root.DeleteTreeAsync("cache", cancellationToken);
+```
+
 ## Copying a tree
 
 `source.CopyTo(destination, options)` copies the contents of one handle's directory into
@@ -219,6 +231,29 @@ The two handles may be on different backends, for example a tree on disk and one
 memory for a test. Everything is read through the source handle and written through the
 destination handle, so neither backend is ever handed the other's handle. See
 [backends.md](backends.md#handles-on-different-backends).
+
+`CopyToAsync` is the same copy without holding the calling thread: each directory is read as
+`WalkAsync()` reads it, and file contents are moved with `ReadAsync`/`WriteAsync`. Opens,
+creations, renames and metadata calls stay synchronous, on whichever thread the copy resumes on.
+Both forms take an `IProgress<CopyReport>` and a `CancellationToken`.
+
+```csharp
+var progress = new Progress<CopyReport>(r => status.Text = $"{r.Files} files, {r.Bytes} bytes");
+CopyReport report = await source.CopyToAsync(destination, options, progress, cancellationToken);
+```
+
+Progress is reported after each directory, file and link is made and each entry is skipped, so
+the counts never go down and the last report equals the one returned. It is called on the
+thread doing the copy; `Progress<T>` posts each report on to the context it was made on.
+
+The token is looked at before each entry and between the 64 KiB pieces a file is copied in.
+Cancelled mid-copy, the copy throws `OperationCanceledException` and leaves what a failure
+leaves: files already copied stay, no scratch (`cap-*`) file remains, and the file being
+written is not published — it is removed from its real name, or under `Overwrite` its scratch
+copy is removed and whatever held the name keeps it. The same is true of any other failure
+part of the way through a file, so no name in the destination ever holds a partly written
+file. Directories already made stay, and under `PreservePermissions` keep the owner-only
+permissions they are given while they are filled.
 
 ### What happens to each kind
 
@@ -342,6 +377,10 @@ out, including the directories a search would otherwise descend into.
 A pattern is relative, like every other name this library takes. One that begins at a root, or
 that contains `..`, is refused when it is parsed: a pattern describes names beneath a
 directory, and a piece that climbed would describe names beside it.
+
+`GlobAsync(pattern)` is the same search with the reading done as `WalkAsync()` does it, and a
+`CancellationToken` that stops it between batches of entries. The pattern is parsed when it is
+called, so an unusable one is refused there rather than at the first `MoveNextAsync`.
 
 ## Handles that are not a `Dir`
 

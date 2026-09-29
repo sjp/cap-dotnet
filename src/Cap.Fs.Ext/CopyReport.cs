@@ -12,8 +12,10 @@ namespace Cap.Fs.Ext;
 /// to find it.
 /// </para>
 /// <para>
-/// <strong>Immutable.</strong> The counts are fixed when the copy finishes, so a report can be
-/// read from any thread.
+/// <strong>Immutable.</strong> A report is a snapshot: the one returned holds the counts as the
+/// copy finished, and each one handed to a progress callback holds them as they stood after the
+/// entry just done. Nothing changes a report once it is made, so one can be read from any
+/// thread, and kept after the copy has moved on.
 /// </para>
 /// </remarks>
 public readonly struct CopyReport
