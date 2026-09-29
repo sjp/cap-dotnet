@@ -80,13 +80,55 @@ public static partial class DirExtensions
     /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public static IEnumerable<WalkEntry> Glob(this IDir dir, string pattern, WalkOptions? options = null) =>
-        Glob(dir, ParsePattern(dir, pattern), options);
+        Glob(dir, ParsePattern(dir, pattern, ignoreCase: false), options);
+
+    /// <summary>
+    /// Finds everything beneath this handle whose name the pattern describes, saying whether
+    /// letters match regardless of spelling.
+    /// </summary>
+    /// <param name="dir">The directory to search.</param>
+    /// <param name="pattern">The pattern, in the syntax <see cref="GlobPattern"/> describes.</param>
+    /// <param name="ignoreCase">
+    /// Whether letters match regardless of spelling, compared by the invariant culture's rules
+    /// as <see cref="GlobPattern.Parse(string, bool)"/> compares them.
+    /// </param>
+    /// <param name="options">How the search descends, or null for the defaults.</param>
+    /// <returns>The matching entries, parents before their children.</returns>
+    /// <remarks>
+    /// <para>
+    /// The search <see cref="Glob(IDir, string, WalkOptions?)"/> performs, with the choice about
+    /// case made here. The pattern is divided as the handle reads a path, which
+    /// <see cref="GlobPattern.Parse(string, bool)"/> cannot do: it has no handle to ask, and
+    /// divides by the running machine's rules.
+    /// </para>
+    /// <para>
+    /// Entries, <strong>symbolic links</strong> and directories that cannot be opened are
+    /// treated exactly as the form without the choice treats them, and it is as safe to use
+    /// from several threads.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The pattern is not one that can be matched.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="WalkOptions.MaxDepth"/> is less than one.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="CapIOException">
+    /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static IEnumerable<WalkEntry> Glob(this IDir dir, string pattern, bool ignoreCase, WalkOptions? options = null) =>
+        Glob(dir, ParsePattern(dir, pattern, ignoreCase), options);
 
     /// <summary>Reads a pattern given as text as the handle it will search beneath reads a path.</summary>
-    private static GlobPattern ParsePattern(IDir dir, string pattern)
+    private static GlobPattern ParsePattern(IDir dir, string pattern, bool ignoreCase)
     {
         ArgumentNullException.ThrowIfNull(dir);
-        return GlobPattern.Parse(pattern, ignoreCase: false, Handles.SyntaxOf(dir));
+        return GlobPattern.Parse(pattern, ignoreCase, Handles.SyntaxOf(dir));
     }
 
     /// <summary>
@@ -182,7 +224,48 @@ public static partial class DirExtensions
         string pattern,
         WalkOptions? options = null,
         CancellationToken cancellationToken = default) =>
-        GlobAsync(dir, ParsePattern(dir, pattern), options, cancellationToken);
+        GlobAsync(dir, ParsePattern(dir, pattern, ignoreCase: false), options, cancellationToken);
+
+    /// <summary>
+    /// Finds everything beneath this handle whose name a pattern describes, saying whether
+    /// letters match regardless of spelling, without holding the calling thread.
+    /// </summary>
+    /// <param name="dir">The directory to search.</param>
+    /// <param name="pattern">
+    /// The pattern, read as <see cref="Glob(IDir, string, bool, WalkOptions?)"/> reads it.
+    /// </param>
+    /// <param name="ignoreCase">Whether letters match regardless of spelling.</param>
+    /// <param name="options">How the search descends, or null for the defaults.</param>
+    /// <param name="cancellationToken">Stops the search between batches of entries.</param>
+    /// <returns>The matching entries, parents before their children.</returns>
+    /// <remarks>
+    /// The search <see cref="GlobAsync(IDir, string, WalkOptions?, CancellationToken)"/>
+    /// performs, with the choice about case made here and the pattern divided as the handle
+    /// reads a path. The pattern is read before the sequence is handed back, so one that
+    /// cannot be matched is refused at the call.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The pattern is not one that can be matched.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <see cref="WalkOptions.MaxDepth"/> is less than one.
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// A directory could not be opened or read for want of permission, and
+    /// <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="CapIOException">
+    /// The tree descends past <see cref="WalkOptions.MaxDepth"/>, or a directory could not be
+    /// opened or read, and <see cref="WalkOptions.OnError"/> did not say to go on without it.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static IAsyncEnumerable<WalkEntry> GlobAsync(
+        this IDir dir,
+        string pattern,
+        bool ignoreCase,
+        WalkOptions? options = null,
+        CancellationToken cancellationToken = default) =>
+        GlobAsync(dir, ParsePattern(dir, pattern, ignoreCase), options, cancellationToken);
 
     /// <summary>
     /// Finds everything beneath this handle whose name a pattern read in advance describes,

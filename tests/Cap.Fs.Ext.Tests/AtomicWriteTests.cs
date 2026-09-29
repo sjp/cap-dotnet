@@ -262,6 +262,34 @@ public sealed class AtomicWriteTests : IDisposable
         Assert.True(HostDirectory.Exists(Path.Combine(_tree.HostPath, "occupied")));
     }
 
+    /// <summary>
+    /// A publish refused at the last step names the name it was asked to publish, not the
+    /// scratch file that was being moved onto it.
+    /// </summary>
+    /// <remarks>
+    /// The scratch name is random, the caller never saw it, and it has been removed by the
+    /// time the exception arrives, so a message quoting it points at nothing. The directory
+    /// holding the name is the commonest way to get here.
+    /// </remarks>
+    [Fact]
+    public void A_failed_publish_names_the_target_in_its_error()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "occupied"));
+
+        Exception? refused = Record.Exception(() => _tree.Directory.WriteAllTextAtomic("occupied", "contents"));
+
+        Assert.NotNull(refused);
+        Assert.True(refused is IOException or UnauthorizedAccessException, refused.ToString());
+        Assert.Contains("'occupied'", refused.Message);
+        Assert.DoesNotContain("cap-", refused.Message);
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(CapErrorKind.IsADirectory, Assert.IsType<CapIOException>(refused).Kind);
+        }
+
+        Assert.Equal(["occupied"], Names());
+    }
+
     /// <summary>The scratch file is made in the directory the published file lands in.</summary>
     /// <remarks>
     /// <para>

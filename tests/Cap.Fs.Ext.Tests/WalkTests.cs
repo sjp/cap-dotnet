@@ -338,6 +338,126 @@ public sealed class WalkTests : IDisposable
         Assert.Throws<ObjectDisposedException>(() => nested.GetMetadata());
     }
 
+    /// <summary>
+    /// A walk abandoned part of the way down closes every directory it had open, not only the
+    /// ones it had finished with.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Stopping early is the ordinary way to use a lazy walk — a search that has found what it
+    /// wanted — and the levels still open at that point are the ones a walk that closed
+    /// handles only on leaving a directory would leak. Disposing the enumerator is what a
+    /// <c>foreach</c> does on <c>break</c>, so that is how it is abandoned here.
+    /// </para>
+    /// <para>
+    /// Observed through an entry captured from the deepest level, whose handle has to be
+    /// closed afterwards, and on Linux also by counting the descriptors the kernel says this
+    /// process holds on anything beneath the scratch tree. Counting only those keeps the
+    /// answer this test's own, whatever the tests running beside it have open.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Abandoning_a_walk_closes_every_handle()
+    {
+        Make("a", "b", "c.txt");
+        Make("a", "b", "d.txt");
+        Make("z.txt");
+
+        int before = DescriptorsBeneathTheTree();
+
+        WalkEntry? captured = null;
+        foreach (WalkEntry entry in _tree.Directory.Walk())
+        {
+            if (entry.Depth == 3)
+            {
+                captured = entry;
+
+                // Something beneath the tree is open while the walk is at its deepest, so the
+                // count going back down afterwards is evidence rather than a count of nothing.
+                Assert.True(DescriptorsBeneathTheTree(orNone: before + 1) > before);
+                break;
+            }
+        }
+
+        Assert.NotNull(captured);
+        Assert.Throws<ObjectDisposedException>(() => captured.Value.Directory.Clone());
+        Assert.Equal(before, DescriptorsBeneathTheTree());
+    }
+
+    /// <summary>An asynchronous walk asked to stop stops, whether before it starts or part of the way.</summary>
+    [Fact]
+    public async Task Cancelling_the_asynchronous_walk_stops_it()
+    {
+        Make("top.txt");
+        Make("a", "one.txt");
+        Make("a", "b", "two.txt");
+
+        List<string> before = [];
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (WalkEntry entry in _tree.Directory.WalkAsync(cancellationToken: new CancellationToken(canceled: true)))
+            {
+                before.Add(entry.Name);
+            }
+        });
+
+        Assert.Empty(before);
+
+        using CancellationTokenSource cancel = new();
+        List<string> during = [];
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (WalkEntry entry in _tree.Directory.WalkAsync(cancellationToken: cancel.Token))
+            {
+                during.Add(entry.Name);
+                await cancel.CancelAsync();
+            }
+        });
+
+        Assert.NotEmpty(during);
+        Assert.True(during.Count < 5, $"The walk went on to yield {during.Count} entries after being cancelled.");
+    }
+
+    /// <summary>
+    /// How many descriptors this process holds on anything beneath the scratch tree, as the
+    /// kernel lists them; <paramref name="orNone"/> where the kernel cannot be asked.
+    /// </summary>
+    /// <remarks>
+    /// The tree's own directory is not beneath itself, so the handle the scratch tree holds on
+    /// it is not counted.
+    /// </remarks>
+    private int DescriptorsBeneathTheTree(int orNone = 0)
+    {
+        if (!OperatingSystem.IsLinux() || HostTree.InMemory || !Directory.Exists("/proc/self/fd"))
+        {
+            return orNone;
+        }
+
+        string beneath = _tree.HostPath + Path.DirectorySeparatorChar;
+        int held = 0;
+        foreach (string descriptor in Directory.GetFileSystemEntries("/proc/self/fd"))
+        {
+            string? target;
+            try
+            {
+                target = new FileInfo(descriptor).LinkTarget;
+            }
+            catch (IOException)
+            {
+                // Closed between the listing and the read, which is the listing's own
+                // descriptor more often than not.
+                continue;
+            }
+
+            if (target is not null && target.StartsWith(beneath, StringComparison.Ordinal))
+            {
+                held++;
+            }
+        }
+
+        return held;
+    }
+
     /// <summary>The walk reads through the handle, so a restricted handle restricts it.</summary>
     /// <remarks>
     /// Asking for links to be followed cannot widen what the handle was granted. A component

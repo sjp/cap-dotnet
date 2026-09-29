@@ -174,6 +174,47 @@ public sealed class InterfaceHandleTests
     }
 
     [Fact]
+    public void A_crossing_pattern_through_the_interface_finds_what_the_handle_finds()
+    {
+        Tree();
+        _fs.AddFile("a/b/c/four.txt", "four");
+        using Dir direct = _fs.OpenRoot();
+        using RecordingDir root = Root();
+
+        List<(string, int)> expected = [.. direct.Glob("**/*.txt").Select(e => (e.Name, e.Depth)).Order()];
+        List<(string, int)> actual = [.. root.Glob("**/*.txt").Select(e => (e.Name, e.Depth)).Order()];
+
+        Assert.Equal([("four.txt", 4), ("one.txt", 2), ("top.txt", 1), ("two.txt", 3)], actual);
+        Assert.Equal(expected, actual);
+        AssertEveryNameIsOneComponent(root);
+    }
+
+    /// <summary>
+    /// Under Windows rules a name carrying the hidden attribute is hidden, and a hidden
+    /// directory is not entered, whatever machine the filesystem is held on.
+    /// </summary>
+    [Fact]
+    public void Hidden_entries_under_windows_rules_are_the_ones_carrying_the_attribute()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        fs.AddFile("shown.txt", "s");
+        fs.AddFile("secret.txt", "s");
+        fs.AddFile(".dotted.txt", "s");
+        fs.AddFile("cloak/inner.txt", "i");
+        fs.AddFile("open/inner2.txt", "i");
+        fs.SetAttributes("secret.txt", FileAttributes.Hidden);
+        fs.SetAttributes("cloak", FileAttributes.Hidden);
+        using Dir root = fs.OpenRoot();
+
+        WalkOptions skipping = new() { SkipHidden = true };
+
+        Assert.Equal(["inner2.txt", "open", "shown.txt"], root.Walk(skipping).Select(e => e.Name).Order());
+        Assert.Equal(["inner2.txt", "shown.txt"], root.Glob("**/*.txt", skipping).Select(e => e.Name).Order());
+        Assert.Contains("secret.txt", root.Walk().Select(e => e.Name));
+        Assert.Contains("inner.txt", root.Walk().Select(e => e.Name));
+    }
+
+    [Fact]
     public void The_predicates_ask_the_interface_to_describe_the_name()
     {
         Tree();
@@ -378,8 +419,11 @@ public sealed class InterfaceHandleTests
         _fs.AddDirectory("report.txt");
         using RecordingDir root = Root();
 
-        _ = Assert.ThrowsAny<IOException>(() => root.WriteAllTextAtomic("report.txt", "new"));
+        IOException refused = Assert.ThrowsAny<IOException>(() => root.WriteAllTextAtomic("report.txt", "new"));
 
+        // Named by the name that was asked for, not by the scratch name it was removed under.
+        Assert.Contains("'report.txt'", refused.Message);
+        Assert.DoesNotContain("cap-", refused.Message);
         Assert.Equal(["report.txt"], _fs.GetEntries());
         Assert.Contains(root.Log, call => call.StartsWith(".: TryDeleteFile(", StringComparison.Ordinal));
     }
@@ -603,6 +647,86 @@ public sealed class InterfaceHandleTests
         Assert.True(_fs.Exists("a/one.txt"));
         Assert.False(_fs.Exists("a/b"));
         Assert.False(_fs.Exists("a/empty"));
+    }
+
+    /// <summary>
+    /// A directory that cannot be opened but is empty is removed, whether it is the one named
+    /// or one inside it, through the interface and through a handle alike.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void An_unreadable_empty_directory_is_removed(bool throughInterface)
+    {
+        _fs.AddDirectory("sealed");
+        _fs.AddFile("tree/g.txt", "g");
+        _fs.AddDirectory("tree/sealed");
+        _fs.SetUnreadable("sealed");
+        _fs.SetUnreadable("tree/sealed");
+        using IDir root = throughInterface ? Root() : _fs.OpenRoot();
+
+        root.DeleteTree("sealed", TestContext.Current.CancellationToken);
+        root.DeleteTree("tree", TestContext.Current.CancellationToken);
+
+        Assert.Empty(_fs.GetEntries());
+    }
+
+    /// <summary>
+    /// A directory that cannot be opened and is not empty stops the removal with the refusal
+    /// to open it, named by where it is, after the rest has been removed.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void An_unreadable_subdirectory_is_reported_as_permission_denied_after_the_rest_is_removed(bool throughInterface)
+    {
+        Tree();
+        _fs.SetUnreadable("a/b");
+        using IDir root = throughInterface ? Root() : _fs.OpenRoot();
+        char separator = throughInterface
+            ? Path.DirectorySeparatorChar
+            : ((Dir)root).PathSyntax == CapPathSyntax.Windows ? '\\' : '/';
+
+        UnauthorizedAccessException named = Assert.Throws<UnauthorizedAccessException>(
+            () => root.DeleteTree("a", TestContext.Current.CancellationToken));
+        Assert.Contains($"'a{separator}b'", named.Message);
+
+        using IDir a = root.OpenDir("a");
+        UnauthorizedAccessException emptying = Assert.Throws<UnauthorizedAccessException>(
+            () => a.DeleteTreeContents(TestContext.Current.CancellationToken));
+        Assert.Contains("'b'", emptying.Message);
+
+        Assert.Equal(["b"], _fs.GetEntries("a"));
+        Assert.True(_fs.Exists("top.txt"));
+
+        _fs.SetUnreadable("a/b", unreadable: false);
+        Assert.True(_fs.Exists("a/b/two.txt"));
+    }
+
+    /// <summary>
+    /// A handle whose restriction to the policy it already has answers with itself is not
+    /// closed by a removal that narrowed it.
+    /// </summary>
+    /// <remarks>
+    /// The removal narrows the handle it is given to refuse links, and disposes what the
+    /// narrowing produced. An implementation of the interface that saves a duplicate by
+    /// returning itself would otherwise have the caller's own handle closed underneath it.
+    /// </remarks>
+    [Fact]
+    public void Removing_a_tree_through_a_handle_whose_Restrict_returns_itself_leaves_the_handle_usable()
+    {
+        Tree();
+        using RecordingDir root = new(_fs.OpenRoot(SymlinkPolicy.Deny)) { RestrictReturnsItself = true };
+
+        root.DeleteTree("a", TestContext.Current.CancellationToken);
+        Assert.Equal(["top.txt"], root.EnumerateEntries().Select(e => e.Name));
+
+        root.DeleteTreeContents(TestContext.Current.CancellationToken);
+        Assert.Empty(root.EnumerateEntries());
+
+        _fs.AddFile("again.txt", "x");
+        Assert.False(root.TryDeleteTree("missing", TestContext.Current.CancellationToken));
+        Assert.Equal(["again.txt"], root.EnumerateEntries().Select(e => e.Name));
     }
 
     [Fact]

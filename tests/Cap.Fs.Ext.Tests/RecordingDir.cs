@@ -321,7 +321,26 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label, A
     public bool TryClone([NotNullWhen(true)] out IDir? clone) =>
         Opened(inner.TryClone(out clone), ref clone, ".", Call());
 
-    public IDir Restrict(SymlinkPolicy policy) => Child(Record(inner.Restrict(policy), policy), ".");
+    /// <summary>
+    /// Whether <see cref="Restrict"/> answers a request for the policy this handle already has
+    /// with this handle itself, as a wrapper written to save a duplicate might.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Dir.Restrict"/> never does, and says so; this lets a test check that code
+    /// narrowing a handle it was given survives an implementation that does.
+    /// </remarks>
+    public bool RestrictReturnsItself { get; init; }
+
+    public IDir Restrict(SymlinkPolicy policy)
+    {
+        if (RestrictReturnsItself && policy == inner.SymlinkPolicy)
+        {
+            Add(Call(policy));
+            return this;
+        }
+
+        return Child(Record(inner.Restrict(policy), policy), ".");
+    }
 
     public bool TryRestrict(SymlinkPolicy policy, [NotNullWhen(true)] out IDir? restricted) =>
         Opened(inner.TryRestrict(policy, out restricted), ref restricted, ".", Call(policy));

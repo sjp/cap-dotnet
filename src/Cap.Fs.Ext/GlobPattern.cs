@@ -24,12 +24,14 @@ namespace Cap.Fs.Ext;
 ///   <item><term><c>[abc]</c></term><description>Any one of the characters listed.</description></item>
 ///   <item><term><c>[a-z]</c></term><description>Any one character in the range.</description></item>
 ///   <item><term><c>[!abc]</c></term><description>Any one character not listed. <c>^</c> may be used for <c>!</c>.</description></item>
+///   <item><term><c>[]abc]</c></term><description>A <c>]</c> first in the list, after any <c>!</c> or <c>^</c>, is a member rather than the end.</description></item>
 /// </list>
 /// <para>
-/// There is no escape character, so a name containing one of the special characters cannot be
-/// matched literally. Adding one would mean choosing a character to carry the meaning, and on
-/// Windows every plausible choice — the backslash above all — already divides one level from
-/// the next. A caller who needs to act on an awkward name has the walk, where names arrive as
+/// There is no escape character. Adding one would mean choosing a character to carry the
+/// meaning, and on Windows every plausible choice — the backslash above all — already divides
+/// one level from the next. A special character is matched literally by making it the only
+/// member of a class instead: <c>[*]</c>, <c>[?]</c>, <c>[[]</c> and <c>[]]</c>. A caller who
+/// needs to act on a name no pattern describes comfortably has the walk, where names arrive as
 /// names and a condition is written in code.
 /// </para>
 /// <para>
@@ -87,6 +89,13 @@ public sealed class GlobPattern
     /// would be asking for authority nobody handed out.
     /// </para>
     /// <para>
+    /// The pattern is divided into levels by the running machine's rules, since there is no
+    /// handle here to ask. A handle may read paths by another platform's rules — a filesystem
+    /// held in memory can — and a pattern for a search beneath one is better given as text to
+    /// <see cref="DirExtensions.Glob(Cap.Std.IDir, string, bool, WalkOptions?)"/>, which divides
+    /// it as that handle divides a path and takes the same choice about case.
+    /// </para>
+    /// <para>
     /// Parsing touches no filesystem, so no link is looked at here. Safe to call from any
     /// thread.
     /// </para>
@@ -111,7 +120,11 @@ public sealed class GlobPattern
     {
         ArgumentNullException.ThrowIfNull(pattern);
 
-        if (pattern.Length > 0 && CapPath.IsSeparator(pattern[0], syntax))
+        // Every rooted form the syntax has, not only a leading separator: under Windows rules a
+        // drive, a drive-relative prefix, a network share and the device namespace each begin
+        // somewhere other than the handle, and would otherwise be split into pieces such as
+        // "C:" that match nothing and say nothing about why.
+        if (CapPath.IsRooted(pattern, syntax))
         {
             throw new ArgumentException(
                 $"'{pattern}' begins at a root. A pattern is matched against the names " +
@@ -304,9 +317,18 @@ public sealed class GlobPattern
 
     /// <summary>Where the smallest matchable piece of a pattern starting at an index ends.</summary>
     /// <remarks>
+    /// <para>
     /// A character class is one piece however long it is. An unterminated one is treated as
     /// the literal characters it is made of, which is what every shell does and is the least
     /// surprising reading of a pattern somebody mistyped.
+    /// </para>
+    /// <para>
+    /// A <c>]</c> first in the list — straight after the <c>[</c>, or after the <c>!</c> or
+    /// <c>^</c> that negates it — is a member rather than the end, as POSIX has it and every
+    /// shell reads it. With no escape character it is the only way to match a <c>]</c> at all,
+    /// and reading it as the end instead makes <c>[!]</c> a class that excludes nothing and so
+    /// matches every character, the opposite of what was written.
+    /// </para>
     /// </remarks>
     private static int AtomEnd(ReadOnlySpan<char> pattern, int start)
     {
@@ -315,8 +337,19 @@ public sealed class GlobPattern
             return start + 1;
         }
 
-        int close = pattern[(start + 1)..].IndexOf(']');
-        return close < 0 ? start + 1 : start + close + 2;
+        int first = start + 1;
+        if (first < pattern.Length && pattern[first] is '!' or '^')
+        {
+            first++;
+        }
+
+        if (first < pattern.Length && pattern[first] == ']')
+        {
+            first++;
+        }
+
+        int close = pattern[first..].IndexOf(']');
+        return close < 0 ? start + 1 : first + close + 1;
     }
 
     /// <summary>Whether one piece of a pattern describes one character.</summary>

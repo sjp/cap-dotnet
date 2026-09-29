@@ -298,6 +298,108 @@ public sealed class DeleteTreeTests : IDisposable
         Assert.Equal(3, HostDirectory.GetFileSystemEntries(doomed).Length);
     }
 
+    /// <summary>
+    /// A directory this process may not read is still removed when it is empty, at the top of
+    /// the removal and inside it.
+    /// </summary>
+    /// <remarks>
+    /// Removing an empty directory asks nothing of the directory, only of the one holding it,
+    /// which is why <c>rm -rf</c> removes one. Not being able to open it is a reason not to
+    /// look inside, not a reason to leave it.
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_empty_directory_is_removed()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "sealed"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "tree", "sealed"));
+        Make("tree", "g.txt");
+
+        using (Seal("sealed"))
+        using (Seal(Path.Combine("tree", "sealed")))
+        {
+            _tree.Directory.DeleteTree("sealed", TestContext.Current.CancellationToken);
+            _tree.Directory.DeleteTree("tree", TestContext.Current.CancellationToken);
+        }
+
+        Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
+    }
+
+    /// <summary>
+    /// A directory inside the tree this process may not read, holding something, stops it
+    /// going; the failure is the refusal to open it, named by where it is, and the rest of the
+    /// tree is removed.
+    /// </summary>
+    /// <remarks>
+    /// What the removal goes on to meet is "not empty", on the directory and then on each one
+    /// above it, and reporting that blamed the tree for a concurrent writer that was never
+    /// there. The refusal is the cause, and its place in the tree is what the caller needs to
+    /// go and fix it.
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_subdirectory_is_reported_as_permission_denied_after_the_rest_is_removed()
+    {
+        Make("tree", "g.txt");
+        Make("tree", "inner", "sealed", "f.txt");
+        Make("tree", "inner", "h.txt");
+
+        using (Seal(Path.Combine("tree", "inner", "sealed")))
+        {
+            UnauthorizedAccessException named = Assert.Throws<UnauthorizedAccessException>(
+                () => _tree.Directory.DeleteTree("tree", TestContext.Current.CancellationToken));
+            Assert.Contains($"'{Path.Combine("tree", "inner", "sealed")}'", named.Message);
+
+            using Dir opened = _tree.Directory.OpenDir("tree");
+            UnauthorizedAccessException emptying = Assert.Throws<UnauthorizedAccessException>(
+                () => opened.DeleteTreeContents(TestContext.Current.CancellationToken));
+            Assert.Contains($"'{Path.Combine("inner", "sealed")}'", emptying.Message);
+
+            Assert.False(_tree.Directory.TryDeleteTree("tree", TestContext.Current.CancellationToken));
+        }
+
+        string tree = Path.Combine(_tree.HostPath, "tree");
+        Assert.Equal(["inner"], HostDirectory.GetFileSystemEntries(tree).Select(Path.GetFileName));
+        Assert.Equal(["sealed"], HostDirectory.GetFileSystemEntries(Path.Combine(tree, "inner")).Select(Path.GetFileName));
+        Assert.True(HostFile.Exists(Path.Combine(tree, "inner", "sealed", "f.txt")));
+    }
+
+    /// <summary>
+    /// Takes every permission off a directory in the scratch tree until disposed, or skips the
+    /// test where that would not stop this process reading it.
+    /// </summary>
+    private Sealed Seal(string name)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Making a directory unreadable here needs a security descriptor this test does not build.");
+        }
+
+        if (HostTree.InMemory)
+        {
+            Assert.Skip("The filesystem held in memory does not act on mode bits; InterfaceHandleTests covers it with SetUnreadable.");
+        }
+
+        if (Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("A privileged process reads a directory whatever its mode says.");
+        }
+
+        string path = Path.Combine(_tree.HostPath, name);
+        HostFile.SetUnixFileMode(path, UnixFileMode.None);
+        return new Sealed(path);
+    }
+
+    /// <summary>Gives a sealed directory its permissions back, if it is still there, so the scratch tree can be removed.</summary>
+    private readonly struct Sealed(string path) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (HostDirectory.Exists(path))
+            {
+                HostFile.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+        }
+    }
+
     /// <summary>Creates a file, and whatever directories it needs, under the scratch tree.</summary>
     private void Make(params string[] parts)
     {

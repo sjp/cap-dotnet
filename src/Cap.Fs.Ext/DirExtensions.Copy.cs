@@ -819,7 +819,7 @@ public static partial class DirExtensions
         {
             if (scratch is not null)
             {
-                directory.Rename(scratch, directory, name, replaceExisting: true);
+                MoveOnto(directory, scratch, name);
             }
         }
 

@@ -83,8 +83,25 @@ internal static class TreeRemoval
     /// </para>
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
-    public static CapError Empty(Dir directory, CancellationToken cancellationToken = default)
+    public static CapError Empty(Dir directory, CancellationToken cancellationToken = default) =>
+        Empty(directory, out _, cancellationToken);
+
+    /// <summary>
+    /// Removes everything inside an open directory, leaving the directory itself, and says
+    /// where the failure it reports was met.
+    /// </summary>
+    /// <param name="directory">The directory to empty.</param>
+    /// <param name="failedAt">
+    /// The names leading from <paramref name="directory"/> to the entry the reported failure
+    /// concerns, outermost first; null when it concerns <paramref name="directory"/> itself or
+    /// there was no failure.
+    /// </param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
+    /// <returns>As <see cref="Empty(Dir, CancellationToken)"/> returns.</returns>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    public static CapError Empty(Dir directory, out IReadOnlyList<string>? failedAt, CancellationToken cancellationToken = default)
     {
+        failedAt = null;
         cancellationToken.ThrowIfCancellationRequested();
 
         if (!directory.TryRestrict(SymlinkPolicy.Deny, out Dir? strict))
@@ -94,7 +111,9 @@ internal static class TreeRemoval
 
         using (strict)
         {
-            return EmptyOpen(strict, MaximumDepth, cancellationToken);
+            Outcome emptied = EmptyOpen(strict, MaximumDepth, cancellationToken);
+            failedAt = emptied.Where();
+            return emptied.Error;
         }
     }
 
@@ -131,8 +150,36 @@ internal static class TreeRemoval
     /// </para>
     /// </remarks>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
-    public static CapError Remove(Dir parent, string name, CancellationToken cancellationToken = default)
+    public static CapError Remove(Dir parent, string name, CancellationToken cancellationToken = default) =>
+        Remove(parent, name, out _, cancellationToken);
+
+    /// <summary>
+    /// Removes the directory named <paramref name="name"/> beneath <paramref name="parent"/>,
+    /// and everything inside it, and says where the failure it reports was met.
+    /// </summary>
+    /// <param name="parent">The directory holding the name.</param>
+    /// <param name="name">A single component naming the directory to remove.</param>
+    /// <param name="failedAt">
+    /// The names leading from <paramref name="name"/> to the entry the reported failure
+    /// concerns, outermost first; null when it concerns <paramref name="name"/> itself or
+    /// there was no failure.
+    /// </param>
+    /// <param name="cancellationToken">Stops the removal before the next entry.</param>
+    /// <returns>As <see cref="Remove(Dir, string, CancellationToken)"/> returns.</returns>
+    /// <remarks>
+    /// <para>
+    /// A directory that stats as one but cannot be opened — one whose permissions refuse this
+    /// process a read — is not a reason to give up on the name. Removing an empty directory
+    /// asks nothing of the directory itself, only of the one holding it, so the removal is
+    /// attempted anyway: an empty one goes, as it would for <c>rm -rf</c>, and a full one
+    /// stays, reported with the failure that stopped it being opened rather than with the
+    /// "not empty" that followed from it.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    public static CapError Remove(Dir parent, string name, out IReadOnlyList<string>? failedAt, CancellationToken cancellationToken = default)
     {
+        failedAt = null;
         cancellationToken.ThrowIfCancellationRequested();
 
         if (!parent.TryRestrict(SymlinkPolicy.Deny, out Dir? strict))
@@ -142,20 +189,28 @@ internal static class TreeRemoval
 
         using (strict)
         {
-            if (!strict.TryOpenDir(name, out Dir? directory))
+            CapError opened = strict.OpenDirForWalk(name, refuseLinks: true, out Dir? directory);
+            if (opened.IsFailure)
             {
-                return Diagnose(parent, name);
+                CapError diagnosed = Diagnose(parent, name);
+                if (diagnosed.Category != CapErrorCategory.Unknown)
+                {
+                    return diagnosed;
+                }
+
+                return RemoveEmpty(strict, name).IsSuccess ? CapError.Success : opened;
             }
 
-            CapError emptied;
+            Outcome emptied;
             using (directory)
             {
-                emptied = EmptyOpen(directory, MaximumDepth, cancellationToken);
+                emptied = EmptyOpen(directory!, MaximumDepth, cancellationToken);
             }
 
-            if (emptied.IsFailure)
+            if (emptied.Error.IsFailure)
             {
-                return emptied;
+                failedAt = emptied.Where();
+                return emptied.Error;
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -168,7 +223,8 @@ internal static class TreeRemoval
     /// Asked as a description of the name rather than as another attempt to open it, so that
     /// the answer says what is actually there. A link and a file are worth telling apart from
     /// each other and from a name holding nothing, because each means a different mistake in
-    /// the calling code. Anything else is left unexplained rather than blamed on a guess.
+    /// the calling code. A directory that would not open answers <see cref="CapErrorCategory.Unknown"/>
+    /// here, which the caller takes as the cue to report the open's own failure instead.
     /// </remarks>
     private static CapError Diagnose(Dir parent, string name)
     {
@@ -196,25 +252,101 @@ internal static class TreeRemoval
         Unlink(parent, name, directory: true);
 
     /// <summary>
+    /// A failure met while emptying a directory, and where beneath that directory it was met.
+    /// </summary>
+    /// <param name="Error">The failure, or success.</param>
+    /// <param name="Trail">
+    /// The names from the directory being emptied down to the entry the failure concerns,
+    /// innermost first — the order a failure climbing back out of the recursion adds them in —
+    /// or null when it concerns the directory itself.
+    /// </param>
+    /// <remarks>
+    /// The names are gathered only on the way back out from a failure, so a removal that
+    /// succeeds builds nothing.
+    /// </remarks>
+    private readonly record struct Outcome(CapError Error, List<string>? Trail)
+    {
+        public static Outcome Success => new(CapError.Success, null);
+
+        /// <summary>This outcome as met one level further out, inside the entry <paramref name="name"/>.</summary>
+        public Outcome Inside(string name)
+        {
+            List<string> trail = Trail ?? [];
+            trail.Add(name);
+            return this with { Trail = trail };
+        }
+
+        /// <summary>The trail outermost first, as the caller reads it.</summary>
+        public string[]? Where()
+        {
+            if (Trail is null)
+            {
+                return null;
+            }
+
+            string[] names = [.. Trail];
+            Array.Reverse(names);
+            return names;
+        }
+    }
+
+    /// <summary>
     /// Removes everything inside the directory named <paramref name="name"/>, leaving the
     /// directory itself.
     /// </summary>
-    private static CapError Empty(Dir parent, string name, int remainingDepth, CancellationToken cancellationToken)
+    /// <remarks>
+    /// <para>
+    /// A name that is not a directory that can be entered — gone already, replaced with a
+    /// link, never one, or changed while being opened — is not descended into, and reported as
+    /// nothing to do: the caller unlinks the name instead, which acts on the name and not on
+    /// whatever it now refers to.
+    /// </para>
+    /// <para>
+    /// A directory that could not be opened for any other reason — permission, above all — is
+    /// reported as the failure it was, in <paramref name="unopenable"/>, and not as a failure
+    /// of this step. The caller still tries to unlink the name, since an empty directory can be
+    /// removed without being opened, and reports the open's failure only when that does not
+    /// work: "not empty" is what the unlink says, but the reason is that it could not be looked
+    /// inside.
+    /// </para>
+    /// </remarks>
+    private static Outcome Empty(
+        Dir parent, string name, int remainingDepth, out CapError unopenable, CancellationToken cancellationToken)
     {
-        if (!parent.TryOpenDir(name, out Dir? directory))
+        unopenable = CapError.Success;
+
+        CapError opened = parent.OpenDirForWalk(name, refuseLinks: true, out Dir? directory);
+        if (opened.IsFailure)
         {
-            // The name is not a directory that can be opened: either it has gone already, or
-            // something replaced it with a link, or it was never one. None of those is
-            // descended into; the caller unlinks the name instead, which acts on the name and
-            // not on whatever it now refers to.
-            return CapError.Success;
+            if (!LeavesNothingToEnter(opened.Category))
+            {
+                unopenable = opened;
+            }
+
+            return Outcome.Success;
         }
 
         using (directory)
         {
-            return EmptyOpen(directory, remainingDepth, cancellationToken);
+            return EmptyOpen(directory!, remainingDepth, cancellationToken);
         }
     }
+
+    /// <summary>
+    /// Whether a failed open means the name is not a directory to descend into, rather than
+    /// one that could not be.
+    /// </summary>
+    /// <remarks>
+    /// The same division a walk makes: gone, not a directory, a link, leading out of the
+    /// subtree, or changed during the open are all names with nothing beneath them to remove.
+    /// </remarks>
+    private static bool LeavesNothingToEnter(CapErrorCategory category) => FailureTranslation.KindOf(category) is
+        CapErrorKind.NotFound or
+        CapErrorKind.NotADirectory or
+        CapErrorKind.SymbolicLink or
+        CapErrorKind.LinkNotFollowed or
+        CapErrorKind.Escaped or
+        CapErrorKind.ConcurrentChange;
 
     /// <summary>Removes everything inside a directory that is already open.</summary>
     /// <remarks>
@@ -225,14 +357,14 @@ internal static class TreeRemoval
     /// been removed from underneath us — by the very thing we are cleaning up after, or by
     /// somebody else — is an ordinary outcome rather than a fault.
     /// </remarks>
-    private static CapError EmptyOpen(Dir directory, int remainingDepth, CancellationToken cancellationToken)
+    private static Outcome EmptyOpen(Dir directory, int remainingDepth, CancellationToken cancellationToken)
     {
         if (remainingDepth == 0)
         {
-            return CapError.FromCategory(CapErrorCategory.PathTooDeep);
+            return new Outcome(CapError.FromCategory(CapErrorCategory.PathTooDeep), null);
         }
 
-        CapError first = CapError.Success;
+        Outcome first = Outcome.Success;
 
         try
         {
@@ -240,8 +372,8 @@ internal static class TreeRemoval
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                CapError removed = RemoveEntry(directory, entry, remainingDepth, cancellationToken);
-                if (removed.IsFailure && first.IsSuccess)
+                Outcome removed = RemoveEntry(directory, entry, remainingDepth, cancellationToken);
+                if (removed.Error.IsFailure && first.Error.IsSuccess)
                 {
                     // The first failure is the one reported, and the walk carries on past it.
                     // Stopping would leave behind entries that had nothing to do with the
@@ -253,11 +385,11 @@ internal static class TreeRemoval
         }
         catch (IOException)
         {
-            return first.IsFailure ? first : CapError.FromCategory(CapErrorCategory.Unknown);
+            return first.Error.IsFailure ? first : new Outcome(CapError.FromCategory(CapErrorCategory.Unknown), null);
         }
         catch (UnauthorizedAccessException)
         {
-            return first.IsFailure ? first : CapError.FromCategory(CapErrorCategory.PermissionDenied);
+            return first.Error.IsFailure ? first : new Outcome(CapError.FromCategory(CapErrorCategory.PermissionDenied), null);
         }
 
         return first;
@@ -277,19 +409,26 @@ internal static class TreeRemoval
     /// being wrong the other way is a directory left behind.
     /// </para>
     /// </remarks>
-    private static CapError RemoveEntry(
+    private static Outcome RemoveEntry(
         Dir directory, DirEntry entry, int remainingDepth, CancellationToken cancellationToken)
     {
+        CapError unopenable = CapError.Success;
         if (entry.Type is CapFileType.Directory or CapFileType.Unknown)
         {
-            CapError emptied = Empty(directory, entry.Name, remainingDepth - 1, cancellationToken);
-            if (emptied.IsFailure)
+            Outcome emptied = Empty(directory, entry.Name, remainingDepth - 1, out unopenable, cancellationToken);
+            if (emptied.Error.IsFailure)
             {
-                return emptied;
+                return emptied.Inside(entry.Name);
             }
         }
 
-        return Unlink(directory, entry.Name, directory: entry.Type == CapFileType.Directory);
+        CapError unlinked = Unlink(directory, entry.Name, directory: entry.Type == CapFileType.Directory);
+        if (unlinked.IsSuccess)
+        {
+            return Outcome.Success;
+        }
+
+        return new Outcome(unopenable.IsFailure ? unopenable : unlinked, null).Inside(entry.Name);
     }
 
     /// <summary>

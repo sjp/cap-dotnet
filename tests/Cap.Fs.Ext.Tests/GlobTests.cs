@@ -1,4 +1,7 @@
+using System.Diagnostics;
+using Cap.Primitives;
 using Cap.Std;
+using Cap.Std.Testing;
 
 namespace Cap.Fs.Ext.Tests;
 
@@ -117,6 +120,63 @@ public sealed class GlobTests : IDisposable
         Assert.Equal(["ab.log"], Matches("a[!0-9].log"));
     }
 
+    /// <summary>
+    /// A <c>]</c> first in a class, after any negation, is a member rather than the end, and a
+    /// class that never ends is the literal characters it is made of.
+    /// </summary>
+    /// <remarks>
+    /// With no escape character, a class is the only way to match <c>]</c> at all. Reading the
+    /// first <c>]</c> as the end instead made <c>[]]x</c> match nothing and <c>[!]x</c> — a
+    /// class excluding nothing — match every character, the opposite of what was written.
+    /// </remarks>
+    [Fact]
+    public void A_leading_close_bracket_is_a_literal_member()
+    {
+        foreach (string name in (string[])["]x", "ax", "-x", "[x", "]b", "ab", "[!]"])
+        {
+            Make("brackets", name);
+        }
+
+        Assert.Equal(["]x"], InBrackets("[]]x"));
+        Assert.Equal(["-x", "[x", "ax"], InBrackets("[!]]x"));
+        Assert.Equal(["-x", "[x", "ax"], InBrackets("[^]]x"));
+        Assert.Equal(["]b", "ab"], InBrackets("[]a]b"));
+        Assert.Equal(["-x", "ax"], InBrackets("[a-]x"));
+        Assert.Equal(["[!]"], InBrackets("[!]"));
+        Assert.Equal(["[x"], InBrackets("[x"));
+        Assert.Equal(["[x"], InBrackets("[[]x"));
+
+        string[] InBrackets(string pattern) =>
+            [.. Matches(Path.Combine("brackets", pattern)).Order(StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// A piece full of runs is matched against a long name in time proportional to the two,
+    /// not exponential in the runs.
+    /// </summary>
+    /// <remarks>
+    /// Both the pattern and the names come from outside, so a matcher that explored every way
+    /// of dividing a name among twenty runs would be a way of stopping the process. The bound
+    /// is generous: the matcher takes microseconds, and the exponential one would not finish.
+    /// </remarks>
+    [Fact]
+    public void A_pattern_full_of_runs_matches_a_long_name_quickly()
+    {
+        string name = new('a', 200);
+        Make("long", name);
+        string missing = string.Concat(Enumerable.Repeat("*a", 20)) + "*b";
+        string present = string.Concat(Enumerable.Repeat("*a", 20)) + "*";
+
+        Stopwatch elapsed = Stopwatch.StartNew();
+        string[] none = Matches(Path.Combine("long", missing));
+        string[] one = Matches(Path.Combine("long", present));
+        elapsed.Stop();
+
+        Assert.Empty(none);
+        Assert.Equal([name], one);
+        Assert.True(elapsed.ElapsedMilliseconds < 2_000, $"Matching took {elapsed.ElapsedMilliseconds} ms.");
+    }
+
     /// <summary>Spelling matters unless the pattern says otherwise.</summary>
     [Fact]
     public void Case_is_compared_exactly_unless_the_pattern_says_otherwise()
@@ -125,6 +185,38 @@ public sealed class GlobTests : IDisposable
 
         Assert.DoesNotContain("Report.TXT", Matches("*.txt"));
         Assert.Contains("Report.TXT", Names(GlobPattern.Parse("*.txt", ignoreCase: true)));
+        Assert.Contains("Report.TXT", _tree.Directory.Glob("*.txt", ignoreCase: true).Select(e => e.Name));
+        Assert.DoesNotContain("Report.TXT", _tree.Directory.Glob("*.txt", ignoreCase: false).Select(e => e.Name));
+    }
+
+    /// <summary>
+    /// A search asked to ignore case divides its pattern as the handle reads a path, which a
+    /// pattern parsed without a handle cannot.
+    /// </summary>
+    /// <remarks>
+    /// Under Windows rules a backslash divides levels. On a machine where it does not, a
+    /// pattern parsed by <see cref="GlobPattern.Parse(string, bool)"/> keeps it inside one
+    /// piece and matches nothing, which is why the handle-taking form exists.
+    /// </remarks>
+    [Fact]
+    public async Task A_search_that_ignores_case_divides_the_pattern_as_the_handle_does()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        fs.AddFile("a/One.TXT", "one");
+        fs.AddFile("a/two.md", "two");
+        using Dir root = fs.OpenRoot();
+
+        Assert.Equal(["One.TXT"], root.Glob(@"a\*.txt", ignoreCase: true).Select(e => e.Name));
+        Assert.Empty(root.Glob(@"a\*.txt", ignoreCase: false));
+
+        List<string> found = [];
+        await foreach (WalkEntry entry in root.GlobAsync(
+            @"a\*.txt", ignoreCase: true, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            found.Add(entry.Name);
+        }
+
+        Assert.Equal(["One.TXT"], found);
     }
 
     /// <summary>A name beginning with a dot is matched like any other.</summary>
@@ -228,6 +320,45 @@ public sealed class GlobTests : IDisposable
         Assert.Throws<ArgumentException>(() => GlobPattern.Parse(Path.Combine("..", "*")));
         Assert.Throws<ArgumentException>(() => GlobPattern.Parse(Path.DirectorySeparatorChar + "etc"));
         Assert.Throws<ArgumentException>(() => GlobPattern.Parse("."));
+    }
+
+    /// <summary>
+    /// Every rooted form Windows rules have is refused when a pattern is read, not only a
+    /// leading separator.
+    /// </summary>
+    /// <remarks>
+    /// A drive, a drive-relative prefix, a share and the device namespace used to be split into
+    /// pieces such as <c>C:</c> that matched nothing and said nothing about why. Under Unix
+    /// rules none of those is rooted, and <c>C:etc</c> is an ordinary name.
+    /// </remarks>
+    [Theory]
+    [InlineData(@"C:\etc")]
+    [InlineData(@"C:etc")]
+    [InlineData(@"C:/etc")]
+    [InlineData(@"\etc")]
+    [InlineData(@"\\server\share\*")]
+    [InlineData(@"\\?\C:\x")]
+    [InlineData(@"\\.\pipe\x")]
+    public void A_rooted_pattern_under_windows_rules_is_refused(string pattern)
+    {
+        InMemoryFileSystem windows = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        using Dir root = windows.OpenRoot();
+
+        Assert.Throws<ArgumentException>(() => root.Glob(pattern));
+        Assert.Throws<ArgumentException>(() => root.Glob(pattern, ignoreCase: true));
+        Assert.Throws<ArgumentException>(() => root.GlobAsync(pattern, cancellationToken: TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>What is rooted under Windows rules is an ordinary name under Unix rules.</summary>
+    [Fact]
+    public void A_drive_shaped_name_under_unix_rules_is_an_ordinary_name()
+    {
+        InMemoryFileSystem unix = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Unix });
+        unix.AddFile("C:etc", "x");
+        using Dir root = unix.OpenRoot();
+
+        Assert.Equal(["C:etc"], root.Glob("C:etc").Select(e => e.Name));
+        Assert.Throws<ArgumentException>(() => root.Glob("/etc"));
     }
 
     /// <summary>A pattern parsed once can be used more than once.</summary>

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Cap.Primitives;
 using Cap.Std;
+using Cap.Std.Testing;
 
 namespace Cap.Fs.Ext.Tests;
 
@@ -315,6 +316,85 @@ public sealed class CopyTests : IDisposable
         Assert.Equal(["report.txt"], HostDirectory.GetFileSystemEntries(destination).Select(Path.GetFileName));
     }
 
+    /// <summary>
+    /// A file where the source has a directory stops the copy, and is left in place, however
+    /// the copy was told to treat names already taken.
+    /// </summary>
+    /// <remarks>
+    /// Overwriting replaces files with files. Replacing a file with a directory would be a
+    /// removal the caller did not ask for, of something the copy did not make.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_file_at_a_directory_name_stops_the_copy_even_when_overwriting(bool overwrite)
+    {
+        Make("source", "nested", "inner.txt");
+        MakeBytes([1, 2, 3], "destination", "nested");
+
+        Assert.ThrowsAny<IOException>(() => Copy(new CopyOptions { Overwrite = overwrite }));
+
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        Assert.Equal([1, 2, 3], HostFile.ReadAllBytes(Path.Combine(destination, "nested")));
+        Assert.Equal(["nested"], HostDirectory.GetFileSystemEntries(destination).Select(Path.GetFileName));
+    }
+
+    /// <summary>
+    /// A file that is copied and then cannot be moved onto the name it replaces is reported
+    /// against that name, not against the scratch file it was written to.
+    /// </summary>
+    [Fact]
+    public void A_file_that_cannot_replace_its_name_is_reported_against_the_name()
+    {
+        InMemoryFileSystem fs = new();
+        fs.AddFile("source/data.txt", "new");
+        fs.AddFile("destination/data.txt", "old");
+        fs.SetUndeletable("destination/data.txt");
+        using Dir source = fs.OpenRoot("source");
+        using Dir destination = fs.OpenRoot("destination");
+
+        Exception? refused = Record.Exception(() => source.CopyTo(destination, new CopyOptions { Overwrite = true }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.NotNull(refused);
+        Assert.IsType<UnauthorizedAccessException>(refused);
+        Assert.Contains("'data.txt'", refused.Message);
+        Assert.DoesNotContain("cap-", refused.Message);
+        Assert.Equal("old", fs.ReadAllText("destination/data.txt"));
+        Assert.Equal(["data.txt"], fs.GetEntries("destination"));
+    }
+
+    /// <summary>
+    /// A file that cannot be read stops the copy, and leaves no scratch name and no partial
+    /// copy of itself behind; what was copied before it is whole.
+    /// </summary>
+    /// <remarks>
+    /// Arranged with a fault on a filesystem held in memory, so it runs on every leg, and with
+    /// replacement asked for so that every file goes through a scratch name.
+    /// </remarks>
+    [Fact]
+    public void A_failed_copy_leaves_no_scratch_file()
+    {
+        InMemoryFileSystem fs = new();
+        fs.AddFile("source/1.txt", "one");
+        fs.AddFile("source/2.txt", "two");
+        fs.AddFile("source/3.txt", "three");
+        fs.AddDirectory("destination");
+        fs.SetUnreadable("source/2.txt");
+        using Dir source = fs.OpenRoot("source");
+        using Dir destination = fs.OpenRoot("destination");
+
+        _ = Assert.Throws<UnauthorizedAccessException>(
+            () => source.CopyTo(destination, new CopyOptions { Overwrite = true }, cancellationToken: TestContext.Current.CancellationToken));
+
+        string[] left = [.. fs.GetEntries("destination")];
+        Assert.DoesNotContain(left, name => name.StartsWith("cap-", StringComparison.Ordinal));
+        Assert.DoesNotContain("2.txt", left);
+        foreach (string name in left)
+        {
+            Assert.Equal(fs.ReadAllText($"source/{name}"), fs.ReadAllText($"destination/{name}"));
+        }
+    }
+
     /// <summary>Permissions are carried across when the caller asks for them.</summary>
     [Fact]
     public void Permissions_are_carried_across_when_asked()
@@ -498,6 +578,91 @@ public sealed class CopyTests : IDisposable
 
         CapIOException refused = Assert.Throws<CapIOException>(() => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
+
+        // Refused when the copy reached the destination, so nothing was copied into itself:
+        // what is there, if anything, is the file listed ahead of it, whole, and no scratch.
+        string inside = Path.Combine(_tree.HostPath, "source", "destination");
+        string[] left = [.. HostDirectory.GetFileSystemEntries(inside).Select(Path.GetFileName)!];
+        Assert.True(left is [] or ["top.txt"], $"The destination held: {string.Join(", ", left)}");
+        if (left is ["top.txt"])
+        {
+            Assert.Equal("contents", HostFile.ReadAllText(Path.Combine(inside, "top.txt")));
+        }
+
+        Assert.Equal(["destination", "top.txt"], HostDirectory.GetFileSystemEntries(Path.Combine(_tree.HostPath, "source")).Select(Path.GetFileName).Order());
+    }
+
+    /// <summary>
+    /// Times are carried across between two handles opened separately on one filesystem, a
+    /// recreated link's own times included.
+    /// </summary>
+    /// <remarks>
+    /// The other cases derive both handles from one root. Opening each from the ambient path
+    /// gives two roots with nothing in common but the filesystem, which is the shape a caller
+    /// copying between two places it was handed has.
+    /// </remarks>
+    [Fact]
+    public void A_copy_between_two_roots_on_one_filesystem_preserves_link_times()
+    {
+        DateTimeOffset written = new(2003, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        DateTimeOffset accessed = new(2004, 5, 6, 7, 8, 9, TimeSpan.Zero);
+        Make("source", "top.txt");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        HostFile.CreateSymbolicLink(Path.Combine(_tree.HostPath, "source", "pointer"), "top.txt");
+        _tree.Directory.SetTimes("source/pointer", CapFileTime.At(accessed), CapFileTime.At(written));
+
+        using (Dir source = Dir.Open(Path.Combine(_tree.HostPath, "source"), AmbientAuthority.Acquire()))
+        using (Dir destination = Dir.Open(Path.Combine(_tree.HostPath, "destination"), AmbientAuthority.Acquire()))
+        {
+            source.CopyTo(destination, new CopyOptions { PreserveTimes = true, Symlinks = CopyAction.Recreate }, cancellationToken: TestContext.Current.CancellationToken);
+        }
+
+        CapMetadata copied = _tree.Directory.GetMetadata("destination/pointer");
+        Assert.Equal(CapFileType.Symlink, copied.Type);
+        Assert.Equal(written, copied.LastWriteTime);
+        Assert.Equal(accessed, copied.LastAccessTime);
+    }
+
+    /// <summary>
+    /// A refusal to set a copied file's times stops the copy, and the file whose times could
+    /// not be set is not left behind as though it had been copied.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_refused_time_change_stops_the_copy(bool overwrite)
+    {
+        Make("source", "top.txt");
+        string destination = Path.Combine(_tree.HostPath, "destination");
+        HostDirectory.CreateDirectory(destination);
+        if (overwrite)
+        {
+            HostFile.WriteAllText(Path.Combine(destination, "top.txt"), "old");
+        }
+
+        UnauthorizedAccessException refused = await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Run(
+            asynchronous: false,
+            new CopyOptions { PreserveTimes = true, Overwrite = overwrite },
+            observe: call =>
+            {
+                if (call.Contains(": SetTimes(", StringComparison.Ordinal))
+                {
+                    throw new UnauthorizedAccessException("The times may not be changed.");
+                }
+            }, cancellationToken: TestContext.Current.CancellationToken));
+
+        Assert.Equal("The times may not be changed.", refused.Message);
+        Assert.DoesNotContain(
+            HostDirectory.GetFileSystemEntries(destination),
+            entry => Path.GetFileName(entry).StartsWith("cap-", StringComparison.Ordinal));
+        if (overwrite)
+        {
+            Assert.Equal("old", HostFile.ReadAllText(Path.Combine(destination, "top.txt")));
+        }
+        else
+        {
+            Assert.Empty(HostDirectory.GetFileSystemEntries(destination));
+        }
     }
 
     /// <summary>

@@ -749,7 +749,7 @@ public static partial class DirExtensions
     /// </remarks>
     internal static void Publish(IDir directory, string scratch, string name, Durability durability)
     {
-        directory.Rename(scratch, directory, name, replaceExisting: true);
+        MoveOnto(directory, scratch, name);
 
         if (durability != Durability.FileAndDirectory)
         {
@@ -766,6 +766,58 @@ public static partial class DirExtensions
         if (synced.IsFailure && synced.Category != CapErrorCategory.NotSupported)
         {
             throw FailureTranslation.ToException(synced, name, ExpectedTarget.Name);
+        }
+    }
+
+    /// <summary>
+    /// Moves a file written under a scratch name onto the name it was written for, replacing
+    /// whatever that name holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A failure is reported against <paramref name="quoted"/>, or <paramref name="name"/> when
+    /// that is null — the name the caller passed, either way — and not against the scratch name, which the caller never saw and which is removed on the way
+    /// out. The commonest failure is a directory holding the name, and "'cap-…' names a
+    /// directory" is a message about something that no longer exists.
+    /// </para>
+    /// <para>
+    /// A <see cref="Dir"/> hands back the platform's failure, so the exception is built around
+    /// the name from the start. Any other handle reports by throwing, and what it threw is
+    /// wrapped: the kind is kept, the message names the target, and the implementation's own
+    /// exception is carried as the inner one.
+    /// </para>
+    /// </remarks>
+    internal static void MoveOnto(IDir directory, string scratch, string name, string? quoted = null)
+    {
+        quoted ??= name;
+
+        if (directory is Dir concrete)
+        {
+            CapError error = concrete.RenameCore(scratch, directory, name, replaceExisting: true, out ExpectedTarget expected);
+            if (error.IsFailure)
+            {
+                throw FailureTranslation.ToException(error, quoted, expected);
+            }
+
+            return;
+        }
+
+        try
+        {
+            directory.Rename(scratch, directory, name, replaceExisting: true);
+        }
+        catch (CapIOException exception)
+        {
+            throw new CapIOException(
+                exception.Kind,
+                $"'{quoted}' could not be replaced by the file written beside it. ({exception.Kind})",
+                exception);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            throw new UnauthorizedAccessException(
+                $"'{quoted}' could not be replaced by the file written beside it: the filesystem refused the move.",
+                exception);
         }
     }
 

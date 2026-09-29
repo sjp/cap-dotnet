@@ -71,7 +71,25 @@ public sealed class AtomicWriteCrashTests : IDisposable
             IsUnchanged(after, before) || IsWholePayload(after),
             $"The published name held {after.Length} bytes, which is neither what was there " +
             $"before nor the whole of what was being written.");
+
+        // Whatever else the kill left is a scratch file, recognisable by its prefix as
+        // something to clear up rather than a file anybody meant to write.
+        string[] left = [.. Leftovers()];
+        Assert.All(left, name => Assert.StartsWith("cap-", name, StringComparison.Ordinal));
+
+        // And it is in nobody's way: the next publish of the same name succeeds beside it,
+        // adding no leftover of its own.
+        byte[] next = [9];
+        _tree.Directory.WriteAllBytesAtomic(AtomicWriteCrashChild.TargetName, next);
+        Assert.Equal(next, HostFile.ReadAllBytes(target));
+        Assert.Equal(left.Order(StringComparer.Ordinal), Leftovers().Order(StringComparer.Ordinal));
     }
+
+    /// <summary>The names in the scratch tree other than the one being published.</summary>
+    private IEnumerable<string> Leftovers() =>
+        Directory.EnumerateFileSystemEntries(_tree.HostPath)
+            .Select(entry => Path.GetFileName(entry))
+            .Where(name => name != AtomicWriteCrashChild.TargetName);
 
     /// <summary>Whether what is on disk is exactly what was there before the publish began.</summary>
     private static bool IsUnchanged(byte[] after, byte[] before) => after.AsSpan().SequenceEqual(before);

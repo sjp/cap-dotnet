@@ -1041,6 +1041,26 @@ public sealed partial class Dir : IDir
     }
 
     /// <summary>
+    /// Moves an entry as <see cref="Rename"/> does, handing back the platform's failure rather
+    /// than an exception built around <paramref name="from"/>.
+    /// </summary>
+    /// <remarks>
+    /// For a caller whose source name is its own business — a scratch file it wrote under a
+    /// random name to move over the name it was asked about — and which reports a failure
+    /// against the name the caller of <em>that</em> operation passed. A name that is not
+    /// usable still throws, as it would from <see cref="Rename"/>.
+    /// </remarks>
+    internal CapError RenameCore(string from, IDir toDir, string to, bool replaceExisting, out ExpectedTarget expected)
+    {
+        CapError error = LinkCore(
+            from, toDir, to, rename: true, replaceExisting, followLink: false,
+            out CapPathError fromError, out CapPathError toError, out expected);
+
+        ThrowForPaths(fromError, from, nameof(from), toError, to, nameof(to));
+        return error;
+    }
+
+    /// <summary>
     /// Creates a symbolic link to a file beneath this handle.
     /// </summary>
     /// <param name="linkPath">A relative path naming the link to create.</param>
@@ -1545,6 +1565,14 @@ public sealed partial class Dir : IDir
     /// <para>
     /// The result owns its own open directory, so it outlives this handle and can be closed
     /// without affecting it. It is a separate capability, not a view onto this one.
+    /// </para>
+    /// <para>
+    /// <strong>The result is always a new handle, which the caller owns and must dispose</strong>,
+    /// even when <paramref name="policy"/> is the one this handle already carries. Another
+    /// implementation of <see cref="IDir"/> should keep to that: code that narrows a handle it
+    /// was given and disposes the result when done would otherwise close the handle it was
+    /// given. The library's own callers do not dispose a result that is the handle they asked,
+    /// but other code may.
     /// </para>
     /// <para>
     /// Safe to call concurrently with any other member of this handle, from any thread. This

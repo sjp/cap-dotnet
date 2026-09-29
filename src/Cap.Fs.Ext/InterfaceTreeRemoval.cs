@@ -65,26 +65,42 @@ internal static class InterfaceTreeRemoval
 
         try
         {
-            using IDir strict = parent.Restrict(SymlinkPolicy.Deny);
-
-            if (!strict.TryOpenDir(name, noFollow: true, out IDir? directory))
+            IDir strict = parent.Restrict(SymlinkPolicy.Deny);
+            try
             {
-                return FailureTranslation.ToException(Diagnose(parent, name), path, ExpectedTarget.Directory);
-            }
+                if (!strict.TryOpenDir(name, noFollow: true, out IDir? directory))
+                {
+                    CapError diagnosed = Diagnose(parent, name);
+                    if (diagnosed.Category != CapErrorCategory.Unknown)
+                    {
+                        return FailureTranslation.ToException(diagnosed, path, ExpectedTarget.Directory);
+                    }
 
-            Exception? emptied;
-            using (directory)
+                    // A directory that would not open. An empty one can still be removed, which
+                    // asks nothing of the directory itself; a full one is reported with the
+                    // reason it could not be opened, rather than with the "not empty" that
+                    // follows from that.
+                    return strict.TryDeleteDir(name) ? null : WhyNotOpened(strict, name, path);
+                }
+
+                Exception? emptied;
+                using (directory)
+                {
+                    emptied = EmptyOpen(directory, MaximumDepth, new Trail(path, null), cancellationToken);
+                }
+
+                if (emptied is not null)
+                {
+                    return emptied;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                return Unlink(strict, name, directory: true);
+            }
+            finally
             {
-                emptied = EmptyOpen(directory, MaximumDepth, path, cancellationToken);
+                Release(strict, parent);
             }
-
-            if (emptied is not null)
-            {
-                return emptied;
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            return Unlink(strict, name, directory: true);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -107,8 +123,15 @@ internal static class InterfaceTreeRemoval
 
         try
         {
-            using IDir strict = directory.Restrict(SymlinkPolicy.Deny);
-            return EmptyOpen(strict, MaximumDepth, path: null, cancellationToken);
+            IDir strict = directory.Restrict(SymlinkPolicy.Deny);
+            try
+            {
+                return EmptyOpen(strict, MaximumDepth, trail: null, cancellationToken);
+            }
+            finally
+            {
+                Release(strict, directory);
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -119,10 +142,30 @@ internal static class InterfaceTreeRemoval
     /// <summary>Throws a failure this walk kept, as it was first thrown.</summary>
     public static void Rethrow(Exception failure) => ExceptionDispatchInfo.Throw(failure);
 
+    /// <summary>
+    /// Disposes the handle a restriction produced, unless it is the handle it was asked of.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Dir.Restrict"/> always produces a new handle, and says so, but
+    /// <see cref="IDir"/> is implemented by stubs and wrappers too, and one that answers a
+    /// request for the policy it already has by returning itself is doing nothing
+    /// unreasonable. Disposing that answer would close the caller's own handle behind its
+    /// back, so it is left alone.
+    /// </remarks>
+    private static void Release(IDir narrowed, IDir original)
+    {
+        if (!ReferenceEquals(narrowed, original))
+        {
+            narrowed.Dispose();
+        }
+    }
+
     /// <summary>Says why a name could not be opened as the directory it was meant to be.</summary>
     /// <remarks>
     /// Asked as a description of the name, so that a link, a file and a name holding nothing
-    /// are told apart, as the core layer tells them apart.
+    /// are told apart, as the core layer tells them apart. A directory that would not open
+    /// answers <see cref="CapErrorCategory.Unknown"/>, which the caller takes as the cue to
+    /// ask the open itself why.
     /// </remarks>
     private static CapError Diagnose(IDir parent, string name)
     {
@@ -139,22 +182,105 @@ internal static class InterfaceTreeRemoval
         };
     }
 
+    /// <summary>
+    /// Opens a name that would not open, in the form that throws, for the implementation's
+    /// account of why, and reports it against <paramref name="where"/>.
+    /// </summary>
+    /// <returns>
+    /// The failure, or null when the open now succeeds or fails only because the name is not
+    /// a directory to enter — something changed it in between, and there is nothing to add.
+    /// </returns>
+    /// <remarks>
+    /// Asked only once the name has also refused to be removed, so a removal that goes well
+    /// never pays for it.
+    /// </remarks>
+    private static Exception? WhyNotOpened(IDir directory, string name, string? where)
+    {
+        try
+        {
+            directory.OpenDir(name, noFollow: true).Dispose();
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            CapErrorKind kind = CapIOException.KindOf(exception);
+            if (LeavesNothingToEnter(kind))
+            {
+                return null;
+            }
+
+            string quoted = where ?? name;
+            return exception switch
+            {
+                UnauthorizedAccessException => new UnauthorizedAccessException(
+                    $"'{quoted}' could not be opened to remove what is inside it: permission was refused.",
+                    exception),
+                _ => new CapIOException(
+                    kind,
+                    $"'{quoted}' could not be opened to remove what is inside it. ({kind})",
+                    exception),
+            };
+        }
+    }
+
+    /// <summary>
+    /// Whether a failed open means the name is not a directory to descend into, rather than
+    /// one that could not be.
+    /// </summary>
+    private static bool LeavesNothingToEnter(CapErrorKind kind) => kind is
+        CapErrorKind.NotFound or
+        CapErrorKind.NotADirectory or
+        CapErrorKind.SymbolicLink or
+        CapErrorKind.LinkNotFollowed or
+        CapErrorKind.Escaped or
+        CapErrorKind.ConcurrentChange;
+
+    /// <summary>
+    /// The names descended through to reach a directory, kept only so that a failure inside it
+    /// can say where it was.
+    /// </summary>
+    /// <param name="Start">The caller's path, when the removal began from one.</param>
+    /// <param name="Up">The directory this one was found in, or null at the top.</param>
+    /// <param name="Name">This directory's name in <paramref name="Up"/>, or null at the top.</param>
+    /// <remarks>
+    /// Never resolved and never handed to anything that resolves: it is spelled out into a
+    /// message by <see cref="CapPath.DescribeBeneath"/> and nowhere else.
+    /// </remarks>
+    private sealed record Trail(string? Start, Trail? Up, string? Name = null)
+    {
+        public Trail Into(string name) => new(Start, this, name);
+
+        /// <summary>Spells the entry <paramref name="name"/> in this directory for a message.</summary>
+        public string Describe(string name)
+        {
+            List<string> names = [name];
+            for (Trail? level = this; level?.Name is not null; level = level.Up)
+            {
+                names.Add(level.Name);
+            }
+
+            names.Reverse();
+            return CapPath.DescribeBeneath(Start, names, CapPath.HostSyntax);
+        }
+    }
+
     /// <summary>Removes everything inside a directory that is already open.</summary>
     /// <param name="directory">The directory to empty.</param>
     /// <param name="remainingDepth">How many more levels the descent may go down.</param>
-    /// <param name="path">
-    /// The caller's path, when the removal began from one; null when it began from a handle.
+    /// <param name="trail">
+    /// How the directory was reached, from the caller's path when the removal began from one;
+    /// null when it began from a handle and this is that handle.
     /// </param>
     /// <param name="cancellationToken">Stops the removal before the next entry.</param>
     private static Exception? EmptyOpen(
-        IDir directory, int remainingDepth, string? path, CancellationToken cancellationToken)
+        IDir directory, int remainingDepth, Trail? trail, CancellationToken cancellationToken)
     {
         if (remainingDepth == 0)
         {
             CapError tooDeep = CapError.FromCategory(CapErrorCategory.PathTooDeep);
-            return path is null
+            return trail?.Start is null
                 ? FailureTranslation.ToEnumerationException(tooDeep)
-                : FailureTranslation.ToException(tooDeep, path, ExpectedTarget.Directory);
+                : FailureTranslation.ToException(tooDeep, trail.Start, ExpectedTarget.Directory);
         }
 
         Exception? first = null;
@@ -167,7 +293,7 @@ internal static class InterfaceTreeRemoval
 
                 // The first failure is the one reported, and the walk carries on past it, so
                 // one entry that cannot be removed does not leave the rest of the tree behind.
-                Exception? removed = RemoveEntry(directory, entry, remainingDepth, path, cancellationToken);
+                Exception? removed = RemoveEntry(directory, entry, remainingDepth, trail, cancellationToken);
                 first ??= removed;
             }
         }
@@ -181,31 +307,53 @@ internal static class InterfaceTreeRemoval
 
     /// <summary>Removes one entry, emptying it first when it may hold entries.</summary>
     /// <remarks>
+    /// <para>
     /// A link is never descended into, and an entry the implementation declined to classify is
     /// treated as though it might be a directory: the open that follows refuses it if it is
     /// not, at the cost of one call.
+    /// </para>
+    /// <para>
+    /// A directory that will not open is still removed when it is empty. When it will not go
+    /// either, the failure reported is the reason it would not open, named by its place
+    /// beneath the removal's start, rather than the "not empty" the removal was bound to meet.
+    /// </para>
     /// </remarks>
     private static Exception? RemoveEntry(
-        IDir directory, IDirEntry entry, int remainingDepth, string? path, CancellationToken cancellationToken)
+        IDir directory, IDirEntry entry, int remainingDepth, Trail? trail, CancellationToken cancellationToken)
     {
-        if (entry.Type is CapFileType.Directory or CapFileType.Unknown &&
-            directory.TryOpenDir(entry.Name, noFollow: true, out IDir? child))
+        bool isDirectory = entry.Type == CapFileType.Directory;
+        if (entry.Type is CapFileType.Directory or CapFileType.Unknown)
         {
-            Exception? emptied;
-            using (child)
+            Trail here = trail ?? new Trail(null, null);
+            if (directory.TryOpenDir(entry.Name, noFollow: true, out IDir? child))
             {
-                emptied = EmptyOpen(child, remainingDepth - 1, path, cancellationToken);
-            }
+                Exception? emptied;
+                using (child)
+                {
+                    emptied = EmptyOpen(child, remainingDepth - 1, here.Into(entry.Name), cancellationToken);
+                }
 
-            if (emptied is not null)
+                if (emptied is not null)
+                {
+                    return emptied;
+                }
+            }
+            else
             {
-                return emptied;
+                if (TryUnlinkAs(directory, entry.Name, isDirectory) || TryUnlinkAs(directory, entry.Name, !isDirectory))
+                {
+                    return null;
+                }
+
+                if (WhyNotOpened(directory, entry.Name, here.Describe(entry.Name)) is { } unopenable)
+                {
+                    return unopenable;
+                }
             }
         }
 
-        return Unlink(directory, entry.Name, directory: entry.Type == CapFileType.Directory);
+        return Unlink(directory, entry.Name, directory: isDirectory);
     }
-
     /// <summary>
     /// Removes a single name, as the kind of thing it is expected to be and then as the other
     /// kind.

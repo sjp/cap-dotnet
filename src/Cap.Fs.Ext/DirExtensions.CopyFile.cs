@@ -121,7 +121,7 @@ public static partial class DirExtensions
                 copied = FillCopy(source, target, metadata, directory);
             }
 
-            directory.Rename(scratch, directory, location.Name, replaceExisting: true);
+            MoveOnto(directory, scratch, location.Name, quoted: to);
             scratch = null;
             return copied;
         }

@@ -66,6 +66,11 @@ system's temporary location instead is the usual mistake: the two can be on diff
 filesystems, the move then fails, and the repair everybody reaches for is a copy — which is
 not atomic, and was the point.
 
+When the move fails — a directory holding the name is the usual reason — the scratch file is
+removed and the exception names the target, keeping the failure's kind. The scratch name is
+never quoted: the caller did not choose it, and it is gone by the time the exception arrives.
+The same holds for a copy that replaces a file.
+
 A symbolic link at the target name is replaced, not followed: the move acts on the name, so
 the link is swapped for the new file and whatever it pointed at — another file in the tree,
 something outside it, or nothing — is neither written nor removed. That includes a link to
@@ -243,6 +248,14 @@ It is not atomic and nothing can make it so. It is many operations, and an entry
 it runs may or may not be removed. What it guarantees is that every one of those operations
 lands inside the subtree the handle covers.
 
+A failure part of the way through does not stop the rest: the first failure is the one
+reported, after everything else that could go has gone. One met inside the tree names the entry
+it concerns by its place beneath the path given (`'cache/a/b'`), or beneath the handle for
+`DeleteTreeContents()`, so it can be found. A directory the process may not open is still
+removed when it is empty, as `rm -rf` removes one — that asks nothing of the directory, only of
+its parent. One that is not empty stays, and the failure reported is the refusal to open it
+(`UnauthorizedAccessException` for a permission) rather than the "not empty" that followed.
+
 Every form takes a `CancellationToken`, looked at before each entry is removed, and
 `DeleteTreeAsync`, `TryDeleteTreeAsync` and `DeleteTreeContentsAsync` do the same work on a
 thread-pool thread — no platform here removes a name asynchronously, so what they offer is a
@@ -396,21 +409,30 @@ rest of the tree.
 | `[abc]` | any one of the characters listed |
 | `[a-z]` | any one character in the range |
 | `[!abc]`, `[^abc]` | any one character not listed |
+| `[]abc]`, `[!]abc]` | a `]` first in the list, after any `!` or `^`, is a member rather than the end |
 
-There is no escape character, so a name containing one of these cannot be matched literally —
-on Windows every plausible choice for one, the backslash above all, already divides one level
-from the next. Use the walk and a condition in code for an awkward name.
+There is no escape character — on Windows every plausible choice for one, the backslash above
+all, already divides one level from the next. A special character is matched literally by
+making it the only member of a class instead: `[*]`, `[?]`, `[[]` and `[]]`. A `[` with no `]`
+to close it is the literal characters it is made of. Use the walk and a condition in code for a
+name no pattern describes comfortably.
 
-Two differences from a shell are worth knowing. Case is compared exactly unless
-`GlobPattern.Parse(pattern, ignoreCase: true)` says otherwise, because whether a filesystem
-folds case is a property of how it was made and mounted rather than of the platform. And `*`
+Two differences from a shell are worth knowing. Case is compared exactly unless the search says
+otherwise: `dir.Glob(pattern, ignoreCase: true)` (and the matching `GlobAsync` overload), or
+`GlobPattern.Parse(pattern, ignoreCase: true)` for a pattern parsed once and reused. Whether a
+filesystem folds case is a property of how it was made and mounted rather than of the platform.
+`GlobPattern.Parse` divides the pattern into levels by the running machine's rules, having no
+handle to ask; the `Glob` and `GlobAsync` overloads taking text divide it as the handle reads a
+path, which differs for a filesystem held in memory under another platform's rules. And `*`
 matches a name beginning with a dot like any other: the names come from a directory read
 rather than from a command line, and `WalkOptions.SkipHidden` is where hidden entries are left
 out, including the directories a search would otherwise descend into.
 
 A pattern is relative, like every other name this library takes. One that begins at a root, or
 that contains `..`, is refused when it is parsed: a pattern describes names beneath a
-directory, and a piece that climbed would describe names beside it.
+directory, and a piece that climbed would describe names beside it. Under Windows rules every
+rooted form counts — `C:\logs\*`, the drive-relative `C:logs`, `\\server\share\*` and
+`\\?\C:\x` as well as a leading separator.
 
 `GlobAsync(pattern)` is the same search with the reading done as `WalkAsync()` does it, and a
 `CancellationToken` that stops it between batches of entries. The pattern is parsed when it is

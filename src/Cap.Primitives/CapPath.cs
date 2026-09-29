@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Cap.Primitives;
 
 /// <summary>
@@ -314,6 +316,59 @@ public readonly struct CapPath
     /// </remarks>
     internal static bool IsSeparator(char c, CapPathSyntax syntax) =>
         c == '/' || (syntax == CapPathSyntax.Windows && c == '\\');
+
+    /// <summary>
+    /// Spells where something beneath a path was found, for a message and for nothing else.
+    /// </summary>
+    /// <param name="start">
+    /// The path the caller passed, or null when the operation began from a handle rather than
+    /// from a path.
+    /// </param>
+    /// <param name="names">The single names descended through beneath it, outermost first.</param>
+    /// <param name="syntax">The syntax whose usual separator joins them.</param>
+    /// <remarks>
+    /// <para>
+    /// A walk that descends by handle never has the path of what it is looking at, and does
+    /// not want one: a path is a thing that gets resolved, and a resolution is a second answer
+    /// to a question the handles already answered. But a failure deep in a tree reported only
+    /// by the last name, or only by the path the caller started from, leaves the caller unable
+    /// to find it. This is the one place such a string is made, and what it makes is quoted in
+    /// an exception message; nothing in the library hands it to anything that resolves.
+    /// </para>
+    /// <para>
+    /// Here rather than beside its callers because the layers above keep no path separator in
+    /// their source at all, so that one appearing there is a finding rather than a judgement
+    /// call.
+    /// </para>
+    /// </remarks>
+    internal static string DescribeBeneath(string? start, IReadOnlyList<string> names, CapPathSyntax syntax)
+    {
+        char separator = syntax == CapPathSyntax.Windows ? '\\' : '/';
+        StringBuilder text = new();
+
+        if (!string.IsNullOrEmpty(start))
+        {
+            int end = start.Length;
+            while (end > 1 && IsSeparator(start[end - 1], syntax))
+            {
+                end--;
+            }
+
+            text.Append(start, 0, end);
+        }
+
+        foreach (string name in names)
+        {
+            if (text.Length > 0)
+            {
+                text.Append(separator);
+            }
+
+            text.Append(name);
+        }
+
+        return text.ToString();
+    }
 
     /// <summary>
     /// The single pass that decides everything: prefix shape first, then each component.

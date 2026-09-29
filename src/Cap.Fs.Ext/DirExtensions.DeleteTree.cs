@@ -70,7 +70,15 @@ public static partial class DirExtensions
     /// <para>
     /// A failure part of the way through leaves the tree partly removed. The first failure is
     /// the one reported and the walk carries on past it, so a single entry that cannot be
-    /// removed does not leave behind the rest of a tree that had nothing to do with it.
+    /// removed does not leave behind the rest of a tree that had nothing to do with it. A
+    /// failure inside the tree names the entry it concerns, spelled beneath
+    /// <paramref name="path"/>, so that it can be found.
+    /// </para>
+    /// <para>
+    /// A directory that cannot be opened — its permissions refuse this process a read — is
+    /// still removed when it is empty, since that asks nothing of the directory itself. When it
+    /// is not empty it stays, and the failure reported is the refusal to open it rather than
+    /// the "not empty" that followed from it.
     /// </para>
     /// <para>
     /// Safe to call from any thread, and concurrently with anything else on the same tree,
@@ -118,10 +126,12 @@ public static partial class DirExtensions
             return;
         }
 
-        CapError error = TreeRemoval.Remove(concrete, location.Name, cancellationToken);
+        CapError error = TreeRemoval.Remove(concrete, location.Name, out IReadOnlyList<string>? failedAt, cancellationToken);
         if (error.IsFailure)
         {
-            throw FailureTranslation.ToException(error, path, ExpectedTarget.Directory);
+            throw failedAt is null
+                ? FailureTranslation.ToException(error, path, ExpectedTarget.Directory)
+                : FailureTranslation.ToException(error, CapPath.DescribeBeneath(path, failedAt, concrete.PathSyntax), ExpectedTarget.Name);
         }
     }
 
@@ -227,10 +237,12 @@ public static partial class DirExtensions
             return;
         }
 
-        CapError error = TreeRemoval.Empty(concrete, cancellationToken);
+        CapError error = TreeRemoval.Empty(concrete, out IReadOnlyList<string>? failedAt, cancellationToken);
         if (error.IsFailure)
         {
-            throw FailureTranslation.ToEnumerationException(error);
+            throw failedAt is null
+                ? FailureTranslation.ToEnumerationException(error)
+                : FailureTranslation.ToException(error, CapPath.DescribeBeneath(null, failedAt, concrete.PathSyntax), ExpectedTarget.Name);
         }
     }
 
