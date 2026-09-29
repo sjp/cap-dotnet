@@ -23,7 +23,7 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 | `CAP0003` | `AmbientAuthority.Acquire()` called outside a composition root | warning |
 | `CAP0004` | A raw handle taken out of a capability: `Dir.UnsafeGetHandle()`, `CapFile.UnsafeGetHandle()` | info |
 | `CAP0005` | A path passed to this library that was built by joining strings at the call | warning |
-| `CAP0006` | The system clock: `DateTime.Now`/`UtcNow`/`Today`, `DateTimeOffset.Now`/`UtcNow`, `TimeProvider.System`, `Thread.Sleep`, and the `Task.Delay` overloads that take no `TimeProvider` | off |
+| `CAP0006` | The system clock: `DateTime.Now`/`UtcNow`/`Today`, `DateTimeOffset.Now`/`UtcNow`, `TimeProvider.System`, `Thread.Sleep`, the constructors of `System.Threading.Timer` and `System.Timers.Timer`, and the overloads of `Task.Delay`, `Task.WaitAsync`, `PeriodicTimer` and `CancellationTokenSource` that take a timeout or interval but no `TimeProvider` | off |
 | `CAP0007` | The operating system's entropy or a stand-in for it: `RandomNumberGenerator`, `System.Random`, `Guid.NewGuid`, `Guid.CreateVersion7`, `Path.GetRandomFileName` | off |
 | `CAP0008` | Anything listed in a `CapBannedSymbols.txt` the project supplies | warning |
 

@@ -96,10 +96,20 @@ else from reaching around it takes a build rule, like the one below.
 Every assembly under `src/` is built with the ambient clock banned, by rule `CAP0006` of the
 analyzer that ships in the `Cap.Std` package (see [analyzers.md](analyzers.md)):
 `DateTime.Now`, `UtcNow` and `Today`, `DateTimeOffset.Now` and `UtcNow`, `TimeProvider.System`,
-`Thread.Sleep`, and the `Task.Delay` overloads that take no provider. `CapClock` is the one
-place allowed to name `TimeProvider.System`. A consuming project gets the same rule by
-turning `CAP0006` on, or by marking its assembly `[assembly: CapabilityStrict]`.
+`Thread.Sleep`, the constructors of `System.Threading.Timer` and `System.Timers.Timer` (use
+`TimeProvider.CreateTimer`), and the overloads of `Task.Delay`, `Task.WaitAsync`,
+`PeriodicTimer` and `CancellationTokenSource` that take a timeout or an interval but no
+provider. `CapClock` is the one place allowed to name `TimeProvider.System`. A consuming
+project gets the same rule by turning `CAP0006` on, or by marking its assembly
+`[assembly: CapabilityStrict]`.
 
-`Stopwatch` is deliberately left alone. It measures an interval from a starting point of the
-caller's choosing and cannot say what time it is, which is why the record of ambient-authority
-acquisitions uses it for the times it reports.
+`Stopwatch` and `Environment.TickCount`/`TickCount64` are deliberately left alone. They measure
+an interval from a starting point of the caller's choosing and cannot say what time it is,
+which is why the record of ambient-authority acquisitions uses `Stopwatch` for the times it
+reports.
+
+`CancellationTokenSource.CancelAfter` is not reported either. It waits on the provider the
+source was constructed with, which the rule cannot see at the call. On a source built with
+`new CancellationTokenSource()` it waits on the system clock, and nothing reports that; build
+the source with `new CancellationTokenSource(Timeout.InfiniteTimeSpan, provider)` and
+`CancelAfter` then waits on the provider that was passed in.

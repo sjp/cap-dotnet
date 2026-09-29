@@ -3,6 +3,10 @@
 # Same format as the BannedSymbols.txt files read by Microsoft.CodeAnalysis.BannedApiAnalyzers:
 # one documentation-comment ID per line, then optionally `;` and the message to show. A method
 # written without a parameter list stands for every overload of it.
+#
+# Left out on purpose (see docs/time.md): Stopwatch and Environment.TickCount, which measure an
+# interval and cannot say what time it is, and CancellationTokenSource.CancelAfter, which
+# waits on whatever provider the source was constructed with.
 
 P:System.DateTime.Now;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
 P:System.DateTime.UtcNow;Reads the system clock. Take a TimeProvider from Cap.Time.CapClock and pass it down.
@@ -15,3 +19,12 @@ M:System.Threading.Tasks.Task.Delay(System.Int32);Waits on the system clock. Use
 M:System.Threading.Tasks.Task.Delay(System.Int32,System.Threading.CancellationToken);Waits on the system clock. Use the overload that takes a TimeProvider.
 M:System.Threading.Tasks.Task.Delay(System.TimeSpan);Waits on the system clock. Use the overload that takes a TimeProvider.
 M:System.Threading.Tasks.Task.Delay(System.TimeSpan,System.Threading.CancellationToken);Waits on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.WaitAsync(System.TimeSpan);Times out on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task.WaitAsync(System.TimeSpan,System.Threading.CancellationToken);Times out on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task`1.WaitAsync(System.TimeSpan);Times out on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Tasks.Task`1.WaitAsync(System.TimeSpan,System.Threading.CancellationToken);Times out on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.CancellationTokenSource.#ctor(System.TimeSpan);Times out on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.CancellationTokenSource.#ctor(System.Int32);Times out on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.PeriodicTimer.#ctor(System.TimeSpan);Ticks on the system clock. Use the overload that takes a TimeProvider.
+M:System.Threading.Timer.#ctor;Fires on the system clock. Use TimeProvider.CreateTimer on the provider that was passed in.
+M:System.Timers.Timer.#ctor;Fires on the system clock. Use TimeProvider.CreateTimer on the provider that was passed in.

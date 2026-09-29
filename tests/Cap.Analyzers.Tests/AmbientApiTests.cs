@@ -97,6 +97,13 @@ public sealed class AmbientApiTests
     [InlineData("DateTimeOffset.Now", "CAP0006")]
     [InlineData("TimeProvider.System", "CAP0006")]
     [InlineData("Task.Delay(10)", "CAP0006")]
+    [InlineData("Task.CompletedTask.WaitAsync(TimeSpan.FromSeconds(1))", "CAP0006")]
+    [InlineData("Task.FromResult(1).WaitAsync(TimeSpan.FromSeconds(1), CancellationToken.None)", "CAP0006")]
+    [InlineData("new CancellationTokenSource(TimeSpan.FromSeconds(1))", "CAP0006")]
+    [InlineData("new CancellationTokenSource(1000)", "CAP0006")]
+    [InlineData("new PeriodicTimer(TimeSpan.FromSeconds(1))", "CAP0006")]
+    [InlineData("new Timer(_ => { }, null, 1000, 1000)", "CAP0006")]
+    [InlineData("new System.Timers.Timer(1000)", "CAP0006")]
     [InlineData("new Random()", "CAP0007")]
     [InlineData("Random.Shared.Next()", "CAP0007")]
     [InlineData("RandomNumberGenerator.GetInt32(10)", "CAP0007")]
@@ -115,7 +122,13 @@ public sealed class AmbientApiTests
     [InlineData("new FileStream(new SafeFileHandle(), FileAccess.Read)")]
     [InlineData("new StreamReader(Stream.Null)")]
     [InlineData("Task.Delay(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
+    [InlineData("Task.CompletedTask.WaitAsync(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
+    [InlineData("new CancellationTokenSource(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
+    [InlineData("new PeriodicTimer(TimeSpan.FromSeconds(1), TimeProvider.System is var p ? p : p)")]
+    [InlineData("new CancellationTokenSource()")]
+    [InlineData("Task.CompletedTask.WaitAsync(CancellationToken.None)")]
     [InlineData("Stopwatch.GetTimestamp()")]
+    [InlineData("Environment.TickCount64")]
     [InlineData("nameof(File.ReadAllText)")]
     [InlineData("nameof(Environment.CurrentDirectory)")]
     public async Task What_reaches_nothing_by_itself_is_not_reported(string expression)
@@ -188,6 +201,7 @@ public sealed class AmbientApiTests
         using System.Net;
         using System.Net.Sockets;
         using System.Security.Cryptography;
+        using System.Threading;
         using System.Threading.Tasks;
         using Microsoft.Win32.SafeHandles;
 
