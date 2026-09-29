@@ -774,4 +774,127 @@ public sealed class DirMutationTests : IDisposable
         _ = Assert.Throws<ObjectDisposedException>(() => root.ReadLink("x"));
         _ = Assert.Throws<ObjectDisposedException>(() => root.TryDeleteFile("x"));
     }
+
+    // --- making a chain of directories -----------------------------------------------------------
+
+    /// <summary>Every missing directory on the path is made, and the last is opened.</summary>
+    [Fact]
+    public void A_chain_of_directories_is_created_and_the_last_is_opened()
+    {
+        using Dir root = OpenRoot();
+        using Dir leaf = root.OpenOrCreateDirAll("a/b/c");
+
+        Assert.True(HostDirectory.Exists(Host("a", "b", "c")));
+        Assert.Equal(root.GetMetadata("a/b/c").FileId, leaf.GetMetadata().FileId);
+    }
+
+    /// <summary>A chain that is already there, in whole or in part, is opened and finished.</summary>
+    [Fact]
+    public void A_chain_that_is_partly_there_is_finished()
+    {
+        HostDirectory.CreateDirectory(Host("a", "b"));
+        HostFile.WriteAllText(Host("a", "b", "kept"), "x");
+
+        using Dir root = OpenRoot();
+        using (Dir whole = root.OpenOrCreateDirAll("a/b"))
+        {
+            Assert.Equal(root.GetMetadata("a/b").FileId, whole.GetMetadata().FileId);
+        }
+
+        using Dir deeper = root.OpenOrCreateDirAll("a/b/c/d");
+
+        Assert.True(HostDirectory.Exists(Host("a", "b", "c", "d")));
+        Assert.Equal("x", HostFile.ReadAllText(Host("a", "b", "kept")));
+    }
+
+    /// <summary>
+    /// A `..` steps back over a name still to be made, and among directories already there it
+    /// steps back as it does for an open.
+    /// </summary>
+    [Fact]
+    public void A_chain_with_a_parent_step_makes_only_what_is_left_beneath_it()
+    {
+        HostDirectory.CreateDirectory(Host("there"));
+
+        using Dir root = OpenRoot();
+        using (root.OpenOrCreateDirAll("gone/../b/c"))
+        {
+        }
+
+        using (root.OpenOrCreateDirAll("there/new/../../d"))
+        {
+        }
+
+        Assert.False(HostEntry.Exists(Host("gone")));
+        Assert.True(HostDirectory.Exists(Host("b", "c")));
+        Assert.False(HostEntry.Exists(Host("there", "new")));
+        Assert.True(HostDirectory.Exists(Host("d")));
+    }
+
+    /// <summary>A file in the way stops the chain before anything is made.</summary>
+    [Fact]
+    public void A_chain_stops_at_a_file_in_the_way()
+    {
+        HostDirectory.CreateDirectory(Host("a"));
+        HostFile.WriteAllText(Host("a", "file"), "x");
+
+        using Dir root = OpenRoot();
+
+        IOException refused = Assert.ThrowsAny<IOException>(() => root.OpenOrCreateDirAll("a/new/../file/deeper"));
+        Assert.Contains("a/new/../file", refused.Message, StringComparison.Ordinal);
+        Assert.False(HostEntry.Exists(Host("a", "new")));
+        Assert.Equal("x", HostFile.ReadAllText(Host("a", "file")));
+        Assert.False(root.TryOpenOrCreateDirAll("a/file/deeper", out Dir? none));
+        Assert.Null(none);
+    }
+
+    /// <summary>
+    /// A step that climbs above the handle is refused as an escape, with nothing made on the
+    /// way to it.
+    /// </summary>
+    [Fact]
+    public void A_chain_that_leaves_is_refused_before_anything_is_made()
+    {
+        using Dir root = OpenRoot();
+
+        _ = Assert.Throws<SandboxEscapeException>(() => root.OpenOrCreateDirAll("../outside"));
+        _ = Assert.Throws<SandboxEscapeException>(() => root.OpenOrCreateDirAll("new/../../outside"));
+        Assert.False(HostEntry.Exists(Host("new")));
+        Assert.False(HostEntry.Exists(Path.Combine(Path.GetDirectoryName(_tree.HostPath)!, "outside")));
+        Assert.False(root.TryOpenOrCreateDirAll("../outside", out _));
+    }
+
+    /// <summary>A chain deeper than the walk descends is refused before anything is made.</summary>
+    [Fact]
+    public void A_chain_too_deep_to_open_is_refused_before_anything_is_made()
+    {
+        using Dir root = OpenRoot();
+
+        _ = Assert.ThrowsAny<IOException>(() => root.OpenOrCreateDirAll(string.Join('/', Enumerable.Repeat("d", 300))));
+        Assert.False(HostEntry.Exists(Host("d")));
+    }
+
+    /// <summary>
+    /// A link to a directory inside the handle is followed, as <c>mkdir -p</c> follows one,
+    /// and one that leaves is refused.
+    /// </summary>
+    [Fact]
+    public void A_chain_follows_a_link_that_stays_inside_and_refuses_one_that_leaves()
+    {
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
+        HostDirectory.CreateDirectory(Host("real"));
+        HostDirectory.CreateSymbolicLink(Host("inside"), "real");
+        HostDirectory.CreateSymbolicLink(Host("away"), "..");
+
+        using Dir root = OpenRoot();
+        using (root.OpenOrCreateDirAll("inside/made"))
+        {
+        }
+
+        Assert.True(HostDirectory.Exists(Host("real", "made")));
+        _ = Assert.Throws<SandboxEscapeException>(() => root.OpenOrCreateDirAll("away/made"));
+
+        using Dir strict = root.Restrict(SymlinkPolicy.Deny);
+        _ = Assert.Throws<CapIOException>(() => strict.OpenOrCreateDirAll("inside/other"));
+    }
 }

@@ -326,6 +326,34 @@ internal static class FailureTranslation
     };
 
     /// <summary>
+    /// The exception for a change of permissions through a handle that did not happen.
+    /// </summary>
+    /// <remarks>
+    /// A platform handed the other system's kind of permissions reports that it does not
+    /// support them, and so does a filesystem with nowhere to keep them; the message names
+    /// both, since the category cannot tell them apart.
+    /// </remarks>
+    public static Exception ToPermissionsException(CapError error) => error.Category switch
+    {
+        CapErrorCategory.Closed => DisposedDuringCall(),
+
+        CapErrorCategory.PermissionDenied =>
+            new UnauthorizedAccessException(
+                $"The filesystem would not change the permissions of what this handle refers to. ({error})"),
+
+        CapErrorCategory.NotSupported =>
+            new CapIOException(
+                KindOf(error.Category),
+                $"The permissions were not written: they are not the kind this filesystem " +
+                $"records (a Unix mode on Windows, or Windows attributes elsewhere), or the " +
+                $"filesystem cannot change them. ({error})"),
+
+        _ => new CapIOException(
+            KindOf(error.Category),
+            $"The permissions of what this handle refers to could not be changed. ({error})"),
+    };
+
+    /// <summary>
     /// Builds the exception for a failure to set the times of what an open handle refers to.
     /// </summary>
     /// <remarks>

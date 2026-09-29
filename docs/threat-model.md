@@ -56,6 +56,13 @@ The guarantee is about the filesystem a `Dir` was opened on.
 - **A `Dir` on the host**, from `Dir.Open`, `CapTempDir`, `ProjectDirs` or anything derived
   from one of those, is what the guarantee is written for. *D* is a directory on the host,
   and the objects it constrains are the host's.
+- **A `Dir` from `Dir.FromHandle`** is one on the host whose *D* is the directory a handle the
+  process already held refers to: one inherited, passed by socket activation or received over
+  a socket. It demands the ambient token, as `Dir.Open` does, because how that handle was
+  chosen is outside anything the library can see (§6.4). The directory is opened again
+  through the handle, as a directory and with read access, so the new `Dir` owns an open
+  object of its own and nothing about the handle it came from, its flags included, carries
+  over. From there the guarantee holds as for any other root.
 - **A `Dir` on an `InMemoryFileSystem`**, from the `Cap.Std.Testing` package, is outside the
   claim about the host, because it has no host objects to reach or protect: every object it
   can name is in the process's memory. Inside its own tree the guarantee holds as written,
@@ -340,7 +347,8 @@ table is data, so an attack is written once and runs everywhere:
 
 - **through every operation that takes a path**, and through each end of the ones that take
   two: opening, creating, describing, reading a link, removing a file, a directory or a whole
-  tree, moving, and linking. A removal or a move that resolves its path differently from an
+  tree, moving, linking, making a chain of directories, reading, writing and appending text,
+  and copying a file. A removal or a move that resolves its path differently from an
   open is the classic escape, and a corpus run only against opens would not see it;
 - **on every backend the host has**, installed in turn for the length of one case, so a Linux
   run covers the kernel-atomic open and the walk and does not depend on which one the machine
@@ -608,7 +616,8 @@ outside files — in practice, a dedicated mount or a directory they own exclusi
 ### 6.4 The root itself is resolved with ambient authority
 
 Opening the first `Dir` requires an `AmbientAuthority` token and resolves an ordinary path
-with ordinary ambient rules. Everything the model promises begins *after* that. The token
+with ordinary ambient rules, or, through `Dir.FromHandle`, takes whatever directory a handle
+the process already held refers to. Everything the model promises begins *after* that. The token
 exists to make that moment greppable and auditable, not to make it safe.
 
 Auditable includes at run time: a process can be told to record every acquisition against

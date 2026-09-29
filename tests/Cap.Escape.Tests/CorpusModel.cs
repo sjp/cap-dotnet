@@ -156,6 +156,24 @@ internal enum Operation
 
     /// <summary>Opens whatever the name holds, refusing a link at the name, and lists or reads it.</summary>
     OpenAnyNoFollow,
+
+    /// <summary>Reads an existing file as lines of text.</summary>
+    ReadAllLines,
+
+    /// <summary>Creates or truncates a file, and writes text to it.</summary>
+    WriteAllText,
+
+    /// <summary>Creates a file or opens an existing one, and adds text to its end.</summary>
+    AppendAllText,
+
+    /// <summary>Opens a directory, making it and every directory missing above it, and lists it.</summary>
+    OpenOrCreateDirAll,
+
+    /// <summary>Copies the named file to a fixed name beneath the root, and reads the copy.</summary>
+    CopyFileFrom,
+
+    /// <summary>Copies a fixed file beneath the root to the name, without replacing anything there.</summary>
+    CopyFileTo,
 }
 
 /// <summary>
@@ -239,6 +257,7 @@ internal sealed class Expectation
         [
             Operation.OpenFile, Operation.OpenDir, Operation.GetMetadataFollowing,
             Operation.SetTimesFollowing, Operation.HardLinkFromFollowing, Operation.OpenAny,
+            Operation.ReadAllLines, Operation.OpenOrCreateDirAll, Operation.CopyFileFrom,
         ];
 
     private readonly Dictionary<Operation, Outcome> _outcomes;
@@ -284,6 +303,26 @@ internal sealed class Expectation
         _outcomes.TryAdd(Operation.GetMetadataFollowing, final ? reached : _outcomes[Operation.GetMetadata]);
         _outcomes.TryAdd(Operation.SetTimesFollowing, final ? reached : _outcomes[Operation.SetTimes]);
         _outcomes.TryAdd(Operation.HardLinkFromFollowing, final ? linked : _outcomes[Operation.HardLinkFrom]);
+
+        // The whole-file text members open exactly as the open they are built on does, and
+        // copying from a name reads it as opening it to read does.
+        _outcomes.TryAdd(Operation.ReadAllLines, asFile);
+        _outcomes.TryAdd(Operation.CopyFileFrom, asFile);
+        _outcomes.TryAdd(Operation.WriteAllText, _outcomes[Operation.CreateFile]);
+        _outcomes.TryAdd(Operation.AppendAllText, _outcomes[Operation.CreateFile]);
+
+        // Copying to a name claims it as a second name does: exclusively, never following a
+        // link there, beneath a directory resolved as any other.
+        _outcomes.TryAdd(Operation.CopyFileTo, _outcomes[Operation.HardLinkTo]);
+
+        // Making a chain opens what a directory open reaches. Where that finds nothing, the
+        // names that are missing are made, unless a link holds one, which is never created
+        // through.
+        _outcomes.TryAdd(
+            Operation.OpenOrCreateDirAll,
+            asDirectory != Outcome.NotFound ? asDirectory
+                : Role == LinkRole.None ? Outcome.Success
+                : Outcome.Refused);
     }
 
     /// <summary>Where the link that decides the outcome sits.</summary>
@@ -309,6 +348,13 @@ internal sealed class Expectation
 
         // Asking never throws. It says yes only for a name that is there.
         outcomes[Operation.Exists] = outcome == Outcome.Success ? Outcome.Success : Outcome.NotFound;
+
+        // Making a chain makes what is missing, unless a link holds the name.
+        if (outcome == Outcome.NotFound)
+        {
+            outcomes[Operation.OpenOrCreateDirAll] = role == LinkRole.None ? Outcome.Success : Outcome.Refused;
+        }
+
         return new(outcomes, role, $"uniformly {outcome}");
     }
 

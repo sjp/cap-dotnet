@@ -301,17 +301,19 @@ public sealed class InterfaceHandleTests
     }
 
     [Fact]
-    public void A_copy_that_must_preserve_permissions_is_refused_by_a_destination_that_cannot_take_them()
+    public void A_copy_that_must_preserve_permissions_writes_them_through_a_wrapped_destination()
     {
         _fs.AddFile("src/data.txt", "x");
+        _fs.AddDirectory("src/inner");
         _fs.AddDirectory("dst");
         using RecordingDir source = new(_fs.OpenRoot("src", SymlinkPolicy.FollowWithinSandbox));
-        using RecordingDir destination = new(_fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox));
+        using RecordingDir destination = new(_fs.OpenRoot("dst", SymlinkPolicy.FollowWithinSandbox), [], "dest");
 
-        CapIOException refused = Assert.Throws<CapIOException>(
-            () => source.CopyTo(destination, new CopyOptions { PreservePermissions = true }));
+        CopyReport report = source.CopyTo(destination, new CopyOptions { PreservePermissions = true });
 
-        Assert.Equal(CapErrorKind.NotSupported, refused.Kind);
+        Assert.Equal(1, report.Files);
+        Assert.Contains(destination.Log, call => call.StartsWith("dest/inner: SetPermissions(", StringComparison.Ordinal));
+        Assert.Contains(destination.Log, call => call.Contains(": SetPermissions(", StringComparison.Ordinal) && !call.StartsWith("dest/inner", StringComparison.Ordinal));
     }
 
     [Fact]

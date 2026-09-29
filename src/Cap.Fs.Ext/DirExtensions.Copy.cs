@@ -106,10 +106,10 @@ public static partial class DirExtensions
     /// <see cref="Dir"/> handles on one filesystem, or two handles of any kind that both report
     /// a backend on the host's own filesystem. Otherwise the check is not made, and a copy into
     /// its own subtree ends when it reaches <see cref="CopyOptions.MaxDepth"/>.
-    /// <see cref="CopyOptions.PreservePermissions"/> needs to write permissions, which no
-    /// member of the interface does, so it applies only to directories and files the
-    /// destination hands back as a <see cref="Dir"/> or a <see cref="CapFile"/>; for anything
-    /// else the copy fails rather than finish without the permissions it was asked to carry.
+    /// <see cref="CopyOptions.PreservePermissions"/> writes permissions through
+    /// <see cref="IDir.SetPermissions"/> and <see cref="ICapFile.SetPermissions"/> on whatever
+    /// the destination hands back, and a failure there fails the copy rather than let it
+    /// finish without the permissions it was asked to carry.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
@@ -124,8 +124,8 @@ public static partial class DirExtensions
     /// <exception cref="FileNotFoundException">An entry went away while it was being copied.</exception>
     /// <exception cref="CapIOException">
     /// The source holds something the options say to refuse, a destination name is already
-    /// taken, the destination lies inside the source, permissions were to be preserved on a
-    /// destination that cannot take them, or the copy failed otherwise.
+    /// taken, the destination lies inside the source, permissions were to be preserved and the
+    /// destination would not take them, or the copy failed otherwise.
     /// </exception>
     /// <exception cref="ObjectDisposedException">Either handle has been disposed.</exception>
     public static CopyReport CopyTo(this IDir dir, IDir destination, CopyOptions? options = null)
@@ -147,6 +147,36 @@ public static partial class DirExtensions
 
         Copier copier = new(dir, destination, settings);
         return copier.Run(dir);
+    }
+
+    /// <summary>Reads a file to its end, writing everything read.</summary>
+    /// <remarks>
+    /// Position by position rather than through a stream, so the two handles keep no
+    /// shared state and a short read is handled as what it is: the amount available now,
+    /// and not a statement about what follows.
+    /// </remarks>
+    private static long Transfer(ICapFile source, ICapFile target)
+    {
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
+        try
+        {
+            long offset = 0;
+            while (true)
+            {
+                int read = source.Read(buffer, offset);
+                if (read == 0)
+                {
+                    return offset;
+                }
+
+                target.Write(buffer.AsSpan(0, read), offset);
+                offset += read;
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     /// <summary>The state one copy carries while it runs.</summary>
@@ -387,9 +417,14 @@ public static partial class DirExtensions
 
             if (_options.PreservePermissions)
             {
-                Demand(
-                    (target as CapFile ?? throw CannotSetPermissions(name)).SetPermissions(metadata.Permissions),
-                    name);
+                if (target is CapFile file)
+                {
+                    Demand(file.SetPermissionsCore(metadata.Permissions), name);
+                }
+                else
+                {
+                    target.SetPermissions(metadata.Permissions);
+                }
             }
 
             if (_options.PreserveTimes)
@@ -491,31 +526,27 @@ public static partial class DirExtensions
         }
 
         /// <summary>Carries the source's permissions onto a copied directory, if asked.</summary>
+        /// <remarks>
+        /// A <see cref="Dir"/> is asked for the platform's own answer, so that a refusal names
+        /// the entry being copied. Any other handle is asked through the interface, and a
+        /// refusal is whatever that implementation throws.
+        /// </remarks>
         private void Apply(IDir target, in CapMetadata metadata, string name)
         {
-            if (_options.PreservePermissions)
+            if (!_options.PreservePermissions)
             {
-                Demand(
-                    (target as Dir ?? throw CannotSetPermissions(name)).SetPermissions(metadata.Permissions),
-                    name);
+                return;
+            }
+
+            if (target is Dir directory)
+            {
+                Demand(directory.SetPermissionsCore(metadata.Permissions), name);
+            }
+            else
+            {
+                target.SetPermissions(metadata.Permissions);
             }
         }
-
-        /// <summary>
-        /// Refuses to carry permissions onto a destination handle that has no way to take them.
-        /// </summary>
-        /// <remarks>
-        /// Writing permissions is not something the interfaces offer, so only a handle this
-        /// library opened itself can be given them. Anything else is refused for the reason
-        /// <see cref="Demand"/> reports a refusal: finishing without the permissions would look
-        /// like success.
-        /// </remarks>
-        private static CapIOException CannotSetPermissions(string name) =>
-            new(
-                CapErrorKind.NotSupported,
-                $"'{name}' could not be given the source's permissions: the destination handle " +
-                $"is not one this library opened, and permissions can only be written through " +
-                $"one that is. Copy without preserving permissions, or copy into a Dir.");
 
         /// <summary>
         /// Gives a copied directory the source's times, if asked, once everything inside it
@@ -547,36 +578,6 @@ public static partial class DirExtensions
             if (error.IsFailure)
             {
                 throw FailureTranslation.ToException(error, name, ExpectedTarget.Name);
-            }
-        }
-
-        /// <summary>Reads a file to its end, writing everything read.</summary>
-        /// <remarks>
-        /// Position by position rather than through a stream, so the two handles keep no
-        /// shared state and a short read is handled as what it is: the amount available now,
-        /// and not a statement about what follows.
-        /// </remarks>
-        private static long Transfer(ICapFile source, ICapFile target)
-        {
-            byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
-            try
-            {
-                long offset = 0;
-                while (true)
-                {
-                    int read = source.Read(buffer, offset);
-                    if (read == 0)
-                    {
-                        return offset;
-                    }
-
-                    target.Write(buffer.AsSpan(0, read), offset);
-                    offset += read;
-                }
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buffer);
             }
         }
 

@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 
@@ -213,5 +214,65 @@ public sealed class DirDerivationTests : IDisposable
         Assert.True(left.Handle.Backend.StatHandle(left.Handle, out CapNodeInfo first).IsSuccess);
         Assert.True(right.Handle.Backend.StatHandle(right.Handle, out CapNodeInfo second).IsSuccess);
         return first.IsSameNodeAs(second);
+    }
+
+    // --- a root from a handle ---------------------------------------------------------------------
+
+    /// <summary>
+    /// A root made from a directory handle reaches that directory, and outlives the handle it
+    /// was made from.
+    /// </summary>
+    [Fact]
+    [NotInMemory("Needs a directory handle the operating system issued.")]
+    public void A_root_can_be_made_from_a_directory_handle()
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "inside"), "reached");
+
+        Dir made;
+        using (Dir opened = OpenRoot())
+        {
+            made = Dir.FromHandle(opened.UnsafeGetHandle(), AmbientAuthority.Acquire(), SymlinkPolicy.Deny);
+            Assert.True(SameDirectory(opened, made));
+        }
+
+        using (made)
+        {
+            Assert.Equal("reached", made.ReadAllText("inside"));
+            Assert.Equal(SymlinkPolicy.Deny, made.SymlinkPolicy);
+            Assert.Single(made.EnumerateEntries());
+        }
+    }
+
+    /// <summary>A file handle cannot become the root of a directory.</summary>
+    [Fact]
+    [NotInMemory("Needs a file handle the operating system issued.")]
+    public void A_root_is_not_made_from_a_file_handle()
+    {
+        HostFile.WriteAllText(Path.Combine(_tree.HostPath, "file"), "x");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("file");
+
+        _ = Assert.Throws<ArgumentException>(
+            () => Dir.FromHandle(file.UnsafeGetHandle(), AmbientAuthority.Acquire()));
+    }
+
+    /// <summary>
+    /// Making a root from a handle is a use of ambient authority, and needs the token; a
+    /// closed handle has nothing to make one from.
+    /// </summary>
+    [Fact]
+    [NotInMemory("Needs a directory handle the operating system issued.")]
+    public void A_root_from_a_handle_needs_the_token_and_a_live_handle()
+    {
+        Dir opened = OpenRoot();
+        SafeHandle handle = opened.UnsafeGetHandle();
+
+        _ = Assert.Throws<ArgumentException>(() => Dir.FromHandle(handle, default));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(() => Dir.FromHandle(handle, AmbientAuthority.Acquire(), (SymlinkPolicy)99));
+        _ = Assert.Throws<ArgumentNullException>(() => Dir.FromHandle(null!, AmbientAuthority.Acquire()));
+
+        opened.Dispose();
+        _ = Assert.Throws<ObjectDisposedException>(() => Dir.FromHandle(handle, AmbientAuthority.Acquire()));
     }
 }

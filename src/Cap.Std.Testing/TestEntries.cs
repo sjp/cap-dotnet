@@ -66,8 +66,9 @@ public static class TestEntries
             FileShare share = FileShare.Read,
             FileOptions options = FileOptions.None,
             long preallocationSize = 0,
-            bool append = false) =>
-            owner.OpenFile(name, mode, access, share, options, preallocationSize, append);
+            bool append = false,
+            bool noFollow = false) =>
+            owner.OpenFile(name, mode, access, share, options, preallocationSize, append, noFollow);
 
         public bool TryOpenFile([NotNullWhen(true)] out ICapFile? file) => owner.TryOpenFile(name, out file);
 
@@ -78,8 +79,9 @@ public static class TestEntries
             FileOptions options,
             long preallocationSize,
             bool append,
+            bool noFollow,
             [NotNullWhen(true)] out ICapFile? file) =>
-            owner.TryOpenFile(name, mode, access, share, options, preallocationSize, append, noFollow: false, out file);
+            owner.TryOpenFile(name, mode, access, share, options, preallocationSize, append, noFollow, out file);
 
         public CapMetadata GetMetadata() => owner.GetMetadata(name);
 

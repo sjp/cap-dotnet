@@ -188,6 +188,47 @@ internal static class OperationRunner
                 OpenAny(root, path, noFollow: true, observation);
                 break;
 
+            case Operation.ReadAllLines:
+                observation.Contents.Add(string.Join('\n', root.ReadAllLines(path)));
+                using (CapFile read = root.OpenFile(path))
+                {
+                    observation.Objects.Add(read.GetMetadata().FileId);
+                }
+
+                break;
+
+            case Operation.WriteAllText:
+                root.WriteAllText(path, "written through the sandbox");
+                observation.Objects.Add(root.GetMetadata(path).FileId);
+                break;
+
+            case Operation.AppendAllText:
+                root.AppendAllText(path, "appended through the sandbox");
+                observation.Objects.Add(root.GetMetadata(path).FileId);
+                break;
+
+            case Operation.OpenOrCreateDirAll:
+                using (Dir made = root.OpenOrCreateDirAll(path))
+                {
+                    observation.Objects.Add(made.GetMetadata().FileId);
+                    foreach (DirEntry entry in made.EnumerateEntries())
+                    {
+                        observation.Names.Add(entry.Name);
+                    }
+                }
+
+                break;
+
+            case Operation.CopyFileFrom:
+                _ = root.CopyFile(path, root, EscapeCorpus.LandingName);
+                Read(root, EscapeCorpus.LandingName, observation);
+                break;
+
+            case Operation.CopyFileTo:
+                _ = root.CopyFile(EscapeCorpus.SourceFile, root, path);
+                observation.Objects.Add(root.GetMetadata(path).FileId);
+                break;
+
             default:
                 throw new ArgumentOutOfRangeException(nameof(operation), operation, "Unknown operation.");
         }

@@ -54,6 +54,54 @@ public readonly struct CapPermissions
         }
     }
 
+    /// <summary>
+    /// Permissions as a Unix mode, for writing onto an object on Linux or macOS.
+    /// </summary>
+    /// <param name="mode">
+    /// The permission, set-user, set-group and sticky bits. Nothing else may be set.
+    /// </param>
+    /// <returns>A value that <see cref="TryGetUnixMode"/> answers with <paramref name="mode"/>.</returns>
+    /// <remarks>
+    /// Written as given, with no umask applied: a umask narrows what a creation asks for, and
+    /// this is not a creation. On Windows a value made this way is refused by
+    /// <see cref="Dir.SetPermissions(in CapPermissions)"/> and
+    /// <see cref="CapFile.SetPermissions(in CapPermissions)"/> rather than translated.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="mode"/> has a bit set that <see cref="UnixFileMode"/> does not define.
+    /// </exception>
+    public static CapPermissions FromUnixMode(UnixFileMode mode)
+    {
+        const UnixFileMode Defined = (UnixFileMode)0xFFF;
+        if ((mode & ~Defined) != 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(mode), mode, "The mode has a bit set that is not a permission, set-user, set-group or sticky bit.");
+        }
+
+        return new CapPermissions(mode, null);
+    }
+
+    /// <summary>
+    /// Permissions as Windows attributes, for writing onto an object on Windows.
+    /// </summary>
+    /// <param name="attributes">The attribute flags to record.</param>
+    /// <returns>
+    /// A value that <see cref="TryGetWindowsAttributes"/> answers with
+    /// <paramref name="attributes"/>.
+    /// </returns>
+    /// <remarks>
+    /// Only the flags a caller can set are written — read-only, hidden, system, archive,
+    /// not-content-indexed, offline, temporary and the like. The flags that describe what
+    /// the object is or how it is stored, such as <see cref="FileAttributes.Directory"/>,
+    /// <see cref="FileAttributes.ReparsePoint"/> and <see cref="FileAttributes.Compressed"/>,
+    /// are kept in the value, so one read from a snapshot can be written back unchanged, and
+    /// are ignored when it is written. On Linux
+    /// and macOS a value made this way is refused rather than translated.
+    /// </remarks>
+    public static CapPermissions FromWindowsAttributes(FileAttributes attributes) =>
+        new(null, attributes);
+
     /// <summary>Which system's answer this holds, if either.</summary>
     private enum Origin : byte
     {

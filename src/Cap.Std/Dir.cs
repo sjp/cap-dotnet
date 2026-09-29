@@ -255,6 +255,139 @@ public sealed partial class Dir : IDir
         OpenRootCore(PlatformOps.Host, path, authority, Demand(policy), out dir).IsSuccess;
 
     /// <summary>
+    /// Makes a root handle from a directory handle the process already holds.
+    /// </summary>
+    /// <param name="handle">
+    /// An open descriptor or handle on a directory: one inherited from a parent process,
+    /// passed by socket activation, received over a socket, or opened by other code. It is
+    /// not taken over. The caller still owns it and may close it as soon as this returns.
+    /// </param>
+    /// <param name="authority">
+    /// Proof that taking authority from outside the capability graph is intended here. Must
+    /// come from <see cref="AmbientAuthority.Acquire"/>; a default value is refused.
+    /// </param>
+    /// <param name="policy">
+    /// What resolution beneath the returned handle does with a symbolic link it meets on the
+    /// way to the thing a path names. See <see cref="SymlinkPolicy"/>.
+    /// </param>
+    /// <returns>A handle on the same directory, owning an open object of its own.</returns>
+    /// <remarks>
+    /// <para>
+    /// The counterpart of <see cref="Open"/> for a directory that arrives as a handle rather
+    /// than as a name, as cap-std's <c>Dir::from_std_file</c> is. It takes the ambient token
+    /// for the same reason <see cref="Open"/> does: where the handle came from is outside
+    /// anything this library can see, so this is a point where authority enters, and the
+    /// token is what lets that point be found by searching.
+    /// </para>
+    /// <para>
+    /// <strong>The directory is opened again through the handle, not copied.</strong> Nothing
+    /// is looked up by name: the new open reaches the object the handle refers to, and only a
+    /// directory. That gives the result an open object of its own, so it neither shares a
+    /// read position with the handle it came from nor inherits that handle's flags, and it is
+    /// closed across a process launch whatever the original was. The open is checked against
+    /// the directory's permissions as any open is, so the process needs permission to read
+    /// the directory, as it does for <see cref="Open"/>. A handle opened with less access
+    /// than that, such as a Linux <c>O_PATH</c> descriptor, is accepted, because the new open
+    /// is what is used.
+    /// </para>
+    /// <para>
+    /// Everything <see cref="Open"/> says about what the containment guarantee starts from
+    /// applies: the returned handle confines what is resolved beneath it, and says nothing
+    /// about how the directory it was given came to be chosen.
+    /// </para>
+    /// <para>
+    /// Only for a handle on the host's filesystem. Safe to call from any thread, while other
+    /// threads use <paramref name="handle"/>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="handle"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="handle"/> is invalid or is not a directory, or
+    /// <paramref name="authority"/> was never acquired.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="policy"/> is not a value the enumeration defines.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException"><paramref name="handle"/> has been closed.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
+    /// <exception cref="CapIOException">The open failed for another reason.</exception>
+    public static Dir FromHandle(
+        SafeHandle handle,
+        AmbientAuthority authority,
+        SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox)
+    {
+        CapError error = FromHandleCore(PlatformOps.Host, handle, authority, Demand(policy), out Dir? dir);
+        if (error.IsSuccess)
+        {
+            return dir!;
+        }
+
+        FailureTranslation.ThrowIfClosed(error);
+        throw error.Category switch
+        {
+            CapErrorCategory.NotADirectory => new ArgumentException(
+                $"The handle does not refer to a directory, so it cannot be the root of one. ({error})",
+                nameof(handle)),
+            CapErrorCategory.PermissionDenied => new UnauthorizedAccessException(
+                $"The filesystem would not open the directory the handle refers to. ({error})"),
+            _ => new CapIOException(
+                FailureTranslation.KindOf(error.Category),
+                $"The directory the handle refers to could not be opened. ({error})"),
+        };
+    }
+
+    /// <summary>
+    /// Opens again, through <paramref name="backend"/>, the directory a handle the caller
+    /// owns refers to.
+    /// </summary>
+    /// <remarks>
+    /// The caller's handle is borrowed for the one call that re-opens it, and kept from being
+    /// closed while it is, so a disposal racing this on another thread can never leave the
+    /// re-open aimed at a number something else has since been given.
+    /// </remarks>
+    internal static CapError FromHandleCore(
+        IPlatformOps backend,
+        SafeHandle handle,
+        AmbientAuthority authority,
+        ConfinedResolveOptions options,
+        out Dir? dir)
+    {
+        ArgumentNullException.ThrowIfNull(backend);
+        ArgumentNullException.ThrowIfNull(handle);
+        authority.Demand(nameof(authority));
+        ObjectDisposedException.ThrowIf(handle.IsClosed, handle);
+        if (handle.IsInvalid)
+        {
+            throw new ArgumentException("The handle is not a valid descriptor or handle.", nameof(handle));
+        }
+
+        dir = null;
+
+        bool added = false;
+        try
+        {
+            handle.DangerousAddRef(ref added);
+
+            using SafeDirHandle borrowed = new(handle.DangerousGetHandle(), backend, CapAccess.None, ownsHandle: false);
+            CapResult<SafeDirHandle> reopened = backend.ReopenDirectory(borrowed, CapAccess.Read);
+            if (!reopened.IsSuccess)
+            {
+                return reopened.Error;
+            }
+
+            dir = new Dir(reopened.Value, options);
+            return CapError.Success;
+        }
+        finally
+        {
+            if (added)
+            {
+                handle.DangerousRelease();
+            }
+        }
+    }
+
+    /// <summary>
     /// Opens a directory beneath this one.
     /// </summary>
     /// <param name="path">
@@ -479,9 +612,7 @@ public sealed partial class Dir : IDir
     /// For the common case of making sure a directory is there, where whether this call or an
     /// earlier one put it there is of no interest. It is not a way to create a whole chain of
     /// directories: only the last component is created, and a missing one above it is
-    /// reported as missing. Creating a chain means deciding what to do about the ones already
-    /// made when a later one fails, which is a policy a caller should choose rather than
-    /// inherit.
+    /// reported as missing. <see cref="OpenOrCreateDirAll"/> makes the chain.
     /// </para>
     /// <para>
     /// The name being taken by something that is not a directory is still a failure. So is a
@@ -543,6 +674,103 @@ public sealed partial class Dir : IDir
             CreateDirCore(
                 path, exclusive: false, CreationVisibility.SystemDefault, out dir, out CapError error, out _),
             error);
+
+    /// <summary>
+    /// Opens a directory beneath this one, creating it and any directory missing above it.
+    /// </summary>
+    /// <param name="path">
+    /// A relative path of one or more components, refused and resolved as for
+    /// <see cref="OpenDir"/>.
+    /// </param>
+    /// <returns>A handle on the last directory, carrying this handle's policy.</returns>
+    /// <remarks>
+    /// <para>
+    /// What <c>Directory.CreateDirectory</c> and <c>mkdir -p</c> do, and cap-std's
+    /// <c>create_dir_all</c>: every component is made a directory if it is not one already,
+    /// and the last is opened. A path that is already there costs one open.
+    /// </para>
+    /// <para>
+    /// <strong>Everything that can be refused is refused before anything is made.</strong>
+    /// The path is tried whole first. If something on it is missing, the directories that
+    /// are there are opened one component at a time, each as <see cref="OpenDir"/> opens that
+    /// part of the path from this handle, until the first that is missing. What follows it is
+    /// what this call will make, so a <c>..</c> among those steps back over a name that is
+    /// yet to be made, and one that climbs further is opened among the directories that were
+    /// already there. So a path that leaves this handle, such as <c>new/../../x</c>, a link
+    /// the policy will not follow, or a file where a directory is needed, is refused with
+    /// nothing created. Only then are the missing directories made, each inside the one
+    /// before, as <see cref="OpenOrCreateDir"/> makes one. A <c>..</c> steps back as it does
+    /// for <see cref="OpenDir"/>, so <c>a/../b</c> makes <c>b</c> and, since nothing is left
+    /// beneath it, not <c>a</c>.
+    /// </para>
+    /// <para>
+    /// <strong>A failure while making them leaves what was made.</strong> Something else can
+    /// take a name, or the filesystem can refuse or run out of room, between one directory and
+    /// the next. Directories made before that stay, as they do for the framework's call and
+    /// for <c>mkdir -p</c>: undoing them would mean removing directories something else may
+    /// already have started to use. The exception names the part of the path that failed
+    /// rather than the whole of it. A path that would make more directories than
+    /// <see cref="Cap.Primitives.ResolutionBackend.PortableWalk"/> descends is refused before
+    /// any is made.
+    /// </para>
+    /// <para>
+    /// Permissions are the system's to decide, as for <see cref="CreateDir"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> A component that already exists is opened as
+    /// <see cref="OpenDir"/> opens one, so a link there is followed under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.FollowWithinSandbox"/> while its target stays
+    /// beneath this handle, refused with <see cref="SandboxEscapeException"/> once it leaves,
+    /// and refused with <see cref="CapIOException"/> under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/>. This includes the last component, as
+    /// <c>mkdir -p</c> accepts a link to a directory. A link that leads nowhere is never
+    /// created through: the name is held, so the step that would create it is refused with
+    /// <see cref="CapIOException"/>, as <see cref="OpenOrCreateDir"/> refuses it.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread,
+    /// including another call making the same directories.</para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// A step named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused a step.</exception>
+    /// <exception cref="CapIOException">
+    /// A component is held by something that is not a directory, a symbolic link the policy
+    /// will not follow is in the way, or a step failed otherwise.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public Dir OpenOrCreateDirAll(string path)
+    {
+        CapPathError pathError = CreateDirAllCore(
+            path, out Dir? dir, out CapError error, out string step, out ExpectedTarget expected);
+        if (pathError != CapPathError.None)
+        {
+            throw FailureTranslation.ToException(pathError, path, nameof(path));
+        }
+
+        return error.IsSuccess ? dir! : throw FailureTranslation.ToException(error, step, expected);
+    }
+
+    /// <summary>
+    /// Opens a directory beneath this one, creating it and any directory missing above it,
+    /// and reports failure rather than throwing.
+    /// </summary>
+    /// <param name="path">A relative path. See <see cref="OpenOrCreateDirAll"/>.</param>
+    /// <param name="dir">A handle on the last directory, when this returns true.</param>
+    /// <returns>True when every directory is there and the last was opened.</returns>
+    /// <remarks>
+    /// False covers every reason the chain was not made, and like
+    /// <see cref="OpenOrCreateDirAll"/> it leaves whatever was created before the step that
+    /// failed. Symbolic links are treated exactly as <see cref="OpenOrCreateDirAll"/>
+    /// describes, and a refusal, containment included, is reported as false. Safe to call
+    /// concurrently with any other member of this handle, from any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> is null.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public bool TryOpenOrCreateDirAll(string path, [NotNullWhen(true)] out Dir? dir) =>
+        Succeeded(CreateDirAllCore(path, out dir, out CapError error, out _, out _), error);
 
     /// <summary>
     /// Removes a name beneath this handle. The name must not be a directory.
@@ -2351,6 +2579,155 @@ public sealed partial class Dir : IDir
             error = CapError.Success;
             dir = new Dir(opened.Value, _options);
             return CapPathError.None;
+        }
+    }
+
+    /// <summary>
+    /// Opens a chain of directories, creating each one that is missing.
+    /// </summary>
+    /// <param name="path">The caller's path.</param>
+    /// <param name="dir">The last directory, on success.</param>
+    /// <param name="error">Why a step failed.</param>
+    /// <param name="step">
+    /// The caller's path up to the end of the component whose step failed.
+    /// </param>
+    /// <param name="expected">How a missing thing at that step is reported.</param>
+    /// <remarks>
+    /// <para>
+    /// Planned before anything is made, so that a path which will be refused is refused
+    /// without leaving directories behind. Components that exist are opened, each as a whole
+    /// resolution from this handle, so each means exactly what that part of the path means to
+    /// <see cref="OpenDir"/>, links and <c>..</c> included. From the first component that is
+    /// missing, what follows is only counted: every name after it will be a directory this
+    /// call makes, which holds no link, so a <c>..</c> among them cancels the name before it
+    /// exactly. One that climbs back past the first missing name is resolved against the
+    /// directories that were already there, as the first steps were. So every step that can
+    /// be refused as an escape, as a link the policy will not follow, or as something that is
+    /// not a directory, is taken before the first directory is made.
+    /// </para>
+    /// <para>
+    /// The missing directories are then made one inside the next, each through the handle on
+    /// the one before, which is confined to it. What can still fail part of the way is the
+    /// making itself: a name taken in the meantime, a refused permission, a full disk.
+    /// </para>
+    /// <para>
+    /// A plan to make more directories than the component walk descends is refused before any
+    /// is made, since that backend could not open the result.
+    /// </para>
+    /// </remarks>
+    private CapPathError CreateDirAllCore(
+        string path,
+        out Dir? dir,
+        out CapError error,
+        out string step,
+        out ExpectedTarget expected)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+
+        step = path;
+        expected = ExpectedTarget.Directory;
+
+        CapPathError pathError = OpenDirCore(path, out dir, out error);
+        if (pathError != CapPathError.None || error.IsSuccess)
+        {
+            return pathError;
+        }
+
+        // The whole path was accepted by the open above, so it parses.
+        _ = TryParseCallerPath(path, out CapPath parsed, out _);
+
+        // The directories already there are named by the caller's own text, less any stretch
+        // of names that were missing and were then stepped back over, which names nothing yet.
+        // That stretch is contiguous, so what is left is joined from slices of the caller's
+        // string and never from separators of this library's own.
+        string reached = string.Empty;
+        int consumed = 0;
+        List<(string Name, int End)> missing = [];
+
+        foreach (ReadOnlySpan<char> component in parsed.EnumerateComponents())
+        {
+            path.AsSpan().Overlaps(component, out int offset);
+            int end = offset + component.Length;
+            bool parent = component.SequenceEqual("..");
+
+            if (missing.Count > 0)
+            {
+                if (parent)
+                {
+                    missing.RemoveAt(missing.Count - 1);
+                }
+                else
+                {
+                    missing.Add((component.ToString(), end));
+                }
+
+                consumed = end;
+                continue;
+            }
+
+            string next = reached.Length == 0
+                ? component.ToString()
+                : string.Concat(reached, path.AsSpan(consumed, end - consumed));
+            step = path[..end];
+
+            pathError = OpenDirCore(next, out Dir? probe, out error);
+            probe?.Dispose();
+            if (pathError != CapPathError.None)
+            {
+                return pathError;
+            }
+
+            consumed = end;
+            if (error.IsSuccess)
+            {
+                reached = next;
+                continue;
+            }
+
+            if (parent || error.Category != CapErrorCategory.NotFound)
+            {
+                return CapPathError.None;
+            }
+
+            missing.Add((component.ToString(), end));
+        }
+
+        if (missing.Count > PortableResolver.MaxDepth)
+        {
+            step = path;
+            error = CapError.FromCategory(CapErrorCategory.PathTooDeep);
+            return CapPathError.None;
+        }
+
+        error = reached.Length == 0 ? CloneCore(out dir) : Reopen(reached, out dir);
+        if (error.IsFailure)
+        {
+            step = reached.Length == 0 ? path : reached;
+            return CapPathError.None;
+        }
+
+        foreach ((string name, int end) in missing)
+        {
+            step = path[..end];
+
+            Dir current = dir!;
+            pathError = current.CreateDirCore(
+                name, exclusive: false, CreationVisibility.SystemDefault, out dir, out error, out expected);
+            current.Dispose();
+            if (pathError != CapPathError.None || error.IsFailure)
+            {
+                dir = null;
+                return pathError;
+            }
+        }
+
+        return CapPathError.None;
+
+        CapError Reopen(string existing, out Dir? opened)
+        {
+            _ = OpenDirCore(existing, out opened, out CapError reopened);
+            return reopened;
         }
     }
 

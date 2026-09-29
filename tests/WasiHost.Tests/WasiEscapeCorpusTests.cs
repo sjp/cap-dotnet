@@ -27,6 +27,17 @@ namespace WasiHost.Tests;
 [Collection(CorpusGroup.Name)]
 public sealed class WasiEscapeCorpusTests
 {
+    /// <summary>
+    /// The corpus operations that are helpers built on the library's own members, with no
+    /// WASI call of their own to drive them. What they resolve, each resolves through a member
+    /// the other rows already drive.
+    /// </summary>
+    private static readonly Operation[] NoWasiCall =
+    [
+        Operation.DeleteTree, Operation.ReadAllLines, Operation.WriteAllText, Operation.AppendAllText,
+        Operation.OpenOrCreateDirAll, Operation.CopyFileFrom, Operation.CopyFileTo,
+    ];
+
     /// <summary>Every row the WASI layer can drive.</summary>
     public static TheoryData<string, SymlinkPolicy, string, string> Matrix
     {
@@ -39,7 +50,7 @@ public sealed class WasiEscapeCorpusTests
                 {
                     foreach (EscapeCase entry in EscapeCorpus.Cases.Where(entry => entry.AppliesToHost))
                     {
-                        foreach (Operation operation in Enum.GetValues<Operation>().Where(op => op != Operation.DeleteTree))
+                        foreach (Operation operation in Enum.GetValues<Operation>().Where(op => !NoWasiCall.Contains(op)))
                         {
                             rows.Add(backend, policy, entry.Name, operation.ToString());
                         }

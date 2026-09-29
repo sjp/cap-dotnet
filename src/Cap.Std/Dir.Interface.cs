@@ -42,6 +42,13 @@ public sealed partial class Dir
         Widen(TryOpenOrCreateDir(path, out Dir? concrete), concrete, out dir);
 
     /// <inheritdoc/>
+    IDir IDir.OpenOrCreateDirAll(string path) => OpenOrCreateDirAll(path);
+
+    /// <inheritdoc/>
+    bool IDir.TryOpenOrCreateDirAll(string path, [NotNullWhen(true)] out IDir? dir) =>
+        Widen(TryOpenOrCreateDirAll(path, out Dir? concrete), concrete, out dir);
+
+    /// <inheritdoc/>
     ICapFile IDir.OpenFile(
         string path,
         FileMode mode,

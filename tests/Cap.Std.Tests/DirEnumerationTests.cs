@@ -661,4 +661,36 @@ public sealed partial class DirEnumerationTests : IDisposable
     [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
     private static partial int MakeFifo(
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
+
+    /// <summary>
+    /// An entry opened without following refuses a link at its name, as the handle's own open
+    /// does, where the default follows it.
+    /// </summary>
+    [Fact]
+    public void An_entry_opened_without_following_refuses_a_link()
+    {
+        LinkSupport.RequireSymbolicLinks(_tree.HostPath);
+        HostFile.WriteAllText(Host("plain"), "x");
+        HostFile.CreateSymbolicLink(Host("to-plain"), "plain");
+
+        using Dir root = OpenRoot();
+        DirEntry link = root.EnumerateEntries().Single(entry => entry.Name == "to-plain");
+        DirEntry plain = root.EnumerateEntries().Single(entry => entry.Name == "plain");
+
+        using (link.OpenFile())
+        {
+        }
+
+        _ = Assert.Throws<CapIOException>(() => link.OpenFile(noFollow: true));
+        Assert.False(link.TryOpenFile(FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: false, noFollow: true, out CapFile? refused));
+        Assert.Null(refused);
+
+        using (plain.OpenFile(noFollow: true))
+        {
+        }
+
+        IDirEntry boxed = link;
+        _ = Assert.Throws<CapIOException>(() => boxed.OpenFile(noFollow: true));
+        Assert.False(boxed.TryOpenFile(FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0, append: false, noFollow: true, out _));
+    }
 }

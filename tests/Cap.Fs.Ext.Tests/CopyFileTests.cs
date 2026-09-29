@@ -1,0 +1,173 @@
+using Cap.Primitives;
+using Cap.Std;
+using Cap.Std.Testing;
+
+namespace Cap.Fs.Ext.Tests;
+
+/// <summary>
+/// Copying one file from beneath one handle to beneath another.
+/// </summary>
+/// <remarks>
+/// Run against a filesystem held in memory, which resolves through the same code the disk
+/// does, with one case on the disk for what only the host records.
+/// </remarks>
+public sealed class CopyFileTests : IDisposable
+{
+    private readonly InMemoryFileSystem _fs = new();
+    private readonly ScratchTree _tree = new();
+
+    public void Dispose() => _tree.Dispose();
+
+    /// <summary>The contents arrive at the new name, and the count says how many bytes moved.</summary>
+    [Fact]
+    public void A_file_is_copied_to_a_new_name()
+    {
+        _fs.AddFile("from/data.txt", "contents");
+        _fs.AddDirectory("to/inner");
+        using Dir from = _fs.OpenRoot("from");
+        using Dir to = _fs.OpenRoot("to");
+
+        long copied = from.CopyFile("data.txt", to, "inner/copy.txt");
+
+        Assert.Equal(8, copied);
+        Assert.Equal("contents", _fs.ReadAllText("to/inner/copy.txt"));
+        Assert.Equal("contents", _fs.ReadAllText("from/data.txt"));
+    }
+
+    /// <summary>Without replacement a taken name is refused and left as it was.</summary>
+    [Fact]
+    public void A_taken_name_is_refused_unless_replacement_is_asked_for()
+    {
+        _fs.AddFile("data.txt", "new");
+        _fs.AddFile("copy.txt", "old");
+        using Dir root = _fs.OpenRoot();
+
+        _ = Assert.Throws<CapIOException>(() => root.CopyFile("data.txt", root, "copy.txt"));
+        Assert.Equal("old", _fs.ReadAllText("copy.txt"));
+
+        root.CopyFile("data.txt", root, "copy.txt", overwrite: true);
+        Assert.Equal("new", _fs.ReadAllText("copy.txt"));
+        Assert.Equal(["copy.txt", "data.txt"], _fs.GetEntries().Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>A file copied onto itself with replacement keeps what it held.</summary>
+    [Fact]
+    public void A_file_copied_onto_itself_keeps_its_contents()
+    {
+        _fs.AddFile("data.txt", "same");
+        using Dir root = _fs.OpenRoot();
+
+        _ = Assert.Throws<CapIOException>(() => root.CopyFile("data.txt", root, "data.txt"));
+        root.CopyFile("data.txt", root, "data.txt", overwrite: true);
+
+        Assert.Equal("same", _fs.ReadAllText("data.txt"));
+        Assert.Equal(["data.txt"], _fs.GetEntries());
+    }
+
+    /// <summary>A directory at the destination is never replaced by a file.</summary>
+    [Fact]
+    public void A_directory_at_the_destination_is_refused()
+    {
+        _fs.AddFile("data.txt", "x");
+        _fs.AddFile("folder/kept.txt", "kept");
+        using Dir root = _fs.OpenRoot();
+
+        _ = Assert.Throws<CapIOException>(() => root.CopyFile("data.txt", root, "folder", overwrite: true));
+        _ = Assert.Throws<CapIOException>(() => root.CopyFile("folder", root, "elsewhere"));
+        Assert.Equal("kept", _fs.ReadAllText("folder/kept.txt"));
+    }
+
+    /// <summary>
+    /// A link at the source is followed while it stays inside; a link at the destination is
+    /// replaced with replacement and makes the name taken without, and what it points at is
+    /// never written.
+    /// </summary>
+    [Fact]
+    public void Links_are_followed_at_the_source_and_never_written_through_at_the_destination()
+    {
+        _fs.AddFile("real.txt", "real");
+        _fs.AddSymbolicLink("alias.txt", "real.txt");
+        _fs.AddFile("victim.txt", "untouched");
+        _fs.AddSymbolicLink("trap.txt", "victim.txt");
+        using Dir root = _fs.OpenRoot();
+
+        root.CopyFile("alias.txt", root, "copied.txt");
+        Assert.Equal("real", _fs.ReadAllText("copied.txt"));
+
+        _ = Assert.Throws<CapIOException>(() => root.CopyFile("real.txt", root, "trap.txt"));
+        root.CopyFile("real.txt", root, "trap.txt", overwrite: true);
+
+        Assert.Equal("untouched", _fs.ReadAllText("victim.txt"));
+        Assert.Equal("real", _fs.ReadAllText("trap.txt"));
+        Assert.Equal(CapFileType.File, root.GetMetadata("trap.txt").Type);
+
+        using Dir strict = root.Restrict(SymlinkPolicy.Deny);
+        _ = Assert.Throws<CapIOException>(() => strict.CopyFile("alias.txt", strict, "refused.txt"));
+    }
+
+    /// <summary>Neither end can reach outside the handle it is resolved against.</summary>
+    [Fact]
+    public void Neither_path_can_leave_its_handle()
+    {
+        _fs.AddFile("outside.txt", "secret");
+        _fs.AddFile("inside/data.txt", "x");
+        _fs.AddSymbolicLink("inside/escape.txt", "../outside.txt");
+        using Dir root = _fs.OpenRoot("inside");
+
+        _ = Assert.Throws<SandboxEscapeException>(() => root.CopyFile("../outside.txt", root, "stolen.txt"));
+        _ = Assert.Throws<SandboxEscapeException>(() => root.CopyFile("escape.txt", root, "stolen.txt"));
+        _ = Assert.Throws<SandboxEscapeException>(() => root.CopyFile("data.txt", root, "../planted.txt"));
+        Assert.False(_fs.Exists("inside/stolen.txt"));
+        Assert.False(_fs.Exists("planted.txt"));
+    }
+
+    /// <summary>The source's permissions travel with its contents.</summary>
+    [Fact]
+    public void Permissions_travel_with_the_contents()
+    {
+        _fs.AddFile("data.txt", "x");
+        if (OperatingSystem.IsWindows())
+        {
+            _fs.SetAttributes("data.txt", FileAttributes.Hidden);
+        }
+        else
+        {
+            _fs.SetUnixMode("data.txt", UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        using Dir root = _fs.OpenRoot();
+        root.CopyFile("data.txt", root, "copy.txt");
+        root.CopyFile("data.txt", root, "replaced.txt", overwrite: true);
+
+        string wanted = root.GetMetadata("data.txt").Permissions.ToString();
+        Assert.Equal(wanted, root.GetMetadata("copy.txt").Permissions.ToString());
+        Assert.Equal(wanted, root.GetMetadata("replaced.txt").Permissions.ToString());
+    }
+
+    /// <summary>A file can be copied from a tree in memory onto the disk.</summary>
+    [Fact]
+    public void A_file_is_copied_between_backends()
+    {
+        _fs.AddFile("data.txt", "from memory");
+        using Dir memory = _fs.OpenRoot();
+        using Dir disk = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
+
+        long copied = memory.CopyFile("data.txt", disk, "arrived.txt");
+
+        Assert.Equal(11, copied);
+        Assert.Equal("from memory", HostFile.ReadAllText(Path.Combine(_tree.HostPath, "arrived.txt")));
+    }
+
+    /// <summary>Through wrappers that are not a Dir, the copy goes through the interfaces' members.</summary>
+    [Fact]
+    public void A_file_is_copied_through_wrapped_handles()
+    {
+        _fs.AddFile("data.txt", "wrapped");
+        using RecordingDir root = new(_fs.OpenRoot(), [], "root");
+
+        root.CopyFile("data.txt", root, "copy.txt", overwrite: true);
+
+        Assert.Equal("wrapped", _fs.ReadAllText("copy.txt"));
+        Assert.Contains(root.Log, call => call.StartsWith("root: Rename(", StringComparison.Ordinal));
+    }
+}

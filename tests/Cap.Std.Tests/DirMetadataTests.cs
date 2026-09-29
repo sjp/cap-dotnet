@@ -667,4 +667,129 @@ public sealed class DirMetadataTests : IDisposable
         Assert.Throws<ArgumentNullException>(() => root.GetMetadata(null!));
         Assert.Throws<ArgumentNullException>(() => root.TryGetMetadata(null!, out _));
     }
+
+    // --- writing permissions ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Permissions written through a file handle and a directory handle are the ones read back.
+    /// </summary>
+    [Fact]
+    public void Permissions_can_be_written_back()
+    {
+        HostFile.WriteAllText(Host("private"), "x");
+        HostDirectory.CreateDirectory(Host("folder"));
+
+        using Dir root = OpenRoot();
+        using (CapFile file = root.OpenFile("private", FileMode.Open, FileAccess.ReadWrite))
+        using (Dir folder = root.OpenDir("folder"))
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                file.SetPermissions(CapPermissions.FromWindowsAttributes(FileAttributes.Hidden | FileAttributes.Archive));
+                folder.SetPermissions(CapPermissions.FromWindowsAttributes(FileAttributes.Hidden));
+            }
+            else
+            {
+                file.SetPermissions(CapPermissions.FromUnixMode(UnixFileMode.UserRead | UnixFileMode.UserWrite));
+                folder.SetPermissions(CapPermissions.FromUnixMode(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute));
+            }
+        }
+
+        CapPermissions filePermissions = root.GetMetadata("private").Permissions;
+        CapPermissions folderPermissions = root.GetMetadata("folder").Permissions;
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.True(filePermissions.TryGetWindowsAttributes(out FileAttributes fileAttributes));
+            Assert.Equal(FileAttributes.Hidden | FileAttributes.Archive, fileAttributes & (FileAttributes.Hidden | FileAttributes.Archive | FileAttributes.ReadOnly));
+            Assert.True(folderPermissions.TryGetWindowsAttributes(out FileAttributes folderAttributes));
+            Assert.True((folderAttributes & FileAttributes.Hidden) != 0);
+            Assert.True((folderAttributes & FileAttributes.Directory) != 0);
+        }
+        else
+        {
+            Assert.True(filePermissions.TryGetUnixMode(out UnixFileMode fileMode));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, fileMode);
+            Assert.True(folderPermissions.TryGetUnixMode(out UnixFileMode folderMode));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, folderMode);
+        }
+    }
+
+    /// <summary>
+    /// A value read from one object's snapshot can be written onto another, which is how an
+    /// object's permissions are reproduced.
+    /// </summary>
+    [Fact]
+    public void Permissions_read_from_one_object_can_be_written_onto_another()
+    {
+        HostFile.WriteAllText(Host("model"), "x");
+        HostFile.WriteAllText(Host("copy"), "y");
+
+        using Dir root = OpenRoot();
+        using (CapFile model = root.OpenFile("model", FileMode.Open, FileAccess.ReadWrite))
+        {
+            model.SetPermissions(OperatingSystem.IsWindows()
+                ? CapPermissions.FromWindowsAttributes(FileAttributes.Hidden | FileAttributes.Archive)
+                : CapPermissions.FromUnixMode(UnixFileMode.UserRead | UnixFileMode.GroupRead));
+        }
+
+        CapPermissions wanted = root.GetMetadata("model").Permissions;
+        using (CapFile copy = root.OpenFile("copy", FileMode.Open, FileAccess.ReadWrite))
+        {
+            copy.SetPermissions(wanted);
+        }
+
+        Assert.Equal(wanted.ToString(), root.GetMetadata("copy").Permissions.ToString());
+    }
+
+    /// <summary>A value carrying the other system's kind of permissions is refused, not translated.</summary>
+    [Fact]
+    public void Permissions_of_the_other_kind_are_refused()
+    {
+        HostFile.WriteAllText(Host("file"), "x");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.ReadWrite);
+        CapPermissions foreign = OperatingSystem.IsWindows()
+            ? CapPermissions.FromUnixMode(UnixFileMode.UserRead)
+            : CapPermissions.FromWindowsAttributes(FileAttributes.ReadOnly);
+
+        CapIOException refused = Assert.Throws<CapIOException>(() => file.SetPermissions(foreign));
+        Assert.Equal(CapErrorKind.NotSupported, refused.Kind);
+        Assert.Throws<CapIOException>(() => root.SetPermissions(foreign));
+    }
+
+    /// <summary>The default value describes nothing and is refused as an argument.</summary>
+    [Fact]
+    public void Permissions_that_describe_nothing_are_refused()
+    {
+        HostFile.WriteAllText(Host("file"), "x");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("file", FileMode.Open, FileAccess.ReadWrite);
+
+        Assert.Throws<ArgumentException>(() => file.SetPermissions(default));
+        Assert.Throws<ArgumentException>(() => root.SetPermissions(default));
+    }
+
+    /// <summary>A handle given out to read a file cannot change its permissions.</summary>
+    [Fact]
+    public void A_handle_that_cannot_write_cannot_change_permissions()
+    {
+        HostFile.WriteAllText(Host("file"), "x");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("file");
+        CapPermissions permissions = root.GetMetadata("file").Permissions;
+
+        Assert.Throws<UnauthorizedAccessException>(() => file.SetPermissions(permissions));
+    }
+
+    /// <summary>A mode with a bit that is not a permission is refused when the value is made.</summary>
+    [Fact]
+    public void A_mode_with_an_undefined_bit_is_refused()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => CapPermissions.FromUnixMode((UnixFileMode)0x1000));
+        Assert.True(CapPermissions.FromUnixMode(UnixFileMode.SetUser | UnixFileMode.StickyBit).TryGetUnixMode(out _));
+        Assert.False(CapPermissions.FromWindowsAttributes(FileAttributes.Hidden).TryGetUnixMode(out _));
+    }
 }

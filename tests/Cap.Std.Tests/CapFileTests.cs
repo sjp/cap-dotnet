@@ -424,4 +424,70 @@ public sealed class CapFileTests : IDisposable
 
         file.Dispose();
     }
+
+    // --- copying the handle ------------------------------------------------------------------------
+
+    /// <summary>A copy of an open file keeps working once the original is closed.</summary>
+    [Fact]
+    public void A_copy_of_an_open_file_outlives_it()
+    {
+        using Dir root = OpenRoot();
+        CapFile original = root.OpenFile("data", FileMode.CreateNew, FileAccess.ReadWrite);
+        using CapFile copy = original.Clone();
+        original.Dispose();
+
+        copy.Write("written through the copy"u8, 0);
+
+        Assert.Equal(FileAccess.ReadWrite, copy.Access);
+        Assert.Equal("written through the copy", HostFile.ReadAllText(Host("data")));
+    }
+
+    /// <summary>
+    /// A copy reaches the object that was opened, not whatever the name holds by the time it
+    /// is made.
+    /// </summary>
+    [Fact]
+    public void A_copy_reaches_the_object_and_not_the_name()
+    {
+        HostFile.WriteAllText(Host("data"), "first");
+
+        using Dir root = OpenRoot();
+        using CapFile original = root.OpenFile("data", share: FileShare.Read | FileShare.Delete);
+        root.Rename("data", root, "moved");
+        HostFile.WriteAllText(Host("data"), "second");
+
+        Assert.True(original.TryClone(out CapFile? copy));
+        using (copy)
+        {
+            byte[] buffer = new byte[16];
+            int read = copy.Read(buffer, 0);
+            Assert.Equal("first", System.Text.Encoding.UTF8.GetString(buffer, 0, read));
+        }
+    }
+
+    /// <summary>A copy of a handle that can only read can only read.</summary>
+    [Fact]
+    public void A_copy_carries_the_access_of_its_original()
+    {
+        HostFile.WriteAllText(Host("data"), "x");
+
+        using Dir root = OpenRoot();
+        using CapFile original = root.OpenFile("data");
+        using CapFile copy = original.Clone();
+
+        Assert.Equal(FileAccess.Read, copy.Access);
+        Assert.Throws<UnauthorizedAccessException>(() => copy.Write("y"u8, 0));
+    }
+
+    /// <summary>A closed handle has nothing to copy.</summary>
+    [Fact]
+    public void A_closed_file_cannot_be_copied()
+    {
+        using Dir root = OpenRoot();
+        CapFile file = root.CreateNewFile("data");
+        file.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => file.Clone());
+        Assert.Throws<ObjectDisposedException>(() => file.TryClone(out _));
+    }
 }

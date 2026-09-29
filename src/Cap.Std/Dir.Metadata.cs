@@ -135,19 +135,89 @@ public sealed partial class Dir
     /// <summary>
     /// Writes permissions onto the directory this handle refers to.
     /// </summary>
+    /// <param name="permissions">
+    /// The permissions to record: a Unix mode on Linux and macOS, Windows attributes on
+    /// Windows. Made with <see cref="CapPermissions.FromUnixMode"/> or
+    /// <see cref="CapPermissions.FromWindowsAttributes"/>, or read from another object's
+    /// <see cref="CapMetadata.Permissions"/>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Applied to the object rather than to a name, so it changes the directory this handle
+    /// was opened on, whatever it is called now, and nothing is looked up that could be
+    /// swapped in the meantime. There is deliberately no form taking a path: open what is to
+    /// be changed first, with <see cref="OpenDir"/> or <see cref="OpenFile"/>, and set it
+    /// through that handle. That keeps the answer to "which object changed" the one the open
+    /// resolved, and it is the only way to leave a symbolic link alone on Linux, which has no
+    /// call that changes a link's own mode.
+    /// </para>
+    /// <para>
+    /// <strong>What is written differs by platform</strong>, as
+    /// <see cref="CapPermissions"/> explains. On Linux and macOS the mode's permission,
+    /// set-user, set-group and sticky bits are written, as <c>fchmod</c> writes them. On
+    /// Windows the attribute flags that can be set are written — read-only, hidden, system,
+    /// archive and the like — and the security descriptor, which is where Windows keeps who
+    /// may do what, is not touched. A value carrying the other system's half is refused
+    /// rather than translated: a mode guessed from a read-only flag would be a permission
+    /// nobody chose.
+    /// </para>
+    /// <para>
+    /// A capability decides what can be reached, and the filesystem still decides who may
+    /// change an object's permissions; on Unix that is usually the owner alone.
+    /// </para>
+    /// <para>
+    /// No symbolic link is involved: the handle refers to a directory, never to a link.
+    /// Safe to call concurrently with any other member of this handle, from any thread.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="permissions"/> is the default value, which describes nothing.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the change.</exception>
+    /// <exception cref="CapIOException">
+    /// <paramref name="permissions"/> carries the kind this platform does not record, or the
+    /// change could not be made.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public void SetPermissions(in CapPermissions permissions)
+    {
+        DemandPresent(permissions);
+
+        CapError error = SetPermissionsCore(permissions);
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToPermissionsException(error);
+        }
+    }
+
+    /// <summary>
+    /// Writes permissions onto the directory this handle refers to, reporting the platform's
+    /// own answer.
+    /// </summary>
     /// <param name="permissions">A value read from some other object's snapshot.</param>
     /// <remarks>
-    /// Applied to the object rather than to a name, so nothing is looked up a second time.
-    /// Internal, and reached only by copying: choosing permissions is a decision about a file
-    /// that a caller makes when they create it, while carrying an existing object's across is
-    /// a mechanical step of reproducing that object.
+    /// For copying, which quotes the name of the entry being reproduced when something fails
+    /// and so needs the answer as a value rather than a handle-level exception.
     /// </remarks>
-    internal CapError SetPermissions(in CapPermissions permissions)
+    internal CapError SetPermissionsCore(in CapPermissions permissions)
     {
         ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
 
         return Ops.SetHandlePermissions(
             _handle, permissions.UnixMode, permissions.WindowsAttributes);
+    }
+
+    /// <summary>Refuses a permissions value that came from no filesystem.</summary>
+    internal static void DemandPresent(in CapPermissions permissions)
+    {
+        if (!permissions.IsPresent)
+        {
+            throw new ArgumentException(
+                "These permissions describe nothing: the default value carries neither a Unix " +
+                "mode nor Windows attributes. Make one with CapPermissions.FromUnixMode or " +
+                "CapPermissions.FromWindowsAttributes, or read one from an object's metadata.",
+                nameof(permissions));
+        }
     }
 
     /// <summary>

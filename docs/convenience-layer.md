@@ -1,7 +1,7 @@
 # The convenience layer
 
 `Cap.Fs.Ext` is the ergonomic half of the filesystem API: publishing a file atomically,
-walking a tree, removing one, copying one, and finding names by pattern. It is a separate
+walking a tree, removing one, copying one or a single file, and finding names by pattern. It is a separate
 assembly on purpose. Every one of these is built entirely out of the core surface — an open,
 an enumeration, a rename, an unlink — so the security-critical code stays small enough to
 read, and none of the convenience needs to be trusted to keep the containment promise.
@@ -250,6 +250,26 @@ names. Left to run it would copy what it had just written, and then copy that.
 destination holding only its main contents, silently, because there is no portable way to
 carry it and no way to report it that is not noise for the trees that do not have any.
 
+## Copying one file
+
+`source.CopyFile(from, toDir, to, overwrite)` copies one file, as `File.Copy` does, with each
+end named by a handle and a path beneath it. It returns the number of bytes copied.
+
+- The source is opened as an existing file is opened, so a symbolic link at `from` is followed
+  while it stays beneath `source`, under that handle's policy; what is copied is what it led
+  to.
+- The destination is created exclusively, so a name already taken is refused. With
+  `overwrite: true` the copy is written under a scratch name beside `to` and moved over it,
+  as `CopyTo` replaces a file: a link at `to` is replaced, never written through, and a reader
+  sees the old file or the whole new one. A directory at `to` is refused either way.
+- The copy is given the source's permissions, as `File.Copy` gives it, when both handles are
+  on filesystems that record the same kind. Times are not carried; `CopyTo` with
+  `PreserveTimes` does that.
+- Without `overwrite`, a failure part of the way through the contents leaves the partial file
+  at `to`.
+
+The two handles may be on different backends, as for `CopyTo`.
+
 ## Patterns
 
 `Glob(pattern)` walks the tree with the pattern steering it, and yields the entries whose
@@ -299,9 +319,10 @@ A few things cannot be done or known through the interface, and change as follow
   Failures are the exceptions the implementation threw, the first of them rethrown.
 - **The directory commit is `IDir.Flush(toDisk: true)`.** A false answer from it is accepted,
   as it is on Windows.
-- **A copy can only preserve permissions onto a `Dir` or a `CapFile`.** No interface member
-  writes permissions, so `PreservePermissions` fails the copy with a `CapIOException` of kind
-  `NotSupported` when the destination hands back anything else.
+- **Permissions are written through the interface.** `PreservePermissions` calls
+  `IDir.SetPermissions` and `ICapFile.SetPermissions` on whatever the destination hands back,
+  and a failure is whatever that implementation throws rather than an exception naming the
+  entry.
 - **A copy into its own subtree may not be noticed early.** The check compares identities, and
   identities from two handles are comparable only when both are `Dir` handles on one
   filesystem, or both report a backend on the host's own filesystem. Otherwise the copy stops

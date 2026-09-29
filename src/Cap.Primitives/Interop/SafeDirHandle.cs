@@ -48,7 +48,22 @@ internal sealed class SafeDirHandle : SafeHandleZeroOrMinusOneIsInvalid
     /// </param>
     /// <param name="access">The authority the open was granted.</param>
     public SafeDirHandle(nint handle, IPlatformOps backend, CapAccess access)
-        : base(ownsHandle: true)
+        : this(handle, backend, access, ownsHandle: true)
+    {
+    }
+
+    /// <summary>
+    /// Wraps a descriptor or handle, choosing whether closing this closes it.
+    /// </summary>
+    /// <param name="handle">The raw descriptor or handle value.</param>
+    /// <param name="backend">The implementation that issued it.</param>
+    /// <param name="access">The authority the open was granted.</param>
+    /// <param name="ownsHandle">
+    /// False to borrow a value somebody else owns, for exactly as long as a call needs it:
+    /// closing this then leaves the value open. Whoever lends it must keep it open meanwhile.
+    /// </param>
+    public SafeDirHandle(nint handle, IPlatformOps backend, CapAccess access, bool ownsHandle)
+        : base(ownsHandle)
     {
         ArgumentNullException.ThrowIfNull(backend);
 

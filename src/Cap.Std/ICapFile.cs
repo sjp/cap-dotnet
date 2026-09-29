@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Cap.Primitives;
 
 namespace Cap.Std;
@@ -47,6 +48,9 @@ public interface ICapFile : IDisposable
     /// <inheritdoc cref="CapFile.SetTimes(CapFileTime, CapFileTime)"/>
     void SetTimes(CapFileTime lastAccess = default, CapFileTime lastWrite = default);
 
+    /// <inheritdoc cref="CapFile.SetPermissions(in CapPermissions)"/>
+    void SetPermissions(in CapPermissions permissions);
+
     /// <inheritdoc cref="CapFile.Flush(bool)"/>
     void Flush(bool toDisk);
 
@@ -61,6 +65,12 @@ public interface ICapFile : IDisposable
 
     /// <inheritdoc cref="CapFile.WriteAsync(ReadOnlyMemory{byte}, long, CancellationToken)"/>
     ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, long fileOffset, CancellationToken cancellationToken = default);
+
+    /// <inheritdoc cref="CapFile.Clone()"/>
+    ICapFile Clone();
+
+    /// <inheritdoc cref="CapFile.TryClone(out CapFile)"/>
+    bool TryClone([NotNullWhen(true)] out ICapFile? clone);
 
     /// <inheritdoc cref="CapFile.AsStream(bool, int)"/>
     Stream AsStream(bool leaveOpen = true, int bufferSize = CapFile.DefaultStreamBufferSize);

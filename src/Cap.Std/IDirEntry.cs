@@ -41,19 +41,20 @@ public interface IDirEntry
     /// <inheritdoc cref="DirEntry.TryOpenDir(out Dir)"/>
     bool TryOpenDir([NotNullWhen(true)] out IDir? dir);
 
-    /// <inheritdoc cref="DirEntry.OpenFile(FileMode, FileAccess, FileShare, FileOptions, long, bool)"/>
+    /// <inheritdoc cref="DirEntry.OpenFile(FileMode, FileAccess, FileShare, FileOptions, long, bool, bool)"/>
     ICapFile OpenFile(
         FileMode mode = FileMode.Open,
         FileAccess access = FileAccess.Read,
         FileShare share = FileShare.Read,
         FileOptions options = FileOptions.None,
         long preallocationSize = 0,
-        bool append = false);
+        bool append = false,
+        bool noFollow = false);
 
     /// <inheritdoc cref="DirEntry.TryOpenFile(out CapFile)"/>
     bool TryOpenFile([NotNullWhen(true)] out ICapFile? file);
 
-    /// <inheritdoc cref="DirEntry.TryOpenFile(FileMode, FileAccess, FileShare, FileOptions, long, bool, out CapFile)"/>
+    /// <inheritdoc cref="DirEntry.TryOpenFile(FileMode, FileAccess, FileShare, FileOptions, long, bool, bool, out CapFile)"/>
     bool TryOpenFile(
         FileMode mode,
         FileAccess access,
@@ -61,6 +62,7 @@ public interface IDirEntry
         FileOptions options,
         long preallocationSize,
         bool append,
+        bool noFollow,
         [NotNullWhen(true)] out ICapFile? file);
 
     /// <inheritdoc cref="DirEntry.GetMetadata()"/>

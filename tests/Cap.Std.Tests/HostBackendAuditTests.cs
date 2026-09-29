@@ -67,6 +67,7 @@ public sealed class HostBackendAuditTests
         (typeof(ResolutionMetrics), null),
         (typeof(Dir), nameof(Dir.Open)),
         (typeof(Dir), nameof(Dir.TryOpen)),
+        (typeof(Dir), nameof(Dir.FromHandle)),
         (typeof(CapTempDir), nameof(CapTempDir.New)),
     ];
 

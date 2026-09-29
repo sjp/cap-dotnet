@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using Cap.Primitives;
 
 namespace Cap.Std;
@@ -82,6 +83,12 @@ public interface IDir : IDisposable
     /// <inheritdoc cref="Dir.TryOpenOrCreateDir(string, out Dir)"/>
     bool TryOpenOrCreateDir(string path, [NotNullWhen(true)] out IDir? dir);
 
+    /// <inheritdoc cref="Dir.OpenOrCreateDirAll(string)"/>
+    IDir OpenOrCreateDirAll(string path);
+
+    /// <inheritdoc cref="Dir.TryOpenOrCreateDirAll(string, out Dir)"/>
+    bool TryOpenOrCreateDirAll(string path, [NotNullWhen(true)] out IDir? dir);
+
     /// <inheritdoc cref="Dir.OpenFile(string, FileMode, FileAccess, FileShare, FileOptions, long, bool, bool)"/>
     ICapFile OpenFile(
         string path,
@@ -139,8 +146,47 @@ public interface IDir : IDisposable
     /// <inheritdoc cref="Dir.ReadAllText(string)"/>
     string ReadAllText(string path);
 
+    /// <inheritdoc cref="Dir.ReadAllText(string, Encoding)"/>
+    string ReadAllText(string path, Encoding encoding);
+
+    /// <inheritdoc cref="Dir.ReadAllLines(string)"/>
+    string[] ReadAllLines(string path);
+
+    /// <inheritdoc cref="Dir.ReadAllLines(string, Encoding)"/>
+    string[] ReadAllLines(string path, Encoding encoding);
+
+    /// <inheritdoc cref="Dir.ReadLines(string)"/>
+    IEnumerable<string> ReadLines(string path);
+
+    /// <inheritdoc cref="Dir.ReadLines(string, Encoding)"/>
+    IEnumerable<string> ReadLines(string path, Encoding encoding);
+
+    /// <inheritdoc cref="Dir.ReadLinesAsync(string, CancellationToken)"/>
+    IAsyncEnumerable<string> ReadLinesAsync(string path, CancellationToken cancellationToken = default);
+
+    /// <inheritdoc cref="Dir.ReadLinesAsync(string, Encoding, CancellationToken)"/>
+    IAsyncEnumerable<string> ReadLinesAsync(string path, Encoding encoding, CancellationToken cancellationToken = default);
+
     /// <inheritdoc cref="Dir.WriteAllBytes(string, ReadOnlySpan{byte})"/>
     void WriteAllBytes(string path, ReadOnlySpan<byte> bytes);
+
+    /// <inheritdoc cref="Dir.WriteAllText(string, string)"/>
+    void WriteAllText(string path, string? contents);
+
+    /// <inheritdoc cref="Dir.WriteAllText(string, string, Encoding)"/>
+    void WriteAllText(string path, string? contents, Encoding encoding);
+
+    /// <inheritdoc cref="Dir.WriteAllLines(string, IEnumerable{string})"/>
+    void WriteAllLines(string path, IEnumerable<string> contents);
+
+    /// <inheritdoc cref="Dir.WriteAllLines(string, IEnumerable{string}, Encoding)"/>
+    void WriteAllLines(string path, IEnumerable<string> contents, Encoding encoding);
+
+    /// <inheritdoc cref="Dir.AppendAllText(string, string)"/>
+    void AppendAllText(string path, string? contents);
+
+    /// <inheritdoc cref="Dir.AppendAllText(string, string, Encoding)"/>
+    void AppendAllText(string path, string? contents, Encoding encoding);
 
     /// <inheritdoc cref="Dir.ReadAllBytesAsync(string, CancellationToken)"/>
     Task<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken = default);
@@ -231,6 +277,9 @@ public interface IDir : IDisposable
         CapFileTime lastAccess = default,
         CapFileTime lastWrite = default,
         bool followLink = false);
+
+    /// <inheritdoc cref="Dir.SetPermissions(in CapPermissions)"/>
+    void SetPermissions(in CapPermissions permissions);
 
     /// <inheritdoc cref="Dir.Flush(bool)"/>
     bool Flush(bool toDisk);

@@ -10,7 +10,7 @@ using Dir workspace = Dir.Open("/srv/reports", AmbientAuthority.Acquire());
 ```
 
 Every API that reaches outside the capability graph — opening the first directory by an
-ordinary path, asking the system where scratch files go, finding an application's
+ordinary path or from a handle received from outside, asking the system where scratch files go, finding an application's
 configuration and data directories, and in time the system clock, the operating system's
 entropy, a socket — takes one of these tokens, and no API that does so omits it.
 

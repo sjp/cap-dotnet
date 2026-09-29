@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
@@ -23,9 +24,8 @@ namespace Cap.Std;
 /// </para>
 /// <para>
 /// Creation happens at the last component and nowhere else. A directory missing from the
-/// middle of a path is reported as missing rather than created, because creating a chain
-/// means deciding what to do with the ones already made when a later one fails, and that is
-/// a policy a caller should choose rather than inherit.
+/// middle of a path is reported as missing rather than created. A caller who wants the chain
+/// made asks for it with <see cref="OpenOrCreateDirAll"/> first, and so chooses to have it.
 /// </para>
 /// </remarks>
 public sealed partial class Dir
@@ -599,6 +599,170 @@ public sealed partial class Dir
         return reader.ReadToEnd();
     }
 
+    /// <summary>Reads a whole file beneath this handle as text in a given encoding.</summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="encoding">
+    /// The encoding to decode with, unless the file opens with a byte-order mark naming
+    /// another, as the framework's own read of the same name does.
+    /// </param>
+    /// <returns>Its contents, decoded.</returns>
+    /// <remarks>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member
+    /// of this handle, from any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> or <paramref name="encoding"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable name.</exception>
+    /// <exception cref="SandboxEscapeException">
+    /// <paramref name="path"/> named something outside this handle's authority.
+    /// </exception>
+    /// <exception cref="FileNotFoundException">There is no such file.</exception>
+    /// <exception cref="DirectoryNotFoundException">A directory above the file is missing.</exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the read.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, a symbolic link the policy will not follow is in the way,
+    /// or the read failed otherwise.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public string ReadAllText(string path, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+
+        using CapFile file = OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead);
+        using StreamReader reader = OpenReader(file, encoding);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>Reads a whole file beneath this handle as lines of text.</summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <returns>Its lines, without their line ends.</returns>
+    /// <remarks>
+    /// Decoded as <see cref="ReadAllText(string)"/> decodes, and split where the framework's
+    /// own line reading splits: at a line feed, a carriage return, or the two together. A
+    /// line end at the very end of the file does not start another, empty line. Symbolic
+    /// links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member of
+    /// this handle, from any thread.
+    /// </remarks>
+    /// <inheritdoc cref="ReadAllText(string)" path="/exception"/>
+    public string[] ReadAllLines(string path) => ReadAllLinesCore(path, Encoding.UTF8);
+
+    /// <summary>Reads a whole file beneath this handle as lines of text in a given encoding.</summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="encoding">
+    /// The encoding to decode with, unless the file opens with a byte-order mark naming another.
+    /// </param>
+    /// <returns>Its lines, without their line ends.</returns>
+    /// <remarks>
+    /// Split as <see cref="ReadAllLines(string)"/> splits, with symbolic links followed or
+    /// refused as <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any
+    /// other member of this handle, from any thread.
+    /// </remarks>
+    /// <inheritdoc cref="ReadAllText(string, Encoding)" path="/exception"/>
+    public string[] ReadAllLines(string path, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+        return ReadAllLinesCore(path, encoding);
+    }
+
+    /// <summary>Reads a file beneath this handle a line at a time, as the lines are asked for.</summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <returns>
+    /// Its lines, without their line ends, read as the sequence is enumerated. Enumerate it
+    /// once; the file is closed when the enumeration finishes or is disposed.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// The file is opened by this call, before anything is enumerated, so a missing file or a
+    /// refused path is reported here rather than at the first line; what is read afterwards is
+    /// the object that open reached, whatever the name comes to hold in the meantime. A
+    /// sequence that is never enumerated keeps the file open until it is collected, as the
+    /// framework's own does, so enumerate what this returns or dispose its enumerator.
+    /// </para>
+    /// <para>
+    /// Lines are split and decoded as <see cref="ReadAllLines(string)"/> describes. Unlike the
+    /// framework's, the sequence cannot be enumerated a second time: that would mean opening
+    /// the name again, which may by then name something else.
+    /// </para>
+    /// <para>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member of
+    /// this handle, from any thread; the sequence returned belongs to one caller at a time.
+    /// </para>
+    /// </remarks>
+    /// <inheritdoc cref="ReadAllText(string)" path="/exception"/>
+    public IEnumerable<string> ReadLines(string path) => ReadLinesCore(path, Encoding.UTF8);
+
+    /// <summary>
+    /// Reads a file beneath this handle a line at a time in a given encoding, as the lines are
+    /// asked for.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="encoding">
+    /// The encoding to decode with, unless the file opens with a byte-order mark naming another.
+    /// </param>
+    /// <returns>Its lines, read as the sequence is enumerated. Enumerate it once.</returns>
+    /// <remarks>
+    /// As <see cref="ReadLines(string)"/>, decoding with <paramref name="encoding"/>. Safe to
+    /// call concurrently with any other member of this handle, from any thread.
+    /// </remarks>
+    /// <inheritdoc cref="ReadAllText(string, Encoding)" path="/exception"/>
+    public IEnumerable<string> ReadLines(string path, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+        return ReadLinesCore(path, encoding);
+    }
+
+    /// <summary>
+    /// Reads a file beneath this handle a line at a time, without holding the calling thread.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="cancellationToken">
+    /// Asks for the reading to be abandoned. Combined with any token given to the
+    /// enumeration itself.
+    /// </param>
+    /// <returns>Its lines, read as the sequence is enumerated. Enumerate it once.</returns>
+    /// <remarks>
+    /// <para>
+    /// The file is opened by this call, on the calling thread, as it is for
+    /// <see cref="ReadAllBytesAsync"/>, so a missing file or a refused path is reported here.
+    /// Everything else is as <see cref="ReadLines(string)"/> describes.
+    /// </para>
+    /// <para>
+    /// Symbolic links, the last component included, are followed or refused exactly as
+    /// <see cref="ReadAllBytes"/> describes. Safe to call concurrently with any other member
+    /// of this handle, from any thread.
+    /// </para>
+    /// </remarks>
+    /// <inheritdoc cref="ReadAllText(string)" path="/exception"/>
+    public IAsyncEnumerable<string> ReadLinesAsync(string path, CancellationToken cancellationToken = default) =>
+        ReadLinesAsyncCore(path, Encoding.UTF8, cancellationToken);
+
+    /// <summary>
+    /// Reads a file beneath this handle a line at a time in a given encoding, without holding
+    /// the calling thread.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="encoding">
+    /// The encoding to decode with, unless the file opens with a byte-order mark naming another.
+    /// </param>
+    /// <param name="cancellationToken">Asks for the reading to be abandoned.</param>
+    /// <returns>Its lines, read as the sequence is enumerated. Enumerate it once.</returns>
+    /// <remarks>
+    /// As <see cref="ReadLinesAsync(string, CancellationToken)"/>, decoding with
+    /// <paramref name="encoding"/>. Safe to call concurrently with any other member of this
+    /// handle, from any thread.
+    /// </remarks>
+    /// <inheritdoc cref="ReadAllText(string, Encoding)" path="/exception"/>
+    public IAsyncEnumerable<string> ReadLinesAsync(
+        string path,
+        Encoding encoding,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+        return ReadLinesAsyncCore(path, encoding, cancellationToken);
+    }
+
     /// <summary>Writes a whole file beneath this handle, replacing whatever was there.</summary>
     /// <param name="path">A relative path to the file.</param>
     /// <param name="bytes">The contents to store.</param>
@@ -630,6 +794,158 @@ public sealed partial class Dir
     {
         using CapFile file = OpenFile(path, FileMode.Create, FileAccess.Write);
         file.Write(bytes, 0);
+    }
+
+    /// <summary>Writes a whole file of text beneath this handle, replacing whatever was there.</summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="contents">The text to store. Null stores an empty file.</param>
+    /// <remarks>
+    /// <para>
+    /// Encoded as UTF-8 with no byte-order mark, which is what the framework's own text write
+    /// produces and what <see cref="ReadAllText(string)"/> assumes of a file that begins with
+    /// no mark. The text is encoded a piece at a time as it is written, so no second copy of
+    /// it the size of the file is made.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Opened as <see cref="CreateFile"/> opens, exactly as
+    /// <see cref="WriteAllBytes"/> is: a link at the last component is refused with
+    /// <see cref="CapIOException"/> under either policy, and the file it leads to, if any, is
+    /// left as it was. A link before the last component is followed while it stays beneath
+    /// this handle and refused with <see cref="SandboxEscapeException"/> if it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
+    /// <see cref="CapIOException"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
+    /// </remarks>
+    /// <inheritdoc cref="WriteAllBytes(string, ReadOnlySpan{byte})" path="/exception"/>
+    public void WriteAllText(string path, string? contents) =>
+        WriteText(path, FileMode.Create, contents, Utf8NoMark);
+
+    /// <summary>
+    /// Writes a whole file of text in a given encoding beneath this handle, replacing whatever
+    /// was there.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="contents">The text to store. Null stores only the encoding's byte-order mark.</param>
+    /// <param name="encoding">
+    /// The encoding to write in. Its byte-order mark, if it has one, is written first, as the
+    /// framework's own text write does.
+    /// </param>
+    /// <remarks>
+    /// Symbolic links are refused or followed exactly as <see cref="WriteAllText(string, string)"/>
+    /// describes. Safe to call concurrently with any other member of this handle, from any
+    /// thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> or <paramref name="encoding"/> is null.</exception>
+    /// <inheritdoc cref="WriteAllBytes(string, ReadOnlySpan{byte})" path="/exception"/>
+    public void WriteAllText(string path, string? contents, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+        WriteText(path, FileMode.Create, contents, encoding);
+    }
+
+    /// <summary>
+    /// Writes lines of text as a whole file beneath this handle, replacing whatever was there.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="contents">The lines, each of which is followed by the platform's line end.</param>
+    /// <remarks>
+    /// <para>
+    /// Encoded as <see cref="WriteAllText(string, string)"/> encodes, and ended as the
+    /// framework's own line write ends them, with <see cref="Environment.NewLine"/>. The lines
+    /// are taken from <paramref name="contents"/> one at a time as they are written, so a
+    /// sequence that produces them lazily is never held whole.
+    /// </para>
+    /// <para>
+    /// The file is created or emptied before the first line is asked for, so a sequence that
+    /// throws part of the way leaves a file holding the lines before it.
+    /// </para>
+    /// <para>
+    /// Symbolic links are refused or followed exactly as
+    /// <see cref="WriteAllText(string, string)"/> describes. Safe to call concurrently with any
+    /// other member of this handle, from any thread.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> or <paramref name="contents"/> is null.</exception>
+    /// <inheritdoc cref="WriteAllBytes(string, ReadOnlySpan{byte})" path="/exception"/>
+    public void WriteAllLines(string path, IEnumerable<string> contents) =>
+        WriteLines(path, contents, Utf8NoMark);
+
+    /// <summary>
+    /// Writes lines of text in a given encoding as a whole file beneath this handle, replacing
+    /// whatever was there.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="contents">The lines, each of which is followed by the platform's line end.</param>
+    /// <param name="encoding">
+    /// The encoding to write in. Its byte-order mark, if it has one, is written first.
+    /// </param>
+    /// <remarks>
+    /// As <see cref="WriteAllLines(string, IEnumerable{string})"/>, in
+    /// <paramref name="encoding"/>. Safe to call concurrently with any other member of this
+    /// handle, from any thread.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <inheritdoc cref="WriteAllBytes(string, ReadOnlySpan{byte})" path="/exception"/>
+    public void WriteAllLines(string path, IEnumerable<string> contents, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+        WriteLines(path, contents, encoding);
+    }
+
+    /// <summary>
+    /// Adds text to the end of a file beneath this handle, creating the file if it is not
+    /// there.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="contents">The text to add. Null adds nothing, and still creates the file.</param>
+    /// <remarks>
+    /// <para>
+    /// Encoded as UTF-8 with no byte-order mark, as <see cref="WriteAllText(string, string)"/>
+    /// is. Every write goes to wherever the end of the file is at that moment, as
+    /// <see cref="CapFile.IsAppending"/> describes, on every platform, so appenders sharing the
+    /// file do not overwrite one another. The text is written a piece at a time, so a long
+    /// one from this call can have another writer's bytes land between its pieces.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Opened as <see cref="OpenFile"/> opens with
+    /// <see cref="FileMode.Append"/>, which may create the file: a link at the last component
+    /// is refused with <see cref="CapIOException"/> under either policy, and what it leads to
+    /// is neither appended to nor created. This is where the library parts from
+    /// <c>System.IO</c>, which follows the link. A link before the last component is
+    /// followed while it stays beneath this handle and refused with
+    /// <see cref="SandboxEscapeException"/> if it leaves; under
+    /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
+    /// <see cref="CapIOException"/>.
+    /// </para>
+    /// <para>Safe to call concurrently with any other member of this handle, from any thread.</para>
+    /// </remarks>
+    /// <inheritdoc cref="WriteAllBytes(string, ReadOnlySpan{byte})" path="/exception"/>
+    public void AppendAllText(string path, string? contents) =>
+        WriteText(path, FileMode.Append, contents, Utf8NoMark);
+
+    /// <summary>
+    /// Adds text in a given encoding to the end of a file beneath this handle, creating the
+    /// file if it is not there.
+    /// </summary>
+    /// <param name="path">A relative path to the file.</param>
+    /// <param name="contents">The text to add. Null adds nothing, and still creates the file.</param>
+    /// <param name="encoding">
+    /// The encoding to write in. Its byte-order mark, if it has one, is written only when the
+    /// file was empty, as the framework's own append does, so a mark never lands in the middle
+    /// of a file.
+    /// </param>
+    /// <remarks>
+    /// As <see cref="AppendAllText(string, string)"/>, in <paramref name="encoding"/>. Safe to
+    /// call concurrently with any other member of this handle, from any thread; two calls
+    /// appending to an empty file at once can both write a mark.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="path"/> or <paramref name="encoding"/> is null.</exception>
+    /// <inheritdoc cref="WriteAllBytes(string, ReadOnlySpan{byte})" path="/exception"/>
+    public void AppendAllText(string path, string? contents, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(encoding);
+        WriteText(path, FileMode.Append, contents, encoding);
     }
 
     /// <summary>Reads a whole file beneath this handle without holding the calling thread.</summary>
@@ -675,7 +991,7 @@ public sealed partial class Dir
     /// </summary>
     /// <param name="path">A relative path to the file.</param>
     /// <param name="cancellationToken">Asks for the read to be abandoned.</param>
-    /// <returns>Its contents, decoded as <see cref="ReadAllText"/> describes.</returns>
+    /// <returns>Its contents, decoded as <see cref="ReadAllText(string)"/> describes.</returns>
     /// <remarks>
     /// Opening happens on the calling thread, as it does for <see cref="ReadAllBytesAsync"/>.
     /// Symbolic links, the last component included, are followed or refused exactly as
@@ -1069,8 +1385,231 @@ public sealed partial class Dir
     /// Presents a file as a text reader, giving the stream the handle so that disposing the
     /// reader closes everything.
     /// </summary>
-    private static StreamReader OpenReader(CapFile file) =>
-        new(file.AsStream(leaveOpen: false), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+    private static StreamReader OpenReader(CapFile file, Encoding? encoding = null)
+    {
+        Stream stream = file.AsStream(leaveOpen: false);
+        try
+        {
+            return new(stream, encoding ?? Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// UTF-8 with no byte-order mark, refusing to encode a string that is not valid UTF-16,
+    /// which is what the framework's own text writes use when no encoding is named.
+    /// </summary>
+    private static readonly UTF8Encoding Utf8NoMark = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>
+    /// How many characters a text write encodes at a time: enough that a long text is not
+    /// written in thousands of pieces, few enough that the bytes they encode to come from the
+    /// shared pool.
+    /// </summary>
+    private const int TextChunk = 4096;
+
+    /// <summary>Reads every line of a file into an array.</summary>
+    private string[] ReadAllLinesCore(string path, Encoding encoding)
+    {
+        using CapFile file = OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead);
+        using StreamReader reader = OpenReader(file, encoding);
+
+        List<string> lines = [];
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+
+        return [.. lines];
+    }
+
+    /// <summary>
+    /// Opens a file now and hands back a sequence that reads its lines later.
+    /// </summary>
+    /// <remarks>
+    /// Split from the iterator so that the open, and any failure of it, happens when the
+    /// caller asks rather than at the first line. The reader is owned by the sequence from
+    /// then on, and is disposed when an enumeration of it ends.
+    /// </remarks>
+    private IEnumerable<string> ReadLinesCore(string path, Encoding encoding)
+    {
+        CapFile file = OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead);
+        StreamReader reader;
+        try
+        {
+            reader = OpenReader(file, encoding);
+        }
+        catch
+        {
+            file.Dispose();
+            throw;
+        }
+
+        return Lines(reader);
+
+        static IEnumerable<string> Lines(StreamReader reader)
+        {
+            using (reader)
+            {
+                while (reader.ReadLine() is { } line)
+                {
+                    yield return line;
+                }
+            }
+        }
+    }
+
+    /// <summary>The asynchronous twin of <see cref="ReadLinesCore"/>.</summary>
+    private IAsyncEnumerable<string> ReadLinesAsyncCore(string path, Encoding encoding, CancellationToken cancellationToken)
+    {
+        CapFile file = OpenFile(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead | FileOptions.Asynchronous);
+        StreamReader reader;
+        try
+        {
+            reader = OpenReader(file, encoding);
+        }
+        catch
+        {
+            file.Dispose();
+            throw;
+        }
+
+        return Lines(reader, cancellationToken);
+
+        static async IAsyncEnumerable<string> Lines(
+            StreamReader reader,
+            CancellationToken given,
+            [EnumeratorCancellation] CancellationToken enumerating = default)
+        {
+            using (reader)
+            {
+                using CancellationTokenSource? linked = given.CanBeCanceled && enumerating.CanBeCanceled
+                    ? CancellationTokenSource.CreateLinkedTokenSource(given, enumerating)
+                    : null;
+                CancellationToken token = linked?.Token ?? (given.CanBeCanceled ? given : enumerating);
+
+                while (await reader.ReadLineAsync(token).ConfigureAwait(false) is { } line)
+                {
+                    yield return line;
+                }
+            }
+        }
+    }
+
+    /// <summary>Opens a file for a text write and writes the text into it.</summary>
+    /// <param name="path">The caller's path.</param>
+    /// <param name="mode">
+    /// <see cref="FileMode.Create"/> to replace the file, or <see cref="FileMode.Append"/> to add
+    /// to its end.
+    /// </param>
+    /// <param name="contents">The text, or null for none.</param>
+    /// <param name="encoding">The encoding to write it in.</param>
+    private void WriteText(string path, FileMode mode, string? contents, Encoding encoding)
+    {
+        using CapFile file = OpenFile(path, mode, FileAccess.Write);
+        using TextSink sink = new(file, encoding, preamble: mode != FileMode.Append || file.Length == 0);
+        sink.Write(contents);
+        sink.Finish();
+    }
+
+    /// <summary>Creates or empties a file and writes lines into it.</summary>
+    private void WriteLines(string path, IEnumerable<string> contents, Encoding encoding)
+    {
+        ArgumentNullException.ThrowIfNull(contents);
+
+        using CapFile file = OpenFile(path, FileMode.Create, FileAccess.Write);
+        using TextSink sink = new(file, encoding, preamble: true);
+        foreach (string line in contents)
+        {
+            sink.Write(line);
+            sink.Write(Environment.NewLine);
+        }
+
+        sink.Finish();
+    }
+
+    /// <summary>
+    /// Encodes text into a file a piece at a time, through positioned writes, so that no copy
+    /// of the whole text in bytes is ever made.
+    /// </summary>
+    /// <remarks>
+    /// Written through the handle rather than through a stream, so that a file opened to
+    /// append puts every piece at its end on every platform, as <see cref="CapFile.Write"/>
+    /// does, rather than wherever a stream's own position has got to.
+    /// </remarks>
+    private sealed class TextSink : IDisposable
+    {
+        private readonly CapFile _file;
+        private readonly Encoder _encoder;
+        private readonly byte[] _buffer;
+        private long _offset;
+        private bool _returned;
+
+        public TextSink(CapFile file, Encoding encoding, bool preamble)
+        {
+            _file = file;
+            _encoder = encoding.GetEncoder();
+            _buffer = ArrayPool<byte>.Shared.Rent(encoding.GetMaxByteCount(TextChunk));
+
+            if (preamble)
+            {
+                ReadOnlySpan<byte> mark = encoding.Preamble;
+                if (!mark.IsEmpty)
+                {
+                    Put(mark);
+                }
+            }
+        }
+
+        /// <summary>Encodes and writes some text, keeping any half of a pair of surrogates for later.</summary>
+        public void Write(ReadOnlySpan<char> text)
+        {
+            while (!text.IsEmpty)
+            {
+                ReadOnlySpan<char> piece = text.Length > TextChunk ? text[..TextChunk] : text;
+                _encoder.Convert(piece, _buffer, flush: false, out int used, out int produced, out _);
+                Put(_buffer.AsSpan(0, produced));
+                text = text[used..];
+            }
+        }
+
+        /// <summary>Writes whatever the encoder was still holding.</summary>
+        public void Finish()
+        {
+            bool completed;
+            do
+            {
+                _encoder.Convert(ReadOnlySpan<char>.Empty, _buffer, flush: true, out _, out int produced, out completed);
+                Put(_buffer.AsSpan(0, produced));
+            }
+            while (!completed);
+        }
+
+        public void Dispose()
+        {
+            if (!_returned)
+            {
+                _returned = true;
+                ArrayPool<byte>.Shared.Return(_buffer);
+            }
+        }
+
+        private void Put(ReadOnlySpan<byte> bytes)
+        {
+            if (bytes.IsEmpty)
+            {
+                return;
+            }
+
+            _file.Write(bytes, _offset);
+            _offset += bytes.Length;
+        }
+    }
 
     /// <summary>
     /// Reads a file from the beginning until it stops giving anything back.

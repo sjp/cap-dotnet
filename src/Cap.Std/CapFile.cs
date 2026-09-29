@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Microsoft.Win32.SafeHandles;
@@ -349,19 +350,167 @@ public sealed class CapFile : ICapFile
     /// <summary>
     /// Writes permissions onto the file this handle refers to.
     /// </summary>
+    /// <param name="permissions">
+    /// The permissions to record: a Unix mode on Linux and macOS, Windows attributes on
+    /// Windows. See <see cref="Dir.SetPermissions(in CapPermissions)"/>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Applied through the handle, so the object whose permissions change is the one that was
+    /// opened and not whatever its name has come to mean since. What is written on each
+    /// platform, and what is refused, is as <see cref="Dir.SetPermissions(in CapPermissions)"/>
+    /// describes.
+    /// </para>
+    /// <para>
+    /// <strong>Needs a handle that can write,</strong> on every platform, for the reason
+    /// <see cref="SetTimes"/> does: a handle given out so that something can read a file never
+    /// lets that reader change anything about it.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> Acts on the object this handle refers to; no name is
+    /// consulted, so there is no link to follow.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="permissions"/> is the default value, which describes nothing.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// This handle cannot write, or the filesystem refused the change.
+    /// </exception>
+    /// <exception cref="CapIOException">
+    /// <paramref name="permissions"/> carries the kind this platform does not record, or the
+    /// change could not be made.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
+    public void SetPermissions(in CapPermissions permissions)
+    {
+        Dir.DemandPresent(permissions);
+        Demand();
+
+        if ((_access & FileAccess.Write) == 0)
+        {
+            throw new UnauthorizedAccessException(
+                "This file was opened without write access, so its permissions cannot be " +
+                "changed through it. Open it for writing to change them.");
+        }
+
+        CapError error = SetPermissionsCore(permissions);
+        if (error.IsFailure)
+        {
+            throw FailureTranslation.ToPermissionsException(error);
+        }
+    }
+
+    /// <summary>
+    /// Writes permissions onto the file this handle refers to, reporting the platform's own
+    /// answer.
+    /// </summary>
     /// <param name="permissions">A value read from some other object's snapshot.</param>
     /// <remarks>
-    /// Applied through the handle, so the object whose permissions change is the one that was
-    /// opened and not whatever its name has come to mean since. Internal for the reason the
-    /// directory's counterpart is: it exists to reproduce an object, not to let a caller
-    /// revise one.
+    /// For copying, which quotes the name of the entry being reproduced when something fails.
     /// </remarks>
-    internal CapError SetPermissions(in CapPermissions permissions)
+    internal CapError SetPermissionsCore(in CapPermissions permissions)
     {
         Demand();
 
         return _backend.SetHandlePermissions(
             _handle, permissions.UnixMode, permissions.WindowsAttributes);
+    }
+
+    /// <summary>
+    /// Produces a second handle on the same open file, with a lifetime of its own.
+    /// </summary>
+    /// <returns>A handle on the same file, carrying exactly this handle's access.</returns>
+    /// <remarks>
+    /// <para>
+    /// How an open file is handed to a component that will outlive, or be outlived by, the
+    /// code handing it over, as <see cref="Dir.Clone"/> is for a directory. Both handles refer
+    /// to the same open file, and closing either leaves the other working.
+    /// </para>
+    /// <para>
+    /// <strong>It is a copy of the handle, not a second open.</strong> No name is looked up
+    /// again, so the copy reaches this object even if the name it was opened by now holds
+    /// something else or nothing at all, and it carries this handle's access rather than
+    /// whatever the file's permissions would grant a fresh open. It is not a way to widen
+    /// anything.
+    /// </para>
+    /// <para>
+    /// Being the same open file, the two share what the system keeps per open file rather
+    /// than per handle: on Linux and macOS whether writes append, as
+    /// <see cref="IsAppending"/> describes, and any lock taken through either. The copy starts
+    /// with this handle's <see cref="IsAppending"/> and <see cref="IsAsync"/>. Nothing here
+    /// carries a position, so there is none to share.
+    /// </para>
+    /// <para>
+    /// <strong>Not for an asynchronous file.</strong> Where <see cref="IsAsync"/> is true,
+    /// which is only ever on Windows, the system completes the file's reads and writes
+    /// through a port the open file can be attached to once, and a copy of the handle is the
+    /// same open file, so the copy's asynchronous reads and writes would fail. Such a file is
+    /// refused rather than copied into something that breaks later. Take borrowed streams
+    /// from it with <see cref="AsStream"/>, or open the name again for a second file.
+    /// </para>
+    /// <para>Safe to call from any thread, concurrently with any other member.</para>
+    /// </remarks>
+    /// <exception cref="NotSupportedException"><see cref="IsAsync"/> is true.</exception>
+    /// <exception cref="CapIOException">The handle could not be duplicated.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
+    public CapFile Clone()
+    {
+        CapError error = CloneCore(out CapFile? clone);
+        FailureTranslation.ThrowIfClosed(error);
+        return error.IsSuccess
+            ? clone!
+            : throw new CapIOException(
+                FailureTranslation.KindOf(error.Category),
+                $"The file handle could not be duplicated. ({error})");
+    }
+
+    /// <summary>
+    /// Produces a second handle on the same open file, reporting failure rather than throwing.
+    /// </summary>
+    /// <param name="clone">The copy, when this returns true.</param>
+    /// <returns>True when the handle was duplicated.</returns>
+    /// <remarks>
+    /// <para>
+    /// Duplication fails only when the process is out of handles, which is a condition a
+    /// server may well want to shed load for rather than unwind a stack over.
+    /// </para>
+    /// <para>
+    /// An asynchronous file is still refused with an exception, as <see cref="Clone"/>
+    /// describes: that is fixed by how the file was opened, and no retry changes it.
+    /// </para>
+    /// <para>Safe to call from any thread, concurrently with any other member.</para>
+    /// </remarks>
+    /// <exception cref="NotSupportedException"><see cref="IsAsync"/> is true.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
+    public bool TryClone([NotNullWhen(true)] out CapFile? clone) => CloneCore(out clone).IsSuccess;
+
+    private CapError CloneCore(out CapFile? clone)
+    {
+        Demand();
+
+        if (_isAsync)
+        {
+            throw new NotSupportedException(
+                "This file was opened for asynchronous operation, and on this system a copy of " +
+                "its handle is the same open file, which can be attached to the thread pool " +
+                "only once. A copy's asynchronous reads and writes would fail, so none is made. " +
+                "Take a stream with AsStream, or open the name again.");
+        }
+
+        clone = null;
+
+        CapResult<SafeFileHandle> copy = _backend.DuplicateFile(_handle);
+        if (!copy.IsSuccess)
+        {
+            return copy.Error;
+        }
+
+        clone = new CapFile(copy.Value, _backend, _access, _isAsync, _appending);
+        return CapError.Success;
     }
 
     /// <summary>
@@ -744,6 +893,17 @@ public sealed class CapFile : ICapFile
         {
             _handle.Dispose();
         }
+    }
+
+    /// <inheritdoc/>
+    ICapFile ICapFile.Clone() => Clone();
+
+    /// <inheritdoc/>
+    bool ICapFile.TryClone([NotNullWhen(true)] out ICapFile? clone)
+    {
+        bool copied = TryClone(out CapFile? concrete);
+        clone = concrete;
+        return copied;
     }
 
     /// <summary>Whether a write made now is to be put at the end of the file.</summary>

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Text;
 using Cap.Primitives;
 using Cap.Std;
 using Cap.Std.Testing;
@@ -59,6 +60,11 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
     public bool TryOpenOrCreateDir(string path, [NotNullWhen(true)] out IDir? dir) =>
         Opened(inner.TryOpenOrCreateDir(path, out dir), ref dir, path, Call(path));
 
+    public IDir OpenOrCreateDirAll(string path) => Child(Record(inner.OpenOrCreateDirAll(path), path), path);
+
+    public bool TryOpenOrCreateDirAll(string path, [NotNullWhen(true)] out IDir? dir) =>
+        Opened(inner.TryOpenOrCreateDirAll(path, out dir), ref dir, path, Call(path));
+
     public ICapFile OpenFile(
         string path,
         FileMode mode = FileMode.Open,
@@ -112,10 +118,62 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
 
     public string ReadAllText(string path) => Record(inner.ReadAllText(path), path);
 
+    public string ReadAllText(string path, Encoding encoding) => Record(inner.ReadAllText(path, encoding), path);
+
+    public string[] ReadAllLines(string path) => Record(inner.ReadAllLines(path), path);
+
+    public string[] ReadAllLines(string path, Encoding encoding) => Record(inner.ReadAllLines(path, encoding), path);
+
+    public IEnumerable<string> ReadLines(string path) => Record(inner.ReadLines(path), path);
+
+    public IEnumerable<string> ReadLines(string path, Encoding encoding) => Record(inner.ReadLines(path, encoding), path);
+
+    public IAsyncEnumerable<string> ReadLinesAsync(string path, CancellationToken cancellationToken = default) =>
+        Record(inner.ReadLinesAsync(path, cancellationToken), path);
+
+    public IAsyncEnumerable<string> ReadLinesAsync(string path, Encoding encoding, CancellationToken cancellationToken = default) =>
+        Record(inner.ReadLinesAsync(path, encoding, cancellationToken), path);
+
     public void WriteAllBytes(string path, ReadOnlySpan<byte> bytes)
     {
         _ = Record(0, path);
         inner.WriteAllBytes(path, bytes);
+    }
+
+    public void WriteAllText(string path, string? contents)
+    {
+        _ = Record(0, path);
+        inner.WriteAllText(path, contents);
+    }
+
+    public void WriteAllText(string path, string? contents, Encoding encoding)
+    {
+        _ = Record(0, path);
+        inner.WriteAllText(path, contents, encoding);
+    }
+
+    public void WriteAllLines(string path, IEnumerable<string> contents)
+    {
+        _ = Record(0, path);
+        inner.WriteAllLines(path, contents);
+    }
+
+    public void WriteAllLines(string path, IEnumerable<string> contents, Encoding encoding)
+    {
+        _ = Record(0, path);
+        inner.WriteAllLines(path, contents, encoding);
+    }
+
+    public void AppendAllText(string path, string? contents)
+    {
+        _ = Record(0, path);
+        inner.AppendAllText(path, contents);
+    }
+
+    public void AppendAllText(string path, string? contents, Encoding encoding)
+    {
+        _ = Record(0, path);
+        inner.AppendAllText(path, contents, encoding);
     }
 
     public Task<byte[]> ReadAllBytesAsync(string path, CancellationToken cancellationToken = default) =>
@@ -211,6 +269,12 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label) :
 
     public bool TrySetTimes(string path, CapFileTime lastAccess = default, CapFileTime lastWrite = default, bool followLink = false) =>
         Record(inner.TrySetTimes(path, lastAccess, lastWrite, followLink), path);
+
+    public void SetPermissions(in CapPermissions permissions)
+    {
+        _ = Record(0, permissions);
+        inner.SetPermissions(permissions);
+    }
 
     public bool Flush(bool toDisk) => Record(inner.Flush(toDisk), toDisk);
 
@@ -329,6 +393,12 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
         inner.SetTimes(lastAccess, lastWrite);
     }
 
+    public void SetPermissions(in CapPermissions permissions)
+    {
+        log.Add($"{label}: SetPermissions({permissions})");
+        inner.SetPermissions(permissions);
+    }
+
     public void Flush(bool toDisk)
     {
         log.Add($"{label}: Flush({toDisk})");
@@ -350,6 +420,20 @@ internal sealed class RecordingFile(ICapFile inner, List<string> log, string lab
     {
         log.Add($"{label}: WriteAsync({buffer.Length}, {fileOffset})");
         return inner.WriteAsync(buffer, fileOffset, cancellationToken);
+    }
+
+    public ICapFile Clone() => new RecordingFile(inner.Clone(), log, label);
+
+    public bool TryClone([NotNullWhen(true)] out ICapFile? clone)
+    {
+        if (!inner.TryClone(out ICapFile? copy))
+        {
+            clone = null;
+            return false;
+        }
+
+        clone = new RecordingFile(copy, log, label);
+        return true;
     }
 
     public Stream AsStream(bool leaveOpen = true, int bufferSize = CapFile.DefaultStreamBufferSize) =>

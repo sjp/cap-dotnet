@@ -185,6 +185,11 @@ public readonly struct DirEntry : IDirEntry
     /// <param name="options">Flags and hints for the open.</param>
     /// <param name="preallocationSize">How much room to claim in advance.</param>
     /// <param name="append">Whether every write goes to the end of the file.</param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link holding the name is refused rather than followed, as
+    /// <c>O_NOFOLLOW</c> asks of a POSIX open. It changes only what
+    /// <see cref="FileMode.Open"/> does, as it does for <see cref="Dir.OpenFile"/>.
+    /// </param>
     /// <returns>The open file.</returns>
     /// <remarks>
     /// <para>
@@ -200,7 +205,11 @@ public readonly struct DirEntry : IDirEntry
     /// <see cref="SandboxEscapeException"/> when it leaves; under
     /// <see cref="Cap.Primitives.SymlinkPolicy.Deny"/> it is refused with
     /// <see cref="CapIOException"/>. <see cref="FileMode.CreateNew"/> never follows it and
-    /// reports the name taken.
+    /// reports the name taken, and every other mode that may create or empty the file refuses
+    /// it with <see cref="CapIOException"/>. With <paramref name="noFollow"/> set,
+    /// <see cref="FileMode.Open"/> refuses it too, under either policy and wherever it points,
+    /// which is how a walker that has already decided an entry is a file makes sure the open
+    /// does not land somewhere else if the name is swapped for a link in between.
     /// </para>
     /// <para>
     /// Safe to call from any thread, concurrently with anything else done through the handle
@@ -214,7 +223,10 @@ public readonly struct DirEntry : IDirEntry
     /// </exception>
     /// <exception cref="FileNotFoundException">The entry is gone, and the mode does not create.</exception>
     /// <exception cref="UnauthorizedAccessException">The filesystem refused the open.</exception>
-    /// <exception cref="CapIOException">The name holds a directory, or the open failed otherwise.</exception>
+    /// <exception cref="CapIOException">
+    /// The name holds a directory, holds a symbolic link the mode or
+    /// <paramref name="noFollow"/> refuses, or the open failed otherwise.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">The directory it came from has been disposed.</exception>
     public CapFile OpenFile(
         FileMode mode = FileMode.Open,
@@ -222,8 +234,9 @@ public readonly struct DirEntry : IDirEntry
         FileShare share = FileShare.Read,
         FileOptions options = FileOptions.None,
         long preallocationSize = 0,
-        bool append = false) =>
-        Owner.OpenFile(Name, mode, access, share, options, preallocationSize, append);
+        bool append = false,
+        bool noFollow = false) =>
+        Owner.OpenFile(Name, mode, access, share, options, preallocationSize, append, noFollow);
 
     /// <summary>
     /// Opens the entry as a file to read, reporting failure rather than throwing.
@@ -255,6 +268,9 @@ public readonly struct DirEntry : IDirEntry
     /// <param name="options">Flags and hints for the open.</param>
     /// <param name="preallocationSize">How much room to claim in advance.</param>
     /// <param name="append">Whether every write goes to the end of the file.</param>
+    /// <param name="noFollow">
+    /// Whether a symbolic link holding the name is refused. See <see cref="OpenFile"/>.
+    /// </param>
     /// <param name="file">The open file, when this returns true.</param>
     /// <returns>True when it was opened.</returns>
     /// <remarks>
@@ -266,7 +282,8 @@ public readonly struct DirEntry : IDirEntry
     /// </para>
     /// <para>
     /// A symbolic link holding the name is followed or refused exactly as
-    /// <see cref="OpenFile"/> describes for the same <paramref name="mode"/>, and a refusal,
+    /// <see cref="OpenFile"/> describes for the same <paramref name="mode"/> and
+    /// <paramref name="noFollow"/>, and a refusal,
     /// containment included, is reported as false.
     /// </para>
     /// <para>
@@ -285,8 +302,9 @@ public readonly struct DirEntry : IDirEntry
         FileOptions options,
         long preallocationSize,
         bool append,
+        bool noFollow,
         [NotNullWhen(true)] out CapFile? file) =>
-        Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, append, noFollow: false, out file);
+        Owner.TryOpenFile(Name, mode, access, share, options, preallocationSize, append, noFollow, out file);
 
     /// <summary>
     /// Describes what the entry's name holds now.
@@ -366,8 +384,9 @@ public readonly struct DirEntry : IDirEntry
         FileShare share,
         FileOptions options,
         long preallocationSize,
-        bool append) =>
-        OpenFile(mode, access, share, options, preallocationSize, append);
+        bool append,
+        bool noFollow) =>
+        OpenFile(mode, access, share, options, preallocationSize, append, noFollow);
 
     /// <inheritdoc/>
     bool IDirEntry.TryOpenFile([NotNullWhen(true)] out ICapFile? file)
@@ -385,9 +404,10 @@ public readonly struct DirEntry : IDirEntry
         FileOptions options,
         long preallocationSize,
         bool append,
+        bool noFollow,
         [NotNullWhen(true)] out ICapFile? file)
     {
-        bool opened = TryOpenFile(mode, access, share, options, preallocationSize, append, out CapFile? concrete);
+        bool opened = TryOpenFile(mode, access, share, options, preallocationSize, append, noFollow, out CapFile? concrete);
         file = concrete;
         return opened;
     }

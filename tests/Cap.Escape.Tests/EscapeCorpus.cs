@@ -147,16 +147,22 @@ internal static class EscapeCorpus
             ExistingFile(), ExistingFile()));
         cases.Add(new("parent-that-stays-inside-to-a-name-not-there", ["L1"], "plain/../plain/absent",
             Absent(), Absent()));
+        // Making the chain steps back over the name it would have made, and meets a file where
+        // it needs a directory, before it makes anything.
+        Expectation throughAbsent = Uniform(Outcome.NotFound).With(Operation.OpenOrCreateDirAll, Outcome.Refused);
         cases.Add(new("parent-through-a-name-not-there", ["L1"], "absent/../plain/marker",
-            Uniform(Outcome.NotFound), Uniform(Outcome.NotFound)));
+            throughAbsent, throughAbsent));
 
         // A path ending in a parent step names the directory it climbs back to, here the root
         // itself. It can be opened and described, and nothing can act on it as a name: there
         // is none, and removing or moving what it names would reach a directory the caller
         // never spelled out, up to and including the handle's own.
+        // The copy helpers take a destination for a file, and refuse one spelled as a directory
+        // as an argument, before anything is resolved.
         Expectation climbedBackTo = ExistingDirectory().With(
             Operation.DeleteTree, Outcome.Refused,
-            (Operation.RenameFrom, Outcome.Refused));
+            (Operation.RenameFrom, Outcome.Refused),
+            (Operation.CopyFileTo, Outcome.Malformed));
         cases.Add(new("parent-trailing", ["L1"], "plain/..", climbedBackTo, climbedBackTo));
 
         // Absolute, in each syntax. The target is the test's own directory, so that a bug
@@ -210,9 +216,10 @@ internal static class EscapeCorpus
         // component that is left is still checked.
         cases.Add(new("doubled-separator", ["L5"], "plain//marker", ExistingFile(), ExistingFile()));
         cases.Add(new("dot-components", ["L5"], "./plain/./marker", ExistingFile(), ExistingFile()));
+        Expectation directorySpelled = ExistingDirectory().With(Operation.CopyFileTo, Outcome.Malformed);
         cases.Add(new("trailing-separator-on-a-directory", ["L5"], "plain/",
-            ExistingDirectory(), ExistingDirectory()));
-        Expectation fileAsDirectory = Uniform(Outcome.Refused);
+            directorySpelled, directorySpelled));
+        Expectation fileAsDirectory = Uniform(Outcome.Refused).With(Operation.CopyFileTo, Outcome.Malformed);
         cases.Add(new("trailing-separator-on-a-file", ["L5"], "plain/marker/", fileAsDirectory, fileAsDirectory));
 
         // A NUL ends the string where it reaches the kernel, so a name holding one would be
@@ -238,9 +245,13 @@ internal static class EscapeCorpus
         // open hands it the whole path and is refused for its length. Both refuse, for
         // different and equally true reasons.
         string overKernel = string.Join('/', Enumerable.Repeat("a", 2500));
+        // Making it would make more directories than the walk descends, which is refused before
+        // any is made.
+        Expectation overKernelExpected = Uniform(Outcome.NotFound).With(
+            Operation.CreateSymlinkTo, Outcome.Refused,
+            (Operation.OpenOrCreateDirAll, Outcome.Refused));
         cases.Add(new("longer-than-the-kernel-takes-at-once", ["L6"], overKernel,
-            Uniform(Outcome.NotFound).With(Operation.CreateSymlinkTo, Outcome.Refused),
-            Uniform(Outcome.NotFound).With(Operation.CreateSymlinkTo, Outcome.Refused))
+            overKernelExpected, overKernelExpected)
         {
             Differences =
             [
