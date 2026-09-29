@@ -84,6 +84,26 @@ public sealed class CapTempFileTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A drawn name has the shape <c>Path.GetRandomFileName</c> gives, is spelled from the
+    /// scratch alphabet, is not repeated, and creates nothing.
+    /// </summary>
+    [Fact]
+    public void A_random_name_is_shaped_like_the_frameworks_and_creates_nothing()
+    {
+        HashSet<string> seen = new(StringComparer.Ordinal);
+
+        for (int i = 0; i < 256; i++)
+        {
+            string name = CapTempFile.RandomName();
+
+            Assert.Matches("^[a-km-np-z2-9]{8}\\.[a-km-np-z2-9]{3}$", name);
+            Assert.True(seen.Add(name));
+        }
+
+        Assert.Empty(_root.Directory.EnumerateEntries());
+    }
+
     /// <summary>What is written to it can be read back through the same handle.</summary>
     [Fact]
     public void A_scratch_file_holds_what_is_written_to_it()

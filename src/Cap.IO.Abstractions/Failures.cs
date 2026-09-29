@@ -139,7 +139,4 @@ internal static class Unsupported
 
     public static NotSupportedException Encryption() =>
         new("Encryption is not supported by DirFileSystem. Cap.Std has no operation that encrypts or decrypts a file beneath a directory handle.");
-
-    public static NotSupportedException RandomFileName() =>
-        new("GetRandomFileName is not supported by DirFileSystem. It needs entropy that the adapter is not given. Use GetTempFileName, or Directory.CreateTempSubdirectory, which draw their names from Cap.Std.");
 }

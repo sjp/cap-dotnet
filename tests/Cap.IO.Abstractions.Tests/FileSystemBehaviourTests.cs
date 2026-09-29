@@ -53,6 +53,22 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void A_random_file_name_is_a_bare_name()
+    {
+        string name = Fs.Path.GetRandomFileName();
+
+        Assert.NotEqual(name, Fs.Path.GetRandomFileName());
+        Assert.Equal(name, Fs.Path.GetFileName(name));
+        Assert.Equal(12, name.Length);
+        Assert.Equal('.', name[8]);
+        Assert.False(Fs.File.Exists(P(name)));
+        Assert.False(Fs.Directory.Exists(P(name)));
+
+        Fs.File.WriteAllText(P(name), "hello");
+        Assert.Equal("hello", Fs.File.ReadAllText(P(name)));
+    }
+
+    [Fact]
     public void A_rooted_part_joined_onto_the_root_is_reachable()
     {
         MockDiffers("a path beginning with two separators does not name the path with one.");

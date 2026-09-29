@@ -9,4 +9,4 @@ T:System.Security.Cryptography.RandomNumberGenerator;Draws on the operating syst
 T:System.Random;Is neither a capability nor a cryptographic generator. Take a Cap.Rand.CapRandom and pass it down.
 M:System.Guid.NewGuid;Draws on the operating system's entropy. Take a Cap.Rand.CapRandom and pass it down.
 M:System.Guid.CreateVersion7;Draws on the operating system's entropy, and the overload without a timestamp on the system clock too. Take a Cap.Rand.CapRandom and pass it down.
-M:System.IO.Path.GetRandomFileName;Draws on the operating system's entropy. Take a Cap.Rand.CapRandom and pass it down, or let Cap.Std.CapTempFile choose the name.
+M:System.IO.Path.GetRandomFileName;Draws on the operating system's entropy. Take a Cap.Rand.CapRandom and pass it down, let Cap.Std.CapTempFile choose the name, or call Cap.Std.CapTempFile.RandomName.

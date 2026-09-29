@@ -108,4 +108,48 @@ internal static class TemporaryNames
 
         return new string(name);
     }
+
+    /// <summary>
+    /// Draws a name in the shape <c>Path.GetRandomFileName</c> gives: eight characters, a dot
+    /// and three more.
+    /// </summary>
+    /// <remarks>
+    /// Eleven characters of five bits is fifty-five bits, as the framework's own carries. That
+    /// is fewer than <see cref="Next"/> draws, and it is the shape rather than the strength
+    /// that is being matched: code that asks for this kind of name tends to split it at the
+    /// dot or keep only part of it, and should find what it expects. Same alphabet, so the
+    /// same reasoning about case and look-alike letters holds.
+    /// </remarks>
+    public static string NextShort()
+    {
+        Span<byte> entropy = stackalloc byte[7];
+
+        // The same exemption as Next, for the same reason: the name decides nothing about
+        // where its holder can reach.
+#pragma warning disable CAP0007
+        RandomNumberGenerator.Fill(entropy);
+#pragma warning restore CAP0007
+
+        ulong block = 0;
+        foreach (byte b in entropy)
+        {
+            block = (block << 8) | b;
+        }
+
+        // Fifty-six bits drawn and fifty-five spelled, the top one dropped, so each character
+        // is still exactly five bits with no bias to reason about.
+        Span<char> name = stackalloc char[12];
+        int at = 0;
+        for (int shift = 50; shift >= 0; shift -= 5)
+        {
+            if (at == 8)
+            {
+                name[at++] = '.';
+            }
+
+            name[at++] = Alphabet[(int)((block >> shift) & 0x1F)];
+        }
+
+        return new string(name);
+    }
 }

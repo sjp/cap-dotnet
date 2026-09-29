@@ -180,7 +180,11 @@ internal sealed class PathAdapter(DirFileSystem fs) : IPath
 
     // --- Scratch space ----------------------------------------------------------------------
 
-    public string GetRandomFileName() => throw Unsupported.RandomFileName();
+    /// <remarks>
+    /// A name drawn by <see cref="CapTempFile.RandomName"/>, in the same shape as
+    /// <c>System.IO</c>'s. Nothing is created.
+    /// </remarks>
+    public string GetRandomFileName() => CapTempFile.RandomName();
 
     /// <remarks>
     /// Creates an empty file in the virtual scratch directory, <c>.tmp</c> beneath the root,

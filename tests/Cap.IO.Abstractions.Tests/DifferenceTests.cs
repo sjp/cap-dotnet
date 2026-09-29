@@ -113,7 +113,6 @@ public abstract class DifferenceTests : IDisposable
         Fs.File.WriteAllText("a.txt", "one");
         using SafeFileHandle handle = new();
 
-        Assert.Throws<NotSupportedException>(() => Fs.Path.GetRandomFileName());
         Assert.Throws<NotSupportedException>(() => Fs.DriveInfo.GetDrives());
         Assert.Throws<NotSupportedException>(() => Fs.DriveInfo.New("C"));
         Assert.Throws<NotSupportedException>(() => Fs.FileSystemWatcher.New());

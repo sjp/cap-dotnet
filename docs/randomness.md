@@ -129,7 +129,9 @@ in this library are exempt.
 
 - **`CapRandom`** is where entropy enters, behind the token.
 - **The scratch-name generator in `Cap.Std`**, which picks names for `CapTempDir` and
-  `CapTempFile`, does not take a token. A scratch name grants nothing. The caller already
+  `CapTempFile` and is exposed as `CapTempFile.RandomName` (a name shaped like
+  `Path.GetRandomFileName`'s, which `DirFileSystem`'s `Path.GetRandomFileName` returns), does
+  not take a token. A scratch name grants nothing. The caller already
   holds the directory the object is created in, and the random bytes only choose its name
   inside that directory, never where it can reach. Requiring ambient authority there would
   log as an escape something that is not one.

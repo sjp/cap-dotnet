@@ -134,7 +134,6 @@ Each of these is deliberate and is covered by the package's tests.
 | `Path.GetTempPath` | the host's temporary directory | `/.tmp/`, created beneath the root when first asked for. What goes there is part of the tree, visible to whatever else can see it, and is not cleared away |
 | `Path.GetTempFileName` | a `tmp*.tmp` file in the host's temporary directory | an empty file in `/.tmp/`, with a name drawn by `CapTempFile` |
 | `Directory.CreateTempSubdirectory(prefix)` | in the host's temporary directory | in `/.tmp/`, named `prefix` followed by a name drawn by `CapTempDir` |
-| `Path.GetRandomFileName` | a random name | `NotSupportedException`. The adapter is given no entropy; use one of the members above |
 | Search patterns | may include a directory part | name entries in one directory only. A pattern with a separator is an `ArgumentException`. `EnumerationOptions.ReturnSpecialDirectories` is ignored |
 | Recursive enumeration | does not descend into links | the same. A link that leads to a directory inside the tree is reported as a directory, and one that leads out as a file |
 | `File.Copy` | copies contents and, on Unix, permissions | copies contents only |

@@ -166,6 +166,31 @@ public sealed class CapTempFile : IDisposable
         return New(parent);
     }
 
+    /// <summary>
+    /// Draws a random file name without creating anything, in the shape
+    /// <c>Path.GetRandomFileName</c> gives.
+    /// </summary>
+    /// <returns>
+    /// Eight characters, a dot and three more, from lower-case letters and digits: a single
+    /// component that is never a path.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// For code that names its own scratch objects in a directory it holds, where
+    /// <c>Path.GetRandomFileName</c> would be reached for; that member is banned by the entropy
+    /// rule and this is not. A name grants nothing: the caller already holds the directory,
+    /// and the bits only decide what something is called inside it.
+    /// </para>
+    /// <para>
+    /// <strong>Nothing is claimed.</strong> The name carries fifty-five bits from the system's
+    /// cryptographic generator, as the framework's does, but between drawing it and using it
+    /// anybody else may take it. Create with it exclusively, or use <see cref="New"/>, which
+    /// draws a longer name and claims it in one step.
+    /// </para>
+    /// <para>Safe to call from any thread.</para>
+    /// </remarks>
+    public static string RandomName() => TemporaryNames.NextShort();
+
     /// <summary>The open file, for reading and writing.</summary>
     /// <remarks>
     /// <para>
