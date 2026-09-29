@@ -117,7 +117,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         Directory.CreateDirectory(Sandbox);
         File.WriteAllText(Path.Join(Sandbox, "plain.txt"), "contents");
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
 
         CapError created = PlatformOps.Host.CreateChildSymbolicLink(root, "flink", "plain.txt", false);
         ExpectedHostFeatures.Require(
@@ -157,7 +157,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         File.WriteAllText(source, "new");
         File.WriteAllText(destination, "old");
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
         using SafeFileHandle holder = File.OpenHandle(
             destination, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
@@ -196,7 +196,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         File.WriteAllText(source, "new");
         File.WriteAllText(destination, "old");
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
         using SafeFileHandle moving = OpenForRenaming(source);
 
         CapError refused = WindowsPlatformOps.SetDestinationName(
@@ -241,7 +241,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         string path = Path.Join(Sandbox, "victim");
         File.WriteAllText(path, "old");
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
         using SafeFileHandle holder = File.OpenHandle(
             path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
@@ -271,7 +271,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         File.WriteAllText(path, "x");
         File.SetAttributes(path, FileAttributes.ReadOnly | FileAttributes.Archive);
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
 
         CapError blocked = PlatformOps.Host.RemoveChildFile(root, "locked");
         Assert.Equal(CapErrorCategory.PermissionDenied, blocked.Category);
@@ -315,7 +315,7 @@ public sealed partial class WindowsResolutionOnDiskTests
             SetOwnAttributes(link, FileAttributes.ReadOnly);
             Assert.True((File.GetAttributes(link) & FileAttributes.ReadOnly) != 0, "the link was not made read-only.");
 
-            using SafeDirHandle root = OpenWritableSandbox();
+            using SafeDirHandle root = OpenSandbox();
 
             CapError cleared = PlatformOps.Host.ClearChildRemovalBlock(root, "jn");
             Assert.True(cleared.IsSuccess, cleared.FailureDescription);
@@ -371,7 +371,7 @@ public sealed partial class WindowsResolutionOnDiskTests
             return;
         }
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
 
         CapResult<SafeFileHandle> byOwnName = PortableResolver.OpenFile(
             root, Parse(LongName), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.None);
@@ -415,7 +415,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         DateTime targetBefore = Directory.GetLastWriteTimeUtc(target);
 
         DateTime wanted = new(2001, 2, 3, 4, 5, 6, DateTimeKind.Utc);
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
 
         CapError error = PlatformOps.Host.SetChildTimes(
             root, "jn", CapFileTime.Unchanged, CapFileTime.At(new DateTimeOffset(wanted)));
@@ -448,7 +448,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         string path = Path.Join(Sandbox, "log");
         File.WriteAllText(path, "abc");
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
 
         FileOpenRequest request = new(
             FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete, FileOptions.None, 0);
@@ -490,7 +490,7 @@ public sealed partial class WindowsResolutionOnDiskTests
         string path = Path.Join(Sandbox, "log");
         File.WriteAllText(path, string.Empty);
 
-        using SafeDirHandle root = OpenWritableSandbox();
+        using SafeDirHandle root = OpenSandbox();
 
         FileOpenRequest request = new(
             FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete, FileOptions.Asynchronous, 0);
@@ -620,14 +620,6 @@ public sealed partial class WindowsResolutionOnDiskTests
     }
 
     // --- helpers ---------------------------------------------------------------------------------
-
-    private SafeDirHandle OpenWritableSandbox()
-    {
-        Directory.CreateDirectory(Sandbox);
-        CapResult<SafeDirHandle> root = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.ReadWrite);
-        Assert.True(root.IsSuccess, root.Error.FailureDescription);
-        return root.Value!;
-    }
 
     private static OpenedNode OpenNode(SafeDirHandle root, string name, in FileOpenRequest request)
     {

@@ -38,32 +38,52 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (OperatingSystem.IsWindows())
         {
-            RemoveDirectoryLinks(_root);
+            PrepareForRemoval(_root);
         }
 
         Directory.Delete(_root, recursive: true);
     }
 
     /// <summary>
-    /// Removes every directory link and junction beneath a directory, as the links themselves.
+    /// Clears the read-only flag of every entry beneath a directory, and removes every
+    /// directory link and junction there as the links themselves.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Done before the recursive removal rather than left to it. The framework's recursive
     /// removal takes a junction for a volume mount point and asks the system to unmount it
     /// first, which fails for a junction to an ordinary directory, and the whole removal
     /// fails with it. Removed on its own, a link is just a name.
+    /// </para>
+    /// <para>
+    /// The flags are cleared because the removal-block cases leave read-only entries behind
+    /// when they fail part way, and a removal that fails over them would report itself in
+    /// place of whatever failed the case. A link's own flag is cleared, not its target's.
+    /// </para>
     /// </remarks>
-    private static void RemoveDirectoryLinks(string directory)
+    [SupportedOSPlatform("windows")]
+    private static void PrepareForRemoval(string directory)
     {
-        foreach (string entry in Directory.EnumerateDirectories(directory))
+        foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
         {
-            if ((File.GetAttributes(entry) & FileAttributes.ReparsePoint) != 0)
+            FileAttributes attributes = File.GetAttributes(entry);
+            if ((attributes & FileAttributes.ReadOnly) != 0)
+            {
+                SetOwnAttributes(entry, FileAttributes.Normal);
+            }
+
+            if ((attributes & FileAttributes.Directory) == 0)
+            {
+                continue;
+            }
+
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
             {
                 Directory.Delete(entry);
             }
             else
             {
-                RemoveDirectoryLinks(entry);
+                PrepareForRemoval(entry);
             }
         }
     }
@@ -439,7 +459,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
         File.WriteAllText(Path.Join(Sandbox, "inside", "file.txt"), Contents);
         string rootedTarget = Path.Join(_root, "outside");
 
-        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.ReadWrite);
+        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.Read);
         Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
         using SafeDirHandle root = opened.Value!;
 
@@ -659,7 +679,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
         }
 
         Directory.CreateDirectory(Sandbox);
-        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.ReadWrite);
+        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.Read);
         Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
         using SafeDirHandle root = opened.Value!;
 
