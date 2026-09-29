@@ -354,20 +354,32 @@ jobs:
           $line
           $line >> $env:GITHUB_STEP_SUMMARY
 
+  # ---------------------------------------------------------------------------------
+  # Each leg's reports land in coverage/coverage-<leg name>, and every leg of build-test that
+  # is not passes_only is listed, so a leg whose reports went missing fails the gate rather
+  # than leaving it to judge a smaller union. Add a leg here when adding one to the matrix.
+  #
+  # The floors are a ratchet: raise them as coverage rises, and lower them only in a change
+  # that says why (see docs/testing.md). The merged figure is in the job summary.
+  # ---------------------------------------------------------------------------------
   coverage-gate:
     name: coverage gate (Cap.Primitives)
     runs-on: ubuntu-latest
     needs: build-test
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           path: coverage
-          merge-multiple: true
       - name: Fail on a coverage drop in Cap.Primitives
-        run: build/ci/check-coverage.sh coverage Cap.Primitives 0.47 0.45
+        run: >
+          build/ci/check-coverage.sh coverage Cap.Primitives 0.47 0.45
+          "coverage-linux-x64 (openat2)"
+          "coverage-linux-x64 (forced fallback)"
+          coverage-linux-arm64
+          coverage-windows-x64
+          coverage-macos-arm64
 
   # Cap.IO.Abstractions depends on a minimum of each System.IO.Abstractions package, so a
   # consumer can install a newer one beside it; every other leg builds against the minimums.

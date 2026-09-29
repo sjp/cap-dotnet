@@ -243,3 +243,18 @@ build it in the test, as above, rather than sharing one through a fixture. A tes
 share one sees what every other test wrote to it.
 
 Each `CapTempDir.New` draws a directory of its own, so tests on disk do not collide either.
+
+## Coverage of this library
+
+This section is for contributors to the library itself, not for testing code that uses it.
+
+Continuous integration merges the coverage reports of every test leg, since each platform's
+backend is reached only on that platform, and fails the `coverage gate (Cap.Primitives)` job,
+and with it the workflow, when the merged line or branch rate of `Cap.Primitives` falls below
+its floor, or when a leg that should have sent a report did not. The floors are the arguments
+to `build/ci/check-coverage.sh` in `.github/workflows/ci.yml`, and the merged figures appear in
+that job's summary.
+
+The floors are a ratchet. Raise them, to a point or two below the merged figure, as coverage
+rises. Lower them only in a change that says why, since `Cap.Primitives` holds the path parser
+and every resolution backend, and its tests are the main defence against an escape.
