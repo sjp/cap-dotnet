@@ -1,4 +1,6 @@
 using Cap.Primitives;
+using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Windows;
 using Cap.Tests;
 
 namespace Cap.Std.Tests;
@@ -172,6 +174,25 @@ public sealed class FailureKindTests : IDisposable
         Assert.Equal(CapErrorKind.NotFound, KindOf(() => root.CreateHardLink("file", root, "link/")));
         Assert.Equal(CapErrorKind.AlreadyExists, KindOf(() => root.CreateHardLink("file", root, "dir/")));
         Assert.False(HostEntry.Exists(Host("link")));
+    }
+
+    /// <summary>
+    /// A symbolic link Windows refuses for want of the privilege reaches the caller as the
+    /// framework's permission failure, as <c>File.CreateSymbolicLink</c> reports it.
+    /// </summary>
+    /// <remarks>
+    /// Asserted from the code the link write reports rather than by making the link: the build
+    /// agents hold the privilege. The Windows on-disk suite removes it to check the code.
+    /// </remarks>
+    [Fact]
+    public void A_link_refused_for_want_of_the_privilege_is_a_permission_failure()
+    {
+        CapError refused = Win32Errors.ToError(Win32Errors.ERROR_PRIVILEGE_NOT_HELD);
+
+        Exception thrown = FailureTranslation.ToException(refused, "link", ExpectedTarget.Name);
+
+        Assert.IsType<UnauthorizedAccessException>(thrown);
+        Assert.Equal(CapErrorKind.PermissionDenied, CapIOException.KindOf(thrown));
     }
 
     // --- the helper ---------------------------------------------------------------------------

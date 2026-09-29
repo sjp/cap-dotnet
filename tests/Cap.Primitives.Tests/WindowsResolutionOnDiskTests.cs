@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Windows;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
@@ -474,6 +475,193 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
         Assert.False(link.IsSuccess, $"a reparse point no filter serves was read as a link to '{link.Value}'.");
         Assert.Equal(CapErrorCategory.NotALink, link.Error.Category);
     }
+
+    /// <summary>
+    /// A symbolic link refused because the process lacks the privilege is reported as a
+    /// permission failure, and the empty object made to hold it is gone.
+    /// </summary>
+    /// <remarks>
+    /// The build agents run elevated, so a host that happens to lack the privilege cannot be
+    /// relied on. The privilege is taken away instead: the test thread impersonates a copy of
+    /// the process token with the privilege removed, which refuses the link on this thread
+    /// alone. A host in Developer Mode may still allow the link without it, and then there is
+    /// no refusal to observe.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_link_refused_for_want_of_the_privilege_is_a_permission_failure(bool targetIsDirectory)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        CapResult<SafeDirHandle> opened = PlatformOps.Host.OpenAmbientDirectory(Sandbox, CapAccess.ReadWrite);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using SafeDirHandle root = opened.Value!;
+
+        CapError error;
+        using (WithoutSymbolicLinkPrivilege())
+        {
+            error = PlatformOps.Host.CreateChildSymbolicLink(root, "link", "target", targetIsDirectory);
+        }
+
+        if (error.IsSuccess)
+        {
+            Assert.Skip("This host lets the process create symbolic links without the privilege.");
+        }
+
+        Assert.Equal(CapErrorCategory.PermissionDenied, error.Category);
+        Assert.Equal(CapErrorSource.Win32, error.Source);
+        Assert.Equal(Win32Errors.ERROR_PRIVILEGE_NOT_HELD, error.RawCode);
+        Assert.False(Path.Exists(Path.Join(Sandbox, "link")), "the stub made to hold the link was left behind.");
+    }
+
+    /// <summary>
+    /// Makes the calling thread act under a copy of the process token that does not hold the
+    /// privilege to create symbolic links, until the result is disposed.
+    /// </summary>
+    /// <remarks>
+    /// Removed rather than disabled, so that nothing the system does on the thread's behalf
+    /// can enable it again. The rest of the process keeps its own token throughout.
+    /// </remarks>
+    [SupportedOSPlatform("windows")]
+    private static Impersonation WithoutSymbolicLinkPrivilege()
+    {
+        const uint TokenDuplicate = 0x0002;
+        const uint TokenImpersonate = 0x0004;
+        const uint TokenQuery = 0x0008;
+        const uint TokenAdjustPrivileges = 0x0020;
+        const int SecurityImpersonation = 2;
+        const int TokenImpersonation = 2;
+        const uint PrivilegeRemoved = 0x00000004;
+        const int NotAllAssigned = 1300;
+
+        if (!OpenProcessToken(GetCurrentProcess(), TokenDuplicate, out nint process))
+        {
+            throw new System.ComponentModel.Win32Exception();
+        }
+
+        nint copy = 0;
+        try
+        {
+            if (!DuplicateTokenEx(
+                    process,
+                    TokenImpersonate | TokenQuery | TokenAdjustPrivileges,
+                    0,
+                    SecurityImpersonation,
+                    TokenImpersonation,
+                    out copy) ||
+                !LookupPrivilegeValue(null, "SeCreateSymbolicLinkPrivilege", out Luid privilege))
+            {
+                throw new System.ComponentModel.Win32Exception();
+            }
+
+            TokenPrivilege removal = new() { Count = 1, Privilege = privilege, Attributes = PrivilegeRemoved };
+            if (!AdjustTokenPrivileges(copy, false, removal, 0, 0, 0))
+            {
+                throw new System.ComponentModel.Win32Exception();
+            }
+
+            // Reported when the token never held the privilege, which is the state wanted.
+            int adjusted = Marshal.GetLastPInvokeError();
+            if (adjusted is not 0 and not NotAllAssigned)
+            {
+                throw new System.ComponentModel.Win32Exception(adjusted);
+            }
+
+            if (!SetThreadToken(0, copy))
+            {
+                throw new System.ComponentModel.Win32Exception();
+            }
+
+            return new Impersonation();
+        }
+        finally
+        {
+            if (copy != 0)
+            {
+                _ = CloseHandle(copy);
+            }
+
+            _ = CloseHandle(process);
+        }
+    }
+
+    /// <summary>Returns the thread to the process token when disposed.</summary>
+    [SupportedOSPlatform("windows")]
+    private sealed class Impersonation : IDisposable
+    {
+        public void Dispose()
+        {
+            if (!RevertToSelf())
+            {
+                throw new System.ComponentModel.Win32Exception();
+            }
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Luid
+    {
+        public uint LowPart;
+        public int HighPart;
+    }
+
+    /// <summary><c>TOKEN_PRIVILEGES</c> with room for the one entry it is used with.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenPrivilege
+    {
+        public uint Count;
+        public Luid Privilege;
+        public uint Attributes;
+    }
+
+    [LibraryImport("kernel32.dll")]
+    private static partial nint GetCurrentProcess();
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CloseHandle(nint handle);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool OpenProcessToken(nint process, uint access, out nint token);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DuplicateTokenEx(
+        nint existing,
+        uint access,
+        nint attributes,
+        int impersonationLevel,
+        int tokenType,
+        out nint duplicate);
+
+    [LibraryImport("advapi32.dll", EntryPoint = "LookupPrivilegeValueW", SetLastError = true,
+        StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool LookupPrivilegeValue(string? system, string name, out Luid luid);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AdjustTokenPrivileges(
+        nint token,
+        [MarshalAs(UnmanagedType.Bool)] bool disableAll,
+        in TokenPrivilege newState,
+        uint bufferLength,
+        nint previousState,
+        nint returnLength);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetThreadToken(nint thread, nint token);
+
+    [LibraryImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool RevertToSelf();
 
     /// <summary>The tag the Windows Overlay Filter puts on a file it compressed.</summary>
     private const uint OverlayFilterTag = 0x80000017;

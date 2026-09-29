@@ -115,6 +115,11 @@ public sealed class PlatformErrorTests
     [InlineData(Win32Errors.ERROR_ACCESS_DENIED, CapErrorCategory.PermissionDenied)]
     [InlineData(Win32Errors.ERROR_DIR_NOT_EMPTY, CapErrorCategory.NotEmpty)]
     [InlineData(Win32Errors.ERROR_NOT_A_REPARSE_POINT, CapErrorCategory.Reparse)]
+    [InlineData(Win32Errors.ERROR_PRIVILEGE_NOT_HELD, CapErrorCategory.PermissionDenied)]
+    [InlineData(Win32Errors.ERROR_NOT_SAME_DEVICE, CapErrorCategory.CrossDevice)]
+    [InlineData(Win32Errors.ERROR_INVALID_FUNCTION, CapErrorCategory.NotSupported)]
+    [InlineData(Win32Errors.ERROR_NOT_SUPPORTED, CapErrorCategory.NotSupported)]
+    [InlineData(Win32Errors.ERROR_INVALID_REPARSE_DATA, CapErrorCategory.InvalidArgument)]
     internal void Win32_errors_are_read_from_their_own_table(int error, CapErrorCategory expected) =>
         Assert.Equal(expected, Win32Errors.Classify(error));
 

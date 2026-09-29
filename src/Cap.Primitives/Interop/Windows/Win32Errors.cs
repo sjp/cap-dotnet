@@ -32,18 +32,44 @@ internal static class Win32Errors
     public const int ERROR_REPARSE_TAG_MISMATCH = 4394;
     public const int ERROR_IO_PENDING = 997;
 
+    /// <summary>A rename would have moved the object to a different volume.</summary>
+    public const int ERROR_NOT_SAME_DEVICE = 17;
+
+    /// <summary>
+    /// The device or filesystem does not implement the request. What a volume without reparse
+    /// points (FAT, exFAT) answers to a reparse-point control code.
+    /// </summary>
+    public const int ERROR_INVALID_FUNCTION = 1;
+
+    public const int ERROR_NOT_SUPPORTED = 50;
+
+    /// <summary>
+    /// The process token does not hold a privilege the operation requires. What writing a
+    /// symbolic link reports through the last-error slot where that is still privileged.
+    /// </summary>
+    public const int ERROR_PRIVILEGE_NOT_HELD = 1314;
+
+    /// <summary>
+    /// The reparse data handed to the filesystem is malformed. A fault in what this layer
+    /// built, not a reparse point met during resolution, so it is read as a bad argument.
+    /// </summary>
+    public const int ERROR_INVALID_REPARSE_DATA = 4392;
+
     /// <summary>Reads a Win32 error as a portable category.</summary>
     public static CapErrorCategory Classify(int error) => error switch
     {
         ERROR_FILE_NOT_FOUND or ERROR_PATH_NOT_FOUND => CapErrorCategory.NotFound,
-        ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION => CapErrorCategory.PermissionDenied,
+        ERROR_ACCESS_DENIED or ERROR_SHARING_VIOLATION or ERROR_PRIVILEGE_NOT_HELD =>
+            CapErrorCategory.PermissionDenied,
         ERROR_FILE_EXISTS or ERROR_ALREADY_EXISTS => CapErrorCategory.AlreadyExists,
         ERROR_DIRECTORY => CapErrorCategory.NotADirectory,
         ERROR_DIR_NOT_EMPTY => CapErrorCategory.NotEmpty,
         ERROR_FILENAME_EXCED_RANGE => CapErrorCategory.NameTooLong,
         ERROR_WRITE_PROTECT => CapErrorCategory.ReadOnlyFilesystem,
         ERROR_TOO_MANY_OPEN_FILES => CapErrorCategory.OutOfHandles,
-        ERROR_INVALID_PARAMETER or ERROR_INVALID_NAME or ERROR_INVALID_HANDLE =>
+        ERROR_NOT_SAME_DEVICE => CapErrorCategory.CrossDevice,
+        ERROR_INVALID_FUNCTION or ERROR_NOT_SUPPORTED => CapErrorCategory.NotSupported,
+        ERROR_INVALID_PARAMETER or ERROR_INVALID_NAME or ERROR_INVALID_HANDLE or ERROR_INVALID_REPARSE_DATA =>
             CapErrorCategory.InvalidArgument,
         ERROR_NOT_A_REPARSE_POINT or ERROR_REPARSE_TAG_INVALID or ERROR_REPARSE_TAG_MISMATCH =>
             CapErrorCategory.Reparse,
