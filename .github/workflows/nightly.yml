@@ -213,7 +213,7 @@ jobs:
         with:
           global-json-file: global.json
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm
 
