@@ -48,8 +48,8 @@ namespace Cap.Std.Testing;
 /// flushing a directory's entries is reported unsupported, as Windows reports it; a file open
 /// with a <see cref="FileShare"/> that does not admit a later open, or does not include
 /// <see cref="FileShare.Delete"/>, refuses that open, or the removal or renaming of its name,
-/// as a sharing violation, as Windows refuses them; a rename never replaces a directory; a
-/// time before 1601 cannot be stored; a hard link cannot be given to a link made as a link to
+/// as a sharing violation, as Windows refuses them; a link made as a file is refused over a
+/// directory as a directory rather than as a name taken; a time before 1601 cannot be stored; a hard link cannot be given to a link made as a link to
 /// a directory; and a full disk carries Windows' code rather than Linux's.
 /// </para>
 /// <para>

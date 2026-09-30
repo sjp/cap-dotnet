@@ -130,6 +130,32 @@ public sealed class WindowsRulesTests
         Assert.Equal(CapErrorKind.IsADirectory, linked.Kind);
         CapIOException removed = Assert.ThrowsAny<CapIOException>(() => root.DeleteDir("link"));
         Assert.Equal(CapErrorKind.SymbolicLink, removed.Kind);
+        CapIOException symlinked = Assert.ThrowsAny<CapIOException>(() => root.CreateSymlink("inner", "plain"));
+        Assert.Equal(CapErrorKind.IsADirectory, symlinked.Kind);
+    }
+
+    /// <summary>
+    /// The replacing rename Windows is asked for replaces an empty directory with a directory,
+    /// as Linux does, and refuses one that is not empty as not empty.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_replacing_rename_replaces_an_empty_directory(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("inner/marker", "m");
+        fs.AddDirectory("empty");
+        fs.AddFile("full/child", "c");
+
+        using Dir root = fs.OpenRoot();
+
+        CapIOException refused = Assert.ThrowsAny<CapIOException>(
+            () => root.Rename("empty", root, "full", replaceExisting: true));
+        Assert.Equal(CapErrorKind.NotEmpty, refused.Kind);
+
+        root.Rename("inner", root, "empty", replaceExisting: true);
+        Assert.Equal("m", root.ReadAllText("empty/marker"));
+        Assert.False(root.Exists("inner"));
     }
 
     [Fact]

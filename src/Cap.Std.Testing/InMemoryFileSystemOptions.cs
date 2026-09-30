@@ -41,10 +41,10 @@ public sealed class InMemoryFileSystemOptions
     /// removed while open stays usable through its handles.
     /// </para>
     /// <para>
-    /// The syntax also selects the few other answers that differ between the platforms:
-    /// whether a rename may replace a directory, whether a directory's entries can be flushed,
-    /// whether a time before 1601 can be stored, whether a hard link may be given to a link
-    /// made as a link to a directory, and the code a write that fills the disk reports.
+    /// The syntax also selects the few other answers that differ between the platforms: how
+    /// a link made as a file is refused over a directory, whether a directory's entries can be
+    /// flushed, whether a time before 1601 can be stored, whether a hard link may be given to
+    /// a link made as a link to a directory, and the code a write that fills the disk reports.
     /// Everything else answers as Linux does; see the remarks on
     /// <see cref="InMemoryFileSystem"/>.
     /// </para>

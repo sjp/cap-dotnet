@@ -1061,10 +1061,10 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <remarks>
     /// Follows <c>rename(2)</c>: replacing a name that refers to the same object does nothing,
     /// a directory replaces only an empty directory, a file replaces only a non-directory, and a
-    /// directory cannot be moved beneath itself. Under Windows rules a directory is never
-    /// replaced, a name the read-only attribute protects is not replaced either, and neither
-    /// what is moved nor what it replaces may be held open by a handle that does not share
-    /// deletion.
+    /// directory cannot be moved beneath itself. Windows answers the same way to the replacing
+    /// rename the host backend asks for. Under Windows rules a name the read-only attribute
+    /// protects is not replaced, and neither what is moved nor what it replaces may be held
+    /// open by a handle that does not share deletion.
     /// </remarks>
     public CapError RenameChild(
         SafeDirHandle fromParent,
@@ -1170,7 +1170,10 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <remarks>
     /// A target longer than the system would store is refused as too long: under Unix rules
     /// one that does not fit in Linux's path limit, and under Windows rules one whose reparse
-    /// data does not fit in the most a reparse point holds.
+    /// data does not fit in the most a reparse point holds. Under Windows rules a link made as
+    /// the file kind is refused over a directory as a directory, as the create Windows is asked
+    /// for is refused for asking for a file before the name is found taken, and a directory
+    /// link counts as a directory there.
     /// </remarks>
     public CapError CreateChildSymbolicLink(
         SafeDirHandle parent,
@@ -1184,10 +1187,14 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
         lock (_fs.Gate)
         {
-            CapError error = Child(parent, name, out MemoryNode? directory, out _);
+            CapError error = Child(parent, name, out MemoryNode? directory, out MemoryNode? existing);
             if (error.IsSuccess)
             {
-                return CapError.FromCategory(CapErrorCategory.AlreadyExists);
+                return CapError.FromCategory(
+                    _fs.WindowsRules && !targetIsDirectory &&
+                    (existing!.Type == CapNodeType.Directory || existing.LinkIsDirectory)
+                        ? CapErrorCategory.IsADirectory
+                        : CapErrorCategory.AlreadyExists);
             }
 
             if (error.Category != CapErrorCategory.NotFound || directory is null)
@@ -1655,14 +1662,6 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     {
         bool movingDirectory = node.Type == CapNodeType.Directory;
         bool replacingDirectory = existing.Type == CapNodeType.Directory;
-
-        // Windows never replaces a directory by a rename, and the host backend reports the
-        // refusal by what stands at the destination rather than as the access denial the
-        // filesystem gives, so the same category is given here.
-        if (replacingDirectory && _fs.WindowsRules)
-        {
-            return CapError.FromCategory(CapErrorCategory.IsADirectory);
-        }
 
         if (movingDirectory && !replacingDirectory)
         {

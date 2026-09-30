@@ -95,8 +95,8 @@ file stays usable through the handles that hold it. A directory handle shares ev
 the Windows backend opens every directory, so a directory held open can still be removed or
 renamed. Under Unix rules sharing is ignored, as Linux ignores it.
 
-The few other answers that differ by rules are these. Under Windows rules a rename never
-replaces a directory, a time before 1601 cannot be stored, a hard link cannot be given to a
+The few other answers that differ by rules are these. Under Windows rules a link made as a file
+is refused over a directory as a directory rather than as a name taken, a time before 1601 cannot be stored, a hard link cannot be given to a
 link made as a link to a directory, and a write that fills the disk carries Windows'
 `ERROR_DISK_FULL` code rather than Linux's `ENOSPC`. Everything else answers as Linux does.
 
