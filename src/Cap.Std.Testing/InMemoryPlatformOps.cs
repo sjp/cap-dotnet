@@ -246,7 +246,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             // before the link itself is looked at: O_EXCL takes precedence over O_NOFOLLOW.
             if (request.Mode == FileMode.CreateNew)
             {
-                return Fail<SafeFileHandle>(CapErrorCategory.AlreadyExists);
+                return Fail<SafeFileHandle>(ExclusiveCreateRefusal(node!));
             }
 
             return node!.Type switch
@@ -386,9 +386,10 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             }
 
             // A final link the open refused still holds the name, which an exclusive creation
-            // is refused for first.
+            // is refused for first, unless it is refused as the wrong kind before that.
             if (error.Category == CapErrorCategory.SymbolicLinkLoop && found.Node is not null &&
-                request.Mode == FileMode.CreateNew)
+                request.Mode == FileMode.CreateNew &&
+                ExclusiveCreateRefusal(found.Node) != CapErrorCategory.SymbolicLink)
             {
                 return Fail<SafeFileHandle>(CapErrorCategory.AlreadyExists);
             }
@@ -400,7 +401,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
             if (request.Mode == FileMode.CreateNew)
             {
-                return Fail<SafeFileHandle>(CapErrorCategory.AlreadyExists);
+                return Fail<SafeFileHandle>(ExclusiveCreateRefusal(found.Node!));
             }
 
             return OpenExisting(found.Node!, in request);
@@ -1016,6 +1017,14 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
+            // Windows opens the name as a directory before removing it, and the host backend
+            // reports a link made as the file kind, which that open refuses as the wrong kind,
+            // as the link it is.
+            if (_fs.WindowsRules && node!.Type == CapNodeType.SymbolicLink && !node.LinkIsDirectory)
+            {
+                return CapError.FromCategory(CapErrorCategory.SymbolicLink);
+            }
+
             if (_fs.IsReadOnly)
             {
                 return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
@@ -1216,7 +1225,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// with two names, telling apart from a copy by its identity. A directory cannot be given a
     /// second name, and the refusal is the one Linux gives. Under Windows rules that reaches a
     /// link made as the directory kind too, since such a link is a directory entry there; under
-    /// Unix rules links are untyped and the link itself gets the name.
+    /// Unix rules links are untyped and the link itself gets the name. Windows refuses a
+    /// directory before it looks at the destination, so there a directory is refused as one
+    /// even onto a name already taken, where Linux reports the name as taken.
     /// </remarks>
     public CapError CreateChildHardLink(
         SafeDirHandle parent,
@@ -1230,6 +1241,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (error.IsFailure)
             {
                 return error;
+            }
+
+            if (_fs.WindowsRules && (node!.Type == CapNodeType.Directory || node.LinkIsDirectory))
+            {
+                return CapError.FromCategory(CapErrorCategory.IsADirectory);
             }
 
             error = Child(toParent, toName, out MemoryNode? destination, out _);
@@ -1251,11 +1267,6 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             if (node!.Type == CapNodeType.Directory)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
-            }
-
-            if (_fs.WindowsRules && node.LinkIsDirectory)
-            {
-                return CapError.FromCategory(CapErrorCategory.IsADirectory);
             }
 
             if (destination.VolumeId != node.VolumeId)
@@ -1622,6 +1633,22 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// </remarks>
     private bool RefusesRemoval(MemoryNode node) =>
         node.Undeletable || (_fs.WindowsRules && node.RefusesRemoval);
+
+    /// <summary>
+    /// How an exclusive creation of a file is refused for the name <paramref name="existing"/>
+    /// already holds.
+    /// </summary>
+    /// <remarks>
+    /// Taken, on Unix whatever holds the name. Windows asks for a file before it asks whether
+    /// the name is free, so a directory is refused as one first, and a link made as the
+    /// directory kind is reported as the link the host backend finds when it looks into that
+    /// refusal, which resolution then declines to follow.
+    /// </remarks>
+    private CapErrorCategory ExclusiveCreateRefusal(MemoryNode existing) =>
+        !_fs.WindowsRules ? CapErrorCategory.AlreadyExists
+        : existing.Type == CapNodeType.Directory ? CapErrorCategory.IsADirectory
+        : existing.LinkIsDirectory ? CapErrorCategory.SymbolicLink
+        : CapErrorCategory.AlreadyExists;
 
     /// <summary>Whether <paramref name="node"/> may take the place of <paramref name="existing"/>.</summary>
     private CapError CanReplace(MemoryNode node, MemoryNode existing)

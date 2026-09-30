@@ -107,6 +107,31 @@ public sealed class WindowsRulesTests
         }
     }
 
+    /// <summary>
+    /// Windows asks what kind of object a name holds before it asks whether the name is free,
+    /// so a directory is refused as one where Linux would call the name taken, and a directory
+    /// removal names the file link it found.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_refusal_is_reported_by_the_kind_windows_finds_before_the_name(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddDirectory("inner");
+        fs.AddDirectory("empty");
+        fs.AddFile("plain", "p");
+        fs.AddSymbolicLink("link", "plain");
+
+        using Dir root = fs.OpenRoot();
+
+        CapIOException created = Assert.ThrowsAny<CapIOException>(() => root.CreateNewFile("inner").Dispose());
+        Assert.Equal(CapErrorKind.IsADirectory, created.Kind);
+        CapIOException linked = Assert.ThrowsAny<CapIOException>(() => root.CreateHardLink("inner", root, "empty"));
+        Assert.Equal(CapErrorKind.IsADirectory, linked.Kind);
+        CapIOException removed = Assert.ThrowsAny<CapIOException>(() => root.DeleteDir("link"));
+        Assert.Equal(CapErrorKind.SymbolicLink, removed.Kind);
+    }
+
     [Fact]
     public void Names_are_found_under_any_case_and_keep_the_case_they_were_made_with()
     {
