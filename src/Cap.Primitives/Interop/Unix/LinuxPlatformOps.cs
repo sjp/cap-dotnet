@@ -136,6 +136,18 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// </remarks>
     public long ConfinedOpenRaceRetries => Interlocked.Read(ref _confinedOpenRaceRetries);
 
+    /// <summary>
+    /// Fails attempts of a confined open with a chosen code instead of making the call.
+    /// </summary>
+    /// <remarks>
+    /// Only set by tests. Given the attempt index, counting from zero, it answers the code the
+    /// attempt fails with, or zero to make the real call. The kernel reports a lost race only
+    /// when a rename happens to land mid-resolution, so without this the retry that answers
+    /// it could be reached only by chance. It runs in place of the call, never after it, so a
+    /// failed attempt has opened nothing that would have to be closed.
+    /// </remarks>
+    internal Func<int, int>? ConfinedOpenFault { get; set; }
+
     /// <inheritdoc/>
     public CapResult<SafeDirHandle> OpenAmbientDirectory(string path, CapAccess access)
     {
@@ -1988,16 +2000,23 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             Interlocked.Increment(ref _confinedOpenAttempts);
 
             long result;
-            int errno = 0;
-            unsafe
+            int errno = ConfinedOpenFault?.Invoke(attempt) ?? 0;
+            if (errno != 0)
             {
-                fixed (byte* name = encoded.Bytes)
+                result = -1;
+            }
+            else
+            {
+                unsafe
                 {
-                    result = LinuxNative.OpenAt2(
-                        LinuxConstants.SYS_openat2, lease.Descriptor, name, &how, OpenHow.Size);
-                    if (result < 0)
+                    fixed (byte* name = encoded.Bytes)
                     {
-                        errno = Marshal.GetLastPInvokeError();
+                        result = LinuxNative.OpenAt2(
+                            LinuxConstants.SYS_openat2, lease.Descriptor, name, &how, OpenHow.Size);
+                        if (result < 0)
+                        {
+                            errno = Marshal.GetLastPInvokeError();
+                        }
                     }
                 }
             }

@@ -52,6 +52,80 @@ public sealed class ConfinedOpenRaceTests : IDisposable
     }
 
     /// <summary>
+    /// A lost race the kernel reports is retried, and the open succeeds once the race is won.
+    /// </summary>
+    /// <remarks>
+    /// The race itself cannot be scheduled, so the backend is told to fail the first attempts
+    /// with the code the kernel gives for one. That tests the path from the code to the retry
+    /// and the counter, which the provoked race below reaches only when the timing allows.
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void A_lost_race_reported_by_the_kernel_is_retried_until_it_is_won()
+    {
+        const int lost = 3;
+        LinuxPlatformOps ops = ConfinedOps();
+        using SafeDirHandle root = OpenRootWithInner(ops);
+        ops.ConfinedOpenFault = attempt => attempt < lost ? LinuxErrno.EAGAIN : 0;
+        long attemptsBefore = ops.ConfinedOpenAttempts;
+
+        CapResult<SafeDirHandle> result = ops.OpenConfinedDirectory(
+            root, "inner", CapAccess.Read, ConfinedResolveOptions.None);
+
+        Assert.True(result.IsSuccess, result.Error.FailureDescription);
+        result.Value.Dispose();
+        Assert.Equal(lost, ops.ConfinedOpenRaceRetries);
+        Assert.Equal(lost + 1, ops.ConfinedOpenAttempts - attemptsBefore);
+    }
+
+    /// <summary>
+    /// A race that keeps being lost is given up on at the bound and reported as a race.
+    /// </summary>
+    /// <remarks>
+    /// This is the half of the policy that stands between a rename loop and a hung caller.
+    /// Every attempt is failed, so only the bound can end the loop, and the caller must be
+    /// told the resolution kept losing rather than something it would act on differently.
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void A_race_that_keeps_being_lost_is_given_up_at_the_limit()
+    {
+        LinuxPlatformOps ops = ConfinedOps();
+        using SafeDirHandle root = OpenRootWithInner(ops);
+        ops.ConfinedOpenFault = _ => LinuxErrno.EAGAIN;
+        long attemptsBefore = ops.ConfinedOpenAttempts;
+
+        CapResult<SafeDirHandle> result = ops.OpenConfinedDirectory(
+            root, "inner", CapAccess.Read, ConfinedResolveOptions.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CapErrorCategory.Raced, result.Error.Category);
+        Assert.Equal(ConfinedRetryPolicy.RetryLimit, ops.ConfinedOpenRaceRetries);
+        Assert.Equal(ConfinedRetryPolicy.RetryLimit + 1, ops.ConfinedOpenAttempts - attemptsBefore);
+    }
+
+    /// <summary>Any other failure the kernel reports is the answer, and is not retried.</summary>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void A_failure_other_than_a_lost_race_is_not_retried()
+    {
+        LinuxPlatformOps ops = ConfinedOps();
+        using SafeDirHandle root = OpenRootWithInner(ops);
+
+        // The directory is there, so a missing name can only have come from the fault.
+        ops.ConfinedOpenFault = attempt => attempt == 0 ? PosixErrno.ENOENT : 0;
+        long attemptsBefore = ops.ConfinedOpenAttempts;
+
+        CapResult<SafeDirHandle> result = ops.OpenConfinedDirectory(
+            root, "inner", CapAccess.Read, ConfinedResolveOptions.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(CapErrorCategory.NotFound, result.Error.Category);
+        Assert.Equal(0, ops.ConfinedOpenRaceRetries);
+        Assert.Equal(1, ops.ConfinedOpenAttempts - attemptsBefore);
+    }
+
+    /// <summary>
     /// Under a directory being renamed back and forth, resolution either succeeds or reports
     /// that the name was not there — never that it lost a race.
     /// </summary>
@@ -155,6 +229,33 @@ public sealed class ConfinedOpenRaceTests : IDisposable
                 "against a directory being renamed, so the retry was never reached on this " +
                 "run and remains unexercised here.");
         }
+    }
+
+    /// <summary>A backend of its own, so a fault set on it reaches no other test.</summary>
+    [SupportedOSPlatform("linux")]
+    private static LinuxPlatformOps ConfinedOps()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The confined open is the Linux backend's.");
+        }
+
+        LinuxPlatformOps ops = new();
+        if (!ops.Capabilities.SupportsConfinedOpen)
+        {
+            Assert.Skip("This host has no confined open: " + ops.ConfinedOpenUnavailableReason);
+        }
+
+        return ops;
+    }
+
+    [SupportedOSPlatform("linux")]
+    private SafeDirHandle OpenRootWithInner(LinuxPlatformOps ops)
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "inner"));
+        CapResult<SafeDirHandle> rootResult = ops.OpenAmbientDirectory(_root, CapAccess.Read);
+        Assert.True(rootResult.IsSuccess, rootResult.Error.FailureDescription);
+        return rootResult.Value;
     }
 
     private static void TryRename(string from, string to)
