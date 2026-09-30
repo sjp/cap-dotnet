@@ -144,6 +144,37 @@ public sealed class PathEncodingTests
         }
     }
 
+    /// <summary>
+    /// The round trip holds in the byte direction only. Escapes spelling a valid sequence
+    /// encode to that sequence, which decodes to the character, so two unequal strings name
+    /// one file. Pinned so that the documented asymmetry changes only on purpose.
+    /// </summary>
+    [Fact]
+    public void An_escaped_spelling_of_a_valid_sequence_names_the_same_bytes_as_the_character()
+    {
+        const string Escaped = "\udcc3\udca9";
+
+        byte[] bytes = Encode(Escaped);
+
+        Assert.Equal(new byte[] { 0xC3, 0xA9 }, bytes);
+        Assert.Equal(Encode("é"), bytes);
+        Assert.Equal("é", PathEncoding.GetString(bytes));
+    }
+
+    /// <summary>
+    /// Why the alias above cannot reach containment: the surrogates that would carry
+    /// <c>0x00</c>–<c>0x7F</c> are refused, so no escape can spell a separator, a NUL or a
+    /// dot.
+    /// </summary>
+    [Fact]
+    public void Escapes_cannot_spell_a_separator_terminator_or_dot()
+    {
+        for (char c = '\udc00'; c <= '\udc7f'; c++)
+        {
+            Assert.Equal(-1, PathEncoding.GetByteCount(c.ToString()));
+        }
+    }
+
     /// <summary>A buffer that is too small fails rather than writing a truncated name.</summary>
     [Fact]
     public void A_short_buffer_is_refused()

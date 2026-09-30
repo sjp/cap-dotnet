@@ -29,6 +29,18 @@ namespace Cap.Primitives;
 /// code points, which are not characters and cannot appear alone in well-formed UTF-16, so
 /// an escaped byte is always distinguishable from content that decoded successfully.
 /// </para>
+/// <para>
+/// The round trip holds in the byte direction only. Decoding produces an escape only for a
+/// byte that could not be decoded, but encoding accepts an escape anywhere, so a caller can
+/// spell valid UTF-8 byte by byte: <c>"\udcc3\udca9"</c> encodes to <c>C3 A9</c>, which
+/// decodes to <c>"é"</c>. Two unequal strings then name one file. A string containing
+/// <c>U+DC80</c>–<c>U+DCFF</c> is a spelling of bytes, not of text, and comparing it with
+/// another name as a string says nothing about whether they name the same entry. The alias
+/// cannot reach containment: the escape range carries only bytes <c>0x80</c>–<c>0xFF</c>, and
+/// a lone surrogate below it is refused, so no escape can spell <c>/</c>, <c>U+0000</c> or
+/// <c>.</c>, and every component the parser accepted is the component the kernel sees. Names
+/// read from a directory never use the escaped spelling of a valid sequence.
+/// </para>
 /// </remarks>
 internal static class PathEncoding
 {

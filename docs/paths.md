@@ -182,6 +182,17 @@ trip unchanged. The cost is strings that are not well-formed UTF-16 and must not
 anywhere that assumes they are; the escape range cannot collide with real text, because
 surrogate code points are not characters and cannot appear alone in well-formed UTF-16.
 
+The round trip holds in that direction only. Decoding produces an escape only for a byte it
+could not decode, but encoding accepts an escape wherever it appears, so a caller can spell
+valid UTF-8 one byte at a time: `"\udcc3\udca9"` encodes to `C3 A9`, which reads back as
+`"é"`. Those two unequal strings name the same file. A string containing `U+DC80`–`U+DCFF`
+is a spelling of bytes rather than text, and comparing it with another name as a string does
+not tell you whether they name the same entry. Names read from a directory never use the
+escaped spelling of a valid sequence, so only strings a caller builds can do this. It cannot
+reach containment: the escape range carries only the bytes `0x80`–`0xFF`, and a lone
+surrogate below it is refused, so no escape can produce `/`, NUL or `.`. Every component the
+parser accepted is still the component the kernel sees.
+
 Decoding is strict about what it accepts as valid UTF-8. Overlong encodings, encoded
 surrogates and values above `U+10FFFF` are refused and escaped byte by byte rather than
 decoded generously, because two byte sequences that decoded to one string would be two names
