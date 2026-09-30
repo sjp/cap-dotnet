@@ -120,6 +120,220 @@ public sealed partial class CorpusIntegrityTests
         }
     }
 
+    /// <summary>
+    /// Every test the threat model names in a test column is a test that exists, in whichever
+    /// test project it lives.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A test column that names a test nobody can find is the same claim nothing checks as an
+    /// empty one, and it is the one a rename produces. The document writes a test as
+    /// <c>`Class.Method`</c> or <c>`Class`</c>, and a further method of the class just named as
+    /// <c>`.Method`</c>; an elision (<c>…</c>) is the document saying "and so on", and is skipped.
+    /// </para>
+    /// <para>
+    /// The other test projects are not referenced from here, so their sources are carried as
+    /// text and a test is found by its declaration. A method counts as found in a class when a
+    /// file that declares the class declares the method, which is loose where a file holds more
+    /// than one class, and exact enough to catch a rename.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Every_test_the_threat_model_names_exists()
+    {
+        Dictionary<string, HashSet<string>> declared = DeclaredTests();
+        List<string> missing = [];
+        int named = 0;
+
+        foreach ((string row, string tests) in ThreatModelRows())
+        {
+            string? current = null;
+            foreach (Match quoted in QuotedPattern().Matches(tests))
+            {
+                string token = quoted.Groups[1].Value;
+                string? type;
+                string? method;
+
+                if (TestPattern().Match(token) is { Success: true } test)
+                {
+                    type = current = test.Groups[1].Value;
+                    method = test.Groups[2].Success ? test.Groups[2].Value : null;
+                }
+                else if (token.Contains('…', StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                else if (SameClassPattern().Match(token) is { Success: true } sameClass)
+                {
+                    if (current is null)
+                    {
+                        missing.Add($"{row} names `{token}` before naming the class it belongs to.");
+                        continue;
+                    }
+
+                    type = current;
+                    method = sameClass.Groups[1].Value;
+                }
+                else
+                {
+                    continue;
+                }
+
+                named++;
+                if (!declared.TryGetValue(type, out HashSet<string>? methods))
+                {
+                    missing.Add($"{row} names {type}, and no test source declares it.");
+                }
+                else if (method is not null && !methods.Contains(method))
+                {
+                    missing.Add($"{row} names {type}.{method}, and {type} declares no such member.");
+                }
+            }
+        }
+
+        Assert.True(named > 0, "No test named in the threat model was found; the parsing has stopped matching the document.");
+        Assert.True(missing.Count == 0, string.Join('\n', missing));
+    }
+
+    /// <summary>
+    /// Every corpus case the threat model names is a case that exists: after
+    /// <c>escape corpus:</c>, a case of <see cref="EscapeCorpus"/>, and after <c>corpus case</c>,
+    /// a case of the symbolic link policy corpus in Cap.Primitives.Tests.
+    /// </summary>
+    /// <remarks>
+    /// A <c>*</c> in a name stands for anything, so <c>`absolute-*`</c> must match at least one
+    /// case and <c>`reserved-name *`</c> the family written with a space. A name starting with
+    /// <c>-</c> is the document abbreviating the name before it, and is skipped.
+    /// </remarks>
+    [Fact]
+    public void Every_corpus_case_the_threat_model_names_exists()
+    {
+        string[] escapeCases = [.. EscapeCorpus.Cases.Select(entry => entry.Name)];
+        string[] symlinkCases = SymlinkPolicyCaseNames();
+        List<string> missing = [];
+        int named = 0;
+
+        foreach ((string row, string tests) in ThreatModelRows())
+        {
+            foreach (Match quoted in QuotedPattern().Matches(tests))
+            {
+                string token = quoted.Groups[1].Value;
+                if (!CaseNamePattern().IsMatch(token))
+                {
+                    continue;
+                }
+
+                // Which corpus the name belongs to is said by the nearest marker before it.
+                Match? marker = null;
+                foreach (Match candidate in CorpusMarkerPattern().Matches(tests[..quoted.Index]))
+                {
+                    marker = candidate;
+                }
+
+                if (marker is null)
+                {
+                    missing.Add($"{row} names `{token}` without saying which corpus it is from.");
+                    continue;
+                }
+
+                bool escape = marker.Value == "escape corpus";
+                string[] cases = escape ? escapeCases : symlinkCases;
+                named++;
+                if (!cases.Any(name => Matches(token, name)))
+                {
+                    missing.Add($"{row} names `{token}`, and the {(escape ? "escape" : "symbolic link policy")} corpus has no such case.");
+                }
+            }
+        }
+
+        Assert.True(named > 0, "No corpus case named in the threat model was found; the parsing has stopped matching the document.");
+        Assert.True(missing.Count == 0, string.Join('\n', missing));
+
+        static bool Matches(string pattern, string name)
+        {
+            string[] parts = pattern.Split('*');
+            if (parts.Length == 1)
+            {
+                return pattern == name;
+            }
+
+            if (!name.StartsWith(parts[0], StringComparison.Ordinal) || !name.EndsWith(parts[^1], StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            int at = parts[0].Length;
+            for (int i = 1; i < parts.Length - 1; i++)
+            {
+                int found = name.IndexOf(parts[i], at, StringComparison.Ordinal);
+                if (found < 0)
+                {
+                    return false;
+                }
+
+                at = found + parts[i].Length;
+            }
+
+            return at <= name.Length - parts[^1].Length;
+        }
+    }
+
+    /// <summary>
+    /// The types every carried test source declares, each with the members declared in the
+    /// files that declare it.
+    /// </summary>
+    private static Dictionary<string, HashSet<string>> DeclaredTests()
+    {
+        Dictionary<string, HashSet<string>> declared = [];
+        foreach ((_, string source) in TestSources())
+        {
+            HashSet<string> members = [.. MethodDeclarationPattern().Matches(source).Select(match => match.Groups[1].Value)];
+            foreach (Match type in TypeDeclarationPattern().Matches(source))
+            {
+                string name = type.Groups[1].Value;
+                if (!declared.TryGetValue(name, out HashSet<string>? existing))
+                {
+                    declared[name] = existing = [];
+                }
+
+                existing.UnionWith(members);
+            }
+        }
+
+        Assert.Contains(nameof(CorpusIntegrityTests), declared.Keys);
+        return declared;
+    }
+
+    /// <summary>The names of the cases of the symbolic link policy corpus, read from its source.</summary>
+    private static string[] SymlinkPolicyCaseNames()
+    {
+        string source = TestSources().Single(file => file.Name.EndsWith("SymlinkPolicyCorpus.cs", StringComparison.Ordinal)).Source;
+        string[] names = [.. SymlinkCaseNamePattern().Matches(source).Select(match => match.Groups[1].Value)];
+        Assert.NotEmpty(names);
+        return names;
+    }
+
+    /// <summary>Every test source carried in this assembly, by resource name.</summary>
+    private static IEnumerable<(string Name, string Source)> TestSources()
+    {
+        Assembly assembly = typeof(CorpusIntegrityTests).Assembly;
+        bool any = false;
+        foreach (string name in assembly.GetManifestResourceNames())
+        {
+            if (!name.StartsWith("TestSource.", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            using Stream stream = assembly.GetManifestResourceStream(name)!;
+            using StreamReader reader = new(stream);
+            any = true;
+            yield return (name, reader.ReadToEnd());
+        }
+
+        Assert.True(any, "The test sources are not embedded in the test assembly.");
+    }
+
     /// <summary>The rows the corpus defends, from the table and from the tests beside it.</summary>
     private static HashSet<string> DefendedHere()
     {
@@ -167,8 +381,9 @@ public sealed partial class CorpusIntegrityTests
     }
 
     /// <summary>
-    /// The containment rows of the threat model — lexical, symbolic link, Windows naming,
-    /// case and normalisation, and topology — with the text of each one's test column.
+    /// The numbered rows of the threat model — lexical, symbolic link, Windows naming, case and
+    /// normalisation, topology, scratch space and project directories — with the text of each
+    /// one's test column.
     /// </summary>
     private static Dictionary<string, string> ThreatModelRows()
     {
@@ -188,7 +403,9 @@ public sealed partial class CorpusIntegrityTests
             }
         }
 
-        Assert.NotEmpty(rows);
+        // Counted, so that a row whose id stops matching the pattern above is noticed rather than
+        // silently dropping out of every check. Change it when a row is added or removed.
+        Assert.Equal(49, rows.Count);
         return rows;
     }
 
@@ -204,6 +421,30 @@ public sealed partial class CorpusIntegrityTests
         _ => Outcome.Malformed,
     };
 
-    [GeneratedRegex(@"^\| ([LSWMT]\d+) \|")]
+    [GeneratedRegex(@"^\| ([A-Z]{1,2}\d+) \|")]
     private static partial Regex RowPattern();
+
+    [GeneratedRegex("`([^`]+)`")]
+    private static partial Regex QuotedPattern();
+
+    [GeneratedRegex(@"^([A-Z][A-Za-z0-9_]*Tests)(?:\.([A-Za-z0-9_]+))?$")]
+    private static partial Regex TestPattern();
+
+    [GeneratedRegex(@"^\.([A-Za-z0-9_]+)$")]
+    private static partial Regex SameClassPattern();
+
+    [GeneratedRegex(@"^[a-z0-9*][a-z0-9*' \-]*$")]
+    private static partial Regex CaseNamePattern();
+
+    [GeneratedRegex("escape corpus|corpus case")]
+    private static partial Regex CorpusMarkerPattern();
+
+    [GeneratedRegex(@"\b(?:class|record|struct)\s+([A-Za-z_][A-Za-z0-9_]*)")]
+    private static partial Regex TypeDeclarationPattern();
+
+    [GeneratedRegex(@"(?:\bvoid|\bstring|\bbool|\bint|\blong|>|\]|\b[A-Z][A-Za-z0-9_]*)\??\s+([A-Za-z_][A-Za-z0-9_]*)\s*[<(]")]
+    private static partial Regex MethodDeclarationPattern();
+
+    [GeneratedRegex("new\\(\"([^\"]+)\"")]
+    private static partial Regex SymlinkCaseNamePattern();
 }

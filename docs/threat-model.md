@@ -259,7 +259,7 @@ bullet.
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
 | W1 | Reserved device names: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`; escape corpus: `reserved-name *` |
-| W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused`, `.Trailing_dots_and_spaces_do_not_hide_a_device`; escape corpus: `reserved-name *`, `trailing-dot-or-space *` |
+| W2 | Mangled variants: `CON.txt`, `CON.`, `CON ` (trailing space), `con`, `CoN` | Rejected | Windows name validation | `WindowsReservedNameTests.Every_mangling_of_a_reserved_name_is_refused` (its manglings include the trailing dots and spaces); escape corpus: `reserved-name *`, `trailing-dot-or-space *` |
 | W3 | Superscript digit forms `COM¹`, `COM²`, `COM³`, and `CONIN$` / `CONOUT$` | Rejected | Windows name validation | `WindowsReservedNameTests.ReservedStems`; escape corpus: `reserved-name *` |
 | W4 | Alternate data streams: `file:stream`, `CON::$DATA` | Rejected (`:` is not a legal component character) | Windows name validation | `WindowsReservedNameTests.Every_stream_spelling_of_a_reserved_name_is_refused`; escape corpus: `alternate-data-stream`, `default-data-stream`, `device-through-a-stream` |
 | W5 | Trailing dots and spaces, which Win32 silently strips *after* validation | Rejected before they can diverge | path parsing; Windows name validation | `CapPathParseTests.Rejects_trailing_dot_or_space`; escape corpus: `trailing-dot-or-space *` |

@@ -68,4 +68,16 @@
     <EmbeddedResource Include="../../docs/threat-model.md" LogicalName="threat-model.md" />
   </ItemGroup>
 
+  <!--
+    Every test source in the repository, carried so that the suite can check that each test
+    and corpus case the threat model names still exists. Read as text rather than loaded as
+    assemblies: the other test projects are not referenced from here, and the check must run
+    wherever the binaries were copied to, including the native-AOT build of this corpus.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="../**/*.cs"
+                      Exclude="../**/bin/**/*.cs;../**/obj/**/*.cs"
+                      LogicalName="TestSource.%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
