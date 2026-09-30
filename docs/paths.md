@@ -74,10 +74,12 @@ Two facts are recorded at parse time because splitting the string throws them aw
   fail when `foo` is a regular file, and once the components are separated there is nothing
   left to recover that from.
 
-A path of exactly one ordinary filename is flagged as such, so resolving it is a single
-lookup rather than a walk. That flag is deliberately narrow — a path containing `..`, or one
-insisting on a directory, is not a single lookup even with one component — so a resolver can
-act on it with no further checks.
+A path of exactly one ordinary filename is flagged as such (`IsSingleComponent`), so that a
+caller can resolve it with a single lookup against a directory handle. That flag is deliberately
+narrow — a path containing `..`, or one insisting on a directory, is not a single lookup even
+with one component — so a caller can act on it with no further checks. The shipped resolvers
+do not read it: a single name goes to the kernel's confined open, or through the portable walk
+for one iteration, exactly as a longer path does.
 
 ## `..` is walked, not collapsed
 

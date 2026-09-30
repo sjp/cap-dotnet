@@ -138,14 +138,15 @@ public readonly struct CapPath
     public bool RequiresDirectory => (_flags & Flags.RequiresDirectory) != 0;
 
     /// <summary>
-    /// Whether the path is exactly one ordinary filename, so resolving it is a single
-    /// lookup against the directory handle rather than a walk.
+    /// Whether the path is exactly one ordinary filename, so that a caller can resolve it
+    /// with a single lookup against a directory handle.
     /// </summary>
     /// <remarks>
-    /// This is the common case by a wide margin and skipping the loop for it is worth doing.
     /// It is deliberately narrow: a path with a <c>..</c> in it, or one that insists on a
     /// directory, is not a single lookup even when it has one component, so neither reports
-    /// as one. A resolver can act on this without any further checks.
+    /// as one, and a caller can act on this without any further checks. The shipped
+    /// resolvers do not read it: they hand a single name to the kernel's confined open or
+    /// run the portable walk for one iteration, the same code path as any longer path.
     /// </remarks>
     public bool IsSingleComponent =>
         _componentCount == 1 && _flags == Flags.None;
