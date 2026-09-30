@@ -61,7 +61,7 @@ public sealed class DiskParityTests : IDisposable
     private static readonly Operation[] TwoPathOperations =
         [Operation.Rename, Operation.RenameReplacing, Operation.CreateHardLink, Operation.CreateHardLinkFollowingLink];
 
-    /// <summary>A name longer than the 255 bytes a Unix filesystem stores, though not in characters.</summary>
+    /// <summary>A name longer than the 255 bytes Linux stores, though not in characters.</summary>
     private static readonly string OverlongName = new('é', 200);
 
     /// <summary>
@@ -131,6 +131,10 @@ public sealed class DiskParityTests : IDisposable
         ("plain", OverlongName),
     ];
 
+    /// <summary>Pairs that give a directory a second name where a name is already taken.</summary>
+    private static readonly (string From, string To)[] DirectoryOntoTakenName =
+        [("inner", "plain"), ("inner", "empty"), ("empty", "full")];
+
     /// <summary>
     /// Cases where memory is known to answer differently from the disk, by <see cref="CaseName"/>,
     /// with why.
@@ -151,6 +155,21 @@ public sealed class DiskParityTests : IDisposable
                         "issue 242: renameat2 with RENAME_NOREPLACE, and renamex_np with RENAME_EXCL, refuse a " +
                         "name that exists before noticing it is the name being moved; the in-memory rename " +
                         "treats a move onto the same object as done whether or not replacing was allowed");
+                }
+
+                if (OperatingSystem.IsMacOS())
+                {
+                    foreach ((string from, string to) in DirectoryOntoTakenName)
+                    {
+                        foreach (Operation operation in (Operation[])[Operation.CreateHardLink, Operation.CreateHardLinkFollowingLink])
+                        {
+                            differences.Add(
+                                CaseName(resolution, policy, operation, from, to),
+                                "macOS refuses a hard link of a directory before it looks at the destination, as " +
+                                "Windows does, where Linux, which the in-memory Unix rules follow, first reports " +
+                                "the destination name as taken");
+                        }
+                    }
                 }
             }
         }
@@ -231,10 +250,11 @@ public sealed class DiskParityTests : IDisposable
             Assert.Skip("The disk side has a backend only on Linux, macOS and Windows.");
         }
 
-        if (OperatingSystem.IsWindows() && (path == OverlongName || second == OverlongName))
+        if (!OperatingSystem.IsLinux() && (path == OverlongName || second == OverlongName))
         {
-            // NTFS counts a name in UTF-16 units, and 200 of them is a name it stores.
-            Assert.Skip("Only a Unix filesystem counts a name in UTF-8 bytes.");
+            // NTFS counts a name in UTF-16 units and APFS in characters, and 200 of either is a
+            // name they store.
+            Assert.Skip("Only Linux, which the in-memory Unix rules follow, counts a name in UTF-8 bytes.");
         }
 
         InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { Resolution = resolution });
