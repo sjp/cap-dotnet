@@ -1,33 +1,6 @@
 {
   "measuredOn": "Ubuntu 24.04.5 LTS X64, 4 logical CPUs, .NET 10.0.12",
   "benchmarks": {
-    "CapPathBenchmarks.ParseSingleComponent[Syntax=Unix]/openat2": {
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseShallow[Syntax=Unix]/openat2": {
-      "ratio": 1.3702,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseDeep[Syntax=Unix]/openat2": {
-      "ratio": 3.2226,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Unix]/openat2": {
-      "ratio": 7.1683,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Unix]/openat2": {
-      "ratio": 3.3453,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ValidateSpan[Syntax=Unix]/openat2": {
-      "ratio": 3.3873,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseRejected[Syntax=Unix]/openat2": {
-      "ratio": 0.1834,
-      "allocatedBytes": 0
-    },
     "CapPathBenchmarks.ParseSingleComponent[Syntax=Unix]/walk": {
       "allocatedBytes": 0
     },
@@ -53,33 +26,6 @@
     },
     "CapPathBenchmarks.ParseRejected[Syntax=Unix]/walk": {
       "ratio": 0.1819,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseSingleComponent[Syntax=Windows]/openat2": {
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseShallow[Syntax=Windows]/openat2": {
-      "ratio": 1.1818,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseDeep[Syntax=Windows]/openat2": {
-      "ratio": 2.0726,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Windows]/openat2": {
-      "ratio": 2.8999,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Windows]/openat2": {
-      "ratio": 3.0298,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ValidateSpan[Syntax=Windows]/openat2": {
-      "ratio": 2.3056,
-      "allocatedBytes": 0
-    },
-    "CapPathBenchmarks.ParseRejected[Syntax=Windows]/openat2": {
-      "ratio": 0.0466,
       "allocatedBytes": 0
     },
     "CapPathBenchmarks.ParseSingleComponent[Syntax=Windows]/walk": {

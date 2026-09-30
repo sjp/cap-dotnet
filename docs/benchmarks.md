@@ -133,6 +133,16 @@ minutes.
 The `System.IO` rows themselves are not gated: what the runtime allocates, or how its speed
 moves between versions, is not a regression in this library.
 
+**Every committed row must be measured.** A row in the committed file that the run did not
+produce — a benchmark deleted or renamed, a parameter value dropped, a class taken out of the
+hot path, a whole backend job left out — is listed as **missing** and fails the gate, so that
+removing a row is not a way past it. The one exception is a job the host cannot run:
+`--allow-missing-job <id>` (repeatable) lets that job's rows be missing, and they are listed as
+"missing (allowed)". On a Linux machine without the confined open, `gate` passes
+`--allow-missing-job openat2` by itself, but only when the `CI` environment variable is not
+`true`: a hosted runner that started refusing `openat2` fails the gate rather than quietly
+halving what it holds.
+
 Each gate run writes its own figures, in the same format as the committed file, to
 `BenchmarkDotNet.Artifacts/gate/<os>.json`, and CI uploads them. That upload, run after run,
 is the history; the committed file is the line a change must not cross.
@@ -146,8 +156,11 @@ the baseline in the same commit:
 dotnet run -c Release --project bench/Cap.Benchmarks -- gate --update
 ```
 
-This rewrites the current platform's file from a fresh run, keeping any rows the host could not
-measure (the `openat2` job on a kernel without it). Take the figures from the platform's CI
+This rewrites the current platform's file from a fresh run. It keeps the rows of any job the
+host could not run (the `openat2` job on a kernel without it), and any row the run attempted but
+got no result for; it drops the rows of a job that did run but no longer produces them, so
+deleting or renaming a benchmark and running `--update` leaves no stale row behind to fail the
+gate. Take the figures from the platform's CI
 runner where possible — the uploaded `benchmark-gate-<platform>` artifact holds them — since a
 ratio measured on a laptop's filesystem is not quite the ratio a hosted runner sees. A platform
 with no committed file is run and reported but not gated; committing its artifact's file turns

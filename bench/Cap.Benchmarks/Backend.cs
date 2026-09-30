@@ -122,7 +122,10 @@ internal static class Backend
             .WithEnvironmentVariable(ExpectedVariable, backend)
             .WithId(backend);
 
-    private static string? ConfinedOpenUnavailableReason()
+    /// <summary>
+    /// Why this host cannot run the confined-open job, or none when it can.
+    /// </summary>
+    public static string? ConfinedOpenUnavailableReason()
     {
         if (!OperatingSystem.IsLinux())
         {

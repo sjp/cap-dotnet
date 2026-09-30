@@ -26,6 +26,7 @@
     <Project Path="tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj" />
     <Project Path="tests/Cap.Fuzz.Tests/Cap.Fuzz.Tests.csproj" />
     <Project Path="tests/Cap.Analyzers.Tests/Cap.Analyzers.Tests.csproj" />
+    <Project Path="tests/Cap.Benchmarks.Tests/Cap.Benchmarks.Tests.csproj" />
     <Project Path="tests/WasiHost.Tests/WasiHost.Tests.csproj" />
   </Folder>
   <Folder Name="/fuzz/">

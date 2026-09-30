@@ -11,10 +11,11 @@ using Perfolizer.Horology;
 //   dotnet run -c Release --project bench/Cap.Benchmarks -- --filter '*'
 //       The full suite, with BenchmarkDotNet's usual options.
 //
-//   dotnet run -c Release --project bench/Cap.Benchmarks -- gate [--update]
+//   dotnet run -c Release --project bench/Cap.Benchmarks -- gate [--update] [--allow-missing-job <id>]...
 //       The hot-path subset, compared against bench/baselines/<os>.json. Exits non-zero when a
-//       row has regressed by more than the gate's tolerance; --update rewrites the baseline
-//       from this run instead.
+//       row has regressed by more than the gate's tolerance, or when a committed row was not
+//       measured at all unless its job is allowed to be missing; --update rewrites the
+//       baseline from this run instead.
 if (args.Length > 0 && args[0] == "gate")
 {
     return RunGate(args[1..]);
@@ -29,6 +30,20 @@ static int RunGate(string[] args)
     string baselines = Option(args, "--baselines") ?? Path.Join(RepositoryRoot(), "bench", "baselines");
     string measured = Option(args, "--out")
         ?? Path.Join(Environment.CurrentDirectory, "BenchmarkDotNet.Artifacts", "gate", Gate.Platform + ".json");
+
+    // A committed row this run does not measure fails the gate, so that deleting a benchmark
+    // is not a way past it. A developer's machine without the confined open cannot measure the
+    // openat2 rows at all, so it is excused them -- but not in CI, where a runner image that
+    // started refusing the syscall would otherwise quietly halve what is gated.
+    List<string> allowMissing = Options(args, "--allow-missing-job");
+    if (OperatingSystem.IsLinux()
+        && Backend.ConfinedOpenUnavailableReason() is not null
+        && !string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase)
+        && !allowMissing.Contains(Backend.ConfinedOpen))
+    {
+        Console.WriteLine($"Allowing the {Backend.ConfinedOpen} rows to be missing: this host cannot run that job and CI is not set.");
+        allowMissing.Add(Backend.ConfinedOpen);
+    }
 
     // Shorter than the default job, which would take the gate the better part of an hour across
     // two backends; long enough that the median of a microsecond operation settles. Each
@@ -59,7 +74,7 @@ static int RunGate(string[] args)
         .. BenchmarkRunner.Run(typeof(Program).Assembly, timedConfig),
         .. BenchmarkRunner.Run(typeof(Program).Assembly, allocationConfig),
     ];
-    return Gate.Evaluate(summaries, baselines, measured, update);
+    return Gate.Evaluate(summaries, baselines, measured, update, allowMissing);
 }
 
 static IConfig Configure(Job template)
@@ -78,6 +93,20 @@ static string? Option(string[] args, string name)
 {
     int index = Array.IndexOf(args, name);
     return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+}
+
+static List<string> Options(string[] args, string name)
+{
+    List<string> values = [];
+    for (int index = 0; index + 1 < args.Length; index++)
+    {
+        if (args[index] == name)
+        {
+            values.Add(args[++index]);
+        }
+    }
+
+    return values;
 }
 
 static string RepositoryRoot()

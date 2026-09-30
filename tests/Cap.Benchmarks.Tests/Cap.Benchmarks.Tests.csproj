@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cap.Benchmarks.Tests</RootNamespace>
+    <AssemblyName>Cap.Benchmarks.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The regression gate's comparison, which decides whether CI's benchmark leg passes. -->
+    <ProjectReference Include="../../bench/Cap.Benchmarks/Cap.Benchmarks.csproj" />
+  </ItemGroup>
+
+</Project>

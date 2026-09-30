@@ -68,13 +68,21 @@ internal static class Gate
     /// <param name="baselineDirectory">Where the committed per-platform baselines live.</param>
     /// <param name="measuredPath">Where to write this run's figures, in the baseline format.</param>
     /// <param name="update">Rewrite the committed baseline with this run's figures instead of gating.</param>
-    public static int Evaluate(IEnumerable<Summary> summaries, string baselineDirectory, string measuredPath, bool update)
+    /// <param name="allowedMissingJobs">
+    /// Jobs whose committed rows may go unmeasured without failing the gate: a backend this host
+    /// genuinely cannot run.
+    /// </param>
+    public static int Evaluate(
+        IEnumerable<Summary> summaries, string baselineDirectory, string measuredPath, bool update,
+        IReadOnlyCollection<string> allowedMissingJobs)
     {
         List<Row> rows = [];
         List<string> failures = [];
+        HashSet<string> unmeasured = new(StringComparer.Ordinal);
+        HashSet<string> ranJobs = new(StringComparer.Ordinal);
         foreach (Summary summary in summaries)
         {
-            Collect(summary, rows, failures);
+            Collect(summary, rows, failures, unmeasured, ranJobs);
         }
 
         string baselinePath = Path.Join(baselineDirectory, Platform + ".json");
@@ -90,17 +98,11 @@ internal static class Gate
 
         if (update)
         {
-            // Keep rows this host could not measure -- the confined-open job on a kernel without
-            // it -- rather than deleting another machine's figures.
-            foreach ((string key, Figures figures) in committed.Benchmarks)
-            {
-                measured.Benchmarks.TryAdd(key, figures);
-            }
-
+            Dictionary<string, Figures> merged = Merge(committed, rows, ranJobs, unmeasured);
             Directory.CreateDirectory(baselineDirectory);
             File.WriteAllText(baselinePath, JsonSerializer.Serialize(measured with
             {
-                Benchmarks = new SortedDictionary<string, Figures>(measured.Benchmarks, StringComparer.Ordinal)
+                Benchmarks = new SortedDictionary<string, Figures>(merged, StringComparer.Ordinal)
                     .ToDictionary(StringComparer.Ordinal),
             }, GateJson.Default.BaselineFile) + "\n");
             Console.WriteLine($"Wrote {rows.Count} rows to {baselinePath}.");
@@ -129,6 +131,55 @@ internal static class Gate
         report.AppendLine(CultureInfo.InvariantCulture,
             $"Baseline: `{Path.GetFileName(baselinePath)}`, measured on {committed.MeasuredOn ?? "(none committed)"}. {rule}");
         report.AppendLine();
+
+        Comparison comparison = Compare(committed, rows, unmeasured, allowedMissingJobs, report);
+        failures.AddRange(comparison.Failures);
+
+        if (comparison.Ungated > 0)
+        {
+            report.AppendLine(CultureInfo.InvariantCulture,
+                $"{comparison.Ungated} row(s) have no committed baseline and were not gated. To start gating them, " +
+                $"commit this run's figures (`{Path.GetFileName(measuredPath)}`) as `bench/baselines/{Platform}.json`.");
+            report.AppendLine();
+        }
+
+        foreach (string failure in failures)
+        {
+            report.AppendLine(CultureInfo.InvariantCulture, $"- {failure}");
+        }
+
+        string text = report.ToString();
+        Console.WriteLine(text);
+        string? stepSummary = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
+        if (!string.IsNullOrEmpty(stepSummary))
+        {
+            File.AppendAllText(stepSummary, text);
+        }
+
+        return failures.Count == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Holds every measured row to its committed figures, and every committed row to having been
+    /// measured, appending the table to <paramref name="report"/>.
+    /// </summary>
+    /// <remarks>
+    /// A committed row this run did not measure fails: otherwise deleting a benchmark, renaming
+    /// it, dropping a parameter value or losing a whole backend would be the quietest way past
+    /// the gate. A row whose job is in <paramref name="allowedMissingJobs"/> is reported but does
+    /// not fail. A row that was attempted and produced no result has already failed, so it is
+    /// not reported a second time.
+    /// </remarks>
+    /// <param name="committed">The baseline this run is held to.</param>
+    /// <param name="rows">What this run measured.</param>
+    /// <param name="unmeasured">Rows this run attempted that produced no result.</param>
+    /// <param name="allowedMissingJobs">Jobs whose committed rows may go unmeasured.</param>
+    /// <param name="report">Where the table is written.</param>
+    internal static Comparison Compare(
+        BaselineFile committed, IReadOnlyList<Row> rows, IReadOnlySet<string> unmeasured,
+        IReadOnlyCollection<string> allowedMissingJobs, StringBuilder report)
+    {
+        List<string> failures = [];
         report.AppendLine("| Benchmark | Ratio | Baseline ratio | Allocated | Baseline allocated | Verdict |");
         report.AppendLine("|---|---:|---:|---:|---:|---|");
 
@@ -167,41 +218,85 @@ internal static class Gate
                 $"{(problems.Count > 0 ? "**regressed**" : row.TimeGated ? "ok" : "ok (allocation only)")} |");
         }
 
+        HashSet<string> measured = rows.Select(r => r.Key).ToHashSet(StringComparer.Ordinal);
+        int allowedMissing = 0;
+        foreach ((string key, Figures expected) in committed.Benchmarks.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (measured.Contains(key) || unmeasured.Contains(key))
+            {
+                continue;
+            }
+
+            bool allowed = allowedMissingJobs.Contains(JobOf(key), StringComparer.Ordinal);
+            if (allowed)
+            {
+                allowedMissing++;
+            }
+            else
+            {
+                failures.Add($"{key}: in the baseline but not measured");
+            }
+
+            report.AppendLine(CultureInfo.InvariantCulture,
+                $"| {key} | – | {Format(expected.Ratio)} | – | {expected.AllocatedBytes} B | " +
+                $"{(allowed ? "missing (allowed)" : "**missing**")} |");
+        }
+
         report.AppendLine();
-        if (ungated > 0)
+        if (allowedMissing > 0)
         {
             report.AppendLine(CultureInfo.InvariantCulture,
-                $"{ungated} row(s) have no committed baseline and were not gated. To start gating them, " +
-                $"commit this run's figures (`{Path.GetFileName(measuredPath)}`) as `bench/baselines/{Platform}.json`.");
+                $"{allowedMissing} committed row(s) were not measured and were let pass, since their job was allowed " +
+                $"to be missing on this host ({string.Join(", ", allowedMissingJobs.Order(StringComparer.Ordinal))}).");
             report.AppendLine();
         }
 
-        foreach (string failure in failures)
-        {
-            report.AppendLine(CultureInfo.InvariantCulture, $"- {failure}");
-        }
-
-        string text = report.ToString();
-        Console.WriteLine(text);
-        string? stepSummary = Environment.GetEnvironmentVariable("GITHUB_STEP_SUMMARY");
-        if (!string.IsNullOrEmpty(stepSummary))
-        {
-            File.AppendAllText(stepSummary, text);
-        }
-
-        return failures.Count == 0 ? 0 : 1;
+        return new Comparison(failures, ungated);
     }
 
-    private static void Collect(Summary summary, List<Row> rows, List<string> failures)
+    /// <summary>
+    /// The baseline <c>--update</c> writes: this run's rows, plus the committed rows this run had
+    /// no chance to measure.
+    /// </summary>
+    /// <remarks>
+    /// A committed row is kept when its job did not run here -- the confined-open job on a kernel
+    /// without it -- so as not to delete another machine's figures, or when it was attempted and
+    /// failed, so that a broken run does not erase the line it failed to reach. A committed row
+    /// of a job that did run, and that this run did not produce at all, is a benchmark that no
+    /// longer exists, and is dropped.
+    /// </remarks>
+    /// <param name="committed">The baseline being replaced.</param>
+    /// <param name="rows">What this run measured.</param>
+    /// <param name="ranJobs">The jobs this run ran.</param>
+    /// <param name="unmeasured">Rows this run attempted that produced no result.</param>
+    internal static Dictionary<string, Figures> Merge(
+        BaselineFile committed, IReadOnlyList<Row> rows, IReadOnlySet<string> ranJobs, IReadOnlySet<string> unmeasured)
+    {
+        Dictionary<string, Figures> merged = rows.ToDictionary(r => r.Key, r => r.Figures, StringComparer.Ordinal);
+        foreach ((string key, Figures figures) in committed.Benchmarks)
+        {
+            if (!ranJobs.Contains(JobOf(key)) || unmeasured.Contains(key))
+            {
+                merged.TryAdd(key, figures);
+            }
+        }
+
+        return merged;
+    }
+
+    private static void Collect(
+        Summary summary, List<Row> rows, List<string> failures, HashSet<string> unmeasured, HashSet<string> ranJobs)
     {
         foreach (BenchmarkReport report in summary.Reports)
         {
             BenchmarkCase benchmark = report.BenchmarkCase;
             string key = KeyOf(benchmark);
+            ranJobs.Add(benchmark.Job.Id);
 
             if (!report.Success || report.ResultStatistics is null)
             {
                 failures.Add($"{key}: did not produce a result");
+                unmeasured.Add(key);
                 continue;
             }
 
@@ -240,6 +335,9 @@ internal static class Gate
         return $"{benchmark.Descriptor.Type.Name}.{benchmark.Descriptor.WorkloadMethod.Name}{parameters}/{benchmark.Job.Id}";
     }
 
+    /// <summary>The job a row's key names, the part after its last slash.</summary>
+    internal static string JobOf(string key) => key[(key.LastIndexOf('/') + 1)..];
+
     private static BaselineFile Load(string path) =>
         File.Exists(path)
             ? JsonSerializer.Deserialize(File.ReadAllText(path), GateJson.Default.BaselineFile) ?? new BaselineFile()
@@ -259,7 +357,11 @@ internal static class Gate
     /// Whether the ratio is to a <c>System.IO</c> baseline in a class not marked allocation-only,
     /// and so held to the tolerance.
     /// </param>
-    private sealed record Row(string Key, Figures Figures, bool TimeGated);
+    internal sealed record Row(string Key, Figures Figures, bool TimeGated);
+
+    /// <param name="Failures">One line per row that regressed or went missing.</param>
+    /// <param name="Ungated">How many measured rows had no committed figures to be held to.</param>
+    internal sealed record Comparison(IReadOnlyList<string> Failures, int Ungated);
 
     /// <summary>One row of a baseline file.</summary>
     /// <param name="Ratio">Median time over the class's baseline's median time, or none for a baseline row.</param>
