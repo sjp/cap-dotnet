@@ -94,6 +94,17 @@ public static partial class DirExtensions
             from, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.SequentialScan);
         CapMetadata metadata = source.GetMetadata();
 
+        // A FIFO, a socket or a device opens as a file does, and has no contents to copy: a
+        // read of one waits on whatever is at the other end. Refused before anything is made
+        // at the destination, as the tree copy refuses one it is not told to skip.
+        if (metadata.Type != CapFileType.File)
+        {
+            throw new CapIOException(
+                CapErrorKind.NotSupported,
+                $"'{from}' is a {metadata.Type}, not a file with contents, and a copy has no " +
+                $"faithful equivalent for one.");
+        }
+
         using ParentLocation location = ParentLocation.Resolve(toDir, to, nameof(to), mayNameDirectory: false);
         IDir directory = location.Directory;
 

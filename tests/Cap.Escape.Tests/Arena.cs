@@ -97,6 +97,10 @@ internal sealed class Arena : IDisposable
                     HostFilesystem.CreateJunction(full, Expand(step.Target!));
                     break;
 
+                case SetupKind.Fifo:
+                    HostFile.CreateFifo(full);
+                    break;
+
                 default:
                     throw new ArgumentOutOfRangeException(nameof(steps), step.Kind, "Unknown setup step.");
             }
@@ -216,6 +220,12 @@ internal sealed class Arena : IDisposable
                     Record(entry, relative, excluded, withTimes, lines);
                     break;
 
+                // Recorded by kind alone. Reading a FIFO would wait for a writer, and it has no
+                // contents of its own to change.
+                case HostEntryKind.Special:
+                    lines.Add($"{relative} (special){Written(entry, withTimes)}");
+                    break;
+
                 default:
                     byte[] digest = SHA256.HashData(HostFile.ReadAllBytes(entry));
                     lines.Add($"{relative} {Convert.ToHexString(digest)}{Written(entry, withTimes)}");
@@ -292,6 +302,11 @@ internal static class HostFeatures
         if (OperatingSystem.IsLinux() && !HostTree.InMemory && Directory.Exists("/proc/self/fd"))
         {
             features |= HostFeature.ProcessFilesystem;
+        }
+
+        if (!OperatingSystem.IsWindows() && Attempt(() => HostFile.CreateFifo(Path.Join(root, "fifo"))))
+        {
+            features |= HostFeature.SpecialFiles;
         }
 
         return features;

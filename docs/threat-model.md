@@ -126,8 +126,8 @@ backends are described in [backends.md](backends.md).
 | L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute`; escape corpus: `absolute-*`, `windows-absolute`, `windows-absolute-forward-slashes` |
 | L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state`; escape corpus: `windows-root-relative`, `windows-drive-relative` |
 | L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace`, `WindowsReservedNameTests.A_device_namespace_prefix_on_a_device_name_is_refused`; escape corpus: `windows-unc`, `unc-forward-slashes`, `windows-device-namespace-*`, `device-namespace-forward-slashes`, `windows-object-manager-namespace` |
-| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components`; escape corpus: `empty`, `dot`, `dot-slash-dot`, `doubled-separator`, `dot-components`, `trailing-separator-*`, `nul-*` |
-| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused`; escape corpus: `component-too-long`, `path-too-long`, `longer-than-the-kernel-takes-at-once`, `deeper-than-the-walk-descends`, `longer-than-the-win32-path-limit` |
+| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components`; escape corpus: `empty`, `dot`, `dot-slash-dot`, `doubled-separator`, `dot-components`, `many-dot-components`, `trailing-separator-*`, `nul-*` |
+| L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused`; escape corpus: `component-too-long`, `path-too-long`, `longer-than-the-kernel-takes-at-once`, `ten-thousand-components`, `many-dot-components`, `deeper-than-the-walk-descends`, `longer-than-the-win32-path-limit` |
 
 `..` deserves a note. The obvious implementation — collapse `a/../b` to `b` before touching
 the disk — is **wrong**, because if `a` is a symlink to `/etc` then the kernel resolves
@@ -154,10 +154,10 @@ alone — is in [paths.md](paths.md).
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| S1 | Symlink to an absolute path outside the sandbox | Rejected, under every policy | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-absolute-link`; escape corpus: `absolute-link-*` |
+| S1 | Symlink to an absolute path outside the sandbox | Rejected, under every policy | symlink policy; all backends | `PortableWalkTests.An_absolute_link_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-absolute-link`; escape corpus: `absolute-link-*`, `device-through-a-link` |
 | S2 | Relative symlink escaping via `..` | Rejected | component walk | `PortableWalkTests.A_link_that_climbs_out_is_refused`, `PortableWalkOnDiskTests.A_link_out_of_the_tree_is_refused_by_the_walk`, corpus case `escape-via-parent-link`; escape corpus: `link-climbing-to-a-file-outside`, `link-to-the-parent*`, `link-to-a-sibling-outside`, `nested-link-climbing-out` |
 | S3 | Symlink chain that stays inside | Followed, unless the handle's policy refuses every link, or the link is the final component of an open that creates or truncates a file (S15) | symlink policy; all backends | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_links_target_is_resolved_from_where_the_link_lives`, corpus cases `chain-within-budget`, `denied-chain`; escape corpus: `link-to-a-file-inside`, `link-to-a-directory-inside`, `link-climbing-to-the-root-and-back`, `chain-inside` |
-| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped`, corpus cases `chain-beyond-budget`, `self-cycle`, `mutual-cycle`; escape corpus: `chain-of-five-ending-outside*`, `link-to-a-link-to-outside`, `self-cycle*`, `mutual-cycle`, `chain-beyond-the-budget` |
+| S4 | Symlink chain exceeding the budget | Fails as `ELOOP`, does not hang | component walk | `PortableWalkTests.A_chain_of_links_is_followed_exactly_as_far_as_the_platform_would`, `.A_link_cycle_is_stopped`, corpus cases `chain-beyond-budget`, `self-cycle`, `mutual-cycle`; escape corpus: `chain-of-five-ending-outside*`, `link-to-a-link-to-outside`, `self-cycle*`, `mutual-cycle`, `chain-at-the-budget`, `chain-one-past-the-budget`, `chain-beyond-the-budget` |
 | S5 | Symlink in a *non-final* component | Same rules as any other component | component walk | `PortableWalkTests.A_link_inside_the_sandbox_is_followed`, `.A_step_up_is_taken_from_where_the_walk_actually_is`, corpus cases `link-as-middle-component`, `denied-link-as-middle-component`; escape corpus: every `*-as-a-component` case |
 | S6 | Dangling symlink pointing outside | Decided from the target **as stored**, before anything is looked up. A link that leaves is a containment refusal whether or not the place it names exists, because that is never asked; a link that dangles *inside* is an ordinary not-found | symlink policy; all backends | `SymlinkPolicyTests.An_escaping_link_never_reveals_whether_its_target_exists_to_the_walk`, `.…_to_the_confined_open`, corpus cases `escape-via-parent-link-target-exists` / `-absent`, `dangling-link-inside`; escape corpus: `dangling-link-*`, `TopologyTests.A_link_outside_is_refused_the_same_way_whether_or_not_its_target_exists` |
 | S7 | `/proc/self/fd/N`, `/proc/self/root` and other magic links (Linux) | Rejected — by `RESOLVE_NO_MAGICLINKS` on the `openat2` backend; in the walk by the two rules that already apply, since a no-follow open refuses one and its target reads back as an absolute path or as no path at all | Linux backends | corpus cases `magic-link-to-a-process-root`, `magic-link-to-an-open-descriptor`, run on disk on Linux; escape corpus: `magic-link-*` |
@@ -297,7 +297,7 @@ half that matters, `.Changing_the_case_of_a_refused_name_does_not_get_past_the_r
 
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
-| M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | `CapPathComponentTests.Components_are_returned_verbatim`; escape corpus: `normalisation-variant-*`, run on every volume and folded where the volume folds |
+| M1 | Unicode normalisation: NFC vs NFD forms of the same filename | Documented and consistent; must not allow a check to be bypassed by re-encoding | path parsing | `CapPathComponentTests.Components_are_returned_verbatim`; escape corpus: `normalisation-variant-*`, run on every volume and folded where the volume folds; `lone-surrogate`, a name Windows stores unchecked and the encoder refuses under POSIX rules |
 | M2 | Case-insensitive volume: `secret` vs `SECRET` | Containment must not depend on case-sensitive string comparison | all backends; escape corpus | `WindowsResolutionOnDiskTests.Changing_the_case_of_a_refused_name_does_not_get_past_the_refusal`; escape corpus: `case-variant-*`, run on every volume and folded where the volume folds |
 | M3 | `/tmp` and `/var` being symlinks to `/private/*` | Resolved once, under ambient authority, at root acquisition | temp directory helpers | `CapTempDirTests.The_directory_sits_beneath_the_system_temporary_location_under_its_own_name`; escape corpus: `TopologyTests.A_root_opened_through_a_link_is_confined_to_where_the_link_led`, `.A_temporary_location_that_is_a_link_can_be_a_root` |
 
@@ -306,9 +306,11 @@ half that matters, `.Changing_the_case_of_a_refused_name_does_not_get_past_the_r
 | # | Attack | Required behaviour | Where | Test |
 |---|---|---|---|---|
 | T1 | Mount point or bind mount appearing under the sandbox | Crossed, as descending into anything else is: the mount table is trusted. A step up from inside the mount lands in the sandbox, and a link inside it is held to the same root. Every backend's resolver can refuse to cross a mount, reporting it as crossing a device rather than as an escape, but no public member asks it to yet | `openat2` backend; component walk | `PortableWalkTests.A_mount_point_can_be_refused`, `ConfinedOpenTests.A_refused_mount_crossing_is_reported_as_cross_device_not_as_an_escape`, `SymlinkPolicyOnDiskTests.The_hosts_walk_answers_the_mount_table`, `SymlinkPolicyOnDiskTests.The_hosts_confined_open_answers_the_mount_table`; escape corpus: `TopologyTests.A_mount_inside_the_root_is_crossed_but_cannot_be_climbed_out_of` |
-| T2 | Hardlink creation crossing the sandbox boundary | Requires a capability on *both* sides | `Dir` API | escape corpus: every case through both ends of `CreateHardLink` |
-| T3 | Rename crossing the boundary | Same: both `Dir`s required | `Dir` API | escape corpus: every case through both ends of `Rename` |
+| T2 | Hardlink creation crossing the sandbox boundary | Requires a capability on *both* sides; between two filesystems, refused as crossing a device with neither tree changed | `Dir` API | escape corpus: every case through both ends of `CreateHardLink`, and `TopologyTests.A_move_or_hard_link_onto_another_volume_is_reported_as_cross_device` |
+| T3 | Rename crossing the boundary | Same: both `Dir`s required; between two filesystems, refused as crossing a device and never done as a copy | `Dir` API | escape corpus: every case through both ends of `Rename`, and `TopologyTests.A_move_or_hard_link_onto_another_volume_is_reported_as_cross_device` |
 | T4 | Pre-existing hardlink to an outside file, planted inside | **Not defendable** — see §6.3 | — | escape corpus, as a documented non-defence: `TopologyTests.A_hard_link_planted_before_the_root_was_opened_reaches_the_file_it_names` |
+| T5 | FIFO, socket or device inside the tree, or a link to one outside it | A special file inside is a name like any other: described, moved, removed and linked as itself, and opened without waiting for the other end — a read finds it empty, a write with nobody reading is refused, a copy is refused. A link to one outside is refused as any link leaving is | all backends; `CapFile`; `CopyFile` | `NonBlockingOpenTests.A_fifo_opened_as_a_child_for_reading_has_non_blocking_cleared`; escape corpus: `fifo-as-the-name`, `fifo-as-a-component`, `device-through-a-link` |
+| T6 | The root itself removed, or moved elsewhere, while a handle is open on it | The handle is the root, not the path it was opened by. Removed, it can still be described, holds nothing, and nothing can be created in it or at its old path; moved, names resolve beneath it where it now is, and a step or a link above it is refused as it was | `Dir` API; all backends | escape corpus: `TopologyTests.A_root_removed_while_open_reports_missing_names_and_never_recreates_them`, `.A_root_renamed_while_open_keeps_resolving_beneath_the_handle` |
 
 ### 4.6 Shared scratch space
 
@@ -374,8 +376,12 @@ or normalisation expects the entry to be reached where the volume folds names an
 it does not. A run names the features its host was set up with in
 `CAPDOTNET_EXPECT_HOST_FEATURES`, and there a missing one fails the case instead of skipping
 it, so a runner that lost them cannot pass with those cases untested (see
-[testing](testing.md#host-features-the-suite-expects)). The CI workflow runs the corpus on several filesystems, and against a bind mount
-prepared inside the sandbox root, which the corpus itself cannot create.
+[testing](testing.md#host-features-the-suite-expects)). The CI workflow runs the corpus on several filesystems, against a bind mount
+prepared inside the sandbox root, which the corpus itself cannot create, and with a directory on
+a second filesystem named in `CAPDOTNET_TEST_OTHER_VOLUME`, for moves and links between two.
+Every operation runs under a watchdog: one that has not finished within ten seconds fails its
+case, so an attack that makes an open wait — a FIFO with nobody at the other end — fails the run
+rather than hanging it.
 
 ### 4.9 Fuzzing and properties
 
@@ -403,7 +409,8 @@ stops being true fails its test like any other wrong expectation.
 | Case | Backends | Behaviour | Why |
 |---|---|---|---|
 | `deeper-than-the-walk-descends` | `openat2` | Resolves the path | The depth bound belongs to the walk, which holds a handle per level; the kernel's confined open holds none |
-| `longer-than-the-kernel-takes-at-once` | `openat2` | Refused for length, where the walk reports the first missing name | The kernel is handed the whole path at once and refuses one longer than its own limit |
+| `longer-than-the-kernel-takes-at-once`, `ten-thousand-components` | `openat2` | Refused for length, where the walk reports the first missing name | The kernel is handed the whole path at once and refuses one longer than its own limit |
+| `many-dot-components` | `openat2` | Refused for length, where the walk drops every `.` and reaches the file | The kernel is handed the path as the caller wrote it, `.` components included, and refuses one longer than its own limit |
 
 ## 5. Explicit non-goals
 

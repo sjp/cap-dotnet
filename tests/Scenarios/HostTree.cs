@@ -55,6 +55,9 @@ internal interface IHostTree
 
     void CreateHardLink(string existing, string link);
 
+    /// <summary>Creates a FIFO. Unix only.</summary>
+    void CreateFifo(string path);
+
     /// <summary>The names in a directory, in no particular order.</summary>
     IReadOnlyList<string> Names(string path);
 
@@ -92,6 +95,12 @@ internal enum HostEntryKind
     File,
     Directory,
     SymbolicLink,
+
+    /// <summary>
+    /// A FIFO, a socket or a device: something that is neither a file with contents to read
+    /// nor a directory, and that opening to read could wait on.
+    /// </summary>
+    Special,
 }
 
 /// <summary>The filesystem in force for this run.</summary>
@@ -135,6 +144,9 @@ internal static class HostFile
         Tree.CreateSymbolicLink(path, target, directory: false);
 
     public static void CreateHardLink(string existing, string link) => Tree.CreateHardLink(existing, link);
+
+    /// <summary>Creates a FIFO, as <c>mkfifo</c> does. The framework has no API for one.</summary>
+    public static void CreateFifo(string path) => Tree.CreateFifo(path);
 
     public static void Delete(string path) => Tree.DeleteFile(path);
 
@@ -226,7 +238,7 @@ internal sealed partial class DiskTree : IHostTree
             return HostEntryKind.SymbolicLink;
         }
 
-        return info.Exists ? HostEntryKind.File
+        return info.Exists ? (IsSpecial(path) ? HostEntryKind.Special : HostEntryKind.File)
             : Directory.Exists(path) ? HostEntryKind.Directory
             : HostEntryKind.None;
     }
@@ -267,6 +279,19 @@ internal sealed partial class DiskTree : IHostTree
     }
 
     public void CreateHardLink(string existing, string link) => HardLinks.Create(existing, link);
+
+    public void CreateFifo(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Windows has no FIFOs in its filesystem.");
+        }
+
+        if (MakeFifo(path, 0b110_000_000) != 0)
+        {
+            throw new IOException($"Could not create a FIFO at '{path}': errno {Marshal.GetLastPInvokeError()}.");
+        }
+    }
 
     public IReadOnlyList<string> Names(string path) =>
         [.. Directory.GetFileSystemEntries(path).Select(entry => Path.GetFileName(entry))];
@@ -339,6 +364,63 @@ internal sealed partial class DiskTree : IHostTree
         OperatingSystem.IsWindows()
             ? throw new PlatformNotSupportedException("Names are UTF-16 on Windows and cannot be ill-formed bytes.")
             : [.. Encoding.UTF8.GetBytes(directory), (byte)'/', .. name, 0];
+
+    /// <summary>
+    /// Whether what a path names, without following a link, is something other than a file, a
+    /// directory or a link. The framework reports a FIFO as a file, and reading one to take a
+    /// snapshot of a tree would wait for a writer that never comes.
+    /// </summary>
+    /// <remarks>
+    /// The type is the top four bits of the mode, which Linux's <c>statx</c> reports at a fixed
+    /// offset on every architecture and macOS's <c>stat</c>, in its 64-bit inode layout, at
+    /// another.
+    /// </remarks>
+    private static bool IsSpecial(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return false;
+        }
+
+        byte[] buffer = new byte[256];
+        int result;
+        int modeOffset;
+        if (OperatingSystem.IsLinux())
+        {
+            const int AtCurrentDirectory = -100;
+            const int AtSymlinkNoFollow = 0x100;
+            const uint StatxType = 0x1;
+            result = Statx(AtCurrentDirectory, path, AtSymlinkNoFollow, StatxType, buffer);
+            modeOffset = 28;
+        }
+        else
+        {
+            result = RuntimeInformation.ProcessArchitecture == Architecture.X64
+                ? LStatInode64(path, buffer)
+                : LStat(path, buffer);
+            modeOffset = 4;
+        }
+
+        if (result != 0)
+        {
+            throw new IOException($"Could not describe '{path}': errno {Marshal.GetLastPInvokeError()}.");
+        }
+
+        int type = BitConverter.ToUInt16(buffer, modeOffset) & 0xF000;
+        return type is not (0x8000 or 0x4000 or 0xA000);
+    }
+
+    [LibraryImport("libc", EntryPoint = "mkfifo", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int MakeFifo(string path, uint mode);
+
+    [LibraryImport("libc", EntryPoint = "statx", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Statx(int directory, string path, int flags, uint mask, [Out] byte[] buffer);
+
+    [LibraryImport("libc", EntryPoint = "lstat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int LStat(string path, [Out] byte[] buffer);
+
+    [LibraryImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int LStatInode64(string path, [Out] byte[] buffer);
 
     [LibraryImport("libc", EntryPoint = "open", SetLastError = true)]
     private static partial int OpenRaw([In] byte[] path, int flags, uint mode);

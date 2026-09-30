@@ -405,7 +405,7 @@ public sealed partial class CorpusIntegrityTests
 
         // Counted, so that a row whose id stops matching the pattern above is noticed rather than
         // silently dropping out of every check. Change it when a row is added or removed.
-        Assert.Equal(49, rows.Count);
+        Assert.Equal(51, rows.Count);
         return rows;
     }
 

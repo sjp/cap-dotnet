@@ -32,6 +32,12 @@ internal enum HostFeature
     /// Absent on a FAT volume, which refuses them even under Linux.
     /// </summary>
     PosixNames = 1 << 6,
+
+    /// <summary>
+    /// A FIFO can be created here. Absent on Windows, on a FAT volume and in a filesystem held
+    /// in memory.
+    /// </summary>
+    SpecialFiles = 1 << 7,
 }
 
 /// <summary>

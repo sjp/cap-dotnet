@@ -55,6 +55,8 @@ public sealed class PlatformErrorTests
     [InlineData(PosixErrno.EXDEV, CapErrorCategory.CrossDevice)]
     [InlineData(PosixErrno.EEXIST, CapErrorCategory.AlreadyExists)]
     [InlineData(PosixErrno.EINVAL, CapErrorCategory.InvalidArgument)]
+    [InlineData(PosixErrno.ENXIO, CapErrorCategory.NotSupported)]
+    [InlineData(PosixErrno.ENODEV, CapErrorCategory.NotSupported)]
     internal void The_shared_range_reads_the_same_on_both_platforms(int errno, CapErrorCategory expected)
     {
         Assert.Equal(expected, LinuxErrno.Classify(errno));

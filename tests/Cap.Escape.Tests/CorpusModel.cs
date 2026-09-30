@@ -231,6 +231,12 @@ internal enum SetupKind
 
     /// <summary>A Windows junction, whose target is always stored as an absolute path.</summary>
     Junction,
+
+    /// <summary>
+    /// A FIFO: a name that is neither a file with contents nor a directory, and that an open
+    /// could wait on for a party that never comes.
+    /// </summary>
+    Fifo,
 }
 
 /// <summary>

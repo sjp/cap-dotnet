@@ -323,6 +323,78 @@ public sealed class CapFileTests : IDisposable
         Assert.Throws<ObjectDisposedException>(file.UnsafeGetHandle);
     }
 
+    // --- FIFOs -------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// A FIFO opens like any file, has no positions to read or write at, and says so in words
+    /// that point at the stream, which reads and writes one in order.
+    /// </summary>
+    /// <remarks>
+    /// The framework's own positioned calls refuse such a handle in terms of streams and
+    /// seeking, which describe neither what the caller asked for nor what to do instead.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
+    public async Task A_pipe_is_refused_positional_access_and_carried_by_a_stream()
+    {
+        SkipWithoutPipes();
+        HostFile.CreateFifo(Host("pipe"));
+
+        using Dir root = OpenRoot();
+        using CapFile reader = root.OpenFile("pipe");
+        using CapFile writer = root.OpenFile("pipe", FileMode.Open, FileAccess.Write);
+
+        NotSupportedException read = Assert.Throws<NotSupportedException>(() => reader.Read(new byte[4], 0));
+        Assert.Contains(nameof(CapFile.AsStream), read.Message, StringComparison.Ordinal);
+        Assert.Throws<NotSupportedException>(() => writer.Write("x"u8, 0));
+        await Assert.ThrowsAsync<NotSupportedException>(
+            async () => await reader.ReadAsync(new byte[4], 0, TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<NotSupportedException>(
+            async () => await writer.WriteAsync("x"u8.ToArray(), 0, TestContext.Current.CancellationToken));
+
+        using (Stream output = writer.AsStream())
+        {
+            output.Write("in order"u8);
+            output.Flush();
+        }
+
+        using Stream input = reader.AsStream(bufferSize: 0);
+        byte[] buffer = new byte[16];
+        int count = input.Read(buffer);
+        Assert.Equal("in order", Encoding.UTF8.GetString(buffer, 0, count));
+    }
+
+    /// <summary>
+    /// A FIFO nobody is reading is refused for writing as a kind of entry the open cannot act
+    /// on, rather than reported missing.
+    /// </summary>
+    /// <remarks>
+    /// The open is issued so that it cannot wait for a reader, and the system then refuses it
+    /// with a code that also means a device with no driver behind it. Reported as missing, the
+    /// refusal would send a caller looking for a directory that is there.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
+    public void A_pipe_nobody_is_reading_is_refused_for_writing_rather_than_reported_missing()
+    {
+        SkipWithoutPipes();
+        HostFile.CreateFifo(Host("pipe"));
+
+        using Dir root = OpenRoot();
+
+        CapIOException refused = Assert.Throws<CapIOException>(
+            () => root.OpenFile("pipe", FileMode.Open, FileAccess.Write));
+        Assert.Equal(CapErrorKind.NotSupported, refused.Kind);
+    }
+
+    private static void SkipWithoutPipes()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("A named pipe is not an entry of a directory on this platform.");
+        }
+    }
+
     // --- asynchronous operations -----------------------------------------------------------------
 
     /// <summary>Asynchronous reads and writes agree with the positional ones.</summary>

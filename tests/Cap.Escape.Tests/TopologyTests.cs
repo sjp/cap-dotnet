@@ -209,6 +209,168 @@ public sealed class TopologyTests
         scope.AssertItRan();
     }
 
+    /// <summary>
+    /// A move or a second name between two filesystems is refused as crossing a device, by
+    /// the filesystem, and leaves both trees as they were.
+    /// </summary>
+    /// <remarks>
+    /// Both handles are held, so the capability for each end is there; what refuses is the
+    /// filesystem, which cannot join two volumes. The refusal has to reach the caller as what
+    /// it is, rather than as a missing name or an escape, and has to happen before anything
+    /// changes: the library does not copy in place of a move it cannot make.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(BackendsAndPolicies))]
+    [Defends("T2", "T3")]
+    public void A_move_or_hard_link_onto_another_volume_is_reported_as_cross_device(
+        string backend, SymlinkPolicy policy)
+    {
+        string otherVolume = OtherVolume.Require();
+
+        using Arena arena = new();
+        using ScratchTree away = new(otherVolume);
+        arena.Plant([new(SetupKind.File, $"tree/{EscapeCorpus.PlainFile}")]);
+
+        using (Dir sandbox = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire()))
+        using (Dir other = Dir.Open(away.HostPath, AmbientAuthority.Acquire()))
+        {
+            Assert.True(
+                sandbox.GetMetadata().FileId.VolumeId != other.GetMetadata().FileId.VolumeId,
+                $"{OtherVolume.Variable} names '{otherVolume}', which is on the same volume as " +
+                $"'{arena.SandboxPath}'. Name a directory on another filesystem.");
+        }
+
+        string sandboxBefore = arena.SnapshotSandbox();
+
+        using BackendScope scope = Backends.Enter(backend);
+        using Dir root = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire(), policy);
+        using Dir destination = Dir.Open(away.HostPath, AmbientAuthority.Acquire(), policy);
+        string file = $"{EscapeCorpus.PlainDirectory}/{EscapeCorpus.PlainFile}";
+
+        foreach ((string what, Action attempt) in new (string, Action)[]
+        {
+            ("moving a file", () => root.Rename(file, destination, "moved")),
+            ("moving a directory", () => root.Rename("tree", destination, "moved")),
+            ("moving a file back", () => destination.Rename("absent", root, "moved")),
+            ("giving a file a second name", () => root.CreateHardLink(file, destination, "linked")),
+        })
+        {
+            if (what == "moving a file back")
+            {
+                // The other way round, from a name there: a file is made there to be moved.
+                HostFile.WriteAllText(Path.Join(away.HostPath, "absent"), EscapeCorpus.InsideContent);
+            }
+
+            Exception refused = Assert.ThrowsAny<CapIOException>(attempt);
+            Assert.True(
+                CapIOException.KindOf(refused) == CapErrorKind.CrossDevice,
+                $"{what}, {backend}, {policy}: {refused.GetType().Name}: {refused.Message}");
+
+            string planted = Path.Join(away.HostPath, "absent");
+            if (HostEntry.IsTaken(planted))
+            {
+                HostFile.Delete(planted);
+            }
+        }
+
+        Assert.Empty(HostDirectory.GetFileSystemEntries(away.HostPath));
+        Assert.Equal(sandboxBefore, arena.SnapshotSandbox());
+        scope.AssertItRan();
+    }
+
+    /// <summary>
+    /// A root removed while a handle is open on it holds nothing, and nothing done through
+    /// the handle brings it or anything in it back.
+    /// </summary>
+    /// <remarks>
+    /// The handle keeps the directory itself alive, not its name or its place: it can still be
+    /// described, every name beneath it is missing, listing it reports it removed, and a
+    /// creation there is refused by the filesystem, which will not add an entry to a directory
+    /// that has been removed. Nothing is resolved by the path the root was opened by, so
+    /// nothing is made at that path either.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(BackendsAndPolicies))]
+    [Defends("T6")]
+    public void A_root_removed_while_open_reports_missing_names_and_never_recreates_them(
+        string backend, SymlinkPolicy policy)
+    {
+        SkipWhereOpenDirectoriesCannotBeMoved();
+
+        foreach (Operation operation in Enum.GetValues<Operation>())
+        {
+            using Arena arena = new();
+
+            Observation observation;
+            using (BackendScope scope = Backends.Enter(backend))
+            {
+                using Dir root = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire(), policy);
+                HostDirectory.Delete(arena.SandboxPath, recursive: true);
+
+                observation = OperationRunner.Run(root, operation, "x");
+
+                Assert.Throws<DirectoryNotFoundException>(() => root.EnumerateEntries().ToList());
+                Assert.Equal(CapFileType.Directory, root.GetMetadata().Type);
+            }
+
+            string context = $"{operation}, {backend}, {policy}";
+            Assert.True(
+                observation.Outcome == Outcome.NotFound,
+                $"{context}: expected NotFound, got {observation.Outcome}" +
+                (observation.Detail is null ? "." : $": {observation.Detail.GetType().Name}: {observation.Detail.Message}"));
+            Assert.False(HostEntry.IsTaken(arena.SandboxPath), $"{context}: the removed root was made again.");
+        }
+    }
+
+    /// <summary>
+    /// A root moved while a handle is open on it is still the root, wherever it now sits: names
+    /// beneath it resolve beneath it, and a step or a link above it is still refused.
+    /// </summary>
+    /// <remarks>
+    /// Moved into the directory beside it, so that what lies above the root afterwards is the
+    /// very place the sandbox must not reach. A handle that remembered the path it was opened
+    /// by, or looked its own place up again, would find it gone, or find the parent changed.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(BackendsAndPolicies))]
+    [Defends("T6")]
+    public void A_root_renamed_while_open_keeps_resolving_beneath_the_handle(string backend, SymlinkPolicy policy)
+    {
+        SkipWhereOpenDirectoriesCannotBeMoved();
+        RequireFeatures(HostFeature.Symlinks);
+
+        using Arena arena = new();
+        arena.Plant([new(SetupKind.DirectoryLink, "up", "..")]);
+        string moved = Path.Join(arena.OutsidePath, "moved");
+
+        using BackendScope scope = Backends.Enter(backend);
+        using Dir root = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire(), policy);
+        HostDirectory.Move(arena.SandboxPath, moved);
+
+        Assert.Equal(
+            EscapeCorpus.InsideContent,
+            root.ReadAllText($"{EscapeCorpus.PlainDirectory}/{EscapeCorpus.PlainFile}"));
+        Assert.Throws<SandboxEscapeException>(() => root.OpenDir(".."));
+        Assert.Throws<SandboxEscapeException>(() => root.OpenFile($"../{EscapeCorpus.OutsideFile}"));
+
+        if (policy == SymlinkPolicy.FollowWithinSandbox)
+        {
+            Assert.Throws<SandboxEscapeException>(() => root.OpenDir("up"));
+            Assert.Throws<SandboxEscapeException>(() => root.OpenFile($"up/{EscapeCorpus.OutsideFile}"));
+        }
+        else
+        {
+            Exception refused = Assert.ThrowsAny<CapIOException>(() => root.OpenDir("up"));
+            Assert.IsNotType<SandboxEscapeException>(refused);
+        }
+
+        root.WriteAllText("made", EscapeCorpus.InsideContent);
+        Assert.True(HostFile.Exists(Path.Join(moved, "made")));
+        Assert.False(HostEntry.IsTaken(arena.SandboxPath));
+        Assert.Equal(EscapeCorpus.OutsideContent, HostFile.ReadAllText(Path.Join(arena.OutsidePath, EscapeCorpus.OutsideFile)));
+        scope.AssertItRan();
+    }
+
     private static Observation RunOnce(
         string backend, SymlinkPolicy policy, SetupStep[] links, Operation operation, string path)
     {
@@ -229,4 +391,16 @@ public sealed class TopologyTests
 
     private static void RequireFeatures(HostFeature needed) =>
         HostFeatures.Require(needed, "The topology cannot be built without it.");
+
+    /// <summary>
+    /// Windows will not remove or rename a directory while a handle is open on it, so there the
+    /// attack cannot be arranged.
+    /// </summary>
+    private static void SkipWhereOpenDirectoriesCannotBeMoved()
+    {
+        if (OperatingSystem.IsWindows() && !HostTree.InMemory)
+        {
+            Assert.Skip("Windows does not remove or rename a directory while a handle is open on it.");
+        }
+    }
 }

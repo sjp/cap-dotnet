@@ -322,16 +322,16 @@ and every resolution backend, and its tests are the main defence against an esca
 This section is also for contributors to the library itself.
 
 A test that needs something the host may lack — a symbolic link, a hard link, a Windows
-junction, the Linux `/proc` filesystem, or a volume that stores names Windows reserves — finds
-out by trying, and stands aside where the host refuses. That is right on a machine that cannot
+junction, the Linux `/proc` filesystem, a FIFO, or a volume that stores names Windows
+reserves — finds out by trying, and stands aside where the host refuses. That is right on a machine that cannot
 provide it, and wrong on one that was set up to: creating a symbolic link on Windows needs an
 elevated token or developer mode, so a runner that lost either would pass with most of the
 escape corpus skipped.
 
 `CAPDOTNET_EXPECT_HOST_FEATURES` names, as a comma-separated list, the features a run was set
 up with: any of `Symlinks`, `HardLinks`, `Junctions`, `ProcessFilesystem`, `CaseInsensitive`,
-`NormalizationInsensitive` and `PosixNames`. Where a test needs a feature the list names and the
-host lacks, it fails naming the feature instead of skipping, and
+`NormalizationInsensitive`, `PosixNames` and `SpecialFiles`. Where a test needs a feature the
+list names and the host lacks, it fails naming the feature instead of skipping, and
 `HostFeaturesTests.The_features_this_run_was_set_up_with_are_present` in the escape corpus fails
 once for the whole run. A name that is not a feature fails the run. Unset, every such test skips
 as before, which is what a local run on a machine without those features wants.

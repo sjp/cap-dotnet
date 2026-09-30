@@ -531,12 +531,24 @@ public sealed class CapFile : ICapFile
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot read.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The file is a FIFO, a socket or a device, whose contents arrive in order and have no
+    /// positions to read at. <see cref="AsStream"/> reads one in order.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public int Read(Span<byte> buffer, long fileOffset)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(fileOffset);
         Demand();
-        return _backend.ReadFile(_handle, buffer, fileOffset);
+
+        try
+        {
+            return _backend.ReadFile(_handle, buffer, fileOffset);
+        }
+        catch (NotSupportedException unseekable)
+        {
+            throw NoPositions(unseekable);
+        }
     }
 
     /// <summary>
@@ -566,6 +578,10 @@ public sealed class CapFile : ICapFile
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot write.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The file is a FIFO, a socket or a device, whose contents leave in order and have no
+    /// positions to write at. <see cref="AsStream"/> writes to one in order.
+    /// </exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public void Write(ReadOnlySpan<byte> buffer, long fileOffset)
     {
@@ -578,7 +594,14 @@ public sealed class CapFile : ICapFile
             return;
         }
 
-        _backend.WriteFile(_handle, buffer, fileOffset);
+        try
+        {
+            _backend.WriteFile(_handle, buffer, fileOffset);
+        }
+        catch (NotSupportedException unseekable)
+        {
+            throw NoPositions(unseekable);
+        }
     }
 
     /// <summary>
@@ -604,6 +627,10 @@ public sealed class CapFile : ICapFile
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot read.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The file is a FIFO, a socket or a device, whose contents arrive in order and have no
+    /// positions to read at. <see cref="AsStream"/> reads one in order.
+    /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public ValueTask<int> ReadAsync(
@@ -613,7 +640,15 @@ public sealed class CapFile : ICapFile
     {
         ArgumentOutOfRangeException.ThrowIfNegative(fileOffset);
         Demand();
-        return _backend.ReadFileAsync(_handle, buffer, fileOffset, cancellationToken);
+
+        try
+        {
+            return _backend.ReadFileAsync(_handle, buffer, fileOffset, cancellationToken);
+        }
+        catch (NotSupportedException unseekable)
+        {
+            throw NoPositions(unseekable);
+        }
     }
 
     /// <summary>
@@ -642,6 +677,10 @@ public sealed class CapFile : ICapFile
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="fileOffset"/> is negative.</exception>
     /// <exception cref="UnauthorizedAccessException">This handle cannot write.</exception>
+    /// <exception cref="NotSupportedException">
+    /// The file is a FIFO, a socket or a device, whose contents leave in order and have no
+    /// positions to write at. <see cref="AsStream"/> writes to one in order.
+    /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been closed or given away.</exception>
     public ValueTask WriteAsync(
@@ -659,7 +698,14 @@ public sealed class CapFile : ICapFile
                 : new ValueTask(Task.Run(() => WriteAtEnd(buffer.Span, fileOffset), cancellationToken));
         }
 
-        return _backend.WriteFileAsync(_handle, buffer, fileOffset, cancellationToken);
+        try
+        {
+            return _backend.WriteFileAsync(_handle, buffer, fileOffset, cancellationToken);
+        }
+        catch (NotSupportedException unseekable)
+        {
+            throw NoPositions(unseekable);
+        }
     }
 
     /// <summary>
@@ -922,6 +968,21 @@ public sealed class CapFile : ICapFile
             throw FailureTranslation.ToWriteException(error);
         }
     }
+
+    /// <summary>
+    /// The refusal of a read or write at an offset on a file that has no offsets.
+    /// </summary>
+    /// <remarks>
+    /// The framework's own positioned calls refuse such a handle before reaching the system,
+    /// in words about streams and seeking that describe neither what was asked nor what to do
+    /// instead. Opening one is not refused: it is an entry beneath the handle like any other,
+    /// opened so that naming it cannot wait for the other end.
+    /// </remarks>
+    private static NotSupportedException NoPositions(NotSupportedException unseekable) =>
+        new(
+            "This file is a FIFO, a socket or a device: what it holds arrives or leaves in order " +
+            "and has no positions to read or write at. AsStream reads and writes one in order.",
+            unseekable);
 
     /// <summary>Refuses to act on a handle that is closed or has been given away.</summary>
     private void Demand()

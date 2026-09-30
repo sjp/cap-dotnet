@@ -292,6 +292,13 @@ internal sealed class MemoryTree(InMemoryFileSystem fs) : IHostTree
     }
 
     /// <remarks>
+    /// The filesystem held in memory models files, directories and links, and nothing that
+    /// waits for another party, so a case needing one stands aside here.
+    /// </remarks>
+    public void CreateFifo(string path) =>
+        throw new PlatformNotSupportedException("The filesystem held in memory has no FIFOs.");
+
+    /// <remarks>
     /// Held as the library holds such a name, each byte that is not text escaped to a lone
     /// surrogate, since that is the string a handle on this filesystem is given for it.
     /// </remarks>

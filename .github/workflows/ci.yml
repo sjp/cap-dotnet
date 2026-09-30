@@ -75,8 +75,8 @@ jobs:
         run: dotnet build CapDotnet.slnx --configuration Release
 
       # ---------------------------------------------------------------------------------
-      # A test that needs a symbolic link, a hard link, a junction or /proc stands aside on a
-      # host that cannot make one. These runners can, so the suite is told to expect them, and
+      # A test that needs a symbolic link, a hard link, a junction, /proc or a FIFO stands aside
+      # on a host that cannot make one. These runners can, so the suite is told to expect them, and
       # a runner that lost one -- the elevated token Windows needs for links, say, or a masked
       # /proc -- fails the leg instead of passing with the heart of the corpus skipped.
       # ---------------------------------------------------------------------------------
@@ -84,9 +84,9 @@ jobs:
         shell: pwsh
         run: |
           $features = @{
-            Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames'
+            Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames,SpecialFiles'
             Windows = 'Symlinks,HardLinks,Junctions'
-            macOS   = 'Symlinks,HardLinks,PosixNames'
+            macOS   = 'Symlinks,HardLinks,PosixNames,SpecialFiles'
           }['${{ runner.os }}']
           "CAPDOTNET_EXPECT_HOST_FEATURES=$features" >> $env:GITHUB_ENV
 
@@ -317,6 +317,14 @@ jobs:
           echo "CAPDOTNET_TEST_BIND_MOUNT=$mount" >> "$GITHUB_ENV"
           echo "CAPDOTNET_EXPECT_BIND_MOUNT=1" >> "$GITHUB_ENV"
 
+      # The runner's own volume is a different filesystem from every one mounted at
+      # /mnt/captest, so a move or a link from the sandbox to it has to be refused as crossing
+      # a device -- by the kernel, reported as such, and with neither tree changed.
+      - name: Name a second volume for moves and links between filesystems
+        run: |
+          echo "CAPDOTNET_TEST_OTHER_VOLUME=$RUNNER_TEMP" >> "$GITHUB_ENV"
+          echo "CAPDOTNET_EXPECT_OTHER_VOLUME=1" >> "$GITHUB_ENV"
+
       - name: Run the escape corpus against ${{ matrix.fs }}
         env:
           # The escape corpus reads this to place its fixtures. It probes the volume for what
@@ -324,11 +332,11 @@ jobs:
           # normalisation folding -- and adapts each case rather than assuming ext4.
           CAPDOTNET_TEST_ROOT: /mnt/captest
           # What each volume must turn out to hold, so that a case needing it fails rather than
-          # stands aside where it is missing. vfat holds no links of either kind, and is here
-          # to show that making one is refused.
+          # stands aside where it is missing. vfat holds no links of either kind and no FIFOs,
+          # and is here to show that making a link is refused.
           CAPDOTNET_EXPECT_HOST_FEATURES: >-
             ${{ matrix.fs == 'vfat-case-insensitive' && 'CaseInsensitive'
-            || 'Symlinks,HardLinks,ProcessFilesystem,PosixNames' }}
+            || 'Symlinks,HardLinks,ProcessFilesystem,PosixNames,SpecialFiles' }}
         run: >
           dotnet test tests/Cap.Escape.Tests/Cap.Escape.Tests.csproj
           --configuration Release
@@ -376,9 +384,9 @@ jobs:
       - name: Expect the host features this runner provides
         run: |
           $features = @{
-            Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames'
+            Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames,SpecialFiles'
             Windows = 'Symlinks,HardLinks,Junctions'
-            macOS   = 'Symlinks,HardLinks,PosixNames'
+            macOS   = 'Symlinks,HardLinks,PosixNames,SpecialFiles'
           }['${{ runner.os }}']
           "CAPDOTNET_EXPECT_HOST_FEATURES=$features" >> $env:GITHUB_ENV
 

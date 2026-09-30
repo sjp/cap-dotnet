@@ -39,13 +39,32 @@ internal static class OperationRunner
     /// <summary>The largest amount of a file read back.</summary>
     private const int ReadLimit = 4096;
 
+    /// <summary>
+    /// How long one operation may take before it is taken to be waiting for something that will
+    /// never happen. Far longer than any operation on a small tree needs, even on a loaded
+    /// runner.
+    /// </summary>
+    private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
+
+    /// <remarks>
+    /// Run on a thread of its own and waited for with a limit, so that an operation that
+    /// blocks — an open of a FIFO waiting for a writer, say — fails its case instead of hanging
+    /// the run. The thread it blocks is abandoned; the case has failed, and nothing else waits
+    /// on it.
+    /// </remarks>
     public static Observation Run(Dir root, Operation operation, string path)
     {
         Observation observation = new(Outcome.Success, null);
+        Task<bool> performed = Task.Run(() => Perform(root, operation, path, observation));
+
+        if (Task.WaitAny([performed], Watchdog) < 0)
+        {
+            Assert.Fail($"{operation} on '{path}' did not finish within {Watchdog.TotalSeconds} s; it is waiting on something.");
+        }
 
         try
         {
-            return Perform(root, operation, path, observation)
+            return performed.GetAwaiter().GetResult()
                 ? observation
                 : new Observation(Outcome.NotFound, null);
         }
@@ -271,12 +290,27 @@ internal static class OperationRunner
         ReadFrom(file, observation);
     }
 
+    /// <remarks>
+    /// A FIFO has no positions to read at, so what is not a file with contents is read in
+    /// order, through a stream, as a caller holding one would read it.
+    /// </remarks>
     private static void ReadFrom(CapFile file, Observation observation)
     {
-        observation.Objects.Add(file.GetMetadata().FileId);
+        CapMetadata metadata = file.GetMetadata();
+        observation.Objects.Add(metadata.FileId);
 
         byte[] buffer = new byte[ReadLimit];
-        int read = file.Read(buffer, 0);
+        int read;
+        if (metadata.Type == CapFileType.File)
+        {
+            read = file.Read(buffer, 0);
+        }
+        else
+        {
+            using Stream stream = file.AsStream();
+            read = stream.Read(buffer);
+        }
+
         observation.Contents.Add(System.Text.Encoding.UTF8.GetString(buffer, 0, read));
     }
 }

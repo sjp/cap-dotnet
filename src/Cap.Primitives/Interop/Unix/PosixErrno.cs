@@ -22,6 +22,11 @@ internal static class PosixErrno
     public const int ENOENT = 2;
     public const int EINTR = 4;
     public const int EIO = 5;
+
+    /// <summary>
+    /// The name exists and what it holds has no other end to reach: a FIFO opened for writing
+    /// with nobody reading, a socket, or a device with no driver behind it.
+    /// </summary>
     public const int ENXIO = 6;
     public const int EBADF = 9;
     public const int ENOMEM = 12;
@@ -30,6 +35,8 @@ internal static class PosixErrno
     public const int EBUSY = 16;
     public const int EEXIST = 17;
     public const int EXDEV = 18;
+
+    /// <summary>The name holds a device node with no driver behind it.</summary>
     public const int ENODEV = 19;
     public const int ENOTDIR = 20;
     public const int EISDIR = 21;
@@ -60,9 +67,15 @@ internal static class PosixErrno
         switch (errno)
         {
             case ENOENT:
+                category = CapErrorCategory.NotFound;
+                return true;
+
+            // The name is there, so reporting it missing would say something untrue about what
+            // exists beneath the handle, and send a caller looking for a directory that is
+            // there. What it holds is a kind of entry the open cannot act on.
             case ENXIO:
             case ENODEV:
-                category = CapErrorCategory.NotFound;
+                category = CapErrorCategory.NotSupported;
                 return true;
             case EPERM:
             case EACCES:

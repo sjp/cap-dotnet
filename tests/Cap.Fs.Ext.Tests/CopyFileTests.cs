@@ -34,6 +34,36 @@ public sealed class CopyFileTests : IDisposable
         Assert.Equal("contents", _fs.ReadAllText("from/data.txt"));
     }
 
+    /// <summary>
+    /// A FIFO is refused as a source, with or without replacement, before anything is made at
+    /// the destination.
+    /// </summary>
+    /// <remarks>
+    /// It opens as a file does and has no contents of its own: a read of it waits on whatever
+    /// is at the other end. A copy that read it would hang, or copy nothing and call the result
+    /// a file.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
+    public void A_named_pipe_is_refused_as_a_source()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("There is no filesystem object of this kind on this platform.");
+        }
+
+        HostFile.CreateFifo(Path.Combine(_tree.HostPath, "pipe"));
+        using Dir root = Dir.Open(_tree.HostPath, AmbientAuthority.Acquire());
+
+        foreach (bool overwrite in new[] { false, true })
+        {
+            CapIOException refused = Assert.Throws<CapIOException>(
+                () => root.CopyFile("pipe", root, "copy", overwrite));
+            Assert.Equal(CapErrorKind.NotSupported, refused.Kind);
+            Assert.Equal(["pipe"], HostDirectory.GetFileSystemEntries(_tree.HostPath).Select(Path.GetFileName));
+        }
+    }
+
     /// <summary>Without replacement a taken name is refused and left as it was.</summary>
     [Fact]
     public void A_taken_name_is_refused_unless_replacement_is_asked_for()

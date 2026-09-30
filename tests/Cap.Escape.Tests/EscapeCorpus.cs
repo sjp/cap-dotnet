@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Primitives.Interop;
 using Cap.Tests;
 using static Cap.Escape.Tests.Expectation;
 
@@ -117,6 +118,12 @@ internal static class EscapeCorpus
     private const int OverlongChainLength = 45;
 
     /// <summary>
+    /// As many links as one resolution follows, on every backend: the library's own count on
+    /// the walk, and the kernel's on the confined open, which it was matched to.
+    /// </summary>
+    private const int LinkBudget = PortableResolver.MaxSymbolicLinks;
+
+    /// <summary>
     /// Deeper than the walk will descend, so that the bound on handles held at once is reached
     /// on a real tree rather than a simulated one.
     /// </summary>
@@ -136,6 +143,7 @@ internal static class EscapeCorpus
         Lexical(cases);
         Links(cases);
         ProcessFilesystem(cases);
+        SpecialFiles(cases);
         WindowsNames(cases);
         WindowsReparsePoints(cases);
         Folding(cases);
@@ -287,6 +295,41 @@ internal static class EscapeCorpus
             ],
         });
 
+        // Ten thousand real names, four times as many as the case above and still within what
+        // the parser takes. Refused for the same reasons, and not by running out of anything.
+        string manyNames = string.Join('/', Enumerable.Repeat("a", 10_000));
+        cases.Add(new("ten-thousand-components", ["L6"], manyNames, overKernelExpected, overKernelExpected)
+        {
+            Differences =
+            [
+                new(
+                    [Backends.ConfinedOpen, Backends.InMemoryConfined],
+                    Uniform(Outcome.Refused),
+                    "the confined open passes the whole path to the kernel, which refuses one longer " +
+                    "than its own limit before looking anything up. The in-memory filesystem's " +
+                    "confined open answers as the kernel does."),
+            ],
+        });
+
+        // Sixteen thousand "." components in front of an ordinary path, close to the longest
+        // the parser takes. The walk drops each, so what is left is two names, and the path
+        // reaches the file however many there were. Stored in a link, the same text is longer
+        // than any filesystem keeps as a target.
+        string manyDots = string.Concat(Enumerable.Repeat("./", 16_000)) + $"{PlainDirectory}/{PlainFile}";
+        Expectation throughDots = ExistingFile().With(Operation.CreateSymlinkTo, Outcome.Refused);
+        cases.Add(new("many-dot-components", ["L5", "L6"], manyDots, throughDots, throughDots)
+        {
+            Differences =
+            [
+                new(
+                    [Backends.ConfinedOpen, Backends.InMemoryConfined],
+                    Uniform(Outcome.Refused),
+                    "the confined open passes the path to the kernel as the caller wrote it, dots " +
+                    "and all, and the kernel refuses one longer than its own limit before looking " +
+                    "anything up. The in-memory filesystem's confined open answers as the kernel does."),
+            ],
+        });
+
         // Deeper than the walk will go. The bound exists because the walk holds a handle for
         // every level it has descended through; the confined open holds none, so it has no
         // reason for the bound and resolves the path.
@@ -400,6 +443,15 @@ internal static class EscapeCorpus
                 $"overlong-{i:D2}",
                 i == OverlongChainLength - 1 ? "plain" : $"overlong-{i + 1:D2}"))]));
 
+        // Exactly as many links as resolution follows, and one more. The first is followed to
+        // the end, on every backend alike; the second is refused, on every backend alike. A
+        // link made to the first adds one to the chain and is refused as the second is.
+        cases.Add(Link("chain-at-the-budget", ["S4"], "budget-00",
+            FinalLink(Outcome.Success, Outcome.Refused).With(Operation.CreateSymlinkTo, Outcome.Refused),
+            Chain("budget", LinkBudget, $"{PlainDirectory}/{PlainFile}")));
+        cases.Add(Link("chain-one-past-the-budget", ["S4"], "budget-00", loop,
+            Chain("budget", LinkBudget + 1, $"{PlainDirectory}/{PlainFile}")));
+
         // Aimed outside at something that exists and at something that does not. The two must
         // be indistinguishable, which is checked pairwise elsewhere; here each has to be
         // refused on its own.
@@ -437,6 +489,43 @@ internal static class EscapeCorpus
             });
         }
     }
+
+    /// <summary>Things in a Unix tree that are neither files nor directories.</summary>
+    private static void SpecialFiles(List<EscapeCase> cases)
+    {
+        // A FIFO is a name like any other: described, timed, moved, removed and given a second
+        // name as itself. Every open is issued so that it cannot wait for the other end, so
+        // opening one to read finds it empty rather than hanging, and opening one to write,
+        // with nobody reading, is refused rather than hanging. Copying one is refused, since
+        // it has no contents to copy. Nothing about it is followed.
+        cases.Add(new("fifo-as-the-name", ["T5"], "pipe", FifoAsTheName(), null)
+        {
+            Setup = [new(SetupKind.Fifo, "pipe")],
+            Requires = HostFeature.SpecialFiles,
+        });
+
+        // It is not a directory, so nothing can be reached through it.
+        cases.Add(new("fifo-as-a-component", ["T5"], "pipe/x", Uniform(Outcome.Refused), null)
+        {
+            Setup = [new(SetupKind.Fifo, "pipe")],
+            Requires = HostFeature.SpecialFiles,
+        });
+
+        // A device outside the tree is outside, reached through a link like anything else is.
+        cases.Add(new("device-through-a-link", ["S1", "T5"], "dev", FinalLink(Outcome.Escape), null)
+        {
+            Setup = [File("dev", "/dev/null")],
+            Requires = HostFeature.Symlinks,
+        });
+    }
+
+    /// <summary>What every operation on a FIFO comes to.</summary>
+    private static Expectation FifoAsTheName() =>
+        ExistingFile().With(
+            Operation.CreateFile, Outcome.Refused,
+            (Operation.WriteAllText, Outcome.Refused),
+            (Operation.AppendAllText, Outcome.Refused),
+            (Operation.CopyFileFrom, Outcome.Refused));
 
     /// <summary>Names Windows gives a meaning other than a filename.</summary>
     private static void WindowsNames(List<EscapeCase> cases)
@@ -504,6 +593,11 @@ internal static class EscapeCorpus
                 Requires = PosixNamesOnUnix,
             });
         }
+
+        // Half of a UTF-16 pair with no other half. Windows stores names as UTF-16 without
+        // checking them, so this is a name like any other, beneath the directory it is in.
+        // Under POSIX rules it has no UTF-8 spelling, which the encoder's own tests cover.
+        cases.Add(new("lone-surrogate", ["M1"], $"{PlainDirectory}/\uD800", null, ordinaryName));
     }
 
     /// <summary>Windows reparse points that are not symbolic links.</summary>
@@ -623,6 +717,15 @@ internal static class EscapeCorpus
             : expected;
 
     private static SetupStep File(string path, string target) => new(SetupKind.FileLink, path, target);
+
+    /// <summary>
+    /// Links named <c>{prefix}-00</c> onwards, each naming the next, the last naming
+    /// <paramref name="end"/>: following the first follows <paramref name="length"/> links.
+    /// </summary>
+    private static SetupStep[] Chain(string prefix, int length, string end) =>
+        [.. Enumerable.Range(0, length).Select(i => File(
+            $"{prefix}-{i:D2}",
+            i == length - 1 ? end : $"{prefix}-{i + 1:D2}"))];
 
     private static SetupStep Directory(string path, string target) => new(SetupKind.DirectoryLink, path, target);
 }
