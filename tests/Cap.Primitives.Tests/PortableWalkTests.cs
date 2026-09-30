@@ -674,6 +674,121 @@ public sealed class PortableWalkTests
         });
     }
 
+    /// <summary>Every row of the unusable-link-target table, on each resolution strategy.</summary>
+    public static TheoryData<string, bool> LinkTargetRows
+    {
+        get
+        {
+            TheoryData<string, bool> rows = [];
+            foreach (string name in LinkTargets.Keys)
+            {
+                rows.Add(name, false);
+                rows.Add(name, true);
+            }
+
+            return rows;
+        }
+    }
+
+    /// <summary>
+    /// A link whose stored text the parser refuses is answered as a caller's own path of that
+    /// shape would be, on the walk and on the confined open alike, from the text alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The caller's path is read under Windows rules, which is what gives the target the
+    /// rooted, device and rewritten-name shapes to be refused for; the simulation itself
+    /// belongs to no platform, so this runs on every agent. Both strategies are read against
+    /// the same expected value rather than compared with each other, which would pass when
+    /// both were wrong alike.
+    /// </para>
+    /// <para>
+    /// The only name looked up is the link's own: a target is refused before anything it
+    /// names is looked for, so a planted link cannot be used to probe what lies outside.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(LinkTargetRows))]
+    public void A_link_target_the_parser_refuses_is_reported_as_the_walk_would_report_a_callers_path(
+        string row, bool confined)
+    {
+        (string target, CapErrorCategory expected) = LinkTargets[row];
+        FakeFileSystem fs = Sandbox();
+        fs.PathSyntax = CapPathSyntax.Windows;
+        fs.SupportsConfinedOpen = confined;
+        MemoryNode sandbox = fs.Find("sandbox")!;
+        _ = fs.AddDirectory("sandbox/dir");
+        _ = fs.AddSymbolicLink("sandbox/l", target);
+
+        List<string> lookups = [];
+        fs.BeforeLookup = (_, name) => lookups.Add(name);
+
+        Assert.True(
+            CapPath.TryParse("l", CapPathSyntax.Windows, ParentLinkPolicy.Preserve, out CapPath path, out _));
+        FileOpenRequest read = FileOpenRequest.Existing(FileAccess.Read);
+
+        Run(fs, (ops, root) =>
+        {
+            int baseline = ops.OpenHandleCount;
+            lookups.Clear();
+
+            CapResult<SafeDirHandle> directory = Resolver.OpenDirectory(root, in path, CapAccess.Read, ConfinedResolveOptions.None);
+            using (directory.Value)
+            {
+                if (expected == CapErrorCategory.None)
+                {
+                    Assert.True(directory.IsSuccess, directory.Error.FailureDescription);
+                    AssertIs(ops, sandbox, directory.Value!);
+                }
+                else
+                {
+                    Assert.False(directory.IsSuccess, $"'{target}' resolved when it should not have.");
+                    Assert.Equal(expected, directory.Error.Category);
+                    Assert.All(lookups, name => Assert.Equal("l", name));
+                }
+            }
+
+            Assert.Equal(baseline, ops.OpenHandleCount);
+            lookups.Clear();
+
+            CapResult<SafeFileHandle> file = Resolver.OpenFile(root, in path, in read, ConfinedResolveOptions.None);
+            file.Value?.Dispose();
+            Assert.False(file.IsSuccess, $"'{target}' opened as a file.");
+            if (expected == CapErrorCategory.None)
+            {
+                Assert.Equal(CapErrorCategory.IsADirectory, file.Error.Category);
+            }
+            else
+            {
+                Assert.Equal(expected, file.Error.Category);
+                Assert.All(lookups, name => Assert.Equal("l", name));
+            }
+
+            Assert.Equal(baseline, ops.OpenHandleCount);
+        });
+    }
+
+    /// <summary>
+    /// Link targets the parser refuses under Windows rules, and what resolving a link holding
+    /// each must report; <see cref="CapErrorCategory.None"/> is the one target that is not a
+    /// refusal, <c>.</c>, which names the directory holding the link.
+    /// </summary>
+    private static readonly Dictionary<string, (string Target, CapErrorCategory Expected)> LinkTargets = new()
+    {
+        ["reserved-name"] = ("CON", CapErrorCategory.Escaped),
+        ["reserved-name-in-a-later-component"] = (@"dir\NUL.txt", CapErrorCategory.Escaped),
+        ["absolute"] = (@"C:\x", CapErrorCategory.Escaped),
+        ["drive-relative"] = ("C:x", CapErrorCategory.Escaped),
+        ["root-relative"] = (@"\x", CapErrorCategory.Escaped),
+        ["unc"] = (@"\\srv\share", CapErrorCategory.Escaped),
+        ["device-namespace"] = (@"\\?\C:\x", CapErrorCategory.Escaped),
+        ["trailing-dot"] = ("foo.", CapErrorCategory.InvalidArgument),
+        ["invalid-character"] = ("a|b", CapErrorCategory.InvalidArgument),
+        ["component-too-long"] = (@"dir\" + new string('a', CapPath.MaxComponentLength + 1), CapErrorCategory.NameTooLong),
+        ["empty"] = ("", CapErrorCategory.NotFound),
+        ["dot"] = (".", CapErrorCategory.None),
+    };
+
     /// <summary>A mount appearing inside the sandbox can be refused.</summary>
     /// <remarks>
     /// Whoever writes the mount table is outside the trust boundary, so a filesystem grafted
