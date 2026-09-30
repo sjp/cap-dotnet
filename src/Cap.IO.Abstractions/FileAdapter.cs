@@ -156,7 +156,7 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
             using Stream writing = to.AsStream();
             reading.CopyTo(writing);
         }
-        catch (Exception e) when (CopyFailure(e, destination) is { } translated)
+        catch (Exception e) when (CopyFailure(e, destination, overwrite) is { } translated)
         {
             throw translated;
         }
@@ -166,9 +166,17 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
     /// What <c>System.IO</c> throws for a copy that failed at its destination: a name taken by
     /// a directory is reported as a directory rather than as a name taken.
     /// </summary>
-    private Exception? CopyFailure(Exception exception, in Request destination) =>
+    /// <remarks>
+    /// Windows finds the directory before the name collision, so a copy that may not overwrite
+    /// fails there with <see cref="CapErrorKind.IsADirectory"/> rather than
+    /// <see cref="CapErrorKind.AlreadyExists"/>. That is the same refusal, and is reported the
+    /// same way. A copy that may overwrite is refused access to the directory instead, as
+    /// <c>System.IO</c> does.
+    /// </remarks>
+    private Exception? CopyFailure(Exception exception, in Request destination, bool overwrite) =>
         exception is not SandboxEscapeException
-        && CapIOException.KindOf(exception) == CapErrorKind.AlreadyExists
+        && CapIOException.KindOf(exception) is var kind
+        && (kind == CapErrorKind.AlreadyExists || (!overwrite && kind == CapErrorKind.IsADirectory))
         && fs.TryDescribeForExistence(destination.Virtual, out CapMetadata taken)
         && taken.Type == CapFileType.Directory
             ? Failures.TargetIsDirectory(destination.Virtual, exception)
