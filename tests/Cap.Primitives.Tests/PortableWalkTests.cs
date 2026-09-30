@@ -787,6 +787,136 @@ public sealed class PortableWalkTests
         });
     }
 
+    /// <summary>Every row of the mount-crossing table, on each resolution strategy.</summary>
+    public static TheoryData<string, bool> MountCrossingRows
+    {
+        get
+        {
+            TheoryData<string, bool> rows = [];
+            foreach (string name in MountCrossings.Keys)
+            {
+                rows.Add(name, false);
+                rows.Add(name, true);
+            }
+
+            return rows;
+        }
+    }
+
+    /// <summary>
+    /// Refusing mount crossings gives the same answer on the walk and on the confined open,
+    /// whichever kind of open meets the mount, and costs nothing when no mount is met.
+    /// </summary>
+    /// <remarks>
+    /// Each row is asserted twice: under the option, against its expected answer, and without
+    /// it, as a pass-through, so a row cannot pass by the path simply not resolving. Both
+    /// strategies are read against the same expected value rather than compared with each
+    /// other, which would pass when both were wrong alike. Opens that may create are not
+    /// here, because the simulated confined open cannot create; the walk's answer for them is
+    /// asserted above.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(MountCrossingRows))]
+    public void A_mount_crossing_is_answered_alike_by_the_walk_and_the_confined_open(string row, bool confined)
+    {
+        (MountOpen open, string path, CapErrorCategory refused) = MountCrossings[row];
+        FakeFileSystem fs = Sandbox();
+        fs.SupportsConfinedOpen = confined;
+        _ = fs.AddMountPoint("sandbox/mnt", volumeId: 2);
+        _ = fs.AddDirectory("sandbox/mnt/inner");
+        _ = fs.AddFile("sandbox/mnt/f");
+        _ = fs.AddFile("sandbox/plain/f");
+        fs.AddFile("sandbox/foreign").VolumeId = 2;
+        _ = fs.AddSymbolicLink("sandbox/via-link", "mnt/inner");
+        _ = fs.AddSymbolicLink("sandbox/file-link", "mnt/f");
+
+        Run(fs, (ops, root) =>
+        {
+            int baseline = ops.OpenHandleCount;
+
+            Assert.Equal(CapErrorCategory.None, OpenAndClose(root, open, path, ConfinedResolveOptions.None));
+            Assert.Equal(baseline, ops.OpenHandleCount);
+
+            Assert.Equal(refused, OpenAndClose(root, open, path, ConfinedResolveOptions.RefuseMountCrossing));
+            Assert.Equal(baseline, ops.OpenHandleCount);
+        });
+    }
+
+    /// <summary>
+    /// A mount swapped in between the walk asking what a name is and opening it is refused
+    /// by an open of whatever the name holds, which asks the directory it opened again.
+    /// </summary>
+    [Fact]
+    public void A_mount_swapped_in_before_an_open_of_any_kind_is_still_refused()
+    {
+        FakeFileSystem fs = Sandbox();
+        MemoryNode plain = fs.AddDirectory("sandbox/swapped");
+        MemoryNode sandbox = fs.Find("sandbox")!;
+        int lookups = 0;
+
+        fs.BeforeLookup = (directory, name) =>
+        {
+            if (ReferenceEquals(directory, sandbox) && name == "swapped" && ++lookups == 2)
+            {
+                fs.Replace("sandbox/swapped", new MemoryNode
+                {
+                    Type = CapNodeType.Directory,
+                    VolumeId = 2,
+                    NodeId = fs.NextNodeId(),
+                });
+            }
+        };
+
+        Run(fs, (ops, root) =>
+        {
+            int baseline = ops.OpenHandleCount;
+
+            CapResult<OpenedNode> node = PortableResolver.OpenNode(
+                root, Parse("swapped"), FileOpenRequest.Existing(FileAccess.Read), ConfinedResolveOptions.RefuseMountCrossing);
+
+            Assert.Equal(2, lookups);
+            Assert.False(node.IsSuccess, "A directory on another volume opened.");
+            Assert.Equal(CapErrorCategory.CrossDevice, node.Error.Category);
+            Assert.Equal(baseline, ops.OpenHandleCount);
+        });
+
+        Assert.NotSame(plain, fs.Find("sandbox/swapped"));
+    }
+
+    /// <summary>
+    /// A root that cannot say which volume it is on fails a resolution that refuses mount
+    /// crossings, before anything beneath it is opened, and resolves as usual otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Every later volume check compares against the root's, so going on without it would
+    /// either refuse everything or refuse nothing.
+    /// </remarks>
+    [Fact]
+    public void A_root_that_cannot_describe_itself_fails_a_mount_refusing_resolution()
+    {
+        FakeFileSystem fs = Sandbox();
+        MemoryNode sandbox = fs.Find("sandbox")!;
+        _ = fs.AddDirectory("sandbox/a");
+        FakePlatformOps ops = new(fs)
+        {
+            HandleStatFault = node => ReferenceEquals(node, sandbox) ? CapErrorCategory.Unknown : CapErrorCategory.None,
+        };
+        CapResult<SafeDirHandle> opened = ops.OpenAmbientDirectory("sandbox", CapAccess.Read);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using SafeDirHandle root = opened.Value!;
+        int baseline = ops.OpenHandleCount;
+        fs.BeforeLookup = (_, name) => Assert.Fail($"'{name}' was looked up beneath a root whose volume is unknown.");
+
+        foreach (MountOpen open in Enum.GetValues<MountOpen>())
+        {
+            Assert.Equal(CapErrorCategory.Unknown, OpenAndClose(root, open, "a/x", ConfinedResolveOptions.RefuseMountCrossing));
+            Assert.Equal(baseline, ops.OpenHandleCount);
+        }
+
+        fs.BeforeLookup = null;
+        Assert.Equal(CapErrorCategory.None, OpenAndClose(root, MountOpen.Directory, "a", ConfinedResolveOptions.None));
+    }
+
     /// <summary>
     /// A reparse point whose tag is not a filesystem link is refused, never read as one.
     /// </summary>
@@ -849,6 +979,88 @@ public sealed class PortableWalkTests
             Assert.False(result.IsSuccess);
             Assert.Equal(CapErrorCategory.InvalidArgument, result.Error.Category);
         });
+    }
+
+    /// <summary>
+    /// The mount-crossing table: which open meets the path, and what it reports when mount
+    /// crossings are refused. <c>mnt</c> is on another volume, as is the file <c>foreign</c>
+    /// standing directly in the root; <c>plain</c> is not.
+    /// </summary>
+    private static readonly Dictionary<string, (MountOpen Open, string Path, CapErrorCategory Refused)> MountCrossings = new()
+    {
+        ["directory-at-mount"] = (MountOpen.Directory, "mnt", CapErrorCategory.CrossDevice),
+        ["directory-beyond-mount"] = (MountOpen.Directory, "mnt/inner", CapErrorCategory.CrossDevice),
+        ["directory-through-link"] = (MountOpen.Directory, "via-link", CapErrorCategory.CrossDevice),
+        ["directory-plain"] = (MountOpen.Directory, "plain", CapErrorCategory.None),
+        ["file-beyond-mount"] = (MountOpen.File, "mnt/f", CapErrorCategory.CrossDevice),
+        ["file-on-another-volume"] = (MountOpen.File, "foreign", CapErrorCategory.CrossDevice),
+        ["file-through-link"] = (MountOpen.File, "file-link", CapErrorCategory.CrossDevice),
+        ["file-plain"] = (MountOpen.File, "plain/f", CapErrorCategory.None),
+        ["node-at-mount"] = (MountOpen.Node, "mnt", CapErrorCategory.CrossDevice),
+        ["node-beyond-mount"] = (MountOpen.Node, "mnt/f", CapErrorCategory.CrossDevice),
+        ["node-on-another-volume"] = (MountOpen.Node, "foreign", CapErrorCategory.CrossDevice),
+        ["node-through-link"] = (MountOpen.Node, "via-link", CapErrorCategory.CrossDevice),
+        ["node-plain-directory"] = (MountOpen.Node, "plain", CapErrorCategory.None),
+        ["node-plain-file"] = (MountOpen.Node, "plain/f", CapErrorCategory.None),
+        ["parent-beyond-mount"] = (MountOpen.Parent, "mnt/x", CapErrorCategory.CrossDevice),
+        ["parent-of-mount"] = (MountOpen.Parent, "mnt", CapErrorCategory.None),
+        ["parent-through-link"] = (MountOpen.Parent, "via-link/x", CapErrorCategory.CrossDevice),
+        ["parent-plain"] = (MountOpen.Parent, "plain/x", CapErrorCategory.None),
+    };
+
+    /// <summary>The kinds of open the mount-crossing table drives.</summary>
+    private enum MountOpen
+    {
+        Directory,
+        File,
+        Node,
+        Parent,
+    }
+
+    /// <summary>
+    /// Opens a path by whichever strategy the backend provides, closes what it opened, and
+    /// reports the category, <see cref="CapErrorCategory.None"/> for success.
+    /// </summary>
+    /// <remarks>
+    /// A resolved parent must hand back the caller's last name untouched, since that name is
+    /// not looked at; that is asserted here so every parent row checks it.
+    /// </remarks>
+    private static CapErrorCategory OpenAndClose(SafeDirHandle root, MountOpen open, string raw, ConfinedResolveOptions options)
+    {
+        CapPath path = Parse(raw);
+        FileOpenRequest read = FileOpenRequest.Existing(FileAccess.Read);
+
+        switch (open)
+        {
+            case MountOpen.Directory:
+                CapResult<SafeDirHandle> directory = Resolver.OpenDirectory(root, in path, CapAccess.Read, options);
+                directory.Value?.Dispose();
+                return directory.IsSuccess ? CapErrorCategory.None : directory.Error.Category;
+
+            case MountOpen.File:
+                CapResult<SafeFileHandle> file = Resolver.OpenFile(root, in path, in read, options);
+                file.Value?.Dispose();
+                return file.IsSuccess ? CapErrorCategory.None : file.Error.Category;
+
+            case MountOpen.Node:
+                CapResult<OpenedNode> node = Resolver.OpenNode(root, in path, in read, options);
+                node.Value?.Dispose();
+                return node.IsSuccess ? CapErrorCategory.None : node.Error.Category;
+
+            default:
+                CapResult<ResolvedParent> parent = Resolver.ResolveParent(root, in path, options);
+                if (!parent.IsSuccess)
+                {
+                    return parent.Error.Category;
+                }
+
+                using (parent.Value!)
+                {
+                    Assert.Equal(raw[(raw.LastIndexOf('/') + 1)..], parent.Value!.Name);
+                }
+
+                return CapErrorCategory.None;
+        }
     }
 
     private static FakeFileSystem Sandbox()

@@ -98,6 +98,17 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// </remarks>
     public Func<MemoryNode, CapErrorCategory>? DirectoryOpenFault { get; set; }
 
+    /// <summary>
+    /// Decides, per directory, a failure asking a handle to it about itself reports in place of
+    /// the answer; <see cref="CapErrorCategory.None"/> lets the question be answered.
+    /// </summary>
+    /// <remarks>
+    /// For the failures a real kernel produces on a handle it already issued only under
+    /// conditions a test cannot arrange on demand — a device that stopped answering, a network
+    /// share gone stale — without failing every other call on the same directory.
+    /// </remarks>
+    public Func<MemoryNode, CapErrorCategory>? HandleStatFault { get; set; }
+
     /// <inheritdoc/>
     /// <remarks>
     /// Can run on the finalizer thread for a handle a test forgot, which is why the table is
@@ -404,6 +415,12 @@ internal sealed class FakePlatformOps : IPlatformOps
         if (!TryResolveHandle(handle, out MemoryNode? node))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        CapErrorCategory fault = HandleStatFault?.Invoke(node!) ?? CapErrorCategory.None;
+        if (fault != CapErrorCategory.None)
+        {
+            return CapError.FromCategory(fault);
         }
 
         info = node!.Info;
