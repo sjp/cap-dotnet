@@ -148,13 +148,15 @@ public sealed class DiskParityTests : IDisposable
         {
             foreach (SymlinkPolicy policy in (SymlinkPolicy[])[SymlinkPolicy.FollowWithinSandbox, SymlinkPolicy.Deny])
             {
-                if (!OperatingSystem.IsWindows())
+                if (OperatingSystem.IsLinux())
                 {
+                    // macOS's renamex_np with RENAME_EXCL treats a move onto the same name as done,
+                    // as memory does.
                     differences.Add(
                         CaseName(resolution, policy, Operation.Rename, "plain", "plain"),
-                        "issue 242: renameat2 with RENAME_NOREPLACE, and renamex_np with RENAME_EXCL, refuse a " +
-                        "name that exists before noticing it is the name being moved; the in-memory rename " +
-                        "treats a move onto the same object as done whether or not replacing was allowed");
+                        "issue 242: renameat2 with RENAME_NOREPLACE refuses a name that exists before " +
+                        "noticing it is the name being moved; the in-memory rename treats a move onto the " +
+                        "same object as done whether or not replacing was allowed");
                 }
 
                 if (OperatingSystem.IsMacOS())
