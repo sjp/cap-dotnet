@@ -81,13 +81,14 @@ public sealed class ConfinedOpenRaceTests : IDisposable
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The confined open is the Linux backend's.");
             return;
         }
 
         LinuxPlatformOps ops = new();
         if (!ops.Capabilities.SupportsConfinedOpen)
         {
-            return;
+            Assert.Skip("This host has no confined open: " + ops.ConfinedOpenUnavailableReason);
         }
 
         string present = Path.Combine(_root, "moving");

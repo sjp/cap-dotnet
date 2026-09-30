@@ -45,13 +45,14 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The syscalls counted here are the Linux backend's.");
             return;
         }
 
         LinuxPlatformOps ops = new();
         if (!ops.Capabilities.SupportsConfinedOpen)
         {
-            return;
+            Assert.Skip("This host has no confined open: " + ops.ConfinedOpenUnavailableReason);
         }
 
         Directory.CreateDirectory(Path.Combine(_root, "a", "b", "c", "d"));
@@ -84,13 +85,14 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The syscalls counted here are the Linux backend's.");
             return;
         }
 
         LinuxPlatformOps ops = new();
         if (!ops.Capabilities.SupportsConfinedOpen)
         {
-            return;
+            Assert.Skip("This host has no confined open: " + ops.ConfinedOpenUnavailableReason);
         }
 
         string marker = "trace-" + Guid.NewGuid().ToString("N");

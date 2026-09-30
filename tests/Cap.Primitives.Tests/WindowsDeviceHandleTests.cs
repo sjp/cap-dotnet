@@ -57,6 +57,7 @@ public sealed class WindowsDeviceHandleTests
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("Device names and device handles are Windows's.");
             return;
         }
 
@@ -82,6 +83,7 @@ public sealed class WindowsDeviceHandleTests
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("The handle check is the Windows backend's.");
             return;
         }
 
@@ -135,6 +137,7 @@ public sealed class WindowsDeviceHandleTests
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("Device names and device handles are Windows's.");
             return;
         }
 

@@ -145,6 +145,7 @@ public sealed class PlatformErrorTests
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("Filesystem types are recognised this way only on Linux.");
             return;
         }
 

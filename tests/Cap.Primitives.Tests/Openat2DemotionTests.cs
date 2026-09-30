@@ -37,6 +37,7 @@ public sealed class Openat2DemotionTests
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The confined-open probe is the Linux backend's.");
             return;
         }
 
@@ -77,6 +78,7 @@ public sealed class Openat2DemotionTests
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The confined-open probe is the Linux backend's.");
             return;
         }
 
@@ -110,6 +112,7 @@ public sealed class Openat2DemotionTests
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The confined-open probe is the Linux backend's.");
             return;
         }
 
@@ -138,6 +141,7 @@ public sealed class Openat2DemotionTests
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The confined-open probe is the Linux backend's.");
             return;
         }
 

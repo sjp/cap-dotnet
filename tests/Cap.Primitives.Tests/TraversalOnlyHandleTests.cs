@@ -170,6 +170,7 @@ public sealed class TraversalOnlyHandleTests : IDisposable
     {
         if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("Linux is the platform that separates traversing a directory from listing it.");
             return;
         }
 
@@ -200,9 +201,15 @@ public sealed class TraversalOnlyHandleTests : IDisposable
     [SupportedOSPlatform("linux")]
     public void A_confined_open_walks_through_a_directory_it_could_not_have_read()
     {
-        if (!OperatingSystem.IsLinux() || !Ops.Capabilities.SupportsConfinedOpen)
+        if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("The confined open is the Linux backend's.");
             return;
+        }
+
+        if (!Ops.Capabilities.SupportsConfinedOpen)
+        {
+            Assert.Skip("The confined open is not available on this host.");
         }
 
         string gate = Path.Combine(_root, "gate");

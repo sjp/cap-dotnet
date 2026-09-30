@@ -35,7 +35,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     {
         if (!SupportsSymbolicLinks)
         {
-            return;
+            Assert.Skip("Symbolic links need a privilege or developer mode on Windows, so this tree is built only elsewhere.");
         }
 
         Build();
@@ -54,7 +54,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     {
         if (!SupportsSymbolicLinks)
         {
-            return;
+            Assert.Skip("Symbolic links need a privilege or developer mode on Windows, so this tree is built only elsewhere.");
         }
 
         Build();
@@ -75,7 +75,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     {
         if (!SupportsSymbolicLinks)
         {
-            return;
+            Assert.Skip("Symbolic links need a privilege or developer mode on Windows, so this tree is built only elsewhere.");
         }
 
         Build();
@@ -104,7 +104,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     {
         if (!SupportsSymbolicLinks)
         {
-            return;
+            Assert.Skip("Symbolic links need a privilege or developer mode on Windows, so this tree is built only elsewhere.");
         }
 
         Build();
@@ -128,7 +128,7 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     {
         if (!SupportsSymbolicLinks)
         {
-            return;
+            Assert.Skip("Symbolic links need a privilege or developer mode on Windows, so this tree is built only elsewhere.");
         }
 
         Build();
@@ -168,8 +168,9 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     [Fact]
     public void Failing_to_resolve_leaks_no_descriptors()
     {
-        if (!OperatingSystem.IsLinux() || !SupportsSymbolicLinks)
+        if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("Descriptors are counted through the Linux process filesystem.");
             return;
         }
 
@@ -234,9 +235,15 @@ public sealed class PortableWalkOnDiskTests : IDisposable
     [Fact]
     public void A_directory_that_cannot_be_listed_can_still_be_walked_through()
     {
-        if (!OperatingSystem.IsLinux() || TestEnvironment.CanBypassFilePermissions)
+        if (!OperatingSystem.IsLinux())
         {
+            Assert.Skip("Linux is the platform that separates traversing a directory from listing it.");
             return;
+        }
+
+        if (TestEnvironment.CanBypassFilePermissions)
+        {
+            Assert.Skip("This process bypasses file permissions, so it can list a directory that forbids it.");
         }
 
         Build();

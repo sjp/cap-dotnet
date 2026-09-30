@@ -102,6 +102,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -134,6 +135,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -168,6 +170,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -208,6 +211,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -257,6 +261,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -373,6 +378,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -400,6 +406,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -449,6 +456,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -529,6 +537,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -580,6 +589,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -626,6 +636,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
@@ -675,6 +686,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     {
         if (!OperatingSystem.IsWindows())
         {
+            Assert.Skip("These are Windows's own resolution rules.");
             return;
         }
 
