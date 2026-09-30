@@ -6,7 +6,9 @@ name: Release
 #
 # The steps before publishing are the ones CI runs on every change: the same pack script, the
 # same content checks, the same reproducibility check, the same install on three platforms.
-# A release adds only the attestation and the upload. What a human confirms before tagging
+# A release adds only the attestation and the upload. It does not run the tests again: before
+# packing, it checks that the tagged commit is on main (a pre-release may come from a branch)
+# and that CI passed on that exact commit. What a human confirms before tagging
 # (the escape corpus, the nightly stress and fuzz runs, the benchmarks, the threat model) is
 # in the release checklist issue template, and docs/releasing.md walks through it.
 #
@@ -39,13 +41,14 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+      actions: read
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
         with:
-          global-json-file: global.json
+          # The whole history, so the next steps can tell whether the tag is on main.
+          fetch-depth: 0
 
       # Until 1.0 every release is 0.y.z (docs/releasing.md says when that changes), so a tag
       # outside that range is a mistake and stops here. Leaving 0.x means editing this check,
@@ -59,6 +62,45 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # docs/releasing.md says to tag a commit on main. A release candidate may be cut from a
+      # branch, so a version with a pre-release suffix skips this check but not the next one.
+      - name: Check that the tagged commit is on main
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ "$VERSION" == *-* ]]; then
+            echo "$VERSION is a pre-release, so it may be tagged on a branch."
+            exit 0
+          fi
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main."
+            exit 1
+          fi
+
+      # Packing, attesting and installing prove where a package was built, not that its tests
+      # passed. So the release needs a successful CI run on this exact commit. A pull_request
+      # run does not count, because it tests the pull request merged into main rather than the
+      # commit itself. If the push run was cancelled, or the commit is on a branch, run CI by
+      # hand on the tag (Actions > CI > Run workflow, with the tag as the ref). If CI is still
+      # running, this fails; re-run the release once it is green.
+      - name: Check that CI passed on the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+            --status success --limit 100 --json event \
+            --jq '[.[] | select(.event == "push" or .event == "workflow_dispatch")] | length')
+          if [[ "$runs" == "0" ]]; then
+            echo "::error::No successful CI run (push or workflow_dispatch) for $GITHUB_SHA."
+            exit 1
+          fi
+          echo "Found $runs successful CI run(s) for $GITHUB_SHA."
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
 
       - name: Pack and check the contents
         run: build/ci/pack.sh "$RUNNER_TEMP/feed" "${{ steps.version.outputs.version }}"

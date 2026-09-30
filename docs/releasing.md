@@ -79,14 +79,25 @@ Pre-1.0, only the latest release is supported ([SECURITY.md](../SECURITY.md#supp
    escape corpus, the nightly stress and fuzz runs, the NativeAOT jobs and the benchmarks to
    be green, for the threat model to be reviewed against what the release changes, and for the
    advisory process to have been tried out with a dry run.
-2. Tag the commit on `main` and push the tag:
+2. Tag the commit on `main` and push the tag (a pre-release such as `v0.2.0-rc.1` may be
+   tagged on a branch):
 
    ```bash
    git tag -s v0.2.0 -m "cap-dotnet 0.2.0"
    git push origin v0.2.0
    ```
 
-3. The [release workflow](../.github/workflows/release.yml) packs the eight packages and checks
+3. The [release workflow](../.github/workflows/release.yml) first checks the tagged commit,
+   and stops before packing if either check fails:
+   - unless the version has a pre-release suffix, the commit must be on `main`;
+   - the `CI` workflow must have succeeded on that exact commit, in a `push` or
+     `workflow_dispatch` run. A `pull_request` run does not count, because it tests the pull
+     request merged into `main` rather than the commit itself. If the push run was cancelled
+     by a later push, or the commit is on a branch, run CI by hand with the tag as the ref
+     (*Actions → CI → Run workflow*). If CI is still running, the check fails; re-run the
+     release once CI is green.
+
+   The release does not run the tests again. It then packs the eight packages and checks
    their contents. It builds them a second time from another directory and confirms every
    assembly is identical. It attests their provenance, and installs them into fresh projects
    on Linux, Windows and macOS.
@@ -96,7 +107,8 @@ Pre-1.0, only the latest release is supported ([SECURITY.md](../SECURITY.md#supp
    pre-release on GitHub and on nuget.org.
 
 CI runs steps 3 and 4 up to publishing on every change: the same pack script, the same checks,
-and the same installs. So a release shouldn't fail in any way a pull request didn't.
+and the same installs. So a release shouldn't fail in any way a pull request didn't, and the
+check in step 3 makes sure the tests a pull request runs have also passed on the tagged commit.
 
 ### One-time setup
 
