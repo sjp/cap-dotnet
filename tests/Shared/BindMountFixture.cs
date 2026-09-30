@@ -16,22 +16,34 @@ internal static class BindMountFixture
     /// <summary>The environment variable naming the prepared directory.</summary>
     public const string Variable = "CAPDOTNET_TEST_BIND_MOUNT";
 
+    /// <summary>
+    /// The environment variable that, set to <c>1</c>, says this run was set up with a mount, so
+    /// that its absence fails rather than skips.
+    /// </summary>
+    public const string ExpectedVariable = "CAPDOTNET_EXPECT_BIND_MOUNT";
+
     /// <summary>The name, inside the prepared directory, of the mount point.</summary>
     public const string MountName = "mnt";
 
     /// <summary>
     /// Returns the prepared directory, skipping where none was prepared and failing where the
-    /// one named has no mount inside it.
+    /// one named has no mount inside it, or where none was prepared on a run that expected one.
     /// </summary>
     /// <remarks>
     /// A directory whose <c>mnt</c> is not a mount point would have the case test an ordinary
-    /// subdirectory and pass for the wrong reason, so it fails rather than skips.
+    /// subdirectory and pass for the wrong reason, so it fails rather than skips. A run that
+    /// sets <see cref="ExpectedVariable"/> fails when <see cref="Variable"/> is empty, so a
+    /// mount that could not be made does not quietly skip the cases it was made for.
     /// </remarks>
     public static string Require()
     {
         string? prepared = Environment.GetEnvironmentVariable(Variable);
         if (string.IsNullOrEmpty(prepared))
         {
+            Assert.False(
+                Environment.GetEnvironmentVariable(ExpectedVariable) == "1",
+                $"No bind mount was prepared for this run, but {ExpectedVariable} says it was set " +
+                $"up with one. The mount is made beforehand and named in {Variable}.");
             Assert.Skip(
                 $"No bind mount was prepared for this run. Mounting needs a privilege the suite " +
                 $"must not hold, so it is made beforehand and named in {Variable}.");

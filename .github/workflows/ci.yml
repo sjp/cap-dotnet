@@ -169,7 +169,10 @@ jobs:
       - name: Prepare a bind mount for the escape corpus
         if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' && !matrix.passes_only }}
         run: |
-          echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+          # Assigned first so a failed mount fails the step; inside echo its status is lost.
+          mount="$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")"
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$mount" >> "$GITHUB_ENV"
+          echo "CAPDOTNET_EXPECT_BIND_MOUNT=1" >> "$GITHUB_ENV"
 
       # ---------------------------------------------------------------------------------
       # The WebAssembly WASI test suite's programs, run against the WASI host sample. Fetched
@@ -180,7 +183,8 @@ jobs:
       - name: Fetch the WASI test suite
         if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Linux' && !matrix.passes_only }}
         run: |
-          echo "CAPDOTNET_WASI_TESTSUITE=$(build/ci/fetch-wasi-testsuite.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+          testsuite="$(build/ci/fetch-wasi-testsuite.sh "$RUNNER_TEMP")"
+          echo "CAPDOTNET_WASI_TESTSUITE=$testsuite" >> "$GITHUB_ENV"
           echo "CAPDOTNET_EXPECT_WASI_TESTSUITE=1" >> "$GITHUB_ENV"
 
       - name: Test
@@ -308,7 +312,10 @@ jobs:
       # symbolic links, and vfat has none.
       - name: Prepare a bind mount for the escape corpus
         run: |
-          echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+          # Assigned first so a failed mount fails the step; inside echo its status is lost.
+          mount="$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")"
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$mount" >> "$GITHUB_ENV"
+          echo "CAPDOTNET_EXPECT_BIND_MOUNT=1" >> "$GITHUB_ENV"
 
       - name: Run the escape corpus against ${{ matrix.fs }}
         env:
@@ -387,7 +394,10 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          echo "CAPDOTNET_TEST_BIND_MOUNT=$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")" >> "$GITHUB_ENV"
+          # Assigned first so a failed mount fails the step; inside echo its status is lost.
+          mount="$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")"
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$mount" >> "$GITHUB_ENV"
+          echo "CAPDOTNET_EXPECT_BIND_MOUNT=1" >> "$GITHUB_ENV"
 
       - name: Publish the escape corpus as a NativeAOT executable
         if: contains(matrix.parts, 'native')
