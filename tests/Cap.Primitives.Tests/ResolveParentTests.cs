@@ -218,7 +218,9 @@ public sealed class ResolveParentTests
     /// Both backends have to say so, and they arrive at it differently: one divides the text
     /// and sees what the last component is, the other walks until nothing is pending and
     /// finds itself standing on a directory with no final name. A disagreement here would be
-    /// a path that can be deleted through on one platform and not on another.
+    /// a path that can be deleted through on one platform and not on another. The
+    /// kernel-atomic backend opens the directory it climbs to before refusing, so the count
+    /// of open handles is checked as well: that directory must be closed again.
     /// </remarks>
     [Theory]
     [InlineData(true)]
@@ -228,7 +230,13 @@ public sealed class ResolveParentTests
         FakeFileSystem fs = Sandbox(atomic);
         _ = fs.AddDirectory("sandbox/a");
 
-        Run(fs, (ops, handle) => AssertFails(CapErrorCategory.InvalidArgument, handle, "a/.."));
+        Run(fs, (ops, handle) =>
+        {
+            int baseline = ops.OpenHandleCount;
+
+            AssertFails(CapErrorCategory.InvalidArgument, handle, "a/..");
+            Assert.Equal(baseline, ops.OpenHandleCount);
+        });
     }
 
     /// <summary>
@@ -251,9 +259,14 @@ public sealed class ResolveParentTests
 
         Run(fs, (ops, handle) =>
         {
+            int baseline = ops.OpenHandleCount;
+
             AssertFails(CapErrorCategory.Escaped, handle, "..");
+            Assert.Equal(baseline, ops.OpenHandleCount);
             AssertFails(CapErrorCategory.Escaped, handle, "a/../..");
+            Assert.Equal(baseline, ops.OpenHandleCount);
             AssertFails(CapErrorCategory.NotFound, handle, "missing/..");
+            Assert.Equal(baseline, ops.OpenHandleCount);
         });
     }
 
