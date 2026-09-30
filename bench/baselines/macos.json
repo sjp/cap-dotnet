@@ -1,0 +1,75 @@
+{
+  "measuredOn": "macOS 26.6.2 Arm64, 5 logical CPUs, .NET 10.0.12",
+  "benchmarks": {
+    "OpenReadFiveComponents.CapDotnet/walk": {
+      "ratio": 3.4872,
+      "allocatedBytes": 4417
+    },
+    "OpenReadSingleComponent.CapDotnet/walk": {
+      "ratio": 0.8631,
+      "allocatedBytes": 4225
+    },
+    "PositionalRead.CapDotnet/walk": {
+      "ratio": 1.0826,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Unix]/walk": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Unix]/walk": {
+      "ratio": 0.1365,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Unix]/walk": {
+      "ratio": 0.316,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Unix]/walk": {
+      "ratio": 0.6489,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Unix]/walk": {
+      "ratio": 0.3427,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Unix]/walk": {
+      "ratio": 0.3457,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Unix]/walk": {
+      "ratio": 0.2161,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Windows]/walk": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Windows]/walk": {
+      "ratio": 1.3442,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Windows]/walk": {
+      "ratio": 2.614,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Windows]/walk": {
+      "ratio": 4.1476,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Windows]/walk": {
+      "ratio": 3.2775,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Windows]/walk": {
+      "ratio": 2.6197,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Windows]/walk": {
+      "ratio": 0.4909,
+      "allocatedBytes": 0
+    },
+    "StatFile.CapDotnet/walk": {
+      "ratio": 0.525,
+      "allocatedBytes": 0
+    }
+  }
+}

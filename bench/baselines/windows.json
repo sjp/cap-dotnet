@@ -1,0 +1,75 @@
+{
+  "measuredOn": "Microsoft Windows 10.0.26100 X64, 4 logical CPUs, .NET 10.0.12",
+  "benchmarks": {
+    "OpenReadFiveComponents.CapDotnet/windows": {
+      "ratio": 3.9597,
+      "allocatedBytes": 4424
+    },
+    "OpenReadSingleComponent.CapDotnet/windows": {
+      "ratio": 1.2682,
+      "allocatedBytes": 4232
+    },
+    "PositionalRead.CapDotnet/windows": {
+      "ratio": 1.0012,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Unix]/windows": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Unix]/windows": {
+      "ratio": 1.3827,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Unix]/windows": {
+      "ratio": 3.3295,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Unix]/windows": {
+      "ratio": 6.7485,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Unix]/windows": {
+      "ratio": 3.1358,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Unix]/windows": {
+      "ratio": 3.1453,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Unix]/windows": {
+      "ratio": 0.2114,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseSingleComponent[Syntax=Windows]/windows": {
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseShallow[Syntax=Windows]/windows": {
+      "ratio": 1.5436,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeep[Syntax=Windows]/windows": {
+      "ratio": 2.4484,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseAndWalkDeep[Syntax=Windows]/windows": {
+      "ratio": 3.5811,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseDeviceLookalikes[Syntax=Windows]/windows": {
+      "ratio": 3.2228,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ValidateSpan[Syntax=Windows]/windows": {
+      "ratio": 2.635,
+      "allocatedBytes": 0
+    },
+    "CapPathBenchmarks.ParseRejected[Syntax=Windows]/windows": {
+      "ratio": 0.0751,
+      "allocatedBytes": 0
+    },
+    "StatFile.CapDotnet/windows": {
+      "ratio": 1.4513,
+      "allocatedBytes": 48
+    }
+  }
+}

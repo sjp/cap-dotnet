@@ -87,8 +87,9 @@ RESULTS_PLACEHOLDER
 ## The regression gate
 
 `gate` runs the classes marked ✓ above and compares them with the figures committed in
-`bench/baselines/<os>.json`. CI runs it on every change on Linux, Windows and macOS, and fails
-when any row has become more than 10% worse.
+`bench/baselines/<os>.json`. CI runs it on every change on Linux, Windows and macOS; on each
+platform with a committed baseline it fails when any row has become more than 10% worse. A
+platform with no committed file is run and reported with a warning annotation, but not gated.
 
 **Time is compared as a ratio, not as a duration.** A hosted CI runner's speed wanders from one
 run to the next by more than the 10% being guarded, so a gate on absolute time would fail at

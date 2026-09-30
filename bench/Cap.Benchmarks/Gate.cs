@@ -99,6 +99,17 @@ internal static class Gate
         var report = new StringBuilder();
         report.AppendLine(CultureInfo.InvariantCulture, $"### Benchmark gate ({Platform})");
         report.AppendLine();
+        if (!File.Exists(baselinePath))
+        {
+            // A workflow command, so the run page carries a warning annotation rather than
+            // a green job whose summary alone says nothing was compared.
+            Console.WriteLine($"::warning::No baseline committed for {Platform}; nothing was gated.");
+            report.AppendLine(CultureInfo.InvariantCulture,
+                $"> [!WARNING]\n> No baseline is committed for {Platform} (`bench/baselines/{Platform}.json`), " +
+                $"so nothing on this platform was gated.");
+            report.AppendLine();
+        }
+
         report.AppendLine(CultureInfo.InvariantCulture,
             $"Baseline: `{Path.GetFileName(baselinePath)}`, measured on {committed.MeasuredOn ?? "(none committed)"}. " +
             $"A row fails when its time ratio to `System.IO` or its allocation grows more than {Tolerance:P0}; " +
