@@ -30,8 +30,12 @@ See [docs/releasing.md](../../docs/releasing.md) for the process and the version
 - [ ] Read the diff since the last release against [docs/threat-model.md](../../docs/threat-model.md).
       Update the threat model for anything that changes what is defended, what is out of
       scope or the residual risk, or note here that nothing did.
+- [ ] The `Unreleased` entries in [CHANGELOG.md](../../CHANGELOG.md) are moved under
+      `## [0.y.z] - YYYY-MM-DD`, and a fresh empty `## [Unreleased]` is left above them. The
+      release workflow refuses a version with no section, and publishes the section as the
+      release's notes.
 - [ ] Any change in containment behaviour, including one that fixes an escape, is described
-      in the release notes. A containment fix still ships as a patch release.
+      under **Security** in that section. A containment fix still ships as a patch release.
 - [ ] The public API changes match the version bump (minor for a breaking change or a new
       feature, patch for a fix).
 - [ ] `AnalyzerReleases.Unshipped.md` entries have been moved to `AnalyzerReleases.Shipped.md`
@@ -41,9 +45,8 @@ See [docs/releasing.md](../../docs/releasing.md) for the process and the version
 
 ## The advisory path works
 
-- [ ] Private vulnerability reporting is enabled on the repository.
-- [ ] The reporting contacts in [SECURITY.md](../../SECURITY.md) are current, including a
-      fallback for reporters without a GitHub account.
+- [ ] Private vulnerability reporting is enabled on the repository; it is the only channel
+      [SECURITY.md](../../SECURITY.md) offers.
 - [ ] A dry run has been done since the last release: file a private report, draft an
       advisory from it, request a CVE up to the point of submission, and close it without
       publishing. Note the date and anything that did not work:

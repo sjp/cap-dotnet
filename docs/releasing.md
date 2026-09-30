@@ -60,7 +60,8 @@ Versions follow [SemVer 2.0](https://semver.org/). Until 1.0 every release is `0
 path used to reach outside the sandbox and now throws `SandboxEscapeException`, then code that
 depended on the old behaviour was depending on an escape. That change will not wait for the
 next minor version, and it will not be held back to preserve compatibility. The advisory for
-the fix says what changed.
+the fix says what changed, and so does the release's entry in
+[CHANGELOG.md](../CHANGELOG.md).
 
 The project stays at 0.x until both of these are true:
 
@@ -88,7 +89,9 @@ Pre-1.0, only the latest release is supported ([SECURITY.md](../SECURITY.md#supp
    ```
 
 3. The [release workflow](../.github/workflows/release.yml) first checks the tagged commit,
-   and stops before packing if either check fails:
+   and stops before packing if any check fails:
+   - unless the version has a pre-release suffix, [CHANGELOG.md](../CHANGELOG.md) must have
+     a non-empty section headed `## [<version>]`, which becomes the release's notes;
    - unless the version has a pre-release suffix, the commit must be on `main`;
    - the `CI` workflow must have succeeded on that exact commit, in a `push` or
      `workflow_dispatch` run. A `pull_request` run does not count, because it tests the pull
@@ -103,8 +106,9 @@ Pre-1.0, only the latest release is supported ([SECURITY.md](../SECURITY.md#supp
    on Linux, Windows and macOS.
 4. Publishing waits for approval on the `release` environment. Once approved, the workflow
    pushes the packages to nuget.org and creates a GitHub release with the same `.nupkg` files
-   attached. A version with a pre-release suffix, such as `v0.2.0-rc.1`, becomes a
-   pre-release on GitHub and on nuget.org.
+   attached and the version's CHANGELOG section as its notes. A version with a pre-release
+   suffix, such as `v0.2.0-rc.1`, becomes a pre-release on GitHub and on nuget.org, with notes
+   GitHub generates from the pull requests merged since the last release.
 
 CI runs steps 3 and 4 up to publishing on every change: the same pack script, the same checks,
 and the same installs. So a release shouldn't fail in any way a pull request didn't, and the

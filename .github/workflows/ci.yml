@@ -633,9 +633,15 @@ jobs:
       # A published page must not carry a template token or a note to its author.
       - name: no placeholders in docs
         run: |
-          if grep -rnE '[A-Z]+_PLACEHOLDER|\bTODO\b|\bFIXME\b|\bTBD\b' docs/ README.md; then
-            echo "::error::docs/ or README.md holds a template token or TODO"; exit 1
+          if grep -rnE '[A-Z]+_PLACEHOLDER|\bTODO\b|\bFIXME\b|\bTBD\b' docs/ ./*.md; then
+            echo "::error::docs/ or a top-level .md file holds a template token or TODO"; exit 1
           fi
+      # Changes are written down as they land, under Unreleased; release.yml takes a version's
+      # section as its notes.
+      - name: CHANGELOG has an Unreleased section
+        run: |
+          grep -qxF '## [Unreleased]' CHANGELOG.md \
+            || { echo "::error::CHANGELOG.md has no '## [Unreleased]' heading"; exit 1; }
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json

@@ -7,8 +7,9 @@ name: Release
 # The steps before publishing are the ones CI runs on every change: the same pack script, the
 # same content checks, the same reproducibility check, the same install on three platforms.
 # A release adds only the attestation and the upload. It does not run the tests again: before
-# packing, it checks that the tagged commit is on main (a pre-release may come from a branch)
-# and that CI passed on that exact commit. What a human confirms before tagging
+# packing, it checks that CHANGELOG.md has a section for the version (a pre-release need not),
+# which becomes the release's notes, that the tagged commit is on main (a pre-release may come
+# from a branch) and that CI passed on that exact commit. What a human confirms before tagging
 # (the escape corpus, the nightly stress and fuzz runs, the benchmarks, the threat model) is
 # in the release checklist issue template, and docs/releasing.md walks through it.
 #
@@ -62,6 +63,21 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # The release's notes on GitHub are its section of CHANGELOG.md, so a release cannot be
+      # tagged before its changes are written down. A pre-release gets GitHub's generated notes
+      # instead, and needs no section of its own.
+      - name: Take the release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ "$VERSION" == *-* ]]; then
+            echo "$VERSION is a pre-release, so its notes are generated from the pull requests."
+            exit 0
+          fi
+          mkdir -p "$RUNNER_TEMP/notes"
+          build/ci/changelog-section.sh "$VERSION" > "$RUNNER_TEMP/notes/release-notes.md"
+          cat "$RUNNER_TEMP/notes/release-notes.md"
 
       # docs/releasing.md says to tag a commit on main. A release candidate may be cut from a
       # branch, so a version with a pre-release suffix skips this check but not the next one.
@@ -130,6 +146,13 @@ jobs:
           name: packages
           path: ${{ runner.temp }}/feed/*.nupkg
 
+      - uses: actions/upload-artifact@v7
+        if: ${{ !contains(steps.version.outputs.version, '-') }}
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes/release-notes.md
+          if-no-files-found: error
+
   install:
     name: packages install (${{ matrix.name }})
     needs: pack
@@ -177,6 +200,11 @@ jobs:
         with:
           name: packages
           path: ${{ runner.temp }}/feed
+      - uses: actions/download-artifact@v8
+        if: ${{ !contains(needs.pack.outputs.version, '-') }}
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
 
       - name: Exchange the OIDC token for a short-lived nuget.org key
         id: nuget
@@ -196,9 +224,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.pack.outputs.version }}
         run: |
-          prerelease=()
           if [[ "$VERSION" == *-* ]]; then
-            prerelease=(--prerelease)
+            notes=(--generate-notes --prerelease)
+          else
+            notes=(--notes-file "$RUNNER_TEMP/notes/release-notes.md")
           fi
           gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP"/feed/*.nupkg \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$VERSION" --generate-notes "${prerelease[@]}"
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$VERSION" "${notes[@]}"

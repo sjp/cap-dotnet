@@ -14,11 +14,7 @@ reporting — several things that look like escapes are documented limits, and o
 
 Use GitHub's private vulnerability reporting on this repository
 (*Security* → *Report a vulnerability*), which opens a private advisory visible only to
-maintainers.
-
-> **TODO:** add a fallback email address and its PGP key here before the first
-> public release. GitHub private reporting alone is not enough for reporters who do not
-> have, or do not want, a GitHub account.
+maintainers. It is the only reporting channel; there is no security mailbox.
 
 A useful report contains:
 

@@ -208,6 +208,9 @@ dotnet run -c Release --project bench/Cap.Benchmarks -- --filter '*'
 runs the benchmarks: each operation against its `System.IO` equivalent, once per resolution
 backend the machine has.
 
+Before sending a change, read [CONTRIBUTING.md](CONTRIBUTING.md); what each release changed is
+in [CHANGELOG.md](CHANGELOG.md).
+
 ## Security
 
 Escapes are vulnerabilities; please report them privately. See [SECURITY.md](SECURITY.md).
