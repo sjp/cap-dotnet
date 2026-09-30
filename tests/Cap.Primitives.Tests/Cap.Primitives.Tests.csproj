@@ -11,4 +11,9 @@
     <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The check a suite makes on leaving a backend, so that BackendScopeTests can make it fail. -->
+    <Compile Include="../Backends/Backends.cs" Link="Backends/Backends.cs" />
+  </ItemGroup>
+
 </Project>

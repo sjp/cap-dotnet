@@ -85,8 +85,9 @@ public sealed class EscapeCorpusTests
         using (BackendScope scope = Backends.Enter(backend))
         {
             using Dir root = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire(), policy);
-            observation = OperationRunner.Run(root, operation, arena.Expand(entry.Path));
-            scope.AssertItRan();
+            string path = arena.Expand(entry.Path);
+            observation = OperationRunner.Run(root, operation, path);
+            EscapeCorpus.AssertItRan(scope, operation, path);
         }
 
         oracle.AssertContained(observation, context);

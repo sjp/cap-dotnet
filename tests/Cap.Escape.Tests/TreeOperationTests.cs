@@ -94,7 +94,15 @@ public sealed class TreeOperationTests
                 observation = new Observation(outcome, e);
             }
 
-            scope.AssertItRan();
+            // A copy makes each directory of the tree beneath the destination and opens it by name.
+            if (operation is TreeOperation.CopyRecreatingLinks or TreeOperation.CopySkippingLinks or TreeOperation.CopyRefusingLinks)
+            {
+                scope.AssertItRanOpeningWhatItCreated(resolvedAPath: true);
+            }
+            else
+            {
+                scope.AssertItRan();
+            }
         }
 
         oracle.AssertContained(observation, context);

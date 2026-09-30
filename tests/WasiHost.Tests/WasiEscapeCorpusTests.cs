@@ -99,7 +99,7 @@ public sealed class WasiEscapeCorpusTests
             Dir root = Dir.Open(arena.SandboxPath, AmbientAuthority.Acquire(), policy);
             using TrampolineGuest guest = new(root);
             observed = WasiOperationRunner.Run(guest, operation, path);
-            scope.AssertItRan();
+            EscapeCorpus.AssertItRan(scope, operation, path);
         }
 
         oracle.AssertContained(observed.Observation, context);

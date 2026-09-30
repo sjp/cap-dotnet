@@ -155,6 +155,7 @@ internal sealed class BackendScope : IDisposable
     private readonly IPlatformOps _ops;
     private readonly IDisposable _substitution;
     private readonly long _confinedOpensBefore;
+    private readonly long _componentOpensBefore;
 
     public BackendScope(string name, IPlatformOps ops, IDisposable substitution)
     {
@@ -162,25 +163,79 @@ internal sealed class BackendScope : IDisposable
         _ops = ops;
         _substitution = substitution;
         _confinedOpensBefore = ops.ConfinedOpenAttempts;
+        _componentOpensBefore = ops.ComponentOpens;
     }
 
     /// <summary>The backend's name.</summary>
     public string Name { get; }
 
     /// <summary>
-    /// Asserts that the walk really was the walk.
+    /// Asserts that the walk really was the walk, and that the confined open never walked.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A walk leg that quietly kept using the kernel's confined open would pass every case and
     /// test nothing the other leg did not, and nothing about the results would show it.
+    /// </para>
+    /// <para>
+    /// The mirror image is worse: a confined leg whose resolution quietly became a walk — the
+    /// silent demotion <c>docs/threat-model.md</c> §6.5 calls a security bug — would pass every
+    /// case too. A walk spends a single-name open on every name it resolves, even when the path
+    /// has only one, and a confined resolution spends none, so on a confined leg the count of
+    /// single-name opens must not move. That holds however the case ended: a path the parser
+    /// refused, or an operation that is one call against the root, made no open of either kind.
+    /// An operation that opens by name a directory it has just created uses
+    /// <see cref="AssertItRanOpeningWhatItCreated"/> instead.
+    /// </para>
     /// </remarks>
     public void AssertItRan()
+    {
+        AssertTheWalkNeverUsedTheConfinedOpen();
+
+        if (IsConfined)
+        {
+            long walked = _ops.ComponentOpens - _componentOpensBefore;
+            Assert.True(walked == 0, $"{Name}: resolution walked, opening {walked} name(s) one at a time.");
+        }
+    }
+
+    /// <summary>
+    /// Asserts that the walk really was the walk, for an operation that opens by name what it
+    /// has just created.
+    /// </summary>
+    /// <remarks>
+    /// Creating a directory and returning a handle on it opens the new name beneath its parent
+    /// on every backend, as does creating each missing level of a path or each directory of a
+    /// copied tree, so on a confined leg the single-name opens cannot tell a walk from the
+    /// creation. What can is the path the operation resolved first: when there was one, the
+    /// confined open must have resolved it.
+    /// </remarks>
+    /// <param name="resolvedAPath">
+    /// Whether the operation had a path to resolve before it could create anything: for a
+    /// single directory, a parent, which is a path the parser accepts that names more than one
+    /// component; for a whole tree, the tree.
+    /// </param>
+    public void AssertItRanOpeningWhatItCreated(bool resolvedAPath)
+    {
+        AssertTheWalkNeverUsedTheConfinedOpen();
+
+        if (IsConfined && resolvedAPath)
+        {
+            Assert.True(
+                _ops.ConfinedOpenAttempts > _confinedOpensBefore,
+                $"{Name}: a path was resolved without a confined open.");
+        }
+    }
+
+    public void Dispose() => _substitution.Dispose();
+
+    private bool IsConfined => Name is Backends.ConfinedOpen or Backends.InMemoryConfined;
+
+    private void AssertTheWalkNeverUsedTheConfinedOpen()
     {
         if (Name is Backends.LinuxWalk or Backends.InMemoryWalk)
         {
             Assert.Equal(_confinedOpensBefore, _ops.ConfinedOpenAttempts);
         }
     }
-
-    public void Dispose() => _substitution.Dispose();
 }

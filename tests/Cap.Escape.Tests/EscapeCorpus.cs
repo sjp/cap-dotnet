@@ -88,6 +88,29 @@ internal static class EscapeCorpus
         Path.IsPathRooted(path);
 
     /// <summary>
+    /// Asserts that the backend in force was the one that resolved the case's path, however
+    /// the operation goes about it.
+    /// </summary>
+    /// <remarks>
+    /// Creating a directory opens the new name beneath its parent on every backend, so those
+    /// operations are held only to having resolved the parent through the backend, and only
+    /// when the path has one: more than one component, under the rules the library parses it by.
+    /// </remarks>
+    public static void AssertItRan(BackendScope scope, Operation operation, string path)
+    {
+        if (operation is Operation.CreateDir or Operation.OpenOrCreateDirAll)
+        {
+            bool parsed = CapPath.TryParse(
+                path, CapPath.HostSyntax, ParentLinkPolicy.Preserve, out CapPath parsedPath, out _);
+            scope.AssertItRanOpeningWhatItCreated(resolvedAPath: parsed && parsedPath.ComponentCount > 1);
+        }
+        else
+        {
+            scope.AssertItRan();
+        }
+    }
+
+    /// <summary>
     /// Longer than the forty links this library follows and than the limits the kernels apply
     /// to their own resolution, so that every backend refuses it for its own reasons.
     /// </summary>

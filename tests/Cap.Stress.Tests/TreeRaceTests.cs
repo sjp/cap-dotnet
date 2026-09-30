@@ -115,7 +115,8 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
                 HostOps.RemoveWithoutFollowing(victim);
             }
 
-            scope.AssertItRan();
+            // A scratch directory is made and then opened by name.
+            scope.AssertItRanOpeningWhatItCreated(resolvedAPath: true);
         }
 
         StressReport.Publish(output, "tree removed under attack", backend, tally);
@@ -214,7 +215,8 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
                 HostOps.RemoveWithoutFollowing(destination);
             }
 
-            scope.AssertItRan();
+            // The copy makes each directory of the tree beneath the destination and opens it by name.
+            scope.AssertItRanOpeningWhatItCreated(resolvedAPath: true);
         }
 
         StressReport.Publish(output, "tree copied under attack", backend, tally);
