@@ -374,12 +374,30 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
         lock (_fs.Gate)
         {
+            // A name that ends in a separator can only be a directory, and a file open does not
+            // make directories. The kernel refuses O_CREAT with a trailing slash once it has
+            // reached the directory holding the last name, before that name is looked at, so
+            // whatever holds it — nothing, a file, a link — is refused the same way.
+            if (request.Creates && CapPath.EndsInSeparatorAfterName(path, _fs.PathSyntax, out int nameStart))
+            {
+                ReadOnlySpan<char> prefix = path[..nameStart];
+                if (prefix.IsEmpty)
+                {
+                    return Fail<SafeFileHandle>(CapErrorCategory.IsADirectory);
+                }
+
+                CapError reached = Confined(root, prefix, options, followFinalLink: true, out MemoryWalkResult holder);
+                return reached.IsFailure
+                    ? CapResult<SafeFileHandle>.Fail(reached)
+                    : Fail<SafeFileHandle>(holder.Node!.Type == CapNodeType.Directory
+                        ? CapErrorCategory.IsADirectory
+                        : CapErrorCategory.NotADirectory);
+            }
+
             CapError error = Confined(root, path, options, request.FollowsFinalLink, out MemoryWalkResult found);
 
             if (error.Category == CapErrorCategory.NotFound && found.FinalName is { } name && request.Creates)
             {
-                // A name that ends in a separator can only be a directory, and a file open
-                // does not make directories.
                 return found.RequiresDirectory
                     ? Fail<SafeFileHandle>(CapErrorCategory.IsADirectory)
                     : CreateFile(found.Parent!, name, in request);

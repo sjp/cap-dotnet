@@ -395,12 +395,26 @@ internal static class PortableResolver
         // planted under that name leads to. So does an open whose caller asked for a final
         // link not to be followed, which a directory open carries in its request too.
         //
-        // A path spelled as a directory is the exception for an open of something that
-        // already exists: `link/` names what the link leads to, not the link, and the kernel's
-        // own resolution follows it even when asked not to follow a final link. Refusing it
-        // here would make the same path open on one backend and fail on another.
-        bool followFinal = request.FollowsFinalLink ||
-                           (pending.RequiresDirectory && request.Mode == FileMode.Open);
+        // A path spelled as a directory is the exception: `link/` and `link/.` name what the
+        // link leads to, not the link, and the kernel's own resolution follows it even when
+        // asked not to follow a final link — for `link/.` the link is not even the last
+        // component. Refusing it here would make the same path open on one backend and fail
+        // on another. It cannot steer a write, since what it reaches has to be a directory,
+        // and an open that may create under a trailing separator is refused below before
+        // anything is followed.
+        bool followFinal = request.FollowsFinalLink || pending.RequiresDirectory;
+
+        // A file open that may create, spelled with a separator after its last name, is refused
+        // as naming a directory before that name is looked at, as the kernel's open refuses
+        // O_CREAT with a trailing slash: no file can be made under such a name, whatever holds
+        // it now. Only the caller's own spelling can ask this: the name here is the caller's
+        // last one until a link under it is followed, and this refuses before that. A separator
+        // after a final `.` is not this case: the kernel resolves that, and so does the branch
+        // below.
+        if (target == ResolutionTarget.File && request.Creates && CapPath.EndsInSeparatorAfterName(path.Raw, path.Syntax, out _))
+        {
+            return CapError.FromCategory(CapErrorCategory.IsADirectory);
+        }
 
         if (asDirectory)
         {

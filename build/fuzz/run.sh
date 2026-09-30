@@ -4,9 +4,9 @@
 #
 #   build/fuzz/run.sh <target> <seconds> [corpus-dir]
 #
-# Builds the harness, instruments Cap.Primitives with SharpFuzz so that the fuzzer can see
-# which branches an input reached, builds the libFuzzer driver, and runs the target for the
-# given number of seconds. Linux only: the driver talks to the harness over System V shared
+# Builds the harness, instruments Cap.Primitives and Cap.Std.Testing with SharpFuzz so that
+# the fuzzer can see which branches an input reached, builds the libFuzzer driver, and runs
+# the target for the given number of seconds. Linux only: the driver talks to the harness over System V shared
 # memory.
 #
 # The working corpus -- the inputs libFuzzer keeps because each reached something new -- goes
@@ -62,7 +62,10 @@ fi
 rm -rf "$work/bin"
 dotnet publish "$root/fuzz/Cap.Fuzz/Cap.Fuzz.csproj" --configuration Release --output "$work/bin" -p:UseAppHost=true
 dotnet tool restore --tool-manifest "$root/.config/dotnet-tools.json"
+# Cap.Primitives holds the parser, the reparse reader and the walk; Cap.Std.Testing holds the
+# in-memory confined open that the resolution-memory target drives.
 dotnet tool run sharpfuzz "$work/bin/Cap.Primitives.dll"
+dotnet tool run sharpfuzz "$work/bin/Cap.Std.Testing.dll"
 
 # -timeout      an input that runs longer than this many seconds is a hang, and is kept.
 # -rss_limit_mb the harness is a whole .NET runtime, which starts well above libFuzzer's

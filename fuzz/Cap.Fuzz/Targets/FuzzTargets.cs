@@ -16,5 +16,6 @@ internal static class FuzzTargets
         [CapPathTarget.Name] = CapPathTarget.Run,
         [ReparseDataTarget.Name] = ReparseDataTarget.Run,
         [ResolutionWalkTarget.Name] = ResolutionWalkTarget.Run,
+        [MemoryResolutionTarget.Name] = MemoryResolutionTarget.Run,
     };
 }

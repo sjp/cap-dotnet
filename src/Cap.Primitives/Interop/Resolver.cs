@@ -170,14 +170,27 @@ internal static class Resolver
             return PortableResolver.ResolveParent(root, in path, options);
         }
 
+        if (!path.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
+        {
+            return CapResult<ResolvedParent>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
+        }
+
         // `..` is not a name an operation can act on: there is nothing there to create,
         // remove or rename, only a directory the caller could have asked for directly. The
-        // walk reaches the same conclusion by standing on the directory and finding no final
-        // name, and the two backends have to agree about it or the same path would be
-        // actionable on one platform and not on another.
-        if (!path.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name) ||
-            name.SequenceEqual(".."))
+        // walk reaches that conclusion by climbing to the directory and finding no final name,
+        // so a climb that fails on the way — out of the subtree, through a missing name —
+        // fails for that reason first. The two backends have to agree about both, or the same
+        // path would be refused as an escape on one platform and as a bad argument on
+        // another, so the whole path is resolved here just as far, and refused afterwards.
+        if (name.SequenceEqual(".."))
         {
+            CapResult<SafeDirHandle> climbed = ops.OpenConfinedDirectory(root, path.Raw, CapAccess.None, options);
+            if (!climbed.IsSuccess)
+            {
+                return CapResult<ResolvedParent>.Fail(climbed.Error);
+            }
+
+            climbed.Value!.Dispose();
             return CapResult<ResolvedParent>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 

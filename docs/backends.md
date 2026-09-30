@@ -148,9 +148,13 @@ without reading it; the kernel-atomic backend adds `O_NOFOLLOW` to the open, so 
 refuses it the same way. An open asked per call not to follow a final link is refused the
 same way on both. For a directory the kernel reports that refusal as "not a directory", so
 the kernel-atomic backend looks at the name again, confined and without following it, and
-reports a link it finds there as the refused link it was. A path ending in a separator asks
-for what a final link leads to, and the kernel follows it even when told not to; the walk
-does the same, so the two agree.
+reports a link it finds there as the refused link it was. A path ending in a separator, or in
+`/.`, asks for what a final link leads to, and the kernel follows it even when told not to; the
+walk does the same, so the two agree. That holds for an open that may create or truncate too,
+since what it reaches has to be a directory, which no file open can write. The exception is
+an open that may create with a separator after the last name. The kernel refuses O_CREAT with a
+trailing slash as naming a directory before it looks the name up, and the walk refuses it the
+same way.
 
 A mount the caller asked not to cross is refused by the kernel with the code it uses for a
 path that leaves the root, so the kernel-atomic backend resolves the path again, confined as

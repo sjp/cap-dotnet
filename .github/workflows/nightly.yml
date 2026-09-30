@@ -86,7 +86,8 @@ jobs:
 
   # -------------------------------------------------------------------------------------
   # The fuzz targets in fuzz/Cap.Fuzz, each under libFuzzer for an hour: path parsing, the
-  # reparse-point reader, and the walk over a simulated tree whose links the fuzzer chooses.
+  # reparse-point reader, the walk over a simulated tree whose links the fuzzer chooses, and
+  # the in-memory confined open over the same trees, held to the walk's answers.
   # Linux only, since the driver talks to the harness over System V shared memory. None of
   # the targets touches the host filesystem, so what they find does not depend on the OS they
   # run on.
@@ -109,7 +110,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [cap-path, reparse-data, resolution]
+        target: [cap-path, reparse-data, resolution, resolution-memory]
 
     steps:
       - uses: actions/checkout@v7

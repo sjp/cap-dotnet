@@ -25,8 +25,9 @@ internal sealed record Seed(string Target, string Name, byte[] Data);
 /// </para>
 /// <para>
 /// The paths go to the parser under both syntaxes. The trees go to the walk, over the
-/// simulated filesystem, through each of its operations. The link targets go to the reparse
-/// reader, written out as the structure that would store them.
+/// simulated filesystem, and to the confined open in memory, through each of their
+/// operations. The link targets go to the reparse reader, written out as the structure that
+/// would store them.
 /// </para>
 /// </remarks>
 internal static class EscapeCorpusSeeds
@@ -67,6 +68,7 @@ internal static class EscapeCorpusSeeds
                 if (scenario.Encode() is { } data)
                 {
                     yield return new Seed(ResolutionWalkTarget.Name, $"{entry.Name}-{operation}", data);
+                    yield return new Seed(MemoryResolutionTarget.Name, $"{entry.Name}-{operation}", data);
                 }
             }
         }

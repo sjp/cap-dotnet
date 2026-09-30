@@ -121,7 +121,7 @@ public sealed class ResolutionPropertyTests
     /// the directory the step down came from. Nothing when a name is missing or not a
     /// directory, or when a step up would leave the starting directory.
     /// </summary>
-    private static MemoryNode? ReadAsText(MemoryNode start, CapPath path)
+    internal static MemoryNode? ReadAsText(MemoryNode start, CapPath path)
     {
         Stack<MemoryNode> above = new();
         MemoryNode current = start;

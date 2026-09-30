@@ -217,6 +217,14 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.IsADirectory));
         }
 
+        // A reparse point that stands for another object is refused whatever the open was
+        // asked for, as the Windows backend refuses its tag: opening it as a file would hand
+        // back the redirection instead of anything the name holds.
+        if (node.Type == CapNodeType.UnknownReparsePoint)
+        {
+            return CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.Reparse));
+        }
+
         return request.Mode == FileMode.CreateNew
             ? CapResult<SafeFileHandle>.Fail(CapError.FromCategory(CapErrorCategory.AlreadyExists))
             : CapResult<SafeFileHandle>.Ok(OpenExistingFile(node, in request));
@@ -1146,6 +1154,13 @@ internal sealed class FakePlatformOps : IPlatformOps
         if (directory.Unreadable)
         {
             return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+        }
+
+        // A name longer than the system looks up is refused before any lookup, as every real
+        // backend's own lookup refuses it and as the confined open over this tree does.
+        if (MemoryPathWalk.NameTooLong(name, Capabilities.PathSyntax))
+        {
+            return CapError.FromCategory(CapErrorCategory.NameTooLong);
         }
 
         node = _fileSystem.Lookup(directory, name.ToString());

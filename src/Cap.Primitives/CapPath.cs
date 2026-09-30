@@ -527,6 +527,41 @@ public readonly struct CapPath
     private static bool IsDriveLetter(char c) => char.IsAsciiLetter(c);
 
     /// <summary>
+    /// Whether <paramref name="raw"/> ends in a separator that follows a name, rather than
+    /// <c>.</c> or <c>..</c>; and if so, where that name starts.
+    /// </summary>
+    /// <remarks>
+    /// What the kernel's open refuses outright when it may create: with a trailing slash after
+    /// a name, no file can be made under it, and the name is not even looked up. After
+    /// <c>.</c> or <c>..</c> the separator changes nothing, since those are resolved to the
+    /// directory they name in either spelling.
+    /// </remarks>
+    internal static bool EndsInSeparatorAfterName(ReadOnlySpan<char> raw, CapPathSyntax syntax, out int nameStart)
+    {
+        nameStart = 0;
+        if (raw.IsEmpty || !IsSeparator(raw[^1], syntax))
+        {
+            return false;
+        }
+
+        int end = raw.Length;
+        while (end > 0 && IsSeparator(raw[end - 1], syntax))
+        {
+            end--;
+        }
+
+        int start = end;
+        while (start > 0 && !IsSeparator(raw[start - 1], syntax))
+        {
+            start--;
+        }
+
+        ReadOnlySpan<char> last = raw[start..end];
+        nameStart = start;
+        return !last.IsEmpty && !last.SequenceEqual(".") && !last.SequenceEqual("..");
+    }
+
+    /// <summary>
     /// Whether the path insists its target be a directory: it ends in a separator, or its
     /// last component is <c>.</c> or <c>..</c>.
     /// </summary>

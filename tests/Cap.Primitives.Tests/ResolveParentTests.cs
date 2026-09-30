@@ -232,6 +232,32 @@ public sealed class ResolveParentTests
     }
 
     /// <summary>
+    /// A path that ends by stepping up is resolved as far as the step before it is refused
+    /// for naming nothing, so a climb out of the sandbox is refused as the escape it is, and a
+    /// missing name on the way as missing, on both backends.
+    /// </summary>
+    /// <remarks>
+    /// The walk climbs before it finds there is no final name. The kernel-atomic backend used to
+    /// refuse from the text alone, which reported <c>..</c> from the root as a bad argument on
+    /// Linux and as an escape everywhere else. The fuzzer's agreement check found it.
+    /// </remarks>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_path_that_ends_by_stepping_up_is_refused_for_what_the_climb_meets_first(bool atomic)
+    {
+        FakeFileSystem fs = Sandbox(atomic);
+        _ = fs.AddDirectory("sandbox/a");
+
+        Run(fs, (ops, handle) =>
+        {
+            AssertFails(CapErrorCategory.Escaped, handle, "..");
+            AssertFails(CapErrorCategory.Escaped, handle, "a/../..");
+            AssertFails(CapErrorCategory.NotFound, handle, "missing/..");
+        });
+    }
+
+    /// <summary>
     /// The directory handed back is the resolution's own, and closing it leaves the root
     /// working.
     /// </summary>

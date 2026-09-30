@@ -108,6 +108,16 @@ internal static class MemoryPathWalk
                 continue;
             }
 
+            // A step that stays put, but a step all the same: the name before it is not the
+            // last one, so a missing name there is missing on the way and not one that could
+            // be created, as it is for the kernel.
+            if (component == ".")
+            {
+                parent = null;
+                finalName = null;
+                continue;
+            }
+
             if (current.Unreadable)
             {
                 return CapError.FromCategory(CapErrorCategory.PermissionDenied);
@@ -228,7 +238,7 @@ internal static class MemoryPathWalk
 
             ReadOnlySpan<char> component = path[start..i];
             start = i + 1;
-            if (!component.IsEmpty && !component.SequenceEqual("."))
+            if (!component.IsEmpty)
             {
                 components.Add(component.ToString());
             }

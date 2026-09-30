@@ -62,13 +62,33 @@ walk, so the walk must agree exactly with reading the path as text. It must succ
 when every name exists and is a directory and no `..` climbs above the start, and it must then
 reach the directory the text names.
 
+**The confined open in memory** (`resolution-memory`). `Cap.Std.Testing` has a second
+resolver, `MemoryPathWalk`, which resolves a whole path in one call as `openat2` does under
+`RESOLVE_BENEATH`. It keeps its own count of `..`, its own limit on links and its own
+refusals of links and mount crossings. The `in-memory-confined` CI legs use it in place of the
+kernel, and it ships to consumers in the `Cap.Std.Testing` package. If it were more permissive
+than the kernel, those legs would pass while hiding an escape. This target builds the same
+trees as `resolution`, copied into an `InMemoryFileSystem` that resolves by the confined open.
+It runs each operation through the library's own choice of resolver, which is the path those
+legs take, and holds the result to every check listed for the walk. That path gives no way to
+watch each lookup, so the target also runs `MemoryPathWalk` directly with a lookup that
+refuses to be asked about any directory outside the sandbox.
+
+It must also **agree with the walk**. When nothing changes the tree during resolution, the
+confined open and the walk are meant to reach the same verdict. So the same scenario goes
+through the walk as well, and both must succeed and reach the same object, or both must fail
+for the same reason. There is no list of permitted differences: when the two disagreed, the
+code that differed from the kernel was fixed. The property tests run this over general trees,
+over trees made mostly of links (where the two resolvers keep their accounts differently), and
+over trees without links, compared with reading the path as text.
+
 ## Starting inputs and saved inputs
 
 The fuzzer starts from the escape corpus. `tests/Cap.Fuzz.Tests/EscapeCorpusSeeds.cs` turns
-each case into inputs for the three targets:
+each case into inputs for the four targets:
 
 - its path goes to the parser, under both syntaxes;
-- its tree goes to the walk, through each operation;
+- its tree goes to the walk and to the confined open in memory, through each operation;
 - its link targets go to the reparse reader, written out as the structure that would store
   them.
 
@@ -96,8 +116,8 @@ build/fuzz/run.sh cap-path 600
 `build/fuzz/run.sh` does four things:
 
 1. publishes the harness;
-2. instruments `Cap.Primitives` with SharpFuzz, pinned in `.config/dotnet-tools.json`, so the
-   fuzzer can see which branches an input reached;
+2. instruments `Cap.Primitives` and `Cap.Std.Testing` with SharpFuzz, pinned in
+   `.config/dotnet-tools.json`, so the fuzzer can see which branches an input reached;
 3. builds the libFuzzer driver from source pinned by tag and SHA-256 digest;
 4. runs the target.
 
