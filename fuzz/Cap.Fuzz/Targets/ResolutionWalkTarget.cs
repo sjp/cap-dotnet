@@ -97,7 +97,7 @@ internal static class ResolutionWalkTarget
     /// </summary>
     internal static (FakeFileSystem Fs, MemoryNode Sandbox, MemoryNode Outside) Build(IReadOnlyList<TopologyEntry> entries)
     {
-        FakeFileSystem fs = new();
+        FakeFileSystem fs = new() { PathSyntax = CapPathSyntax.Unix };
         MemoryNode sandbox = fs.AddDirectory(ResolutionScenario.SandboxName);
         MemoryNode outside = fs.AddDirectory(ResolutionScenario.OutsideName);
         _ = fs.AddFile($"{ResolutionScenario.OutsideName}/{ResolutionScenario.OutsideFileName}");

@@ -61,7 +61,9 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public PlatformCapabilities Capabilities => new(
         _fileSystem.SupportsConfinedOpen ? ResolutionBackend.ConfinedOpen : ResolutionBackend.PortableWalk,
-        overlappedFileHandles: false);
+        overlappedFileHandles: false,
+        _fileSystem.SupportsConfinedOpen,
+        _fileSystem.PathSyntax);
 
     /// <inheritdoc/>
     public long ConfinedOpenAttempts => _confinedOpenAttempts;

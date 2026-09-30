@@ -1,3 +1,4 @@
+using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Windows;
 using Cap.Std.Testing;
@@ -58,6 +59,17 @@ internal sealed class FakeFileSystem
     /// other's behaviour unasserted on every build agent that lacks it.
     /// </remarks>
     public bool SupportsConfinedOpen { get; set; }
+
+    /// <summary>
+    /// The rules a path beneath one of the simulated platform's handles is read under: the
+    /// host's unless told otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Settable so that a check comparing the simulation with a filesystem pinned to one
+    /// syntax measures names the same way on every build agent, rather than by UTF-16 units
+    /// on Windows and UTF-8 bytes everywhere else.
+    /// </remarks>
+    public CapPathSyntax PathSyntax { get; set; } = CapPath.HostSyntax;
 
     /// <summary>
     /// Whether the simulated platform can create a file with no name in any directory.
