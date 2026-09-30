@@ -26,6 +26,14 @@ namespace Cap.Benchmarks;
 /// <see cref="Categories.AllocationOnly"/> is reported the same way, for the same reason.
 /// </para>
 /// <para>
+/// <strong>Time is gated on Linux alone.</strong> On the hosted Windows and macOS runners the
+/// ratio to <c>System.IO</c> does not hold still either. A Windows runner agrees with itself
+/// to under 1% within a run, but runners differ from one another by more than the tolerance.
+/// A macOS runner scatters by a fifth within a single run. Both failed the gate on code they
+/// had passed, so on those platforms the ratios are reported and every row is held to its
+/// allocation alone.
+/// </para>
+/// <para>
 /// <strong>Allocation is gated as bytes per operation.</strong> It does not depend on the
 /// machine, so it is compared directly, and an operation whose baseline allocates nothing fails
 /// on its first byte: those are the rows whose whole point is that they allocate nothing.
@@ -41,6 +49,9 @@ internal static class Gate
 {
     /// <summary>How much worse than its baseline a row may get before the gate fails.</summary>
     public const double Tolerance = 0.10;
+
+    /// <summary>Whether this platform's runners hold a time ratio steady enough to gate it.</summary>
+    public static bool GatesTime => OperatingSystem.IsLinux();
 
     /// <summary>The name of this platform's baseline file.</summary>
     public static string Platform =>
@@ -110,10 +121,13 @@ internal static class Gate
             report.AppendLine();
         }
 
+        string rule = GatesTime
+            ? $"A row fails when its time ratio to `System.IO` or its allocation grows more than {Tolerance:P0}; " +
+              $"a row marked allocation only is held to its allocation alone."
+            : $"Time ratios are not gated on {Platform}, whose hosted runners move them by more than the tolerance; " +
+              $"a row fails when its allocation grows more than {Tolerance:P0}.";
         report.AppendLine(CultureInfo.InvariantCulture,
-            $"Baseline: `{Path.GetFileName(baselinePath)}`, measured on {committed.MeasuredOn ?? "(none committed)"}. " +
-            $"A row fails when its time ratio to `System.IO` or its allocation grows more than {Tolerance:P0}; " +
-            $"a row marked allocation only is held to its allocation alone.");
+            $"Baseline: `{Path.GetFileName(baselinePath)}`, measured on {committed.MeasuredOn ?? "(none committed)"}. {rule}");
         report.AppendLine();
         report.AppendLine("| Benchmark | Ratio | Baseline ratio | Allocated | Baseline allocated | Verdict |");
         report.AppendLine("|---|---:|---:|---:|---:|---|");
@@ -209,7 +223,8 @@ internal static class Gate
                 if (yardstick?.ResultStatistics is { } baseline)
                 {
                     ratio = Math.Round(report.ResultStatistics.Median / baseline.Median, 4);
-                    timeGated = yardstick.BenchmarkCase.Descriptor.WorkloadMethod.Name == Categories.SystemIOMethod
+                    timeGated = GatesTime
+                        && yardstick.BenchmarkCase.Descriptor.WorkloadMethod.Name == Categories.SystemIOMethod
                         && !benchmark.Descriptor.HasCategory(Categories.AllocationOnly);
                 }
             }

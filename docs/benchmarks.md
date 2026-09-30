@@ -88,7 +88,8 @@ RESULTS_PLACEHOLDER
 
 `gate` runs the classes marked ✓ above and compares them with the figures committed in
 `bench/baselines/<os>.json`. CI runs it on every change on Linux, Windows and macOS; on each
-platform with a committed baseline it fails when any row has become more than 10% worse. A
+platform with a committed baseline it fails when any row has become more than 10% worse (on
+Windows and macOS, in allocation only; see below). A
 platform with no committed file is run and reported with a warning annotation, but not gated.
 
 **Time is compared as a ratio, not as a duration.** A hosted CI runner's speed wanders from one
@@ -115,6 +116,13 @@ component against several. That moves by a fifth between hosted runners on uncha
 while holding to under 1% within a single run, so it measures the runner rather than the
 library. The ratio is still reported. A class opts into this with the `AllocationOnly`
 benchmark category, as the parser does.
+
+**Windows and macOS are gated on allocation only.** Their time ratios are reported but not held
+to the tolerance, because the hosted runners move them too far on unchanged code. A Windows
+runner agrees with itself to under 1% within a run, but `OpenReadFiveComponents` has measured
+3.96 on one runner and 4.41 on another. A macOS runner scatters by a fifth within a single run,
+and `OpenReadSingleComponent` has measured 0.86 on one run and 1.51 on another. On Linux the
+ratios hold, and every row not marked allocation only is gated on time as well.
 
 **An allocation-only class gets a short run.** Bytes per operation come out the same after one
 iteration as after twenty, so these classes run with one warmup and three short iterations
