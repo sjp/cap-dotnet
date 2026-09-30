@@ -230,11 +230,7 @@ public sealed class Openat2DemotionTests
         using Process child = Process.Start(start) ??
             throw new InvalidOperationException("The probe child did not start.");
 
-        string output = child.StandardOutput.ReadToEnd();
-        string errors = child.StandardError.ReadToEnd();
-        Assert.True(
-            child.WaitForExit(ChildTimeout),
-            "The probe child did not finish within " + ChildTimeout + "ms.");
+        (string output, string errors) = ChildProcessWait.Finish(child, "The probe child", ChildTimeout);
 
         foreach (string line in output.Split('\n'))
         {
@@ -248,5 +244,5 @@ public sealed class Openat2DemotionTests
             "The probe child reported nothing. Its output was:\n" + output + errors);
     }
 
-    private const int ChildTimeout = 60_000;
+    private static readonly TimeSpan ChildTimeout = TimeSpan.FromSeconds(60);
 }

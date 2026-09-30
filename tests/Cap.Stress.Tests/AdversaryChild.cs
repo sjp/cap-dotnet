@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using Cap.Tests;
 
 namespace Cap.Stress.Tests;
 
@@ -73,6 +74,12 @@ internal static class AdversaryChild
 /// </summary>
 internal sealed class ProcessAdversary : Adversary
 {
+    /// <summary>
+    /// How long the attacker has to finish its first cycle and say so. One cycle over every
+    /// partner takes milliseconds; a child that has not answered in this time never will.
+    /// </summary>
+    private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
+
     private readonly Process _child;
     private bool _stopped;
 
@@ -85,12 +92,12 @@ internal sealed class ProcessAdversary : Adversary
             [AdversaryChild.PartnersVariable] = string.Join(Path.PathSeparator, partners),
         });
 
-        string? line = _child.StandardOutput.ReadLine();
+        string? line = ChildProcessWait.ReadLine(_child, "The attacking process", StartTimeout);
         if (line != AdversaryChild.Ready)
         {
-            _child.Kill(entireProcessTree: true);
+            ChildProcessWait.Kill(_child, "The attacking process");
             throw new InvalidOperationException(
-                $"The attacking process did not start attacking: '{line}' {_child.StandardError.ReadToEnd()}");
+                $"The attacking process did not start attacking: '{line}' {ChildProcessWait.Finish(_child, "The attacking process").Errors}");
         }
     }
 
@@ -105,8 +112,7 @@ internal sealed class ProcessAdversary : Adversary
         if (!_stopped)
         {
             _stopped = true;
-            _child.Kill(entireProcessTree: true);
-            _child.WaitForExit();
+            ChildProcessWait.Kill(_child, "The attacking process");
             _child.Dispose();
         }
 

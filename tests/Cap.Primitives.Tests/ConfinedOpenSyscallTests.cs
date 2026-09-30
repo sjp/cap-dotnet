@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
+using Cap.Tests;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Tests;
@@ -368,11 +369,9 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
             _ = Kill(trace.Id, Interrupt);
             if (!trace.WaitForExit(TracerShutdownMilliseconds))
             {
-                trace.Kill();
+                ChildProcessWait.Kill(trace, "The tracer");
             }
         }
-
-        trace.WaitForExit();
     }
 
     private static bool TryFindTracer(out string path)

@@ -24,6 +24,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
+    # Every test that waits on a child process is bounded (tests/Shared/ChildProcessWait.cs);
+    # this catches whatever hang is left, at 45 minutes rather than GitHub's six hours.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

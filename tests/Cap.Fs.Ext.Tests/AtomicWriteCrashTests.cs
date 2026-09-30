@@ -127,6 +127,10 @@ public sealed class AtomicWriteCrashTests : IDisposable
                     return true;
                 }
             }
+
+            // A millisecond frees the core without widening the window much: the payload
+            // is large and every write of it is flushed, so the publish takes far longer.
+            Thread.Sleep(1);
         }
 
         return false;

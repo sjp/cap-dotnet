@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Cap.Primitives;
 using Cap.Std;
 using Cap.Std.Testing;
+using Cap.Tests;
 
 namespace Cap.Fs.Ext.Tests;
 
@@ -1098,7 +1099,13 @@ public sealed class CopyTests : IDisposable
     /// <summary>Runs one of the system's own tools, and insists that it worked.</summary>
     private static void Run(string program, params string[] arguments)
     {
-        ProcessStartInfo start = new() { FileName = program, UseShellExecute = false };
+        ProcessStartInfo start = new()
+        {
+            FileName = program,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
         foreach (string argument in arguments)
         {
             start.ArgumentList.Add(argument);
@@ -1107,10 +1114,10 @@ public sealed class CopyTests : IDisposable
         using Process process = Process.Start(start) ??
             throw new InvalidOperationException($"'{program}' did not start.");
 
-        process.WaitForExit();
+        (_, string errors) = ChildProcessWait.Finish(process, $"'{program}'", TimeSpan.FromSeconds(30));
         if (process.ExitCode != 0)
         {
-            throw new InvalidOperationException($"'{program}' failed with {process.ExitCode}.");
+            throw new InvalidOperationException($"'{program}' failed with {process.ExitCode}: {errors}");
         }
     }
 

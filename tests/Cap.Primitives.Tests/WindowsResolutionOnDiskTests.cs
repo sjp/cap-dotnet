@@ -32,6 +32,9 @@ namespace Cap.Primitives.Tests;
 [Collection(PlatformOpsTestGroup.Name)]
 public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 {
+    /// <summary>How long one of the system's own tools is given before it is killed.</summary>
+    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(30);
+
     private readonly string _root = Directory.CreateTempSubdirectory("cap-win-").FullName;
 
     public void Dispose()
@@ -892,10 +895,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         Assert.NotNull(process);
 
-        // Both streams drained before waiting, for the reason CreateJunction gives.
-        _ = process.StandardOutput.ReadToEnd();
-        _ = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        _ = ChildProcessWait.Finish(process, "compact", ToolTimeout);
     }
 
     /// <summary>
@@ -1009,11 +1009,7 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         Assert.NotNull(process);
 
-        // Both streams drained before waiting: a process whose output fills the pipe while
-        // nobody is reading it never exits.
-        string output = process.StandardOutput.ReadToEnd();
-        string errors = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        (string output, string errors) = ChildProcessWait.Finish(process, "mklink", ToolTimeout);
 
         Assert.True(Directory.Exists(link), $"could not create a junction at '{link}': {errors}{output}");
     }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using Cap.Tests;
 
 namespace Cap.Escape.Tests;
 
@@ -13,6 +14,9 @@ namespace Cap.Escape.Tests;
 /// </remarks>
 internal static partial class HostFilesystem
 {
+    /// <summary>How long one of the system's own tools is given before it is killed.</summary>
+    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>Creates a junction, which unlike a symbolic link needs no privilege.</summary>
     /// <remarks>
     /// Through the shell because the framework has no API for one. The paths are quoted rather
@@ -34,11 +38,7 @@ internal static partial class HostFilesystem
             RedirectStandardError = true,
         }) ?? throw new IOException("Could not start the shell to create a junction.");
 
-        // Both streams drained before waiting: a process whose output fills the pipe while
-        // nobody is reading it never exits.
-        string output = process.StandardOutput.ReadToEnd();
-        string errors = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        (string output, string errors) = ChildProcessWait.Finish(process, "mklink", ToolTimeout);
 
         if (!HostDirectory.Exists(link))
         {

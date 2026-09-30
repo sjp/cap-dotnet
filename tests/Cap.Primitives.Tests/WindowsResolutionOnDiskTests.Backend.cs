@@ -757,10 +757,7 @@ public sealed partial class WindowsResolutionOnDiskTests
             return "fsutil could not be started.";
         }
 
-        // Both streams drained before waiting, for the reason CreateJunction gives.
-        string output = process.StandardOutput.ReadToEnd();
-        string errors = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        (string output, string errors) = ChildProcessWait.Finish(process, "fsutil", ToolTimeout);
 
         return process.ExitCode == 0 ? null : $"exit code {process.ExitCode}: {errors}{output}".Trim();
     }

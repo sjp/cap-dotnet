@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Cap.Tests;
 
 namespace Cap.Stress.Tests;
 
@@ -47,10 +48,10 @@ public sealed class ExhaustionTests(ITestOutputHelper output)
             [ExhaustionChild.RequestVariable] = arena.SandboxPath,
         });
 
-        Task<string> errors = child.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-        string report = await child.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
-        await child.WaitForExitAsync(TestContext.Current.CancellationToken);
-        string errorText = await errors;
+        (string report, string errorText) = await ChildProcessWait.FinishAsync(
+            child,
+            "The exhausting child",
+            cancellationToken: TestContext.Current.CancellationToken);
         output.WriteLine(report);
         output.WriteLine(errorText);
 
