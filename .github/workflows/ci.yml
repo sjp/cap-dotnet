@@ -630,6 +630,12 @@ jobs:
         run: |
           test "$(jq -r .sdk.version global.json)" = "$(jq -r '.features["ghcr.io/devcontainers/features/dotnet:2"].version' .devcontainer/devcontainer.json)" \
             || { echo "::error::global.json and .devcontainer/devcontainer.json name different SDK versions"; exit 1; }
+      # A published page must not carry a template token or a note to its author.
+      - name: no placeholders in docs
+        run: |
+          if grep -rnE '[A-Z]+_PLACEHOLDER|\bTODO\b|\bFIXME\b|\bTBD\b' docs/ README.md; then
+            echo "::error::docs/ or README.md holds a template token or TODO"; exit 1
+          fi
       - uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
