@@ -24,6 +24,8 @@ what a program moving between Linux, macOS and Windows will notice.
 | Creation time | where the filesystem records it | yes | yes |
 | Access time | unless the filesystem keeps none, when it is null | yes | yes |
 | Appending (`append: true`, `CapFile.IsAppending`) | a flag on the open file, shared with streams taken from it | a flag on the open file, shared with streams taken from it, but a stream's writes go to its own position rather than the end; `CapFile`'s own writes go to the end | applied by `CapFile` to its own writes; a stream taken while it is on gets a handle that can only append |
+| Refusing to replace on rename (`replaceExisting: false`) | `renameat2(RENAME_NOREPLACE)`; fails on kernels and filesystems without it ([below](#linux-which-backend)) | `renameatx_np(RENAME_EXCL)`; fails on volumes without it, such as SMB, NFS and some FUSE ([below](#macos)) | always, as part of the rename itself |
+| Walking through a directory that grants search but not read (`0711`) | yes | no: every directory handle can also list ([why](backends.md#directories-opened-only-to-be-traversed)) | yes |
 | Committing a directory's entries (`Dir.Flush(toDisk: true)`) | `fsync` on the directory | `F_FULLFSYNC` on the directory, falling back to `fsync` where the volume refuses it | not possible; returns false |
 | Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
 | Processor architectures | x86-64, AArch64, 32-bit ARM; any other is refused ([below](#linux-architectures)) | any .NET runs on | any .NET runs on |
@@ -151,6 +153,27 @@ carried from a Linux enumeration with escaped bytes (see
 **`/tmp` and `/var` are links** to `/private/tmp` and `/private/var`. Opening a root through
 them is fine: the root is opened with ambient authority, following links, and confinement
 applies to what lies beneath wherever it led. `TryGetPath` will report the `/private` form.
+
+**Firmlinks** join the system and data volumes, so `/Users` and `/System/Volumes/Data/Users`
+are the same directory. The walk crosses one like any other directory, and `..` returns to
+the directory the walk came from, so a firmlink cannot be used to climb out. `TryGetPath`
+reports the firmlink-resolved form: a directory opened as `/System/Volumes/Data/Users/x`
+comes back as `/Users/x`, just as one opened through `/tmp` comes back as `/private/tmp`.
+Don't compare its answer with the path that was opened.
+
+**Rename without replacing** uses `renameatx_np` with `RENAME_EXCL`, so the refusal of a
+taken destination is part of the move itself. A volume that has not implemented the flag —
+SMB and NFS mounts, and some FUSE filesystems — fails the move with
+`CapErrorKind.NotSupported`. An invalid-argument answer comes through as
+`CapErrorKind.InvalidArgument`, for the reason given under Linux below. On such a volume,
+ask for `replaceExisting: true` if replacing is acceptable. The library never falls back to
+checking first.
+
+**Directories that grant search but not read** (`0711`) cannot be walked through. macOS has
+no way to open a directory only to traverse it, so every directory handle also needs read
+permission, and a tree that Linux and Windows can reach fails here with
+`CapErrorKind.PermissionDenied` at that directory. See
+[backends.md](backends.md#directories-opened-only-to-be-traversed).
 
 **Backend.** Always the walk. macOS has no confined open like Linux's, so the residual
 window described in [threat model §6.1](threat-model.md#61-the-fallback-resolver-narrows-toctou-it-does-not-close-it)
