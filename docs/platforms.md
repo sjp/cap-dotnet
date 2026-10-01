@@ -43,10 +43,11 @@ form when a system or filesystem does not offer it:
 | `FileDispositionInformationEx` (a removed name disappears at once, as on Unix) | `FileDispositionInformation`: the name lingers until the last handle closes |
 | `FileRenameInformationEx` (replacing a name that is open, as on Unix) | `FileRenameInformation` |
 | `FileNormalizedNameInformation` (the stored name, for the check on names containing `~`) | `FileAlternateNameInformation`: the entry's short name (see below) |
+| `FileIdInformation` (the 128-bit identifier and the volume serial) | `FileInternalInformation` and the volume's 32-bit serial |
+| `FileStatInformation` (times, length, attributes, reparse tag and link count in one reply, from Windows 10 1709) | `FileNetworkOpenInformation`, `FileStandardInformation` and, for a reparse point, `FileAttributeTagInformation` |
 
-One class has no fallback yet: `FileIdInformation`, which every metadata call reads. On a
-filesystem that does not offer it, the calls that read it fail. No hosted CI runner is older than 1709, so the older
-directory query is exercised by forcing it on the Windows leg rather than on an old system.
+No hosted CI runner is older than 1709, so the older directory query is exercised by forcing
+it on the Windows leg rather than on an old system.
 
 **Reserved device names are refused, in every disguise.** `CON`, `PRN`, `AUX`, `NUL`,
 `COM0`–`COM9`, `LPT0`–`LPT9`, their superscript-digit forms, `CONIN$` and `CONOUT$` all reach

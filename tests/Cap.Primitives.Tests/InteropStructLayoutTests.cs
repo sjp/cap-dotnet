@@ -459,6 +459,48 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The Windows reply carrying the times, the length, the attributes, the reparse tag and
+    /// the link count together is 72 bytes, with the 64-bit identifier first.
+    /// </summary>
+    /// <remarks>
+    /// Seven 64-bit fields in a row and then four 32-bit ones, so a declaration that dropped or
+    /// reordered one would read a time as a length or a tag as a link count and never fail.
+    /// </remarks>
+    [Fact]
+    public void Windows_combined_description_reply_matches_the_native_layout()
+    {
+        Assert.Equal(72, FileStatInformation.StructSize);
+
+        Assert.Equal(
+            0,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.FileId)).ToInt32());
+        Assert.Equal(
+            8,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.CreationTime)).ToInt32());
+        Assert.Equal(
+            16,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.LastAccessTime)).ToInt32());
+        Assert.Equal(
+            24,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.LastWriteTime)).ToInt32());
+        Assert.Equal(
+            32,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.ChangeTime)).ToInt32());
+        Assert.Equal(
+            48,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.EndOfFile)).ToInt32());
+        Assert.Equal(
+            56,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.FileAttributes)).ToInt32());
+        Assert.Equal(
+            60,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.ReparseTag)).ToInt32());
+        Assert.Equal(
+            64,
+            Marshal.OffsetOf<FileStatInformation>(nameof(FileStatInformation.NumberOfLinks)).ToInt32());
+    }
+
+    /// <summary>
     /// The Windows structure carrying the times and the attributes is 40 bytes, with the
     /// attributes after the four times.
     /// </summary>

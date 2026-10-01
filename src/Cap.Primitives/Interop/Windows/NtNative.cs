@@ -579,6 +579,17 @@ internal static class NtConstants
     public const uint FileNetworkOpenInformationClass = 34;
 
     /// <summary>
+    /// Asks for the times, the length, the attributes, the reparse tag and the link count in
+    /// one reply.
+    /// </summary>
+    /// <remarks>
+    /// Offered from Windows 10 version 1709, and not by every filesystem after that. Where it
+    /// is declined, the same fields are asked for with <see cref="FileNetworkOpenInformationClass"/>,
+    /// <see cref="FileStandardInformationClass"/> and <see cref="FileAttributeTagInformationClass"/>.
+    /// </remarks>
+    public const uint FileStatInformationClass = 68;
+
+    /// <summary>
     /// Asks a directory read for each entry's name, attributes, reparse tag and 64-bit file
     /// identifier.
     /// </summary>

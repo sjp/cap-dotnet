@@ -2988,13 +2988,11 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Three requests in the ordinary case and four when the object has a reparse point. The first
-    /// carries the times, the length and the attributes together, so those describe one
-    /// instant rather than several; the second carries the identity and the third the link
-    /// count, neither of which any single reply combines with the rest. The reparse tag is asked for only when the attributes say
-    /// there is one, because the whole reason to want it — telling a symbolic link from a
-    /// redirection of unknown shape, and either from an object a filter merely serves — does
-    /// not arise otherwise.
+    /// Two requests where the filesystem offers the reply that carries the times, the length,
+    /// the attributes, the reparse tag and the link count together, so those describe one
+    /// instant; the second carries the identity, which that reply has only in part. Where the
+    /// combined reply is declined the same fields take three requests, four when the object
+    /// has a reparse point, as <see cref="FileStat"/> describes.
     /// </para>
     /// <para>
     /// The identifier is carried at its full width here, unlike in the description
@@ -3009,44 +3007,40 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     {
         stat = default;
 
-        CapError error = QueryNetworkOpen(handle, out FileNetworkOpenInformation basic);
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        CapError error = FileStat.Query(
+            lease.Raw, QueryStat, QueryNetworkOpen, QueryStandard, QueryAttributeTag, out FileStatInformation basic);
         if (error.IsFailure)
         {
             return error;
         }
 
-        error = QueryId(handle, out FileIdInformation id);
+        error = QueryId(lease.Raw, out FileIdInformation id);
         if (error.IsFailure)
         {
             return error;
         }
 
-        error = QueryStandard(handle, out FileStandardInformation standard);
-        if (error.IsFailure)
+        // Only a reparse point that stands for another object changes the answer. One that
+        // says which filter serves the object leaves it the file or directory it is.
+        CapFileType type;
+        if ((basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0 &&
+            ReparseTags.Redirects(basic.ReparseTag))
         {
-            return error;
+            type = ReparseTags.IsFilesystemLink(basic.ReparseTag)
+                ? CapFileType.Symlink
+                : CapFileType.ReparsePoint;
         }
-
-        CapFileType type = (basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0
-            ? CapFileType.Directory
-            : CapFileType.File;
-
-        if ((basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+        else
         {
-            error = QueryAttributeTag(handle, out FileAttributeTagInformation tagInfo);
-            if (error.IsFailure)
-            {
-                return error;
-            }
-
-            // Only a reparse point that stands for another object changes the answer. One
-            // that says which filter serves the object leaves it the file or directory it is.
-            if (Redirects(in tagInfo))
-            {
-                type = ReparseTags.IsFilesystemLink(tagInfo.ReparseTag)
-                    ? CapFileType.Symlink
-                    : CapFileType.ReparsePoint;
-            }
+            type = (basic.FileAttributes & NtConstants.FILE_ATTRIBUTE_DIRECTORY) != 0
+                ? CapFileType.Directory
+                : CapFileType.File;
         }
 
         stat = new CapNodeStat(
@@ -3062,27 +3056,43 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             // The same convention for the change time, which a filesystem without a
             // metadata-change clock of its own -- FAT and its descendants -- leaves at zero.
             basic.ChangeTime > 0 ? FileTimes.ToDateTimeOffset(basic.ChangeTime) : null,
-            standard.NumberOfLinks,
+            basic.NumberOfLinks,
             unixMode: null,
             (FileAttributes)basic.FileAttributes);
 
         return CapError.Success;
     }
 
-    private static unsafe CapError QueryNetworkOpen(SafeHandle handle, out FileNetworkOpenInformation result)
+    private static unsafe CapError QueryStat(nint handle, out FileStatInformation result)
     {
         result = default;
 
-        using HandleLease lease = new(handle);
-        if (!lease.IsValid)
+        IoStatusBlock status = default;
+        FileStatInformation value = default;
+        int nt = NtNative.NtQueryInformationFile(
+            handle,
+            &status,
+            &value,
+            (uint)sizeof(FileStatInformation),
+            NtConstants.FileStatInformationClass);
+
+        if (NtStatusCodes.IsFailure(nt))
         {
-            return HandleLease.ClosedError;
+            return NtStatusCodes.ToError(nt);
         }
+
+        result = value;
+        return CapError.Success;
+    }
+
+    private static unsafe CapError QueryNetworkOpen(nint handle, out FileNetworkOpenInformation result)
+    {
+        result = default;
 
         IoStatusBlock status = default;
         FileNetworkOpenInformation value = default;
         int nt = NtNative.NtQueryInformationFile(
-            lease.Raw,
+            handle,
             &status,
             &value,
             (uint)sizeof(FileNetworkOpenInformation),
@@ -3097,20 +3107,14 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         return CapError.Success;
     }
 
-    private static unsafe CapError QueryStandard(SafeHandle handle, out FileStandardInformation result)
+    private static unsafe CapError QueryStandard(nint handle, out FileStandardInformation result)
     {
         result = default;
-
-        using HandleLease lease = new(handle);
-        if (!lease.IsValid)
-        {
-            return HandleLease.ClosedError;
-        }
 
         IoStatusBlock status = default;
         FileStandardInformation value = default;
         int nt = NtNative.NtQueryInformationFile(
-            lease.Raw,
+            handle,
             &status,
             &value,
             (uint)sizeof(FileStandardInformation),

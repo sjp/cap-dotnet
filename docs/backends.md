@@ -505,7 +505,7 @@ different calls:
 |---|---|---|
 | Linux | `statx` | One fixed layout on every architecture, unlike `struct stat` |
 | macOS | `fstatat` / `fstat`, 64-bit-inode form | The entry point is chosen by architecture; on Intel the undecorated name still means the old layout |
-| Windows | `NtQueryInformationFile` | Two queries normally, three when the entry redirects, two more where the 128-bit identity is declined |
+| Windows | `NtQueryInformationFile` | Two queries; where the combined reply is declined, three, or four when the entry has a reparse point; two more where the 128-bit identity is declined |
 
 The same question is asked twice in this library, in two different ways, and the difference
 is deliberate. Resolution asks it of every component of every path, wants only the type and
@@ -517,11 +517,16 @@ call synchronises. A caller who notices that listing a directory is cheap and de
 every entry in it is not has found this, and the difference is the network round trip.
 
 Windows needs more than one query because no single reply combines the times, the length,
-the attributes and the identity. The times, the length and the attributes come together, so
-those describe one instant; the identity is a second query; and the reparse tag is asked for
-only when the attributes say the entry has a reparse point, which is what separates a
-symbolic link from a structure of unknown shape that merely looks like one, and either from
-a file or directory a filter merely serves.
+the attributes and the identity. `FileStatInformation` carries the times, the length, the
+attributes, the reparse tag and the link count together, so those describe one instant; the
+identity at its full width is a second query. The reparse tag is what separates a symbolic
+link from a structure of unknown shape that merely looks like one, and either from a file or
+directory a filter merely serves. A system older than Windows 10 1709, or a filesystem that
+does not offer that reply, is asked the older questions instead: the times, the length and
+the attributes in one reply, the link count in another, and the reparse tag in a third, only
+when the attributes say the entry has a reparse point. Nothing is remembered between calls,
+since the next may be on another volume, so on such a filesystem each call also pays for the
+declined query. On a network filesystem every query is a round trip.
 
 **The identity is carried at 128 bits.** Windows issues identifiers that wide because the
 64-bit ones it used to issue are not unique on every filesystem it supports, so a reader that

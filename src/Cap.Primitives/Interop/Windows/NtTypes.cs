@@ -294,6 +294,64 @@ internal struct FileNetworkOpenInformation
     public static unsafe int StructSize => sizeof(FileNetworkOpenInformation);
 }
 
+/// <summary>
+/// The reply to a request for a file's times, length, attributes, reparse tag and link count
+/// together.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Everything a caller-facing description needs except the identity at its full width: the
+/// identifier here is the 64-bit one, which is not unique on every filesystem, and the volume
+/// is not named at all. One reply where the older classes need two or three, and so one
+/// instant.
+/// </para>
+/// <para>
+/// The last field reports the rights the caller would be granted. It is declared so that the
+/// structure is the size the system writes, and never read.
+/// </para>
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileStatInformation
+{
+    /// <summary>The 64-bit file identifier. Never read; the identity is asked for separately.</summary>
+    public long FileId;
+
+    /// <summary>When the file was created, or zero where nothing recorded it.</summary>
+    public long CreationTime;
+
+    /// <summary>When the file's contents were last read.</summary>
+    public long LastAccessTime;
+
+    /// <summary>When the file's contents were last written.</summary>
+    public long LastWriteTime;
+
+    /// <summary>When the file's metadata last changed.</summary>
+    public long ChangeTime;
+
+    /// <summary>The space reserved for the file, which is not its length.</summary>
+    public long AllocationSize;
+
+    /// <summary>The file's length in bytes.</summary>
+    public long EndOfFile;
+
+    /// <summary>The file attribute bits.</summary>
+    public uint FileAttributes;
+
+    /// <summary>
+    /// The reparse tag, meaningful only when the attributes say this is a reparse point.
+    /// </summary>
+    public uint ReparseTag;
+
+    /// <summary>How many directory entries refer to the file.</summary>
+    public uint NumberOfLinks;
+
+    /// <summary>The rights the caller would be granted. Never read.</summary>
+    public uint EffectiveAccess;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileStatInformation);
+}
+
 /// <summary>The reply to a request for a file's link count and sizes.</summary>
 /// <remarks>
 /// Asked for the link count alone; the sizes it repeats are taken from the reply that
