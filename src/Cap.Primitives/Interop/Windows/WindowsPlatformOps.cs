@@ -87,14 +87,27 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// filesystem reports about it.
     /// </summary>
     /// <remarks>
-    /// Read-only, hidden, system, archive, temporary, offline and the two indexing hints.
-    /// Everything outside this set — that the entry is a directory, that it redirects, that
-    /// the volume has compressed or encrypted or sparsified it — is the filesystem's own
-    /// account of what it did, and a request to set one of them fails the whole call rather
-    /// than being ignored.
+    /// <para>
+    /// Read-only, hidden, system, archive, temporary, offline, not-content-indexed, and the
+    /// pinned and unpinned hints a sync engine reads to decide whether a file's contents stay
+    /// on the device. Everything outside this set — that the entry is a directory, that it
+    /// redirects, that the volume has compressed or encrypted or sparsified it — is the
+    /// filesystem's own account of what it did, and is masked off rather than passed on: the
+    /// system fails the whole call over one of them, and a copy of a compressed file should
+    /// not fail because its source was compressed.
+    /// </para>
+    /// <para>
+    /// What is left replaces the object's settable set as a whole. A bit in this set that the
+    /// caller did not give is cleared, as it is by the system's own attribute call.
+    /// </para>
+    /// <para>
+    /// The two sync hints are here so that attributes read from a file and written back keep
+    /// its pinning. Outside a sync root they are recorded and nothing acts on them.
+    /// </para>
     /// </remarks>
     private const uint SettableAttributes = 0x00000001 | 0x00000002 | 0x00000004 | 0x00000020 |
-                                            0x00000100 | 0x00001000 | 0x00002000 | 0x00080000;
+                                            0x00000100 | 0x00001000 | 0x00002000 | 0x00080000 |
+                                            0x00100000;
 
     /// <summary>Access enough to traverse a directory and to read what it contains.</summary>
     private const uint DirectoryAccess =
@@ -869,8 +882,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// The bits that describe the object rather than ask anything of it — that it is a
     /// directory, that it redirects elsewhere, that the filesystem has compressed or
     /// encrypted it — are dropped. They are the filesystem's own account of what it did and
-    /// are not settable; leaving them in makes the whole call fail rather than the bit be
-    /// ignored.
+    /// are not settable; leaving them in would make the whole call fail rather than the bit be
+    /// ignored. The settable bits that remain replace the object's own, so one not given is
+    /// cleared.
     /// </para>
     /// <para>
     /// An empty set is written as the bit meaning "nothing in particular", because zero means

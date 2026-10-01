@@ -584,6 +584,55 @@ public sealed partial class WindowsResolutionOnDiskTests
         Assert.Equal("abcXYZ!!", File.ReadAllText(path));
     }
 
+    // --- attributes ------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Setting attributes through a handle replaces the settable set as a whole, and a bit the
+    /// filesystem owns is ignored rather than failing the call.
+    /// </summary>
+    /// <remarks>
+    /// Read back through the framework rather than through this library, so the answer is the
+    /// system's. The second write carries <see cref="FileAttributes.Compressed"/> because the
+    /// system refuses the whole call over it: succeeding at all is what shows it was masked.
+    /// </remarks>
+    [Fact]
+    public void Setting_attributes_replaces_the_settable_set_and_ignores_the_filesystems_own()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("File attributes are what Windows records as permissions.");
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        string path = Path.Join(Sandbox, "file");
+        File.WriteAllText(path, "abc");
+        File.SetAttributes(path, FileAttributes.Hidden);
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapResult<SafeFileHandle> opened = PlatformOps.Host.OpenChildFile(
+            root, "file", FileOpenRequest.Existing(FileAccess.ReadWrite));
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+
+        using SafeFileHandle file = opened.Value!;
+
+        CapError readOnly = PlatformOps.Host.SetHandlePermissions(file, null, FileAttributes.ReadOnly);
+        Assert.True(readOnly.IsSuccess, readOnly.FailureDescription);
+
+        FileAttributes afterReadOnly = File.GetAttributes(path);
+        Assert.True((afterReadOnly & FileAttributes.ReadOnly) != 0, $"{afterReadOnly}");
+        Assert.True((afterReadOnly & FileAttributes.Hidden) == 0, $"{afterReadOnly}");
+
+        CapError compressed = PlatformOps.Host.SetHandlePermissions(
+            file, null, FileAttributes.Compressed | FileAttributes.ReadOnly);
+        Assert.True(compressed.IsSuccess, compressed.FailureDescription);
+
+        FileAttributes afterCompressed = File.GetAttributes(path);
+        Assert.True((afterCompressed & FileAttributes.ReadOnly) != 0, $"{afterCompressed}");
+        Assert.True((afterCompressed & FileAttributes.Compressed) == 0, $"{afterCompressed}");
+    }
+
     // --- what a handle says it is called ---------------------------------------------------------
 
     /// <summary>

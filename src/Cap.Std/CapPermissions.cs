@@ -96,7 +96,9 @@ public readonly struct CapPermissions
     /// the object is or how it is stored, such as <see cref="FileAttributes.Directory"/>,
     /// <see cref="FileAttributes.ReparsePoint"/> and <see cref="FileAttributes.Compressed"/>,
     /// are kept in the value, so one read from a snapshot can be written back unchanged, and
-    /// are ignored when it is written. On Linux
+    /// are ignored when it is written. The settable flags replace the object's own as a set,
+    /// so one that is not given is cleared: setting only read-only on a hidden file leaves it
+    /// no longer hidden. On Linux
     /// and macOS a value made this way is refused rather than translated.
     /// </remarks>
     public static CapPermissions FromWindowsAttributes(FileAttributes attributes) =>

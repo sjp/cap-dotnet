@@ -129,6 +129,15 @@ has no value meaning "the moment this is recorded", as the Unix calls do, so for
 `CapFileTime.Now` the backend reads the system time and passes it in. It is the time a write
 would have been stamped with.
 
+**Setting permissions writes the attribute set as a whole.** `SetPermissions` takes file
+attributes here, not a Unix mode, and the attributes given replace the entry's own: a settable
+bit that is not given is cleared, so setting `ReadOnly` on a hidden file leaves it no longer
+hidden. The settable bits are `ReadOnly`, `Hidden`, `System`, `Archive`, `Temporary`,
+`Offline`, `NotContentIndexed` and the two sync-engine hints, pinned (`0x80000`) and unpinned
+(`0x100000`). Bits the filesystem owns (`Directory`, `ReparsePoint`, `Compressed`,
+`Encrypted`, `SparseFile`, `IntegrityStream` and the like) are ignored rather than refused,
+so attributes read from one entry can be written to another unchanged.
+
 **Paths.** `/` and `\` both separate components. Drive-relative (`C:file`), root-relative
 (`\file`), UNC (`\\server\share`) and device-namespace (`\\?\`, `\\.\`) paths are refused;
 the first two look relative but resolve against process-wide state.
