@@ -359,10 +359,19 @@ internal static class InterfaceTreeRemoval
     /// kind.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Both kinds are tried because a directory read is not a snapshot and does not always say
     /// what its entries are. When neither removal succeeds, the expected kind is attempted once
     /// more in the form that throws, so the failure reported is the implementation's own
     /// account of why.
+    /// </para>
+    /// <para>
+    /// When that account is that the name is the other kind, the other kind is asked for its
+    /// account instead, since it is the attempt that speaks for the name: "not empty" from a
+    /// name listed as a file says something was put under it while the tree was being
+    /// removed, where "is a directory" says only that the listing guessed wrong. This is the
+    /// failure <see cref="TreeRemoval"/> reports for the same tree.
+    /// </para>
     /// </remarks>
     private static Exception? Unlink(IDir parent, string name, bool directory)
     {
@@ -371,6 +380,19 @@ internal static class InterfaceTreeRemoval
             return null;
         }
 
+        Exception? failed = WhyNotUnlinked(parent, name, directory);
+        return failed is not null && CapIOException.KindOf(failed) is CapErrorKind.NotADirectory or CapErrorKind.IsADirectory
+            ? WhyNotUnlinked(parent, name, !directory)
+            : failed;
+    }
+
+    /// <summary>
+    /// Removes a name as one kind of object in the form that throws, for the implementation's
+    /// account of why it would not go.
+    /// </summary>
+    /// <returns>The failure, or null when the removal now succeeds.</returns>
+    private static Exception? WhyNotUnlinked(IDir parent, string name, bool directory)
+    {
         try
         {
             if (directory)

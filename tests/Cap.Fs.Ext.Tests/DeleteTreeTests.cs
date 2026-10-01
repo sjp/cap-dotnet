@@ -319,6 +319,51 @@ public sealed class DeleteTreeTests : IDisposable
     }
 
     /// <summary>
+    /// Through an <see cref="IDir"/> that is not a <see cref="Dir"/>, a name listed as a file
+    /// that is a directory with something in it by the time it is removed reports that it is
+    /// not empty, not that it is a directory.
+    /// </summary>
+    /// <remarks>
+    /// The listing's kind is a guess the removal corrects, so the attempt as the right kind is
+    /// the one whose failure means something: here, that the tree was added to while it was
+    /// being removed. The removal over a real handle reports the same, which
+    /// <c>TemporaryHelperSimulationTests</c> in Cap.Std.Tests covers.
+    /// </remarks>
+    [Fact]
+    public void A_name_listed_as_a_file_that_became_a_filled_directory_is_reported_as_not_empty()
+    {
+        string[] names = ["a.txt", "b.txt"];
+        foreach (string name in names)
+        {
+            Make("doomed", name);
+        }
+
+        // The first removal swaps whichever name is still listed as a file for a directory
+        // holding a file, which no listing taken before it can see.
+        bool swapped = false;
+        RecordingDir wrapped = new(_tree.Directory, [], ".", call =>
+        {
+            if (swapped || !call.Contains("TryDeleteFile(", StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            swapped = true;
+            string other = names.Single(name => !call.Contains(name, StringComparison.Ordinal));
+            string path = Path.Combine(_tree.HostPath, "doomed", other);
+            HostFile.Delete(path);
+            HostDirectory.CreateDirectory(path);
+            HostFile.WriteAllText(Path.Combine(path, "late.txt"), "contents");
+        });
+
+        IOException thrown = Assert.ThrowsAny<IOException>(
+            () => wrapped.DeleteTree("doomed", TestContext.Current.CancellationToken));
+
+        Assert.True(swapped);
+        Assert.Equal(CapErrorKind.NotEmpty, CapIOException.KindOf(thrown));
+    }
+
+    /// <summary>
     /// A directory this process may not read is still removed when it is empty, at the top of
     /// the removal and inside it.
     /// </summary>

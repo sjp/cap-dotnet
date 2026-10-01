@@ -179,6 +179,73 @@ public sealed class TemporaryHelperSimulationTests
         Assert.NotNull(fs.Find(Inside(name)));
     }
 
+    /// <summary>
+    /// A name listed as a file that is now a directory with something in it reports that it
+    /// is not empty, not that it is a directory.
+    /// </summary>
+    /// <remarks>
+    /// The listing's kind is a guess the removal corrects, so the attempt as the right kind is
+    /// the one whose failure means something: here, that the tree was added to while it was
+    /// being removed, which a caller can retry.
+    /// </remarks>
+    [Fact]
+    public void A_name_that_changed_kind_and_still_cannot_be_removed_reports_the_second_failure()
+    {
+        FakeFileSystem fs = Simulated();
+        FakePlatformOps ops = new(fs);
+        using CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+
+        temp.Directory.CreateFile("x").Dispose();
+        MemoryNode changed = fs.Find(Inside($"{temp.Name}/x"))!;
+        ops.RemovalFault = (node, directory) => node != changed
+            ? CapErrorCategory.None
+            : directory ? CapErrorCategory.NotEmpty : CapErrorCategory.IsADirectory;
+
+        CapError emptied = TreeRemoval.Empty(temp.Directory, TestContext.Current.CancellationToken);
+        ops.RemovalFault = null;
+
+        Assert.Equal(CapErrorCategory.NotEmpty, emptied.Category);
+    }
+
+    /// <summary>
+    /// A name listed as a directory that has become a file refusing its own removal is
+    /// cleared and removed as a file.
+    /// </summary>
+    /// <remarks>
+    /// The refusal comes from the attempt as the right kind, so that is the attempt clearing
+    /// it is for and the one repeated afterwards. Reporting the first attempt's "not a
+    /// directory" instead would leave behind a file nothing stopped the removal from taking.
+    /// </remarks>
+    [Fact]
+    public void A_name_that_changed_kind_and_refuses_removal_is_cleared_and_removed_as_the_kind_it_is()
+    {
+        FakeFileSystem fs = Simulated();
+        FakePlatformOps ops = new(fs);
+        using CapTempDir temp = CapTempDir.NewThrough(ops, AmbientAuthority.Acquire());
+
+        temp.Directory.CreateDir("x").Dispose();
+        string path = Inside($"{temp.Name}/x");
+        MemoryNode listed = fs.Find(path)!;
+        ops.RemovalFault = (node, directory) =>
+        {
+            if (node != listed || !directory)
+            {
+                return CapErrorCategory.None;
+            }
+
+            // Replaced between the listing and the removal, by a file marked read-only.
+            fs.Remove(path);
+            fs.AddFile(path).RefusesRemoval = true;
+            return CapErrorCategory.NotADirectory;
+        };
+
+        CapError emptied = TreeRemoval.Empty(temp.Directory, TestContext.Current.CancellationToken);
+        ops.RemovalFault = null;
+
+        Assert.True(emptied.IsSuccess, emptied.ToString());
+        Assert.Null(fs.Find(path));
+    }
+
     /// <summary>A file with no name is used where the system offers one.</summary>
     [Fact]
     public void A_nameless_scratch_file_is_used_where_the_system_offers_one()

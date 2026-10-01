@@ -444,37 +444,44 @@ internal static class TreeRemoval
     /// handle, so nothing about containment turns on which of them does it.
     /// </para>
     /// <para>
+    /// Once the name has said it is the other kind, the attempt as that kind is the one that
+    /// speaks for it: when that fails too, its failure is the one reported. "Not empty" from a
+    /// name listed as a file says something was put under it while the tree was being removed;
+    /// "is a directory" says only that the listing guessed wrong.
+    /// </para>
+    /// <para>
     /// A name that will not be removed because the object itself refuses it — the read-only
     /// flag on Windows, which is a property of the file rather than a permission — is cleared
-    /// and tried once more. Only after the removal has already failed, so the ordinary case
-    /// pays nothing for it, and only once, so a name something is actively re-marking ends as
-    /// a failure rather than as a loop.
+    /// and tried once more, as the kind that got that far. Only after the removal has already
+    /// failed, so the ordinary case pays nothing for it, and only once, so a name something is
+    /// actively re-marking ends as a failure rather than as a loop.
     /// </para>
     /// </remarks>
     private static CapError Unlink(Dir parent, string name, bool directory)
     {
-        CapError first = UnlinkAs(parent, name, directory);
-        if (first.IsSuccess)
+        CapError failed = UnlinkAs(parent, name, directory);
+        if (failed.IsSuccess)
         {
-            return first;
+            return failed;
         }
 
-        if (first.Category is CapErrorCategory.NotADirectory or CapErrorCategory.IsADirectory)
+        if (failed.Category is CapErrorCategory.NotADirectory or CapErrorCategory.IsADirectory)
         {
-            CapError other = UnlinkAs(parent, name, !directory);
-            if (other.IsSuccess)
+            directory = !directory;
+            failed = UnlinkAs(parent, name, directory);
+            if (failed.IsSuccess)
             {
-                return other;
+                return failed;
             }
         }
 
-        if (first.Category is not (CapErrorCategory.PermissionDenied or CapErrorCategory.ReadOnlyFilesystem))
+        if (failed.Category is not (CapErrorCategory.PermissionDenied or CapErrorCategory.ReadOnlyFilesystem))
         {
-            return first;
+            return failed;
         }
 
         CapError cleared = parent.ClearRemovalBlock(name);
-        return cleared.IsFailure ? first : UnlinkAs(parent, name, directory);
+        return cleared.IsFailure ? failed : UnlinkAs(parent, name, directory);
     }
 
     /// <summary>Removes a name as one kind of object, reporting the platform's answer.</summary>

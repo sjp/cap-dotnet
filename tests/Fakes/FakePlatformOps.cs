@@ -109,6 +109,18 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// </remarks>
     public Func<MemoryNode, CapErrorCategory>? HandleStatFault { get; set; }
 
+    /// <summary>
+    /// Decides, per name and per kind of removal, a failure removing it reports in place of
+    /// removing it; <see cref="CapErrorCategory.None"/> lets the removal go ahead. The flag is
+    /// true for a removal as a directory and false for one as a file.
+    /// </summary>
+    /// <remarks>
+    /// For what a removal meets only when the tree changes under it — a name listed as one
+    /// kind that is another by the time it is removed, a directory filled again after it was
+    /// emptied — which a test cannot arrange between a listing and the removal that follows.
+    /// </remarks>
+    public Func<MemoryNode, bool, CapErrorCategory>? RemovalFault { get; set; }
+
     /// <inheritdoc/>
     /// <remarks>
     /// Can run on the finalizer thread for a handle a test forgot, which is why the table is
@@ -935,6 +947,12 @@ internal sealed class FakePlatformOps : IPlatformOps
             return error;
         }
 
+        CapErrorCategory fault = RemovalFault?.Invoke(node!, false) ?? CapErrorCategory.None;
+        if (fault != CapErrorCategory.None)
+        {
+            return CapError.FromCategory(fault);
+        }
+
         if (node!.Type == CapNodeType.Directory)
         {
             return CapError.FromCategory(CapErrorCategory.IsADirectory);
@@ -960,6 +978,12 @@ internal sealed class FakePlatformOps : IPlatformOps
         if (error.IsFailure)
         {
             return error;
+        }
+
+        CapErrorCategory fault = RemovalFault?.Invoke(node!, true) ?? CapErrorCategory.None;
+        if (fault != CapErrorCategory.None)
+        {
+            return CapError.FromCategory(fault);
         }
 
         if (node!.Type != CapNodeType.Directory)
