@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Cap.Primitives.Interop;
 using Cap.Std.Testing;
 using Cap.Tests.Fakes;
@@ -262,6 +263,97 @@ public sealed class PortableWalkTests
                     AssertFails(CapErrorCategory.SymbolicLinkLoop, ops, root, "link0");
                 }
             });
+        }
+    }
+
+    /// <summary>
+    /// Chains longer than the frames the walk first makes room for still reach their end,
+    /// across every point at which the room has to grow.
+    /// </summary>
+    /// <remarks>
+    /// Each link in a chain is the last component of the target before it, so every frame
+    /// stays held until the end is reached: a chain of <c>n</c> is <c>n</c> frames deep.
+    /// </remarks>
+    [Theory]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(8)]
+    [InlineData(9)]
+    [InlineData(17)]
+    public void A_chain_deeper_than_the_initial_frame_capacity_still_resolves(int length)
+    {
+        FakeFileSystem fs = Sandbox();
+        MemoryNode target = fs.AddDirectory("sandbox/end/inner");
+        for (int i = 0; i < length; i++)
+        {
+            _ = fs.AddSymbolicLink($"sandbox/link{i}", i == length - 1 ? "end" : $"link{i + 1}");
+        }
+
+        Run(fs, (ops, root) =>
+        {
+            using SafeDirHandle opened = OpenDirectory(ops, root, "link0/inner");
+            AssertIs(ops, target, opened);
+        });
+    }
+
+    /// <summary>
+    /// Following one link costs nothing beyond what reading the link itself costs: the frame
+    /// it is resolved through comes from a pool and goes back to it.
+    /// </summary>
+    /// <remarks>
+    /// Measured as the difference from the same walk through a real directory, so that what
+    /// the simulation allocates for each step is not counted against the walk. What is left
+    /// is the stored target the platform hands back and what parsing it takes, which is tens
+    /// of bytes; a frame array sized for the worst case would be about a kilobyte.
+    /// </remarks>
+    [Fact]
+    public void Following_one_link_allocates_only_the_target_string()
+    {
+        const int Iterations = 1000;
+
+        FakeFileSystem fs = Sandbox();
+        _ = fs.AddDirectory("sandbox/real/inner");
+        _ = fs.AddSymbolicLink("sandbox/link", "real");
+
+        Run(fs, (ops, root) =>
+        {
+            CapPath direct = Parse("real/inner");
+            CapPath throughLink = Parse("link/inner");
+
+            long directBytes = Measure(root, direct);
+            long linkBytes = Measure(root, throughLink);
+
+            long perResolution = (linkBytes - directBytes) / Iterations;
+            Assert.True(
+                perResolution < 128,
+                $"Following one link cost {perResolution} bytes more per resolution than not following one.");
+        });
+
+        static long Measure(SafeDirHandle root, CapPath path)
+        {
+            // Warm up first: the first calls pay for jitting, and the first rent fills the pool.
+            for (int i = 0; i < 64; i++)
+            {
+                OpenAndDispose(root, path);
+            }
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < Iterations; i++)
+            {
+                OpenAndDispose(root, path);
+            }
+
+            return GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void OpenAndDispose(SafeDirHandle root, CapPath path)
+        {
+            CapResult<SafeDirHandle> result =
+                PortableResolver.OpenDirectory(root, path, CapAccess.Read, ConfinedResolveOptions.None);
+            result.Value!.Dispose();
         }
     }
 

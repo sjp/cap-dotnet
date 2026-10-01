@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace Cap.Primitives.Interop;
 
 /// <summary>
@@ -23,7 +25,11 @@ namespace Cap.Primitives.Interop;
 /// <para>
 /// Nothing is allocated for a path with no links in it, which is nearly all of them: the
 /// caller's own path is held inline and the frame array comes into existence only when a
-/// link is actually followed.
+/// link is actually followed. Even then it is rented, small, and grown only as deep as the
+/// links actually nest, because a link on the common path — a <c>current</c> that points at
+/// a release, a package manager's <c>.bin</c> — makes following one the usual case for every
+/// open beneath it. <see cref="Dispose"/> hands it back, and every exit from the walk must
+/// reach it.
 /// </para>
 /// </remarks>
 internal ref struct PendingComponents
@@ -126,16 +132,60 @@ internal ref struct PendingComponents
     /// </returns>
     public bool TryFollow(scoped in CapPath target)
     {
-        _followed ??= new Frame[MaxFollowedLinks];
-
-        if (_followedCount == _followed.Length)
+        // Counted against the limit rather than the array, which the pool may have handed
+        // back larger than was asked for.
+        if (_followedCount == MaxFollowedLinks)
         {
             return false;
         }
 
-        _followed[_followedCount++] = new Frame(target.Text, target.Syntax, target.RequiresDirectory);
+        EnsureCapacity(_followedCount + 1);
+        _followed![_followedCount++] = new Frame(target.Text, target.Syntax, target.RequiresDirectory);
         return true;
     }
+
+    /// <summary>Returns the frame array to the pool, if a link ever made one necessary.</summary>
+    public void Dispose()
+    {
+        _followedCount = 0;
+
+        if (_followed is not null)
+        {
+            // Cleared on return: frames hold the strings of link targets, which would
+            // otherwise stay alive for as long as the pool keeps the buffer.
+            ArrayPool<Frame>.Shared.Return(_followed, clearArray: true);
+            _followed = null;
+        }
+    }
+
+    private void EnsureCapacity(int required)
+    {
+        if (_followed is not null && _followed.Length >= required)
+        {
+            return;
+        }
+
+        int capacity = Math.Max(InitialCapacity, required);
+        if (_followed is not null)
+        {
+            capacity = Math.Max(capacity, _followed.Length * 2);
+        }
+
+        Frame[] grown = ArrayPool<Frame>.Shared.Rent(Math.Min(capacity, MaxFollowedLinks));
+        if (_followed is not null)
+        {
+            Array.Copy(_followed, grown, _followedCount);
+            ArrayPool<Frame>.Shared.Return(_followed, clearArray: true);
+        }
+
+        _followed = grown;
+    }
+
+    /// <summary>
+    /// Frames to make room for when the first link is followed: one link nested in another
+    /// is already uncommon, so this is nearly always the only array a walk rents.
+    /// </summary>
+    private const int InitialCapacity = 4;
 
     /// <summary>
     /// How many link targets may be part-resolved at once.

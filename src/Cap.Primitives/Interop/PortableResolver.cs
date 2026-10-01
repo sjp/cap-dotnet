@@ -294,6 +294,7 @@ internal static class PortableResolver
         }
         finally
         {
+            pending.Dispose();
             stack.Dispose();
         }
     }
