@@ -452,7 +452,13 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     /// link, including one that climbs out of it. Where a link lands relative to the sandbox is
     /// of no interest to the system, so none of those is refused. A rooted target is refused and
     /// leaves nothing behind: storing one would mean respelling it in the object manager's
-    /// syntax, and the backend stores every target exactly as given.
+    /// syntax, and the backend respells nothing but separators.
+    /// </para>
+    /// <para>
+    /// Targets written with <c>/</c> are the ones that would otherwise pass every test here
+    /// and fail everywhere else. Resolution through a directory handle reads <c>/</c> as a
+    /// separator, but the filesystem does not when it resolves a relative link, so a link stored
+    /// as written is followed by this library and dangles for every other program.
     /// </para>
     /// </remarks>
     [Fact]
@@ -484,6 +490,8 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         CreateLink(root, "dlink", @"inside\deeper", targetIsDirectory: true);
         CreateLink(root, "sibling", @"..\outside", targetIsDirectory: true);
+        CreateLink(root, "slashed-flink", "inside/file.txt", targetIsDirectory: false);
+        CreateLink(root, "slashed-dlink", "inside/deeper", targetIsDirectory: true);
         foreach (string rooted in new[]
         {
             rootedTarget,
@@ -506,6 +514,9 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         AssertDirectoryLink("dlink", @"inside\deeper", "marker");
         AssertDirectoryLink("sibling", @"..\outside", "secret");
+
+        Assert.Equal(Contents, File.ReadAllText(Path.Join(Sandbox, "slashed-flink")));
+        Assert.Contains("marker", Directory.EnumerateFiles(Path.Join(Sandbox, "slashed-dlink")).Select(Path.GetFileName));
 
         static void CreateLink(SafeDirHandle root, string name, string target, bool targetIsDirectory)
         {

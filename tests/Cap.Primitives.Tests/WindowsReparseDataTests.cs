@@ -48,6 +48,10 @@ public sealed class WindowsReparseDataTests
     [Theory]
     [InlineData(@"inside\target", @"inside\target")]
     [InlineData(@"..\sibling", @"..\sibling")]
+    [InlineData("inside/target", @"inside\target")]
+    [InlineData("../sibling/file", @"..\sibling\file")]
+    [InlineData("C:/elsewhere/file", @"\??\C:\elsewhere\file")]
+    [InlineData("//srv/share/x", @"\??\UNC\srv\share\x")]
     [InlineData(@"C:\elsewhere\file", @"\??\C:\elsewhere\file")]
     [InlineData(@"\\srv\share\x", @"\??\UNC\srv\share\x")]
     [InlineData(@"\\?\C:\x", @"\??\C:\x")]
@@ -68,6 +72,30 @@ public sealed class WindowsReparseDataTests
         Assert.Equal(substitute, stored);
         Assert.False(stored.StartsWith(ReparseData.ObjectManagerPrefix + @"\", StringComparison.Ordinal));
         Assert.Equal(rooted, CapPath.IsRooted(stored, CapPathSyntax.Windows));
+    }
+
+    /// <summary>
+    /// A target written with <c>/</c> is stored with <c>\</c> where the filesystem resolves
+    /// it, and as written where a reader is shown it.
+    /// </summary>
+    /// <remarks>
+    /// The filesystem does not read <c>/</c> as a separator in a relative substitute name, so
+    /// a link stored as written would be followed by this library and dangle for every other
+    /// program on the machine. The print name is a label, and keeps what the caller wrote, as
+    /// it does for a link the system's own call makes.
+    /// </remarks>
+    [Fact]
+    public void A_forward_slash_is_stored_as_a_backslash_and_shown_as_written()
+    {
+        const string Target = "sub/dir/file";
+        byte[] buffer = new byte[ReparseData.SymbolicLinkSize(Target, rooted: false)];
+
+        Assert.True(ReparseData.TryBuildSymbolicLink(Target, rooted: false, buffer, out _));
+
+        Assert.True(ReparseData.TryReadTarget(buffer, out string stored, out bool isRelative));
+        Assert.Equal(@"sub\dir\file", stored);
+        Assert.True(isRelative);
+        Assert.Equal(Target, PrintName(buffer));
     }
 
     /// <summary>A destination that is too small is refused rather than half filled.</summary>
@@ -327,6 +355,19 @@ public sealed class WindowsReparseDataTests
     /// <summary>A junction, which is the same shape with no flags word.</summary>
     private static byte[] MountPoint(string substitute, string print = "") =>
         Build(ReparseTags.MountPoint, flagsSize: 0, substitute, print, flags: 0);
+
+    /// <summary>
+    /// A symbolic link's print name, which nothing in the library reads: the offsets are
+    /// measured from the start of the characters, after the header, the offsets and the flags
+    /// word.
+    /// </summary>
+    private static string PrintName(byte[] link)
+    {
+        const int PathBuffer = 20;
+        int offset = BinaryPrimitives.ReadUInt16LittleEndian(link.AsSpan(12));
+        int length = BinaryPrimitives.ReadUInt16LittleEndian(link.AsSpan(14));
+        return Encoding.Unicode.GetString(link, PathBuffer + offset, length);
+    }
 
     private static byte[] Build(uint tag, int flagsSize, string substitute, string print, uint flags)
     {

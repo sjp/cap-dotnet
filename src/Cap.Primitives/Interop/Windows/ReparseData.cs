@@ -222,11 +222,21 @@ internal static class ReparseData
     /// </para>
     /// <para>
     /// The substitute name is the one the filesystem resolves and the print name the one a
-    /// reader is shown. They are the same characters for a relative target; for a rooted one
-    /// that names a full path the substitute name is spelled in the object manager's syntax
-    /// and the print name keeps the caller's spelling, which is what the system's own call
-    /// stores. Each is followed by a terminator that its declared length does not count, again
-    /// to match.
+    /// reader is shown. For a rooted target that names a full path the substitute name is
+    /// spelled in the object manager's syntax and the print name keeps the caller's spelling,
+    /// which is what the system's own call stores. Each is followed by a terminator that its
+    /// declared length does not count, again to match.
+    /// </para>
+    /// <para>
+    /// Every <c>/</c> in the substitute name is stored as <c>\</c>, relative target or not,
+    /// and the print name again keeps the caller's spelling. The filesystem resolves a
+    /// relative substitute name by appending it to the path of the directory holding the link,
+    /// and nothing on that path reads <c>/</c> as a separator: only the Win32 layer does, and
+    /// it is not involved. Resolution here reads both characters as separators, so a target
+    /// stored as written would be followed by this library and dangle for every other program
+    /// on the machine. The system's own call stores a relative target as written and leaves
+    /// that to its caller; this is the one place the builder departs from it, and it changes
+    /// no component and so no containment decision.
     /// </para>
     /// <para>
     /// The object manager's spelling depends on which kind of full path the target is, so it
@@ -276,12 +286,31 @@ internal static class ReparseData
         System.Text.Encoding.Unicode.GetBytes(prefix, substitute);
         System.Text.Encoding.Unicode.GetBytes(
             target[replaced..], substitute[(prefix.Length * sizeof(char))..]);
+        UseBackslashes(substitute);
 
         System.Text.Encoding.Unicode.GetBytes(
             target, structure[(SymbolicLinkPathOffset + printOffset)..]);
 
         written = total;
         return true;
+    }
+
+    /// <summary>
+    /// Respells every <c>/</c> in an encoded name as <c>\</c>, in place.
+    /// </summary>
+    /// <remarks>
+    /// Read a character at a time from the little-endian bytes rather than reinterpreted as
+    /// characters, so that it does not depend on the order of the machine running it.
+    /// </remarks>
+    private static void UseBackslashes(Span<byte> encoded)
+    {
+        for (int i = 0; i < encoded.Length; i += sizeof(char))
+        {
+            if (BinaryPrimitives.ReadUInt16LittleEndian(encoded[i..]) == '/')
+            {
+                BinaryPrimitives.WriteUInt16LittleEndian(encoded[i..], '\\');
+            }
+        }
     }
 
     private static int SubstituteChars(ReadOnlySpan<char> target, bool rooted) =>

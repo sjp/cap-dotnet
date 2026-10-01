@@ -96,6 +96,10 @@ kind, the link is reported as the link it is and its target is read and judged l
 other, so one leading out of the subtree is refused as an escape rather than as the wrong
 kind of object, and one staying inside is followed as it would be on Linux or macOS. Other
 programs on the machine still go by the kind, so use `CreateDirSymlink` for directories.
+The same goes for separators: Windows does not read `/` as a separator in a relative link's
+stored target, so a link created here stores every `/` as `\` (and `ReadLink` returns it that
+way). The name Windows displays keeps the spelling you passed. A stored `/` in a link made
+elsewhere is still read as a separator here, although Windows treats that link as dangling.
 Creating either needs the privilege Windows grants to administrators and to
 Developer Mode. Junctions always store an absolute target, so they are always refused on
 the way through, whatever the symbolic-link policy says — but `ReadLink` still reports what one

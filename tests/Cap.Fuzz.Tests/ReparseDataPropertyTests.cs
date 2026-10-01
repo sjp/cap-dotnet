@@ -149,9 +149,12 @@ public sealed class ReparseDataPropertyTests
     /// The substitute name the system's own call stores, read from the documented spellings
     /// rather than from the builder: a drive path behind the object manager's prefix, a
     /// network path's <c>\\</c> and a device path's <c>\\?\</c> or <c>\\.\</c> replaced
-    /// by it, and anything else as written.
+    /// by it, and anything else as written — except that every <c>/</c> is stored as
+    /// <c>\</c>, where the system's call would leave a relative target's as written.
     /// </summary>
-    private static string Substitute(string target, bool rooted) => target switch
+    private static string Substitute(string target, bool rooted) => Prefixed(target, rooted).Replace('/', '\\');
+
+    private static string Prefixed(string target, bool rooted) => target switch
     {
         _ when !rooted => target,
         ['\\' or '/', '\\' or '/', '?' or '.', '\\' or '/', ..] => @"\??\" + target[4..],

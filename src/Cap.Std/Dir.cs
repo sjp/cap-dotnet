@@ -1068,13 +1068,17 @@ public sealed partial class Dir : IDir
     /// </summary>
     /// <param name="linkPath">A relative path naming the link to create.</param>
     /// <param name="target">
-    /// The text the link stores, kept exactly as given. Must be relative: a rooted target is
-    /// refused.
+    /// The text the link stores, kept as given apart from its separators on Windows. Must be
+    /// relative: a rooted target is refused.
     /// </param>
     /// <remarks>
     /// <para>
     /// <strong>The target is text, not a path this call resolves.</strong> It is stored as
-    /// written: not required to exist, not rewritten. Containment is enforced where a link is
+    /// written: not required to exist, not rewritten — except on Windows, where each <c>/</c>
+    /// is stored as <c>\</c>, because Windows itself does not read <c>/</c> as a separator in
+    /// a relative link and every other program there would find the link dangling. That
+    /// changes no component, so <see cref="ReadLink"/> on Windows returns the <c>\</c>
+    /// spelling and resolution is the same either way. Containment is enforced where a link is
     /// followed — a stored target that leaves the subtree is refused by resolution under every
     /// policy — but a link persists on disk, where programs that are not confined to this
     /// handle, such as a shell, a backup job or a web server serving the same tree, follow it
@@ -1174,7 +1178,9 @@ public sealed partial class Dir : IDir
     /// Creates a symbolic link to a directory beneath this handle.
     /// </summary>
     /// <param name="linkPath">A relative path naming the link to create.</param>
-    /// <param name="target">The text the link stores, kept exactly as given.</param>
+    /// <param name="target">
+    /// The text the link stores, kept as given apart from its separators on Windows.
+    /// </param>
     /// <remarks>
     /// <para>
     /// The directory-kind counterpart of <see cref="CreateSymlink"/>, and everything said
