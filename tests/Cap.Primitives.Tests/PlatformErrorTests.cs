@@ -1,3 +1,4 @@
+using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
 using Cap.Primitives.Interop.Windows;
@@ -157,5 +158,101 @@ public sealed class PlatformErrorTests
         Assert.True(LinuxPlatformOps.TryGetFilesystemType(fd, out long type), "fstatfs failed on /proc.");
         Assert.Equal(LinuxConstants.PROC_SUPER_MAGIC, type);
         Assert.False(LinuxPlatformOps.HasNoHardLinks(fd));
+    }
+
+    /// <summary>
+    /// A nameless-file open's three ways of saying "not on this filesystem" read as one, and
+    /// nothing else is drawn into them.
+    /// </summary>
+    [Theory]
+    [InlineData(PosixErrno.EISDIR, CapErrorCategory.NotSupported)]
+    [InlineData(PosixErrno.EINVAL, CapErrorCategory.NotSupported)]
+    [InlineData(LinuxErrno.EOPNOTSUPP, CapErrorCategory.NotSupported)]
+    [InlineData(PosixErrno.EACCES, CapErrorCategory.PermissionDenied)]
+    [SupportedOSPlatform("linux")]
+    internal void Linux_reads_a_refused_anonymous_open(int errno, CapErrorCategory expected)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The translation is the Linux backend's.");
+            return;
+        }
+
+        AssertReading(LinuxPlatformOps.AnonymousOpenFailure(errno), errno, expected);
+    }
+
+    /// <summary>
+    /// A rename that may not replace reads a missing flag as unsupported, and an
+    /// invalid-argument report as the caller's mistake rather than the filesystem's age.
+    /// </summary>
+    [Theory]
+    [InlineData(LinuxErrno.ENOSYS, CapErrorCategory.NotSupported)]
+    [InlineData(LinuxErrno.EOPNOTSUPP, CapErrorCategory.NotSupported)]
+    [InlineData(PosixErrno.EINVAL, CapErrorCategory.InvalidArgument)]
+    [InlineData(PosixErrno.EEXIST, CapErrorCategory.AlreadyExists)]
+    [SupportedOSPlatform("linux")]
+    internal void Linux_reads_a_refused_no_replace_rename(int errno, CapErrorCategory expected)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The translation is the Linux backend's.");
+            return;
+        }
+
+        AssertReading(LinuxPlatformOps.TranslateNoReplaceFailure(errno), errno, expected);
+    }
+
+    /// <summary>
+    /// Under confined resolution the cross-device code is an escape; the loop and retry codes
+    /// keep their ordinary readings.
+    /// </summary>
+    [Theory]
+    [InlineData(PosixErrno.EXDEV, CapErrorCategory.Escaped)]
+    [InlineData(LinuxErrno.ELOOP, CapErrorCategory.SymbolicLinkLoop)]
+    [InlineData(LinuxErrno.EAGAIN, CapErrorCategory.Raced)]
+    [InlineData(PosixErrno.ENOENT, CapErrorCategory.NotFound)]
+    [SupportedOSPlatform("linux")]
+    internal void Linux_reads_a_refused_confined_open(int errno, CapErrorCategory expected)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The translation is the Linux backend's.");
+            return;
+        }
+
+        AssertReading(LinuxPlatformOps.TranslateConfinedFailure(errno), errno, expected);
+    }
+
+    /// <summary>
+    /// The loop code from an open told not to follow is a link to read; from one that did
+    /// follow it is a chain too long.
+    /// </summary>
+    /// <remarks>
+    /// Neither reading asks the filesystem anything, so the descriptor and name are never
+    /// used.
+    /// </remarks>
+    [Theory]
+    [InlineData(true, CapErrorCategory.SymbolicLink)]
+    [InlineData(false, CapErrorCategory.SymbolicLinkLoop)]
+    [SupportedOSPlatform("linux")]
+    internal void Linux_reads_a_loop_from_an_open_by_whether_it_followed(bool noFollow, CapErrorCategory expected)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The translation is the Linux backend's.");
+            return;
+        }
+
+        AssertReading(
+            LinuxPlatformOps.TranslateOpenFailure(LinuxConstants.AT_FDCWD, "\0"u8, LinuxErrno.ELOOP, noFollow),
+            LinuxErrno.ELOOP,
+            expected);
+    }
+
+    private static void AssertReading(CapError error, int errno, CapErrorCategory expected)
+    {
+        Assert.Equal(expected, error.Category);
+        Assert.Equal(CapErrorSource.Errno, error.Source);
+        Assert.Equal(errno, error.RawCode);
     }
 }

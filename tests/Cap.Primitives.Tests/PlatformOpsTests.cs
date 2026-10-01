@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Unix;
 using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
 
@@ -184,6 +186,67 @@ public sealed partial class PlatformOpsTests : IDisposable
 
         Assert.True(target.IsSuccess, target.Error.FailureDescription);
         Assert.Contains("real", target.Value, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A target longer than the first buffer is read back whole, not cut at the buffer's
+    /// size.
+    /// </summary>
+    /// <remarks>
+    /// The kernel truncates a target that does not fit rather than saying so, and a truncated
+    /// target is a different path, not a shorter one. A thousand bytes is past the first
+    /// buffer and well inside the four-kilobyte limit Linux puts on a stored target.
+    /// </remarks>
+    [Fact]
+    public void A_long_link_target_is_read_back_whole()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("A dangling thousand-character link target is a Unix case.");
+            return;
+        }
+
+        string longTarget = new('a', 1000);
+        File.CreateSymbolicLink(Path.Combine(_root, "link"), longTarget);
+
+        using SafeDirHandle root = OpenRoot();
+        CapResult<string> target = Ops.ReadChildLink(root, "link");
+
+        Assert.True(target.IsSuccess, target.Error.FailureDescription);
+        Assert.Equal(longTarget, target.Value);
+    }
+
+    /// <summary>
+    /// A target that does not fit the largest buffer is refused as too long, never returned
+    /// cut short.
+    /// </summary>
+    /// <remarks>
+    /// The real ceiling is far above anything Linux will store, so the read is given a
+    /// smaller one: the target fills the first buffer and the doubled one, and the answer
+    /// must be that it is too long.
+    /// </remarks>
+    [Fact]
+    public void A_link_target_past_the_buffer_ceiling_is_refused_as_too_long()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The growing link read is the Linux backend's.");
+            return;
+        }
+
+        string link = Path.Combine(_root, "link");
+        File.CreateSymbolicLink(link, new string('a', 1000));
+        byte[] path = Encoding.UTF8.GetBytes(link + "\0");
+
+        CapResult<string> grown = LinuxPlatformOps.ReadLinkText(
+            LinuxConstants.AT_FDCWD, path, initialCapacity: 256, maxCapacity: 1024);
+        Assert.True(grown.IsSuccess, grown.Error.FailureDescription);
+        Assert.Equal(1000, grown.Value.Length);
+
+        CapResult<string> capped = LinuxPlatformOps.ReadLinkText(
+            LinuxConstants.AT_FDCWD, path, initialCapacity: 256, maxCapacity: 512);
+        Assert.False(capped.IsSuccess);
+        Assert.Equal(CapErrorCategory.NameTooLong, capped.Error.Category);
     }
 
     /// <summary>Asking about a name reports what it is, without following it.</summary>

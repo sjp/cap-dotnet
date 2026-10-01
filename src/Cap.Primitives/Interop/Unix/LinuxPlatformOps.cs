@@ -396,7 +396,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// with a fallback needs to draw, so they are drawn as that and everything else is left
     /// as the platform reported it.
     /// </remarks>
-    private static CapError AnonymousOpenFailure(int errno) =>
+    internal static CapError AnonymousOpenFailure(int errno) =>
         errno is PosixErrno.EISDIR or PosixErrno.EINVAL or LinuxErrno.EOPNOTSUPP
             ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
             : LinuxErrno.ToError(errno);
@@ -601,9 +601,20 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// room". A truncated target is not a shorter target; it is a different path, and acting
     /// on one would be acting on a name nobody wrote.
     /// </remarks>
-    private static CapResult<string> ReadLinkText(int directoryFd, ReadOnlySpan<byte> path)
+    private static CapResult<string> ReadLinkText(int directoryFd, ReadOnlySpan<byte> path) =>
+        ReadLinkText(directoryFd, path, InitialLinkBufferBytes, MaxLinkBufferBytes);
+
+    /// <summary>
+    /// <see cref="ReadLinkText(int, ReadOnlySpan{byte})"/> with the buffer's first and largest
+    /// sizes given, so the ceiling can be reached by a target the filesystem will store.
+    /// </summary>
+    internal static CapResult<string> ReadLinkText(
+        int directoryFd,
+        ReadOnlySpan<byte> path,
+        int initialCapacity,
+        int maxCapacity)
     {
-        int capacity = InitialLinkBufferBytes;
+        int capacity = initialCapacity;
         while (true)
         {
             byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
@@ -643,13 +654,13 @@ internal sealed class LinuxPlatformOps : IPlatformOps
                 ArrayPool<byte>.Shared.Return(buffer);
             }
 
-            if (capacity >= MaxLinkBufferBytes)
+            if (capacity >= maxCapacity)
             {
                 return CapResult<string>.Fail(CapError.Create(
                     CapErrorCategory.NameTooLong, CapErrorSource.Errno, LinuxErrno.ENAMETOOLONG));
             }
 
-            capacity = Math.Min(capacity * 2, MaxLinkBufferBytes);
+            capacity = Math.Min(capacity * 2, maxCapacity);
         }
     }
 
@@ -1158,25 +1169,43 @@ internal sealed class LinuxPlatformOps : IPlatformOps
 
         fixed (byte* start = buffer)
         {
-            int done = 0;
-            while (done < buffer.Length)
+            return WritePositioned(lease.Descriptor, start, buffer.Length, fileOffset, &LinuxNative.PWrite);
+        }
+    }
+
+    /// <summary>
+    /// Writes all of <paramref name="length"/> bytes at <paramref name="fileOffset"/> through
+    /// <paramref name="write"/>, continuing after a short write and after an interruption.
+    /// </summary>
+    /// <remarks>
+    /// The write is passed in so the loop can be driven by one that accepts less than it was
+    /// given, or is interrupted, which a real file will not do on demand. It reports its
+    /// failure as <c>pwrite</c> does: a negative return with the code in the last error.
+    /// </remarks>
+    internal static unsafe CapError WritePositioned(
+        int fd,
+        byte* start,
+        int length,
+        long fileOffset,
+        delegate*<int, byte*, nuint, long, nint> write)
+    {
+        int done = 0;
+        while (done < length)
+        {
+            nint written = write(fd, start + done, (nuint)(length - done), fileOffset + done);
+
+            if (written < 0)
             {
-                nint written = LinuxNative.PWrite(
-                    lease.Descriptor, start + done, (nuint)(buffer.Length - done), fileOffset + done);
-
-                if (written < 0)
+                int errno = Marshal.GetLastPInvokeError();
+                if (errno == PosixErrno.EINTR)
                 {
-                    int errno = Marshal.GetLastPInvokeError();
-                    if (errno == PosixErrno.EINTR)
-                    {
-                        continue;
-                    }
-
-                    return LinuxErrno.ToError(errno);
+                    continue;
                 }
 
-                done += (int)written;
+                return LinuxErrno.ToError(errno);
             }
+
+            done += (int)written;
         }
 
         return CapError.Success;
@@ -1549,7 +1578,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// caller their filesystem is old when what is actually wrong is what they asked for.
     /// </para>
     /// </remarks>
-    private static CapError TranslateNoReplaceFailure(int errno) =>
+    internal static CapError TranslateNoReplaceFailure(int errno) =>
         errno is LinuxErrno.ENOSYS or LinuxErrno.EOPNOTSUPP
             ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
             : LinuxErrno.ToError(errno);
@@ -1925,7 +1954,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// finds out there for itself if it is no longer one.
     /// </para>
     /// </remarks>
-    private static CapError TranslateOpenFailure(
+    internal static CapError TranslateOpenFailure(
         int directoryFd,
         ReadOnlySpan<byte> name,
         int errno,
@@ -2181,7 +2210,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// forbade crossing a mount, the same code may mean that instead, and
     /// <see cref="ClassifyRefusedCrossing"/> tells the two apart before this is reached.
     /// </remarks>
-    private static CapError TranslateConfinedFailure(int errno) =>
+    internal static CapError TranslateConfinedFailure(int errno) =>
         errno == PosixErrno.EXDEV
             ? CapError.Create(CapErrorCategory.Escaped, CapErrorSource.Errno, errno)
             : LinuxErrno.ToError(errno);
