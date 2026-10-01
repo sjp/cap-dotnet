@@ -216,7 +216,9 @@ internal interface IPlatformOps
     /// there is nowhere for any of that to be aimed — the handle returned is the only
     /// reference to it, and when the last such handle closes the storage goes back. That
     /// makes it the only kind of scratch file no other account on the machine can interfere
-    /// with, whatever the permissions on the directory it came from.
+    /// with, whatever the permissions on the directory it came from. Nor can it be given a
+    /// name later, even by code holding the handle: the file is created so that linking it
+    /// into a directory is refused, and it stays nameless until its storage goes back.
     /// </para>
     /// <para>
     /// <strong>Reports <see cref="CapErrorCategory.NotSupported"/> wherever a nameless file

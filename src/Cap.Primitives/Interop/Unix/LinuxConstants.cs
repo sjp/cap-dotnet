@@ -185,6 +185,11 @@ internal static class LinuxConstants
     /// because it has no place in any directory for that to be aimed at.
     /// </para>
     /// <para>
+    /// That holds only together with <see cref="O_EXCL"/>. On its own the flag still lets a
+    /// holder of the descriptor link the file into a directory afterwards, giving it a name;
+    /// with the exclusive flag the kernel refuses every such link, so the file never has one.
+    /// </para>
+    /// <para>
     /// Architecture-dependent, because the flag is the directory flag with one further bit
     /// set, and the directory flag is one of the two whose value AArch64 did not inherit
     /// from x86-64. Getting it wrong on one architecture would not fail: the kernel would

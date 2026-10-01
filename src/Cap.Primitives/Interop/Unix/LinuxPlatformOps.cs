@@ -329,6 +329,14 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// one of those answers is reported as <see cref="CapErrorCategory.NotSupported"/> and a
     /// caller that has a fallback can take it.
     /// </para>
+    /// <para>
+    /// The exclusive flag goes with it. Without that, a nameless file is only nameless until
+    /// someone holding the descriptor links it into a directory, which the kernel allows
+    /// through an empty-path link or the descriptor's entry under <c>/proc</c>; with it, the
+    /// kernel refuses every such link and the file can never acquire a name. Nothing here
+    /// ever wants to give it one, so the flag costs nothing, and it does not change how a
+    /// kernel without the facility refuses the open.
+    /// </para>
     /// </remarks>
     public CapResult<SafeFileHandle> OpenAnonymousChildFile(SafeDirHandle parent, FileAccess access)
     {
@@ -353,7 +361,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<SafeFileHandle>.Fail(HandleLease.ClosedError);
         }
 
-        int flags = accessFlag | LinuxConstants.O_TMPFILE | LinuxConstants.O_CLOEXEC;
+        int flags = accessFlag | LinuxConstants.O_TMPFILE | LinuxConstants.O_EXCL | LinuxConstants.O_CLOEXEC;
 
         int fd;
         int errno;

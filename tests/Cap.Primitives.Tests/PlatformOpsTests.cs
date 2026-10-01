@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Runtime.InteropServices;
 using Cap.Primitives.Interop;
 using Cap.Tests.Fakes;
 using Microsoft.Win32.SafeHandles;
@@ -14,7 +16,7 @@ namespace Cap.Primitives.Tests;
 /// agrees with itself.
 /// </remarks>
 [Collection(PlatformOpsTestGroup.Name)]
-public sealed class PlatformOpsTests : IDisposable
+public sealed partial class PlatformOpsTests : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("cap-interop-").FullName;
 
@@ -288,6 +290,83 @@ public sealed class PlatformOpsTests : IDisposable
         CapResult<SafeDirHandle> result = Ops.OpenChildDirectory(root, "child", CapAccess.Read);
         Assert.False(result.IsSuccess);
     }
+
+    /// <summary>
+    /// A nameless file cannot be linked into a directory through its descriptor.
+    /// </summary>
+    /// <remarks>
+    /// The empty-path form of the link. Before Linux 6.10 an unprivileged caller is refused
+    /// it whatever the file, so on those kernels this case cannot tell the difference and
+    /// the one through <c>/proc</c> below is the one that can.
+    /// </remarks>
+    [Fact]
+    public void An_anonymous_file_cannot_be_given_a_name_through_its_descriptor()
+    {
+        using SafeFileHandle file = OpenAnonymousFileOrSkip();
+        int fd = (int)file.DangerousGetHandle();
+
+        int result = LinkAt(fd, string.Empty, AtFdCwd, Path.Combine(_root, "named"), AtEmptyPath);
+
+        AssertLinkRefused(result);
+    }
+
+    /// <summary>
+    /// A nameless file cannot be linked into a directory through its entry under
+    /// <c>/proc</c>.
+    /// </summary>
+    /// <remarks>
+    /// Following the descriptor's magic link needs no privilege, so this is the route any
+    /// holder of the descriptor has, on every kernel.
+    /// </remarks>
+    [Fact]
+    public void An_anonymous_file_cannot_be_given_a_name_through_proc()
+    {
+        if (!Directory.Exists("/proc/self/fd"))
+        {
+            Assert.Skip("/proc is not mounted, so there is no descriptor entry to link from.");
+        }
+
+        using SafeFileHandle file = OpenAnonymousFileOrSkip();
+        string entry = "/proc/self/fd/" + file.DangerousGetHandle().ToString(CultureInfo.InvariantCulture);
+
+        int result = LinkAt(AtFdCwd, entry, AtFdCwd, Path.Combine(_root, "named"), AtSymlinkFollow);
+
+        AssertLinkRefused(result);
+    }
+
+    private SafeFileHandle OpenAnonymousFileOrSkip()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("Linking a file in by its descriptor is a Linux facility.");
+        }
+
+        using SafeDirHandle root = OpenRoot();
+        CapResult<SafeFileHandle> result = Ops.OpenAnonymousChildFile(root, FileAccess.ReadWrite);
+        if (!result.IsSuccess && result.Error.Category == CapErrorCategory.NotSupported)
+        {
+            Assert.Skip("The filesystem under the temporary directory has no nameless files.");
+        }
+
+        Assert.True(result.IsSuccess, result.Error.FailureDescription);
+        return result.Value;
+    }
+
+    private void AssertLinkRefused(int result)
+    {
+        int errno = Marshal.GetLastPInvokeError();
+        Assert.Equal(-1, result);
+        Assert.Equal(ENOENT, errno);
+        Assert.False(File.Exists(Path.Combine(_root, "named")));
+    }
+
+    private const int AtFdCwd = -100;
+    private const int AtSymlinkFollow = 0x400;
+    private const int AtEmptyPath = 0x1000;
+    private const int ENOENT = 2;
+
+    [LibraryImport("libc", EntryPoint = "linkat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int LinkAt(int oldDirFd, string oldPath, int newDirFd, string newPath, int flags);
 
     private SafeDirHandle OpenRoot()
     {
