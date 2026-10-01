@@ -951,9 +951,9 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// <para>
     /// A write at the descriptor's position rather than at the offset. POSIX says a
     /// positioned write on a descriptor that appends goes to the offset, Linux puts it at the
-    /// end, and this system does not document which it does. A write at the position is
-    /// defined to go to the end everywhere, and moving the position there is part of the same
-    /// step.
+    /// end, and this system, which does not document it, puts it at the offset. A write at
+    /// the position is defined to go to the end everywhere, and moving the position there is
+    /// part of the same step.
     /// </para>
     /// <para>
     /// The position is shared with every copy of the descriptor, but nothing this library

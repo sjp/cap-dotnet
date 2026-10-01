@@ -23,7 +23,7 @@ what a program moving between Linux, macOS and Windows will notice.
 | Permissions reported as | Unix mode | Unix mode | file attributes |
 | Creation time | where the filesystem records it | yes | yes |
 | Access time | unless the filesystem keeps none, when it is null | yes | yes |
-| Appending (`append: true`, `CapFile.IsAppending`) | a flag on the open file, shared with streams taken from it | same | applied by `CapFile` to its own writes; a stream taken while it is on gets a handle that can only append |
+| Appending (`append: true`, `CapFile.IsAppending`) | a flag on the open file, shared with streams taken from it | a flag on the open file, shared with streams taken from it, but a stream's writes go to its own position rather than the end; `CapFile`'s own writes go to the end | applied by `CapFile` to its own writes; a stream taken while it is on gets a handle that can only append |
 | Committing a directory's entries (`Dir.Flush(toDisk: true)`) | `fsync` on the directory | `F_FULLFSYNC` on the directory, falling back to `fsync` where the volume refuses it | not possible; returns false |
 | Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
 | Processor architectures | x86-64, AArch64, 32-bit ARM; any other is refused ([below](#linux-architectures)) | any .NET runs on | any .NET runs on |

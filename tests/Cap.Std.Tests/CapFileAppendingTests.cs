@@ -312,18 +312,21 @@ public sealed class CapFileAppendingTests : IDisposable
 
     // --- streams -------------------------------------------------------------------------------
 
-    /// <summary>A stream taken while appending is on appends, wherever it thinks it is.</summary>
+    /// <summary>
+    /// A stream taken while appending is on appends, wherever it thinks it is, except on
+    /// macOS, where it writes at its own position.
+    /// </summary>
     /// <remarks>
-    /// Promised on Linux and Windows. A stream writes at its own position, and macOS does not
-    /// document where such a write goes on a file that appends.
+    /// Promised on Linux and Windows. A stream writes through the system's positioned write,
+    /// which macOS does not document for a file that appends; it was observed writing at the
+    /// offset it is given, as POSIX says, on APFS under macOS 27.0.1 on 2026-10-01. This
+    /// handle's own writes still go to the end there.
     /// </remarks>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public void A_stream_taken_while_appending_appends(bool leaveOpen)
     {
-        Assert.SkipWhen(OperatingSystem.IsMacOS(), "macOS does not document where a positioned write to an appending file goes.");
-
         HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
@@ -346,7 +349,8 @@ public sealed class CapFileAppendingTests : IDisposable
             }
         }
 
-        string expected = leaveOpen ? "first second third" : "first second";
+        string streamed = OperatingSystem.IsMacOS() ? " second" : "first second";
+        string expected = leaveOpen ? streamed + " third" : streamed;
         Assert.Equal(expected, HostFile.ReadAllText(Host("log")));
     }
 
@@ -356,12 +360,14 @@ public sealed class CapFileAppendingTests : IDisposable
     /// </summary>
     /// <remarks>
     /// Documented as platform behaviour, since Windows keeps no such flag, and tested where
-    /// it is promised so that the documentation stays true.
+    /// it is promised so that the documentation stays true. macOS keeps the flag but puts the
+    /// stream's positioned write at its offset, as observed in
+    /// <see cref="A_stream_taken_while_appending_appends"/>.
     /// </remarks>
     [Fact]
     public void Turning_appending_on_reaches_a_borrowed_stream_where_the_system_keeps_the_flag()
     {
-        Assert.SkipUnless(OperatingSystem.IsLinux(), "Only Linux both keeps the flag and documents where a stream's write then goes.");
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows keeps no append flag for a stream to share.");
 
         HostFile.WriteAllText(Host("log"), "first");
 
@@ -374,6 +380,7 @@ public sealed class CapFileAppendingTests : IDisposable
             stream.Write(Encoding.ASCII.GetBytes(" second"));
         }
 
-        Assert.Equal("first second", HostFile.ReadAllText(Host("log")));
+        string expected = OperatingSystem.IsMacOS() ? " second" : "first second";
+        Assert.Equal(expected, HostFile.ReadAllText(Host("log")));
     }
 }
