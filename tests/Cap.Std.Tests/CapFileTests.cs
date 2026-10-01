@@ -147,6 +147,27 @@ public sealed class CapFileTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// A handle opened only for reading cannot resize the file, and says so as a permission
+    /// problem rather than leaving the operating system's own answer to describe it.
+    /// </summary>
+    [Fact]
+    public void A_read_only_handle_cannot_change_the_length()
+    {
+        HostFile.WriteAllText(Host("data"), "0123456789");
+
+        using Dir root = OpenRoot();
+        using (CapFile file = root.OpenFile("data"))
+        {
+            UnauthorizedAccessException refused =
+                Assert.Throws<UnauthorizedAccessException>(() => file.SetLength(0));
+            Assert.Equal(CapErrorKind.PermissionDenied, CapIOException.KindOf(refused));
+            Assert.Equal(10, file.Length);
+        }
+
+        Assert.Equal("0123456789", HostFile.ReadAllText(Host("data")));
+    }
+
     /// <summary>Asking for durability is a call that returns; asking for nothing does nothing.</summary>
     /// <remarks>
     /// There is no buffer of this library's own for the weaker form to empty, so the only

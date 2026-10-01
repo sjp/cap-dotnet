@@ -255,6 +255,14 @@ public sealed class CapFile : ICapFile
     {
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         Demand();
+
+        if ((_access & FileAccess.Write) == 0)
+        {
+            throw new UnauthorizedAccessException(
+                "This file was opened without write access, so its length cannot be changed " +
+                "through it. Open it for writing to change it.");
+        }
+
         _backend.SetFileLength(_handle, length);
     }
 
