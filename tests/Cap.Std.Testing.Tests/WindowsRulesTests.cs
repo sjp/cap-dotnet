@@ -174,14 +174,20 @@ public sealed class WindowsRulesTests
         Assert.Equal(CapErrorKind.AlreadyExists, taken.Kind);
     }
 
-    [Fact]
-    public void A_rename_can_change_only_the_case_of_a_name()
+    /// <summary>
+    /// Whether or not the rename may replace, as NTFS and the default macOS volume allow; see
+    /// <c>DirMutationTests</c> for the same case against the host.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_rename_can_change_only_the_case_of_a_name(bool replaceExisting)
     {
         InMemoryFileSystem fs = Windows();
         fs.AddFile("readme.txt", "x");
 
         using Dir root = fs.OpenRoot();
-        root.Rename("readme.txt", root, "README.txt");
+        root.Rename("readme.txt", root, "README.txt", replaceExisting);
 
         Assert.Equal(["README.txt"], fs.GetEntries());
         Assert.Equal("x", fs.ReadAllText("README.txt"));

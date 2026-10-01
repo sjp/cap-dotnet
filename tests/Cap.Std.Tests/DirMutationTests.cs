@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Tests;
 
 namespace Cap.Std.Tests;
 
@@ -313,6 +314,31 @@ public sealed class DirMutationTests : IDisposable
 
         Assert.False(HostFile.Exists(Host("from", "entry")));
         Assert.Equal("contents", HostFile.ReadAllText(Host("to", "entry")));
+    }
+
+    /// <summary>
+    /// On a volume that ignores case the new spelling names the entry being moved, not a
+    /// destination that is taken, so a rename that changes only the case goes through whether
+    /// or not it may replace — as NTFS, <c>mv</c> on the default macOS volume and the in-memory
+    /// filesystem under Windows rules all have it. On macOS the refusing rename is
+    /// <c>renameatx_np(RENAME_EXCL)</c>, and this is what shows the kernel agrees.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void A_rename_that_changes_only_the_case_of_a_name_is_allowed_on_a_folding_volume(bool replaceExisting)
+    {
+        HostFile.WriteAllText(Host("readme"), "contents");
+        ExpectedHostFeatures.Require(
+            HostFeature.CaseInsensitive,
+            HostFile.Exists(Host("README")),
+            "A volume that tells the two spellings apart has nothing to fold.");
+
+        using Dir root = OpenRoot();
+        root.Rename("readme", root, "README", replaceExisting);
+
+        Assert.Equal(["README"], root.EnumerateEntries().Select(entry => entry.Name));
+        Assert.Equal("contents", HostFile.ReadAllText(Host("README")));
     }
 
     /// <summary>By default a name already in use is not destroyed.</summary>

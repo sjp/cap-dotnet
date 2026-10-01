@@ -88,8 +88,8 @@ jobs:
         run: |
           $features = @{
             Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames,SpecialFiles'
-            Windows = 'Symlinks,HardLinks,Junctions'
-            macOS   = 'Symlinks,HardLinks,PosixNames,SpecialFiles'
+            Windows = 'Symlinks,HardLinks,Junctions,CaseInsensitive'
+            macOS   = 'Symlinks,HardLinks,PosixNames,SpecialFiles,CaseInsensitive'
           }['${{ runner.os }}']
           "CAPDOTNET_EXPECT_HOST_FEATURES=$features" >> $env:GITHUB_ENV
 
@@ -388,8 +388,8 @@ jobs:
         run: |
           $features = @{
             Linux   = 'Symlinks,HardLinks,ProcessFilesystem,PosixNames,SpecialFiles'
-            Windows = 'Symlinks,HardLinks,Junctions'
-            macOS   = 'Symlinks,HardLinks,PosixNames,SpecialFiles'
+            Windows = 'Symlinks,HardLinks,Junctions,CaseInsensitive'
+            macOS   = 'Symlinks,HardLinks,PosixNames,SpecialFiles,CaseInsensitive'
           }['${{ runner.os }}']
           "CAPDOTNET_EXPECT_HOST_FEATURES=$features" >> $env:GITHUB_ENV
 
