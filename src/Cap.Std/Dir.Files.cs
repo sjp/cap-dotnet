@@ -1027,9 +1027,15 @@ public sealed partial class Dir
     /// <param name="cancellationToken">Asks for the write to be abandoned.</param>
     /// <remarks>
     /// <para>
-    /// Abandoning it does not undo it. The file has already been emptied by the time any of
-    /// the contents are written, so a cancelled call leaves a file that is shorter than it
-    /// was — cancellation releases the caller and says nothing about what is on disk.
+    /// A token that is already signalled when the call is made stops it before the file is
+    /// opened, so the file is left exactly as it was, as the framework's own whole-file write
+    /// leaves it.
+    /// </para>
+    /// <para>
+    /// Abandoning a write that has started does not undo it. The file has already been
+    /// emptied by the time any of the contents are written, so a call cancelled part of the
+    /// way through leaves a file that is shorter than it was — cancellation releases the
+    /// caller and says nothing about what is on disk.
     /// </para>
     /// <para>
     /// Symbolic links are followed or refused exactly as <see cref="WriteAllBytes"/>
@@ -1055,6 +1061,8 @@ public sealed partial class Dir
         ReadOnlyMemory<byte> bytes,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         using CapFile file = OpenFile(
             path, FileMode.Create, FileAccess.Write, FileShare.Read, FileOptions.Asynchronous);
 

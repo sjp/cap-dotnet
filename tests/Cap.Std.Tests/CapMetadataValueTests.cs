@@ -185,6 +185,21 @@ public sealed class CapMetadataValueTests
         Assert.Equal("ab:cd", identity.ToString());
     }
 
+    /// <summary>
+    /// Permissions render as the bits their own system records, and a value from neither
+    /// system says so.
+    /// </summary>
+    [Fact]
+    public void Permissions_render_for_a_log_line()
+    {
+        const UnixFileMode Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        const FileAttributes Attributes = FileAttributes.ReadOnly | FileAttributes.Hidden;
+
+        Assert.Equal(Mode.ToString(), CapPermissions.FromUnixMode(Mode).ToString());
+        Assert.Equal(Attributes.ToString(), CapPermissions.FromWindowsAttributes(Attributes).ToString());
+        Assert.Equal("none", default(CapPermissions).ToString());
+    }
+
     private static CapMetadata Describe(
         ulong volumeId = 1,
         UInt128 nodeId = default,

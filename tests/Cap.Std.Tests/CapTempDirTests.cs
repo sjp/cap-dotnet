@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Reflection;
 using Cap.Primitives;
 
 namespace Cap.Std.Tests;
@@ -27,6 +29,8 @@ namespace Cap.Std.Tests;
 [Collection(DirTestGroup.Name)]
 public sealed class CapTempDirTests
 {
+    private const int ChildTimeout = 120_000;
+
     /// <summary>The path of a scratch directory, as the host sees it.</summary>
     /// <remarks>
     /// The tests look at the tree from outside, the way anything auditing it would, so they
@@ -236,6 +240,66 @@ public sealed class CapTempDirTests
         after.Dispose();
 
         Assert.False(HostDirectory.Exists(second));
+    }
+
+    /// <summary>
+    /// The environment variable keeps scratch directories as the switch does, in a process
+    /// started with it set.
+    /// </summary>
+    /// <remarks>
+    /// The variable is read once per process, so this process cannot be the one to show it:
+    /// it has long since decided. A second copy of the test program is started with the
+    /// variable set, creates and disposes one scratch directory, and prints where it was.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("Starts a child process that creates its scratch directory on the host's own filesystem.")]
+    public async Task The_persistence_variable_keeps_directories()
+    {
+        ProcessStartInfo start = new()
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        // The test program may have been started through its own launcher or through the
+        // shared host, and only the first can be re-run by path alone.
+        string host = Environment.ProcessPath ??
+            throw new InvalidOperationException("The running program has no path to re-launch.");
+
+        start.FileName = host;
+        if (Path.GetFileNameWithoutExtension(host) is "dotnet")
+        {
+            string assembly = Assembly.GetExecutingAssembly().GetName().Name + ".dll";
+            start.ArgumentList.Add(Path.Combine(AppContext.BaseDirectory, assembly));
+        }
+
+        start.Environment[PersistedTempDirChild.RequestVariable] = "1";
+        start.Environment[CapTempDir.PersistVariableName] = "1";
+
+        using Process child = Process.Start(start) ??
+            throw new InvalidOperationException("The child did not start.");
+
+        CancellationToken token = TestContext.Current.CancellationToken;
+        Task<string> error = child.StandardError.ReadToEndAsync(token);
+        string output = await child.StandardOutput.ReadToEndAsync(token);
+        Assert.True(child.WaitForExit(ChildTimeout), "The child did not finish.");
+        Assert.True(child.ExitCode == 0, $"The child failed with {child.ExitCode}: {await error}");
+
+        string path = output.Trim();
+        Assert.False(string.IsNullOrEmpty(path), "The child reported no directory.");
+
+        try
+        {
+            Assert.True(HostDirectory.Exists(path), $"The child's scratch directory {path} was removed.");
+        }
+        finally
+        {
+            if (HostDirectory.Exists(path))
+            {
+                HostDirectory.Delete(path, recursive: true);
+            }
+        }
     }
 
     /// <summary>A scratch directory can be made inside a handle, with no ambient authority.</summary>

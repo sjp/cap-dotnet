@@ -188,6 +188,66 @@ public sealed class CapFileTests : IDisposable
         Assert.Equal("contents", HostFile.ReadAllText(Host("data")));
     }
 
+    /// <summary>
+    /// A handle opened only for reading can still be flushed to disk.
+    /// </summary>
+    /// <remarks>
+    /// Whether a descriptor opened for reading may be synced is a matter of folklore rather
+    /// than of any one standard, and a platform that refused it would turn a defensive flush
+    /// in a caller's cleanup path into a failure. Every platform this runs on accepts it, and
+    /// this pins that.
+    /// </remarks>
+    [Fact]
+    public void A_read_only_handle_can_still_flush()
+    {
+        HostFile.WriteAllText(Host("data"), "contents");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("data");
+
+        file.Flush(toDisk: false);
+        file.Flush(toDisk: true);
+
+        Assert.Equal("contents", HostFile.ReadAllText(Host("data")));
+    }
+
+    /// <summary>
+    /// Positional reads and writes from many threads on one handle each land where they were
+    /// told to.
+    /// </summary>
+    /// <remarks>
+    /// The promise that makes a positional handle worth having: no position is shared, so
+    /// threads working on disjoint ranges need no agreement between them. A handle that kept
+    /// a cursor underneath and moved it for each call would put some of these writes in the
+    /// wrong range, and the read-back would find another thread's byte.
+    /// </remarks>
+    [Fact]
+    public void Concurrent_positional_reads_and_writes_do_not_interfere()
+    {
+        const int Ranges = 64;
+        const int RangeBytes = 1024;
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("data", FileMode.Create, FileAccess.ReadWrite);
+        file.SetLength(Ranges * RangeBytes);
+
+        Parallel.For(0, Ranges, range =>
+        {
+            byte[] fill = new byte[RangeBytes];
+            Array.Fill(fill, (byte)(range + 1));
+            file.Write(fill, (long)range * RangeBytes);
+        });
+
+        Parallel.For(0, Ranges, range =>
+        {
+            byte[] read = new byte[RangeBytes];
+            Assert.Equal(RangeBytes, file.Read(read, (long)range * RangeBytes));
+            Assert.All(read, b => Assert.Equal((byte)(range + 1), b));
+        });
+
+        Assert.Equal(Ranges * RangeBytes, file.Length);
+    }
+
     // --- streams and ownership --------------------------------------------------------------------
 
     /// <summary>A borrowed stream leaves the file open, so both can be disposed once.</summary>

@@ -677,6 +677,57 @@ public sealed partial class DirEnumerationTests : IDisposable
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
 
     /// <summary>
+    /// An entry opens with a creating mode, which does what the same mode does to the name
+    /// through the handle.
+    /// </summary>
+    /// <remarks>
+    /// The name is resolved afresh when the entry is opened, so what an entry was listed as
+    /// says nothing about what the name holds by then — which is why the creating modes are
+    /// accepted at all, and why each has to behave exactly as it would on a path.
+    /// </remarks>
+    [Fact]
+    public void An_entry_opens_with_a_creating_mode()
+    {
+        HostFile.WriteAllText(Host("data"), "contents");
+
+        using Dir root = OpenRoot();
+        DirEntry entry = root.EnumerateEntries().Single(listed => listed.Name == "data");
+
+        using (CapFile file = entry.OpenFile(FileMode.Create, FileAccess.Write))
+        {
+            Assert.Equal(0, file.Length);
+        }
+
+        Assert.Equal(string.Empty, HostFile.ReadAllText(Host("data")));
+
+        CapIOException taken = Assert.Throws<CapIOException>(
+            () => entry.OpenFile(FileMode.CreateNew, FileAccess.Write));
+        Assert.Equal(CapErrorKind.AlreadyExists, taken.Kind);
+
+        Assert.False(entry.TryOpenFile(
+            FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.None, 0, append: false, noFollow: false, out CapFile? refused));
+        Assert.Null(refused);
+
+        Assert.True(entry.TryOpenFile(
+            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, FileOptions.None, 0, append: false, noFollow: false, out CapFile? opened));
+        using (opened)
+        {
+            opened.Write("kept"u8, 0);
+        }
+
+        Assert.Equal("kept", HostFile.ReadAllText(Host("data")));
+
+        // The name is resolved again, so a creating mode puts back a file removed since the
+        // listing was taken.
+        HostFile.Delete(Host("data"));
+        using (entry.OpenFile(FileMode.CreateNew, FileAccess.Write))
+        {
+        }
+
+        Assert.True(HostFile.Exists(Host("data")));
+    }
+
+    /// <summary>
     /// An entry opened without following refuses a link at its name, as the handle's own open
     /// does, where the default follows it.
     /// </summary>

@@ -103,6 +103,36 @@ public sealed class DirDerivationTests : IDisposable
         Assert.False(root.TryOpenDir(path, out _));
     }
 
+    /// <summary>
+    /// A directory that is not a link opens without following, through both the directory
+    /// open and the open that takes whatever is there.
+    /// </summary>
+    /// <remarks>
+    /// The refusing half is the escape corpus's business; this is the half it does not check.
+    /// An open that refused every directory under <c>noFollow</c> would pass every escape
+    /// case and be useless.
+    /// </remarks>
+    [Fact]
+    public void A_directory_opens_without_following_when_it_is_not_a_link()
+    {
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "child"));
+
+        using Dir root = OpenRoot();
+
+        Assert.True(root.TryOpenDir("child", noFollow: true, out Dir? dir));
+        using (dir)
+        {
+            Assert.True(dir.Handle.Backend.StatHandle(dir.Handle, out CapNodeInfo opened).IsSuccess);
+            Assert.Equal(CapNodeType.Directory, opened.Type);
+        }
+
+        Assert.True(root.TryOpenAny("child", noFollow: true, out CapOpened? any));
+        using (any)
+        {
+            Assert.True(any.IsDirectory);
+        }
+    }
+
     /// <summary>An absolute path names a place the handle confers no authority over.</summary>
     [Fact]
     public void An_absolute_path_is_refused()

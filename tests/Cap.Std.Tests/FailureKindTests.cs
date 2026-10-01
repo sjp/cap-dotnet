@@ -209,5 +209,53 @@ public sealed class FailureKindTests : IDisposable
         Assert.Equal(CapErrorKind.Escaped, CapIOException.KindOf(new SandboxEscapeException()));
     }
 
+    /// <summary>
+    /// Every constructor of the two exception types sets the reason it implies and keeps the
+    /// cause it was given.
+    /// </summary>
+    /// <remarks>
+    /// Code that wraps a failure of its own in one of these, or rethrows one with a cause
+    /// attached, reads the reason back through the same property the library's own failures
+    /// use, so a constructor that dropped either would hide the failure behind
+    /// <see cref="CapErrorKind.Other"/> or lose the trail that led to it.
+    /// </remarks>
+    [Fact]
+    public void Every_constructor_of_the_exception_types_sets_the_kind()
+    {
+        IOException cause = new("underneath");
+
+        CapIOException plain = new();
+        Assert.Equal(CapErrorKind.Other, plain.Kind);
+        Assert.False(string.IsNullOrEmpty(plain.Message));
+        Assert.Null(plain.InnerException);
+
+        CapIOException wrapping = new("wrapped", cause);
+        Assert.Equal(CapErrorKind.Other, wrapping.Kind);
+        Assert.Equal("wrapped", wrapping.Message);
+        Assert.Same(cause, wrapping.InnerException);
+
+        CapIOException kinded = new(CapErrorKind.NotEmpty, "kinded");
+        Assert.Equal(CapErrorKind.NotEmpty, kinded.Kind);
+        Assert.Null(kinded.InnerException);
+
+        CapIOException kindedWrapping = new(CapErrorKind.NotEmpty, "kinded", cause);
+        Assert.Equal(CapErrorKind.NotEmpty, kindedWrapping.Kind);
+        Assert.Same(cause, kindedWrapping.InnerException);
+
+        SandboxEscapeException escape = new();
+        Assert.Equal(CapErrorKind.Escaped, escape.Kind);
+        Assert.False(string.IsNullOrEmpty(escape.Message));
+        Assert.Null(escape.InnerException);
+
+        SandboxEscapeException escapeWithMessage = new("left");
+        Assert.Equal(CapErrorKind.Escaped, escapeWithMessage.Kind);
+        Assert.Equal("left", escapeWithMessage.Message);
+
+        SandboxEscapeException escapeWrapping = new("left", cause);
+        Assert.Equal(CapErrorKind.Escaped, escapeWrapping.Kind);
+        Assert.Equal("left", escapeWrapping.Message);
+        Assert.Same(cause, escapeWrapping.InnerException);
+    }
+
     private static void RequireSymlinks(Action create) => HostLinks.Require(HostFeature.Symlinks, create);
 }
