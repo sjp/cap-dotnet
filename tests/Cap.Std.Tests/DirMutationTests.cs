@@ -531,7 +531,7 @@ public sealed class DirMutationTests : IDisposable
         using Dir root = OpenRoot();
         root.CreateDirSymlink("escape", "../../..");
 
-        Assert.Equal("../../..", root.ReadLink("escape"));
+        Assert.Equal("../../..", root.ReadLink("escape").Replace('\\', '/'));
         _ = Assert.Throws<SandboxEscapeException>(() => root.OpenDir("escape"));
     }
 
