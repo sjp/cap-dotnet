@@ -86,7 +86,10 @@ public sealed partial class Dir
     /// The filesystem refused to let the directory be read, or this handle was opened only
     /// to resolve names beneath it and not to list them.
     /// </exception>
-    /// <exception cref="DirectoryNotFoundException">The directory has since been removed.</exception>
+    /// <exception cref="DirectoryNotFoundException">
+    /// The directory has since been removed, where the platform says so. On macOS it does
+    /// not, and a removed directory lists as an empty one.
+    /// </exception>
     /// <exception cref="CapIOException">The directory could not be read.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public IEnumerable<DirEntry> EnumerateEntries()
@@ -132,7 +135,10 @@ public sealed partial class Dir
     /// The filesystem refused to let the directory be read, or this handle was opened only
     /// to resolve names beneath it and not to list them.
     /// </exception>
-    /// <exception cref="DirectoryNotFoundException">The directory has since been removed.</exception>
+    /// <exception cref="DirectoryNotFoundException">
+    /// The directory has since been removed, where the platform says so. On macOS it does
+    /// not, and a removed directory lists as an empty one.
+    /// </exception>
     /// <exception cref="CapIOException">The directory could not be read.</exception>
     /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
     public IAsyncEnumerable<DirEntry> EnumerateEntriesAsync(CancellationToken cancellationToken = default)

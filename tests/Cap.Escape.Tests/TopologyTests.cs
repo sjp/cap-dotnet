@@ -284,9 +284,9 @@ public sealed class TopologyTests
     /// </summary>
     /// <remarks>
     /// The handle keeps the directory itself alive, not its name or its place: it can still be
-    /// described, every name beneath it is missing, listing it reports it removed, and a
-    /// creation there is refused by the filesystem, which will not add an entry to a directory
-    /// that has been removed. Nothing is resolved by the path the root was opened by, so
+    /// described, every name beneath it is missing, listing it reports it removed (or, on
+    /// macOS, which cannot tell, finds it empty), and a creation there is refused by the
+    /// filesystem, which will not add an entry to a directory that has been removed. Nothing is resolved by the path the root was opened by, so
     /// nothing is made at that path either.
     /// </remarks>
     [Theory]
@@ -309,7 +309,17 @@ public sealed class TopologyTests
 
                 observation = OperationRunner.Run(root, operation, "x");
 
-                Assert.Throws<DirectoryNotFoundException>(() => root.EnumerateEntries().ToList());
+                // macOS lets a removed directory be read, and the read finds it empty; Linux
+                // refuses to read it at all.
+                if (backend == Backends.DarwinWalk)
+                {
+                    Assert.Empty(root.EnumerateEntries());
+                }
+                else
+                {
+                    Assert.Throws<DirectoryNotFoundException>(() => root.EnumerateEntries().ToList());
+                }
+
                 Assert.Equal(CapFileType.Directory, root.GetMetadata().Type);
             }
 
