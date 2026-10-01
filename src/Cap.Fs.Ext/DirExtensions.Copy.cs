@@ -885,15 +885,6 @@ public static partial class DirExtensions
             return true;
         }
 
-        /// <summary>Whether an open that refuses a final link failed because there was one.</summary>
-        /// <remarks>
-        /// Each backend names the refusal in its own way: the kernel's answer to an open that
-        /// will not follow a link is the one it gives for a link it will not follow, and a
-        /// backend that looks at the name first reports it as the link it found.
-        /// </remarks>
-        private static bool IsLinkRefusal(CapIOException refusal) =>
-            refusal.Kind is CapErrorKind.LinkNotFollowed or CapErrorKind.SymbolicLink;
-
         /// <summary>Creates a link in the destination holding the same target text.</summary>
         /// <remarks>
         /// <para>
@@ -1030,14 +1021,6 @@ public static partial class DirExtensions
                 target.SetPermissions(permissions);
             }
         }
-
-        /// <summary>The access time to give a copy: the source's, or none where it has none.</summary>
-        /// <remarks>
-        /// A source on a filesystem that keeps no access times has nothing to carry over, and
-        /// leaving the copy's own in place is closer to that than stamping it with a date.
-        /// </remarks>
-        private static CapFileTime Accessed(in CapMetadata metadata) =>
-            metadata.LastAccessTime is { } accessed ? CapFileTime.At(accessed) : CapFileTime.Unchanged;
 
         /// <summary>Whether a directory has anything in it.</summary>
         private static bool HasEntries(IDir directory)

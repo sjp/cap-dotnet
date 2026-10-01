@@ -247,6 +247,47 @@ public static partial class DirExtensions
     }
 
     /// <summary>
+    /// Removes everything inside this directory, leaving the directory itself, reporting
+    /// failure rather than throwing.
+    /// </summary>
+    /// <param name="dir">The directory to empty.</param>
+    /// <param name="cancellationToken">Stops the emptying before the next entry.</param>
+    /// <returns>True when the directory is empty.</returns>
+    /// <remarks>
+    /// <para>
+    /// The same emptying as <see cref="DeleteTreeContents(IDir, CancellationToken)"/>, in the
+    /// form <see cref="TryDeleteTree(IDir, string, CancellationToken)"/> takes for clearing up:
+    /// an entry that would not go is answered with false rather than an exception built to
+    /// describe it. The emptying still carries on past such an entry, so false means at least
+    /// one entry is left, not that nothing was removed.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread, on the same terms as
+    /// <see cref="DeleteTreeContents(IDir, CancellationToken)"/>.
+    /// </para>
+    /// <para>
+    /// <strong>Symbolic links.</strong> As for
+    /// <see cref="DeleteTreeContents(IDir, CancellationToken)"/>: every link inside is removed
+    /// as the link, and what it points at is never reached.
+    /// </para>
+    /// <para>
+    /// A signal on <paramref name="cancellationToken"/> is thrown rather than answered with
+    /// false, for the reason <see cref="TryDeleteTree(IDir, string, CancellationToken)"/> gives.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static bool TryDeleteTreeContents(this IDir dir, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dir);
+
+        return dir is Dir concrete
+            ? TreeRemoval.Empty(concrete, cancellationToken).IsSuccess
+            : InterfaceTreeRemoval.Empty(dir, cancellationToken) is null;
+    }
+
+    /// <summary>
     /// Removes a directory beneath this handle, and everything inside it, without holding the
     /// calling thread.
     /// </summary>
@@ -340,5 +381,27 @@ public static partial class DirExtensions
         ArgumentNullException.ThrowIfNull(dir);
 
         return Task.Run(() => DeleteTreeContents(dir, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes everything inside this directory without holding the calling thread, leaving
+    /// the directory itself, reporting failure rather than throwing.
+    /// </summary>
+    /// <param name="dir">The directory to empty.</param>
+    /// <param name="cancellationToken">Stops the emptying before the next entry.</param>
+    /// <returns>A task whose result is true when the directory is empty.</returns>
+    /// <remarks>
+    /// The same emptying as <see cref="TryDeleteTreeContents(IDir, CancellationToken)"/>, done on
+    /// a thread-pool thread. A signal on <paramref name="cancellationToken"/> cancels the task
+    /// rather than completing it with false. The handle must stay open until the task completes.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+    /// <exception cref="ObjectDisposedException">This handle has been disposed.</exception>
+    public static Task<bool> TryDeleteTreeContentsAsync(this IDir dir, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(dir);
+
+        return Task.Run(() => TryDeleteTreeContents(dir, cancellationToken), cancellationToken);
     }
 }

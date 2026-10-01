@@ -526,6 +526,27 @@ public sealed class GlobTests : IDisposable
             $"same tree {walked}. The search is supposed to add nothing per name.");
     }
 
+    /// <summary>
+    /// A search honours the ordering options as a walk does: sorted siblings, a directory
+    /// after its contents, and shallow matches left out while the search still goes beneath
+    /// them.
+    /// </summary>
+    [Fact]
+    public void A_search_orders_and_limits_its_matches_as_a_walk_does()
+    {
+        GlobPattern beneathA = GlobPattern.Parse(Path.Combine("a", "**"));
+
+        Assert.Equal(
+            ["b", "three.txt", "one.txt", "two.md"],
+            Names(beneathA, new WalkOptions { Sort = string.CompareOrdinal }));
+        Assert.Equal(
+            ["three.txt", "b", "one.txt", "two.md"],
+            Names(beneathA, new WalkOptions { Sort = string.CompareOrdinal, ContentsFirst = true }));
+        Assert.Equal(
+            ["three.txt"],
+            Names(beneathA, new WalkOptions { MinDepth = 3 }));
+    }
+
     /// <summary>Runs a search or a walk to its end, answering how many entries it yielded.</summary>
     private static int Drain(IEnumerable<WalkEntry> entries)
     {

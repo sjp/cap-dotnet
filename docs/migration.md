@@ -33,7 +33,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 
 | `System.IO` | Replacement | Notes |
 |---|---|---|
-| `File.Exists(p)` | **Ext** `dir.IsFile(p)` | `dir.Exists(p)` is true for anything at the name, directory included. |
+| `File.Exists(p)` | **Ext** `dir.IsFile(p, followLink: true)` | Follows a link at `p`, as `File.Exists` does, but only while it stays beneath `dir`; a link leading out answers false. `dir.IsFile(p)` asks about the name itself, so a link answers false. `dir.Exists(p)` is true for anything at the name, directory included. |
 | `File.ReadAllText(p)`, `File.ReadAllText(p, encoding)` | `dir.ReadAllText(p)`, `dir.ReadAllText(p, encoding)` | UTF-8, or the encoding given, unless a byte-order mark says otherwise, as `File.ReadAllText` does. |
 | `File.ReadAllTextAsync(p)` | `dir.ReadAllTextAsync(p)` | |
 | `File.ReadAllBytes(p)` | `dir.ReadAllBytes(p)` | |
@@ -56,7 +56,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.Move(a, b)` | `dir.Rename(a, dir, b)` | The destination is named against a `Dir` too, and may be a different one: moving between two trees needs authority over both. |
 | `File.Move(a, b, overwrite: true)` | `dir.Rename(a, dir, b, replaceExisting: true)` | |
 | `File.Replace(a, b, backup)` | two `Rename` calls | There is no single-call equivalent. |
-| `File.Copy(a, b)`, `File.Copy(a, b, overwrite)` | **Ext** `dir.CopyFile(a, toDir, b, overwrite)` | The destination is named against a `Dir` too. Carries the source's permissions, as `File.Copy` does, and not its times. With `overwrite` the copy is published over `b`, so a link there is replaced rather than written through. **Ext** `source.CopyTo(destination)` copies a whole tree between two `Dir`s. |
+| `File.Copy(a, b)`, `File.Copy(a, b, overwrite)` | **Ext** `dir.CopyFile(a, toDir, b, overwrite)` | The destination is named against a `Dir` too. Carries the source's permissions, as `File.Copy` does, and not its times. With `overwrite` the copy is published over `b`, so a link there is replaced rather than written through. **Ext** `dir.CopyFile(a, toDir, b, options)` takes a `CopyOptions` and copies the one file as `CopyTo` would, carrying times, permissions or holes only when asked and not following a link at `a`. **Ext** `source.CopyTo(destination)` copies a whole tree between two `Dir`s. |
 | `File.CreateSymbolicLink(p, target)` | `dir.CreateSymlink(p, target)` | `dir.CreateDirSymlink` for a link to a directory, which Windows records differently. A relative target is stored as written (on Windows with each `/` stored as `\`); whether it can be followed is decided when it is used. A rooted target (`/etc`, `C:\dir`) is refused with `SandboxEscapeException`, where `File.CreateSymbolicLink` accepts one. |
 | `File.ResolveLinkTarget(p, false)`, `FileInfo.LinkTarget` | `dir.ReadLink(p)` | |
 | `File.ResolveLinkTarget(p, true)` | open through the link instead | Resolution follows a link only while it stays inside the tree; there is no call that hands back where it leads as a path. |
@@ -80,12 +80,12 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 
 | `System.IO` | Replacement | Notes |
 |---|---|---|
-| `Directory.Exists(p)` | **Ext** `dir.IsDir(p)` | |
+| `Directory.Exists(p)` | **Ext** `dir.IsDir(p, followLink: true)` | Follows a link at `p`, as `Directory.Exists` does, but only while it stays beneath `dir`. `dir.IsDir(p)` answers false for a link. |
 | `Directory.CreateDirectory(p)` | `dir.OpenOrCreateDirAll(p)` | Returns a `Dir` on the last directory. A path that would leave the `Dir`, meet a file where a directory is needed, or pass a link the policy refuses is refused before anything is made. A failure while making the directories leaves the ones already made, as `Directory.CreateDirectory` does. `dir.OpenOrCreateDir(p)` makes the last name only, and refuses a link there. |
 | `Directory.CreateDirectory(p)`, new name expected | `dir.CreateDir(p)` | Fails if the name is taken. |
 | `new DirectoryInfo(p)` | `dir.OpenDir(p)` | A `Dir` rather than a description of a path. |
 | No equivalent: open `p` whichever it holds, as `open(2)` without `O_DIRECTORY` does | `dir.OpenAny(p)` | Reads only. Returns a `CapOpened`: check `IsDirectory`, then `TakeDir()` or `TakeFile()`. The path is resolved once, so the kind reported is that of the object opened, which trying `OpenFile` and then `OpenDir` can't promise. |
-| `Directory.Delete(p)` | `dir.DeleteDir(p)` | Empty directories only. |
+| `Directory.Delete(p)` | `dir.DeleteDir(p)` | Empty directories only. A link to a directory is removed with `dir.DeleteFile(p)`, or **Ext** `dir.RemoveFileOrSymlink(p)`, which removes a file or either kind of link and refuses a directory. |
 | `Directory.Delete(p, recursive: true)` | **Ext** `dir.DeleteTree(p)` | Never follows a link out of the tree; it removes the link. |
 | No equivalent: removing the directory a handle is open on, cap-std's `Dir::remove_open_dir` and `remove_open_dir_all` | **Ext** `dir.DeleteTreeContents()`, then `parent.DeleteDir(name)` | Not provided. POSIX cannot remove a directory through its own handle, only by its name in its parent, so a safe form needs the parent's `Dir` and the name, and that is `DeleteDir` or **Ext** `DeleteTree` on the parent. |
 | `Directory.Move(a, b)` | `dir.Rename(a, dir, b)` | |

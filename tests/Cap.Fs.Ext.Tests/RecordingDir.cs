@@ -192,21 +192,52 @@ internal sealed class RecordingDir(IDir inner, List<string> log, string label, A
     public Task WriteAllBytesAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken = default) =>
         Record(inner.WriteAllBytesAsync(path, bytes, cancellationToken), path);
 
+    /// <summary>
+    /// Whether this handle removes a link made to name a directory only as a directory, as the
+    /// Win32 calls do: a file removal of one is refused, and a directory removal takes it.
+    /// </summary>
+    /// <remarks>
+    /// Every backend of a <see cref="Dir"/> removes either kind of link as a file, so this is
+    /// how a test stands in for a wrapper that keeps the split. Only this handle keeps it, not
+    /// the ones opened from it.
+    /// </remarks>
+    public bool SplitsLinkRemoval { get; init; }
+
     public void DeleteFile(string path)
     {
         _ = Record(0, path);
+        if (SplitsLinkRemoval && IsDirectoryLink(path))
+        {
+            throw new CapIOException(CapErrorKind.IsADirectory, $"'{path}' is a link to a directory.");
+        }
+
         inner.DeleteFile(path);
     }
 
-    public bool TryDeleteFile(string path) => Record(inner.TryDeleteFile(path), path);
+    public bool TryDeleteFile(string path) =>
+        Record(!(SplitsLinkRemoval && IsDirectoryLink(path)) && inner.TryDeleteFile(path), path);
 
     public void DeleteDir(string path)
     {
         _ = Record(0, path);
+        if (SplitsLinkRemoval && IsDirectoryLink(path))
+        {
+            inner.DeleteFile(path);
+            return;
+        }
+
         inner.DeleteDir(path);
     }
 
-    public bool TryDeleteDir(string path) => Record(inner.TryDeleteDir(path), path);
+    public bool TryDeleteDir(string path) =>
+        Record(SplitsLinkRemoval && IsDirectoryLink(path) ? inner.TryDeleteFile(path) : inner.TryDeleteDir(path), path);
+
+    /// <summary>Whether a name holds a link made to name a directory.</summary>
+    private bool IsDirectoryLink(string path) =>
+        inner.TryGetMetadata(path, out CapMetadata metadata) &&
+        metadata.Type == CapFileType.Symlink &&
+        metadata.Permissions.TryGetWindowsAttributes(out FileAttributes attributes) &&
+        (attributes & FileAttributes.Directory) != 0;
 
     public void Rename(string from, IDir toDir, string to, bool replaceExisting = false)
     {

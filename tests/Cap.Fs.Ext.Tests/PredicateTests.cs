@@ -1,3 +1,6 @@
+using Cap.Primitives;
+using Cap.Std;
+
 namespace Cap.Fs.Ext.Tests;
 
 /// <summary>
@@ -64,5 +67,52 @@ public sealed class PredicateTests : IDisposable
 
         Assert.True(_tree.Directory.IsFile(Path.Combine("folder", "inner.txt")));
         Assert.True(_tree.Directory.IsFile(Path.Combine("to-folder", "inner.txt")));
+    }
+
+    /// <summary>Told to follow, the directory and file questions are about the link's target.</summary>
+    [Theory]
+    [InlineData("report.txt", false, true)]
+    [InlineData("folder", true, false)]
+    [InlineData("to-folder", true, false)]
+    [InlineData("to-file", false, true)]
+    [InlineData("to-nothing", false, false)]
+    [InlineData("absent", false, false)]
+    public void Following_asks_about_the_target(string name, bool isDir, bool isFile)
+    {
+        Assert.Equal(isDir, _tree.Directory.IsDir(name, followLink: true));
+        Assert.Equal(isFile, _tree.Directory.IsFile(name, followLink: true));
+    }
+
+    /// <summary>Told not to follow, the answers are the ones the plain forms give.</summary>
+    [Theory]
+    [InlineData("report.txt")]
+    [InlineData("folder")]
+    [InlineData("to-folder")]
+    [InlineData("to-file")]
+    [InlineData("to-nothing")]
+    public void Not_following_answers_as_the_plain_forms_do(string name)
+    {
+        Assert.Equal(_tree.Directory.IsDir(name), _tree.Directory.IsDir(name, followLink: false));
+        Assert.Equal(_tree.Directory.IsFile(name), _tree.Directory.IsFile(name, followLink: false));
+    }
+
+    /// <summary>
+    /// A link whose target is outside the handle answers false when followed, whatever is
+    /// there, and so does a link a policy refuses.
+    /// </summary>
+    [Fact]
+    public void A_link_out_of_the_tree_or_refused_answers_false_when_followed()
+    {
+        HostDirectory.CreateSymbolicLink(Path.Combine(_tree.HostPath, "to-above"), "..");
+        HostDirectory.CreateSymbolicLink(
+            Path.Combine(_tree.HostPath, "to-file-rooted"), Path.Combine(_tree.HostPath, "report.txt"));
+
+        Assert.False(_tree.Directory.IsDir("to-above", followLink: true));
+        Assert.False(_tree.Directory.IsFile("to-file-rooted", followLink: true));
+        Assert.True(_tree.Directory.IsSymlink("to-above"));
+
+        using Dir strict = _tree.Directory.Restrict(SymlinkPolicy.Deny);
+        Assert.False(strict.IsDir("to-folder", followLink: true));
+        Assert.False(strict.IsFile("to-file", followLink: true));
     }
 }

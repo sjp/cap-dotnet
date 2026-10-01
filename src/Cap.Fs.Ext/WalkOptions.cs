@@ -53,6 +53,83 @@ public sealed class WalkOptions
     public int MaxDepth { get; init; } = DefaultMaxDepth;
 
     /// <summary>
+    /// How deep an entry must be before the walk yields it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Zero, the default, yields everything, as does one, since the shallowest entries are at
+    /// depth one. Entries above this depth are not yielded and are still descended into, so
+    /// two, for instance, leaves out what is directly inside the start and yields everything
+    /// beneath it. walkdir's <c>min_depth</c>.
+    /// </para>
+    /// <para>
+    /// It changes only what is yielded, never where the walk goes: <see cref="MaxDepth"/>,
+    /// <see cref="SkipHidden"/> and <see cref="OnError"/> apply to the entries it leaves out
+    /// exactly as to the ones it yields, and <see cref="OnError"/> may be handed an entry that
+    /// is never yielded. It may not exceed <see cref="MaxDepth"/>, which would leave nothing
+    /// to yield.
+    /// </para>
+    /// </remarks>
+    public int MinDepth { get; init; }
+
+    /// <summary>
+    /// Whether a directory is yielded after everything inside it rather than before.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Off, the walk is pre-order: a directory is yielded, and then what is inside it. On, it is
+    /// post-order: a directory the walk enters is yielded once everything inside it has been,
+    /// which is the order removing a tree needs, or setting each directory's times after its
+    /// contents have been written. walkdir's <c>contents_first</c>.
+    /// </para>
+    /// <para>
+    /// <strong>The directory is yielded after it is entered, not before.</strong> Its entry
+    /// carries the handle of the directory it was found in, which the walk holds until it has
+    /// yielded it, so the entry is as usable as any other; the directory's own handle, opened
+    /// for reading what was inside it, has been closed by then, and what the entry names is
+    /// opened again if anything opens it. A directory the walk does not enter — a link it is
+    /// not following, one that leads out, one already on the way down, one
+    /// <see cref="OnError"/> said to go on without — is yielded where it was read, as any other
+    /// entry is. <see cref="OnError"/> is therefore called before the entry it is given has
+    /// been yielded, rather than after.
+    /// </para>
+    /// <para>
+    /// A tree deeper than <see cref="MaxDepth"/> fails the walk at the first entry past the
+    /// limit, before the directory holding it has been yielded.
+    /// </para>
+    /// </remarks>
+    public bool ContentsFirst { get; init; }
+
+    /// <summary>
+    /// The order each directory's entries are yielded in, by name, or null for the order the
+    /// directory is read in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null, the default, yields entries in whatever order the filesystem lists them, which no
+    /// platform promises anything about and which differs between filesystems on the same
+    /// machine. Given, each directory's entries are read in full when the walk enters it and
+    /// yielded, and descended into, in the order this puts their names in —
+    /// <c>string.CompareOrdinal</c>, for instance, for a walk that comes out the same on every
+    /// machine. It orders siblings only: what is inside a directory still comes straight after
+    /// it, or straight before it under <see cref="ContentsFirst"/>. Two names it calls equal
+    /// come out in either order.
+    /// </para>
+    /// <para>
+    /// <strong>It costs memory.</strong> Without it the walk holds one entry per level at a
+    /// time; with it, the whole of every directory on the way down from the start to the entry
+    /// being yielded. A directory of a million names is a million entries held until the walk
+    /// leaves it. A failure reading a directory fails the walk when the directory is entered,
+    /// before any of its entries are yielded.
+    /// </para>
+    /// <para>
+    /// It is called while the walk is reading and must not throw; anything it throws fails the
+    /// walk.
+    /// </para>
+    /// </remarks>
+    public Comparison<string>? Sort { get; init; }
+
+    /// <summary>
     /// Whether a symbolic link naming a directory is descended into.
     /// </summary>
     /// <remarks>
@@ -129,7 +206,9 @@ public sealed class WalkOptions
     /// that entry is still current. Returning true leaves that directory out and carries on
     /// with the rest; returning false fails the walk with the exception as though no handler
     /// were there. The entry has already been yielded either way, so a caller that goes on can
-    /// still act on the directory itself.
+    /// still act on the directory itself — unless <see cref="ContentsFirst"/> is on, when it is
+    /// yielded straight after the handler returns true, or <see cref="MinDepth"/> leaves it
+    /// out, when it is not yielded at all.
     /// </para>
     /// <para>
     /// A name that is not something to enter is not an error and never reaches it: one that

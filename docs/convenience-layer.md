@@ -180,8 +180,8 @@ Windows for the same reason.
 
 ## Walking
 
-`Walk()` yields every entry beneath a handle, parents before their children, by descending
-through handles: each directory is enumerated through the handle opened from the one above
+`Walk()` yields every entry beneath a handle, parents before their children unless
+`ContentsFirst` says otherwise, by descending through handles: each directory is enumerated through the handle opened from the one above
 it. `WalkAsync()` is the same walk with the reading done on a thread-pool thread.
 
 ```csharp
@@ -197,6 +197,9 @@ foreach (WalkEntry entry in root.Walk(new WalkOptions { SkipHidden = true }))
 | `FollowSymlinks` | off | Whether a link naming a directory is entered. Off, every descent is an open that refuses a link, so a link is not entered even when the directory read called it a directory or could not say what it was; the directories entered keep the starting handle's policy. On, it cannot widen that policy: a handle that refuses links keeps refusing them. |
 | `SkipHidden` | off | Leaves out names beginning with a dot, and on Windows anything carrying the hidden attribute. A skipped directory is not entered. |
 | `OnError` | null | Called with the entry and the exception when a directory is there and cannot be opened. Return true to leave it out and carry on, false to fail the walk. Null fails the walk. |
+| `MinDepth` | 0 | Entries shallower than this are not yielded, and are still descended into: `MinDepth = 2` leaves out what is directly inside the start and yields everything beneath it. It may not exceed `MaxDepth`. walkdir's `min_depth`. |
+| `ContentsFirst` | off | Post-order: a directory the walk enters is yielded once everything inside it has been, the order removing a tree or setting directory times after their contents needs. Its entry's handle (the directory it was found in) is still open when it is yielded. A directory the walk does not enter is yielded where it was read. walkdir's `contents_first`. |
+| `Sort` | null | A `Comparison<string>` putting each directory's entries in order by name, `string.CompareOrdinal` for a walk that comes out the same everywhere. Null yields them in the order the filesystem lists them. Sorting reads each directory in full when it is entered, so the walk holds every directory on the way down to the current entry in memory. |
 
 The walk keeps its own stack rather than calling itself, so a tree built to be deep ends as a
 refusal rather than as a stack overflow — which cannot be caught and takes the process with
@@ -214,6 +217,18 @@ directory that fails part-way through being read, or a tree deeper than `MaxDept
 walk whatever it says. `Glob` behaves the same for the directories it tries to enter, and never
 opens one the pattern could not match through.
 
+Removing a tree entry by entry, with each directory after what was inside it:
+
+```csharp
+foreach (WalkEntry entry in root.Walk(new WalkOptions { ContentsFirst = true }))
+{
+    if (entry.Type == CapFileType.Directory) entry.Directory.DeleteDir(entry.Name);
+    else entry.Directory.DeleteFile(entry.Name);
+}
+```
+
+`DeleteTreeContents()` does this for you, and carries on past an entry that will not go.
+
 ```csharp
 var skipped = new List<string>();
 var options = new WalkOptions
@@ -230,7 +245,8 @@ var options = new WalkOptions
 
 `DeleteTree(path)` removes a directory and everything inside it; `DeleteTreeContents()`
 empties the directory a handle refers to and leaves the directory. Both descend by handle and
-unlink by name at each level.
+unlink by name at each level. `TryDeleteTree(path)` and `TryDeleteTreeContents()` answer false
+where the others would throw, for clearing up.
 
 This is the operation sandbox libraries are most often found to have got wrong, and the wrong
 version is the obvious one: list the directory, join each name onto its path, delete the
@@ -257,16 +273,34 @@ its parent. One that is not empty stays, and the failure reported is the refusal
 (`UnauthorizedAccessException` for a permission) rather than the "not empty" that followed.
 
 Every form takes a `CancellationToken`, looked at before each entry is removed, and
-`DeleteTreeAsync`, `TryDeleteTreeAsync` and `DeleteTreeContentsAsync` do the same work on a
+`DeleteTreeAsync`, `TryDeleteTreeAsync`, `DeleteTreeContentsAsync` and
+`TryDeleteTreeContentsAsync` do the same work on a
 thread-pool thread — no platform here removes a name asynchronously, so what they offer is a
 calling thread that is not held and a removal that can be stopped. A cancelled removal throws
-`OperationCanceledException`, `TryDeleteTree` included: being told to stop is not a failure to
+`OperationCanceledException`, the `Try` forms included: being told to stop is not a failure to
 remove, and answering false would say it was. What had been removed is gone and what had not
 is left, as after a failure part of the way through.
 
 ```csharp
 await root.DeleteTreeAsync("cache", cancellationToken);
 ```
+
+### Removing one file or link
+
+`RemoveFileOrSymlink(path)` removes a file or a symbolic link, whichever kind of link it is, as
+cap-fs-ext's `remove_file_or_symlink` does. The name is removed against the directory holding
+it, and a link as the last component is removed as the link: what it points at — a file, a
+directory, nothing, somewhere outside — is never reached. A directory is refused
+(`CapIOException` with `IsADirectory`) and left, empty or not. Links ahead of the last component
+are resolved under the handle's policy as for any path.
+
+Win32 removes a link made to name a directory with `RemoveDirectory` and one made to name a file
+with `DeleteFile`. A `Dir` removes either kind as a file on every platform, and for an `IDir`
+that keeps the Win32 split a link its file removal refuses is removed as a directory.
+`TryRemoveFileOrSymlink` answers false for a name holding nothing, a directory, or a missing or
+refused directory above it, and still throws for a path that leads out of the handle.
+`RemoveFileOrSymlinkAsync` and `TryRemoveFileOrSymlinkAsync` do the same on a thread-pool
+thread.
 
 ## Copying a tree
 
@@ -447,6 +481,27 @@ end named by a handle and a path beneath it. It returns the number of bytes copi
 
 The two handles may be on different backends, as for `CopyTo`.
 
+`source.CopyFile(from, toDir, to, options, cancellationToken)` takes a `CopyOptions` instead and
+copies the one file as `CopyTo` would copy it, returning a `CopyReport`. It differs from the
+`overwrite` form in the direction of `CopyTo`:
+
+- A link at `from` is not followed. It is refused, skipped or made again at `to` with the same
+  target text, as `Symlinks` says; the default refuses it. A named pipe, socket or device there
+  is refused or skipped as `OtherKinds` says. A directory is refused.
+- Permissions, times and holes are carried only when `PreservePermissions`, `PreserveTimes` and
+  `PreserveSparseness` ask, and a destination that will not take the permissions fails the
+  copy. With the defaults the copy gets the permissions a new file gets.
+- A copy that fails or is cancelled part way never leaves a partly written file at `to`.
+
+`Overwrite` replaces a file or link at `to` as the `overwrite` flag does. `MaxDepth` has nothing
+to limit.
+
+```csharp
+CopyReport report = source.CopyFile(
+    "build/app.dll", destination, "app.dll",
+    new CopyOptions { Overwrite = true, PreserveTimes = true });
+```
+
 ## Patterns
 
 `Glob(pattern)` walks the tree with the pattern steering it, and yields the entries whose
@@ -532,8 +587,12 @@ implementation that resolves names some other way, they do whatever it does. See
 
 Each asks about the name and never about what the name points at, so a link aimed at a
 directory answers `false` to `IsDir` and `true` to `IsSymlink`. That is the only rule under
-which the three are consistent with each other; to ask about a target, open it and ask the
-handle.
+which the three are consistent with each other.
+
+`IsDir(path, followLink: true)` and `IsFile(path, followLink: true)` ask about the target
+instead, when the caller says so by name. The link is followed under the handle's policy and
+only while it stays beneath the handle, so a link leading out, one the policy refuses, a chain
+that never arrives and a link to nothing all answer `false`.
 
 An answer describes an instant that has already passed. Code that asks one of these in order
 to decide which operation to attempt has written the check-then-act race this library exists

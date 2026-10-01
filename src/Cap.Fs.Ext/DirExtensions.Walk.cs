@@ -30,7 +30,8 @@ namespace Cap.Fs.Ext;
 public static partial class DirExtensions
 {
     /// <summary>
-    /// Walks everything beneath this handle, parents before their children.
+    /// Walks everything beneath this handle, parents before their children unless
+    /// <see cref="WalkOptions.ContentsFirst"/> says otherwise.
     /// </summary>
     /// <param name="dir">The directory to walk.</param>
     /// <param name="options">What the walk does with what it finds, or null for the defaults.</param>
@@ -80,7 +81,8 @@ public static partial class DirExtensions
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <see cref="WalkOptions.MaxDepth"/> is less than one.
+    /// <see cref="WalkOptions.MaxDepth"/> is less than one, or <see cref="WalkOptions.MinDepth"/>
+    /// is negative or greater than it.
     /// </exception>
     /// <exception cref="UnauthorizedAccessException">
     /// A directory could not be opened or read for want of permission, and
@@ -125,7 +127,8 @@ public static partial class DirExtensions
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="dir"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <see cref="WalkOptions.MaxDepth"/> is less than one.
+    /// <see cref="WalkOptions.MaxDepth"/> is less than one, or <see cref="WalkOptions.MinDepth"/>
+    /// is negative or greater than it.
     /// </exception>
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
     /// <exception cref="UnauthorizedAccessException">
@@ -153,6 +156,8 @@ public static partial class DirExtensions
     {
         WalkOptions settings = options ?? WalkOptions.Default;
         ArgumentOutOfRangeException.ThrowIfLessThan(settings.MaxDepth, 1, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfNegative(settings.MinDepth, nameof(options));
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(settings.MinDepth, settings.MaxDepth, nameof(options));
         return settings;
     }
 
@@ -176,9 +181,13 @@ public static partial class DirExtensions
 
             while (descent.Level is { } level)
             {
-                if (!level.Reader.TryNext(out ListedEntry entry))
+                if (!level.TryNext(options.Sort, out ListedEntry entry))
                 {
-                    descent.Leave();
+                    if (descent.Leave() is { } finished)
+                    {
+                        yield return finished;
+                    }
+
                     continue;
                 }
 
@@ -189,27 +198,46 @@ public static partial class DirExtensions
 
                 descent.Admit();
 
-                if (pattern is null)
+                // Without a pattern every entry is a candidate to yield and every directory a
+                // candidate to enter. With one, nothing else is entered: a directory no
+                // remaining piece of the pattern could match through is not read at all, which
+                // is the whole difference between this and walking the tree and filtering
+                // afterwards.
+                bool matched = true;
+                int[]? beneath = null;
+                if (pattern is not null)
                 {
-                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                    beneath = pattern.Step(level.States!, entry.Name, descent.MayDescend(entry.Type), out matched);
+                }
 
-                    descent.Enter(in entry);
+                bool enters = pattern is null || beneath is not null;
+                WalkEntry found = new(level.Directory, entry, descent.Depth);
+                bool shown = matched && descent.Shows(in found);
+
+                if (options.ContentsFirst)
+                {
+                    // Held back on the level it opens and yielded when the walk leaves it, or
+                    // yielded now when there is nothing to enter.
+                    if (enters && descent.Enter(in entry, beneath, shown ? found : null))
+                    {
+                        continue;
+                    }
+
+                    if (shown)
+                    {
+                        yield return found;
+                    }
+
                     continue;
                 }
 
-                int[]? beneath = pattern.Step(
-                    level.States!, entry.Name, descent.MayDescend(entry.Type), out bool matched);
-
-                if (matched)
+                if (shown)
                 {
-                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                    yield return found;
                 }
 
-                if (beneath is not null)
+                if (enters)
                 {
-                    // Nothing else is entered. A directory no remaining piece of the pattern
-                    // could match through is not read at all, which is the whole difference
-                    // between this and walking the tree and filtering afterwards.
                     descent.Enter(in entry, beneath);
                 }
             }
@@ -238,13 +266,31 @@ public static partial class DirExtensions
 
             while (descent.Level is { } level)
             {
-                if (!await level.Reader.MoveNextAsync().ConfigureAwait(false))
+                if (options.Sort is { } order && !level.IsBuffered)
                 {
-                    await descent.LeaveAsync().ConfigureAwait(false);
+                    await level.BufferAsync(order).ConfigureAwait(false);
+                }
+
+                ListedEntry entry = default;
+                bool more = level.IsBuffered
+                    ? level.TryTakeBuffered(out entry)
+                    : await level.Reader.MoveNextAsync().ConfigureAwait(false);
+
+                if (!more)
+                {
+                    if (await descent.LeaveAsync().ConfigureAwait(false) is { } finished)
+                    {
+                        yield return finished;
+                    }
+
                     continue;
                 }
 
-                ListedEntry entry = level.Reader.Current;
+                if (!level.IsBuffered)
+                {
+                    entry = level.Reader.Current;
+                }
+
                 if (descent.Skips(in entry))
                 {
                     continue;
@@ -252,23 +298,38 @@ public static partial class DirExtensions
 
                 descent.Admit();
 
-                if (pattern is null)
+                bool matched = true;
+                int[]? beneath = null;
+                if (pattern is not null)
                 {
-                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                    beneath = pattern.Step(level.States!, entry.Name, descent.MayDescend(entry.Type), out matched);
+                }
 
-                    descent.Enter(in entry);
+                bool enters = pattern is null || beneath is not null;
+                WalkEntry found = new(level.Directory, entry, descent.Depth);
+                bool shown = matched && descent.Shows(in found);
+
+                if (options.ContentsFirst)
+                {
+                    if (enters && descent.Enter(in entry, beneath, shown ? found : null))
+                    {
+                        continue;
+                    }
+
+                    if (shown)
+                    {
+                        yield return found;
+                    }
+
                     continue;
                 }
 
-                int[]? beneath = pattern.Step(
-                    level.States!, entry.Name, descent.MayDescend(entry.Type), out bool matched);
-
-                if (matched)
+                if (shown)
                 {
-                    yield return new WalkEntry(level.Directory, entry, descent.Depth);
+                    yield return found;
                 }
 
-                if (beneath is not null)
+                if (enters)
                 {
                     descent.Enter(in entry, beneath);
                 }
@@ -333,6 +394,13 @@ public static partial class DirExtensions
         /// <summary>How deep the entries of the current level are.</summary>
         public int Depth => _levels.Count;
 
+        /// <summary>Whether an entry is deep enough to be yielded.</summary>
+        /// <remarks>
+        /// Asked of an entry the walk has already admitted, so one left out for being shallow
+        /// has still been checked against the limit and is still entered.
+        /// </remarks>
+        public bool Shows(in WalkEntry entry) => entry.Depth >= _options.MinDepth;
+
         /// <summary>Whether an entry is one the caller asked not to see.</summary>
         public bool Skips(in ListedEntry entry) => _options.SkipHidden && IsHidden(_levels[^1].Directory, in entry);
 
@@ -385,11 +453,18 @@ public static partial class DirExtensions
         /// first entry that level yields.
         /// </para>
         /// </remarks>
-        public void Enter(in ListedEntry entry, int[]? states = null)
+        /// <param name="entry">The entry to descend into.</param>
+        /// <param name="states">The per-pattern states a glob carries into the level.</param>
+        /// <param name="deferred">
+        /// The entry to yield when the walk leaves the level this opens, for a walk that yields
+        /// a directory after its contents; null when there is nothing to hold back.
+        /// </param>
+        /// <returns>True when the entry was entered and is now the current level.</returns>
+        public bool Enter(in ListedEntry entry, int[]? states = null, WalkEntry? deferred = null)
         {
             if (!MayDescend(entry.Type) || !TryOpen(in entry, out IDir? child))
             {
-                return;
+                return false;
             }
 
             bool kept = false;
@@ -401,11 +476,13 @@ public static partial class DirExtensions
                     // Already on the way down to here, so entering it again is a loop rather
                     // than a subtree. Reported as an entry like any other and not descended
                     // into; the alternative is a walk that never ends.
-                    return;
+                    return false;
                 }
 
                 Push(child, entry.Name, owned: true, id, states);
+                _levels[^1].Deferred = deferred;
                 kept = true;
+                return true;
             }
             finally
             {
@@ -417,21 +494,28 @@ public static partial class DirExtensions
         }
 
         /// <summary>Closes the current level and returns to the one above it.</summary>
-        public void Leave()
+        /// <returns>
+        /// The entry held back for the level, to be yielded now that everything inside it has
+        /// been; null when nothing was. Its handle is the level above's, which is still open.
+        /// </returns>
+        public WalkEntry? Leave()
         {
             WalkLevel level = _levels[^1];
             _levels.RemoveAt(_levels.Count - 1);
             _ = _entered?.Remove(level.Id);
             level.Dispose();
+            return level.Deferred;
         }
 
         /// <summary>Closes the current level, for the form that reads asynchronously.</summary>
-        public async ValueTask LeaveAsync()
+        /// <returns>The entry held back for the level, as <see cref="Leave"/> returns it.</returns>
+        public async ValueTask<WalkEntry?> LeaveAsync()
         {
             WalkLevel level = _levels[^1];
             _levels.RemoveAt(_levels.Count - 1);
             _ = _entered?.Remove(level.Id);
             await level.DisposeAsync().ConfigureAwait(false);
+            return level.Deferred;
         }
 
         /// <summary>Closes every level still open.</summary>
@@ -653,6 +737,80 @@ public static partial class DirExtensions
 
         /// <summary>The reading in progress, reached in place rather than copied out per entry.</summary>
         public ref readonly EntryReader Reader => ref _reader;
+
+        /// <summary>
+        /// The entry that entered this level, held back until the walk leaves it, for a walk
+        /// that yields a directory after its contents.
+        /// </summary>
+        public WalkEntry? Deferred { get; set; }
+
+        /// <summary>
+        /// The directory's entries, read in full and put in order, for a walk that sorts them;
+        /// null until then, and for a walk that does not.
+        /// </summary>
+        private List<ListedEntry>? _buffered;
+
+        /// <summary>The next of <see cref="_buffered"/> to hand out.</summary>
+        private int _next;
+
+        /// <summary>Whether the entries have been read in full and put in order.</summary>
+        public bool IsBuffered => _buffered is not null;
+
+        /// <summary>
+        /// Moves to the next entry of a reading made on the calling thread, putting the whole
+        /// directory in order first when the walk sorts.
+        /// </summary>
+        public bool TryNext(Comparison<string>? order, out ListedEntry entry)
+        {
+            if (order is null)
+            {
+                return Reader.TryNext(out entry);
+            }
+
+            if (_buffered is null)
+            {
+                List<ListedEntry> read = [];
+                while (Reader.TryNext(out ListedEntry next))
+                {
+                    read.Add(next);
+                }
+
+                Order(read, order);
+            }
+
+            return TryTakeBuffered(out entry);
+        }
+
+        /// <summary>Reads the directory in full and puts it in order, without holding the thread.</summary>
+        public async ValueTask BufferAsync(Comparison<string> order)
+        {
+            List<ListedEntry> read = [];
+            while (await Reader.MoveNextAsync().ConfigureAwait(false))
+            {
+                read.Add(Reader.Current);
+            }
+
+            Order(read, order);
+        }
+
+        /// <summary>Hands out the next entry of a directory already put in order.</summary>
+        public bool TryTakeBuffered(out ListedEntry entry)
+        {
+            if (_next < _buffered!.Count)
+            {
+                entry = _buffered[_next++];
+                return true;
+            }
+
+            entry = default;
+            return false;
+        }
+
+        private void Order(List<ListedEntry> read, Comparison<string> order)
+        {
+            read.Sort((left, right) => order(left.Name, right.Name));
+            _buffered = read;
+        }
 
         /// <summary>Stops the reading and closes the directory, if this level opened it.</summary>
         /// <remarks>

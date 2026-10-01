@@ -791,4 +791,83 @@ public sealed class InterfaceHandleTests
 
         Assert.Equal(Encoding.UTF8.GetBytes("naïve"), _fs.ReadAllBytes("note.txt"));
     }
+
+    [Fact]
+    public void A_file_or_link_is_removed_through_the_interface_by_single_names()
+    {
+        Tree();
+        _fs.AddSymbolicLink("a/b/to-one", "../one.txt");
+        using RecordingDir root = Root();
+
+        root.RemoveFileOrSymlink("a/b/to-one");
+        Assert.True(root.TryRemoveFileOrSymlink("a/b/two.txt"));
+        Assert.False(root.TryRemoveFileOrSymlink("a/empty"));
+
+        Assert.Equal(["b", "empty", "one.txt"], _fs.GetEntries("a").Order(StringComparer.Ordinal));
+        Assert.Empty(_fs.GetEntries("a/b"));
+        Assert.Contains("./a/b: TryDeleteFile(to-one)", root.Log);
+
+        // The directory holding the name is reached by its path, in one open, as for every
+        // helper that takes a path; the name itself is removed and described as one component.
+        Assert.All(
+            NamesUsed(root.Log.Where(call => !call.Contains(": OpenDir(", StringComparison.Ordinal))),
+            name => Assert.DoesNotContain('/', name));
+    }
+
+    [Fact]
+    public void A_single_file_is_copied_with_options_through_the_interface_by_single_names()
+    {
+        Tree();
+        using RecordingDir root = Root();
+
+        CopyReport report = root.CopyFile(
+            "a/b/two.txt", root, "a/empty/copy.txt", new CopyOptions { Overwrite = true, PreserveTimes = true }, TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, report.Files);
+        Assert.Equal("two", _fs.ReadAllText("a/empty/copy.txt"));
+        Assert.Contains(root.Log, call => call.StartsWith("./a/empty: Rename(", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Emptying_through_the_interface_reports_whether_it_emptied()
+    {
+        Tree();
+        using RecordingDir root = Root();
+        using IDir a = root.OpenDir("a");
+
+        Assert.True(a.TryDeleteTreeContents(TestContext.Current.CancellationToken));
+
+        Assert.Empty(_fs.GetEntries("a"));
+        Assert.True(_fs.Exists("top.txt"));
+        AssertEveryNameIsOneComponent(root);
+    }
+
+    [Fact]
+    public void A_walk_through_the_interface_honours_the_ordering_options()
+    {
+        Tree();
+        using Dir direct = _fs.OpenRoot();
+        using RecordingDir root = Root();
+        WalkOptions options = new() { ContentsFirst = true, Sort = string.CompareOrdinal, MinDepth = 2 };
+
+        List<(string, int)> expected = [.. direct.Walk(options).Select(e => (e.Name, e.Depth))];
+        List<(string, int)> actual = [.. root.Walk(options).Select(e => (e.Name, e.Depth))];
+
+        Assert.Equal([("two.txt", 3), ("b", 2), ("empty", 2), ("one.txt", 2)], actual);
+        Assert.Equal(expected, actual);
+        AssertEveryNameIsOneComponent(root);
+    }
+
+    [Fact]
+    public void Following_predicates_ask_the_interface_about_the_target()
+    {
+        Tree();
+        _fs.AddSymbolicLink("to-a", "a");
+        using RecordingDir root = Root();
+
+        Assert.True(root.IsDir("to-a", followLink: true));
+        Assert.False(root.IsDir("to-a", followLink: false));
+        Assert.Contains(".: TryGetMetadata(to-a, True)", root.Log);
+        AssertEveryNameIsOneComponent(root);
+    }
 }

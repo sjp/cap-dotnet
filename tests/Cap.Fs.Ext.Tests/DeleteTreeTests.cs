@@ -1,4 +1,5 @@
 using Cap.Std;
+using Cap.Std.Testing;
 
 namespace Cap.Fs.Ext.Tests;
 
@@ -206,6 +207,50 @@ public sealed class DeleteTreeTests : IDisposable
         Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
     }
 
+    /// <summary>
+    /// The reporting form of emptying answers true once the directory is empty, and leaves the
+    /// directory itself.
+    /// </summary>
+    [Fact]
+    public async Task The_reporting_form_of_emptying_answers_whether_it_emptied()
+    {
+        Make("a", "b", "leaf.txt");
+        Make("top.txt");
+
+        Assert.True(_tree.Directory.TryDeleteTreeContents(TestContext.Current.CancellationToken));
+        Assert.True(HostDirectory.Exists(_tree.HostPath));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
+        Assert.True(_tree.Directory.TryDeleteTreeContents(TestContext.Current.CancellationToken));
+
+        Make("again.txt");
+        Assert.True(await _tree.Directory.TryDeleteTreeContentsAsync(TestContext.Current.CancellationToken));
+        Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
+    }
+
+    /// <summary>
+    /// An entry that will not go is answered with false, and the rest of the tree is still
+    /// removed, through a <see cref="Dir"/> and through a wrapper.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task The_reporting_form_of_emptying_answers_false_and_carries_on(bool wrapped)
+    {
+        InMemoryFileSystem fs = new();
+        fs.AddFile("stuck/kept.txt", "kept");
+        fs.AddFile("gone/leaf.txt", "leaf");
+        fs.AddFile("top.txt", "top");
+        fs.SetUndeletable("stuck/kept.txt");
+        using Dir root = fs.OpenRoot();
+        IDir dir = wrapped ? new RecordingDir(root) : root;
+
+        Assert.False(dir.TryDeleteTreeContents(TestContext.Current.CancellationToken));
+        Assert.False(await dir.TryDeleteTreeContentsAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(["stuck"], fs.GetEntries());
+        Assert.Equal("kept", fs.ReadAllText("stuck/kept.txt"));
+    }
+
     /// <summary>The asynchronous removal removes a tree as the synchronous one does.</summary>
     [Fact]
     public async Task An_asynchronous_removal_removes_the_tree()
@@ -252,9 +297,11 @@ public sealed class DeleteTreeTests : IDisposable
     [InlineData("DeleteTree")]
     [InlineData("TryDeleteTree")]
     [InlineData("DeleteTreeContents")]
+    [InlineData("TryDeleteTreeContents")]
     [InlineData("DeleteTreeAsync")]
     [InlineData("TryDeleteTreeAsync")]
     [InlineData("DeleteTreeContentsAsync")]
+    [InlineData("TryDeleteTreeContentsAsync")]
     public async Task A_removal_already_cancelled_removes_nothing(string form)
     {
         Make("doomed", "a", "leaf.txt");
@@ -267,8 +314,10 @@ public sealed class DeleteTreeTests : IDisposable
             "DeleteTree" => () => Task.Run(() => dir.DeleteTree("doomed", cancelled), TestContext.Current.CancellationToken),
             "TryDeleteTree" => () => Task.Run(() => dir.TryDeleteTree("doomed", cancelled), TestContext.Current.CancellationToken),
             "DeleteTreeContents" => () => Task.Run(() => dir.DeleteTreeContents(cancelled), TestContext.Current.CancellationToken),
+            "TryDeleteTreeContents" => () => Task.Run(() => dir.TryDeleteTreeContents(cancelled), TestContext.Current.CancellationToken),
             "DeleteTreeAsync" => () => dir.DeleteTreeAsync("doomed", cancelled),
             "TryDeleteTreeAsync" => () => dir.TryDeleteTreeAsync("doomed", cancelled),
+            "TryDeleteTreeContentsAsync" => () => dir.TryDeleteTreeContentsAsync(cancelled),
             _ => () => dir.DeleteTreeContentsAsync(cancelled),
         });
 

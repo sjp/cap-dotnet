@@ -600,6 +600,173 @@ public sealed class WalkTests : IDisposable
             HostFile.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
+    /// <summary>
+    /// Contents first, a directory is yielded after everything inside it, at the depth it sits
+    /// at.
+    /// </summary>
+    [Fact]
+    public void Contents_first_yields_a_directory_after_its_contents()
+    {
+        Make("a", "b", "deep.txt");
+        Make("a", "c", "other.txt");
+        Make("top.txt");
+
+        List<(string Name, int Depth)> order =
+            [.. _tree.Directory.Walk(new WalkOptions { ContentsFirst = true }).Select(e => (e.Name, e.Depth))];
+
+        Assert.Equal(6, order.Count);
+        Assert.True(order.IndexOf(("deep.txt", 3)) < order.IndexOf(("b", 2)));
+        Assert.True(order.IndexOf(("other.txt", 3)) < order.IndexOf(("c", 2)));
+        Assert.True(order.IndexOf(("b", 2)) < order.IndexOf(("a", 1)));
+        Assert.True(order.IndexOf(("c", 2)) < order.IndexOf(("a", 1)));
+        Assert.Contains(("top.txt", 1), order);
+    }
+
+    /// <summary>
+    /// Contents first, each entry is still usable when it is yielded, so a tree can be removed
+    /// entry by entry as it is walked.
+    /// </summary>
+    [Fact]
+    public void Contents_first_lets_a_tree_be_removed_as_it_is_walked()
+    {
+        Make("a", "b", "deep.txt");
+        Make("a", "one.txt");
+        Make("top.txt");
+
+        foreach (WalkEntry entry in _tree.Directory.Walk(new WalkOptions { ContentsFirst = true }))
+        {
+            if (entry.Type == CapFileType.Directory)
+            {
+                entry.Directory.DeleteDir(entry.Name);
+            }
+            else
+            {
+                entry.Directory.DeleteFile(entry.Name);
+            }
+        }
+
+        Assert.Empty(HostDirectory.GetFileSystemEntries(_tree.HostPath));
+    }
+
+    /// <summary>Contents first, a link that is not followed is yielded where it was read.</summary>
+    [Fact]
+    public void Contents_first_yields_a_link_it_does_not_follow()
+    {
+        Make("real", "inside.txt");
+        Link("link", "real");
+
+        List<(string Name, CapFileType Type)> entries =
+            [.. _tree.Directory.Walk(new WalkOptions { ContentsFirst = true }).Select(e => (e.Name, e.Type))];
+
+        Assert.Contains(("link", CapFileType.Symlink), entries);
+        Assert.Single(entries, e => e.Name == "inside.txt");
+    }
+
+    /// <summary>
+    /// A minimum depth leaves out the shallower entries and still walks beneath them.
+    /// </summary>
+    [Fact]
+    public void A_minimum_depth_leaves_out_shallow_entries_and_still_descends()
+    {
+        Make("top.txt");
+        Make("a", "one.txt");
+        Make("a", "b", "two.txt");
+
+        Assert.Equal(
+            [("b", 2), ("one.txt", 2), ("two.txt", 3)],
+            _tree.Directory.Walk(new WalkOptions { MinDepth = 2 }).Select(e => (e.Name, e.Depth)).Order());
+        Assert.Equal(
+            [("two.txt", 3)],
+            _tree.Directory.Walk(new WalkOptions { MinDepth = 3, ContentsFirst = true }).Select(e => (e.Name, e.Depth)));
+        Assert.Equal(5, _tree.Directory.Walk(new WalkOptions { MinDepth = 1 }).Count());
+    }
+
+    /// <summary>A minimum depth that is negative or past the maximum is refused.</summary>
+    [Fact]
+    public void A_minimum_depth_out_of_range_is_refused()
+    {
+        _ = Assert.Throws<ArgumentOutOfRangeException>(
+            () => _tree.Directory.Walk(new WalkOptions { MinDepth = -1 }));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(
+            () => _tree.Directory.Walk(new WalkOptions { MinDepth = 3, MaxDepth = 2 }));
+        _ = Assert.Throws<ArgumentOutOfRangeException>(
+            () => _tree.Directory.WalkAsync(new WalkOptions { MinDepth = -1 }, TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>
+    /// Sorted, each directory's entries come out in the order given, with what is inside a
+    /// directory straight after it, or straight before it contents first.
+    /// </summary>
+    [Fact]
+    public void Sorted_siblings_are_yielded_in_the_order_given()
+    {
+        Make("c.txt");
+        Make("a.txt");
+        Make("b", "inner.txt");
+        Make("b", "first.txt");
+        Make("d.txt");
+
+        Assert.Equal(
+            ["a.txt", "b", "first.txt", "inner.txt", "c.txt", "d.txt"],
+            Names(new WalkOptions { Sort = string.CompareOrdinal }));
+        Assert.Equal(
+            ["d.txt", "c.txt", "b", "inner.txt", "first.txt", "a.txt"],
+            Names(new WalkOptions { Sort = (x, y) => string.CompareOrdinal(y, x) }));
+        Assert.Equal(
+            ["a.txt", "first.txt", "inner.txt", "b", "c.txt", "d.txt"],
+            Names(new WalkOptions { Sort = string.CompareOrdinal, ContentsFirst = true }));
+
+        List<string> Names(WalkOptions options) => [.. _tree.Directory.Walk(options).Select(e => e.Name)];
+    }
+
+    /// <summary>
+    /// The asynchronous walk yields what the synchronous one does, in the same order, under
+    /// every combination of the ordering options.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false, 0)]
+    [InlineData(true, false, 0)]
+    [InlineData(false, true, 0)]
+    [InlineData(true, true, 0)]
+    [InlineData(true, true, 2)]
+    public async Task The_asynchronous_walk_orders_entries_as_the_synchronous_one_does(
+        bool contentsFirst, bool sort, int minDepth)
+    {
+        Make("c.txt");
+        Make("a", "b", "deep.txt");
+        Make("a", "one.txt");
+        Make("e", "two.txt");
+
+        WalkOptions options = new()
+        {
+            ContentsFirst = contentsFirst,
+            Sort = sort ? string.CompareOrdinal : null,
+            MinDepth = minDepth,
+        };
+
+        List<(string, int)> expected = [.. _tree.Directory.Walk(options).Select(e => (e.Name, e.Depth))];
+        List<(string, int)> actual = [];
+        await foreach (WalkEntry entry in _tree.Directory.WalkAsync(options, TestContext.Current.CancellationToken))
+        {
+            actual.Add((entry.Name, entry.Depth));
+        }
+
+        Assert.Equal(expected, actual);
+        if (!sort)
+        {
+            return;
+        }
+
+        // Sorted, the order is the same on every filesystem, so it can be written down.
+        List<(string, int)> written = (contentsFirst, minDepth) switch
+        {
+            (false, _) => [("a", 1), ("b", 2), ("deep.txt", 3), ("one.txt", 2), ("c.txt", 1), ("e", 1), ("two.txt", 2)],
+            (true, 0) => [("deep.txt", 3), ("b", 2), ("one.txt", 2), ("a", 1), ("c.txt", 1), ("two.txt", 2), ("e", 1)],
+            _ => [("deep.txt", 3), ("b", 2), ("one.txt", 2), ("two.txt", 2)],
+        };
+        Assert.Equal(written, actual);
+    }
+
     /// <summary>Creates a file, and whatever directories it needs, under the scratch tree.</summary>
     private void Make(params string[] parts)
     {
