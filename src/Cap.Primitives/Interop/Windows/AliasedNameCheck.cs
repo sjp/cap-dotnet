@@ -78,7 +78,7 @@ internal static class AliasedNameCheck
                 : CapError.FromCategory(CapErrorCategory.AliasedName);
         }
 
-        if (!Declined(error))
+        if (!NtStatusCodes.IsDeclined(error))
         {
             return error;
         }
@@ -91,7 +91,7 @@ internal static class AliasedNameCheck
             // there is no second name.
             bool noAlias = error.Source == CapErrorSource.NtStatus &&
                 error.RawCode == NtStatusCodes.STATUS_OBJECT_NAME_NOT_FOUND;
-            return Declined(error) || noAlias
+            return NtStatusCodes.IsDeclined(error) || noAlias
                 ? CapError.Success
                 : error;
         }
@@ -100,18 +100,4 @@ internal static class AliasedNameCheck
             ? CapError.FromCategory(CapErrorCategory.AliasedName)
             : CapError.Success;
     }
-
-    /// <summary>
-    /// Whether a query failed because the filesystem declined the question rather than because
-    /// answering it went wrong.
-    /// </summary>
-    /// <remarks>
-    /// A reply this layer found malformed carries one of the same statuses but is classified
-    /// as unknown rather than read from the table, and is a failure to answer, not a refusal to
-    /// be asked.
-    /// </remarks>
-    private static bool Declined(CapError error) =>
-        error.Source == CapErrorSource.NtStatus &&
-        (error.Category is CapErrorCategory.NotSupported or CapErrorCategory.InvalidArgument) &&
-        NtStatusCodes.IsUnsupportedClass(error.RawCode);
 }

@@ -134,6 +134,20 @@ internal static class NtStatusCodes
             or STATUS_INVALID_PARAMETER
             or STATUS_NOT_IMPLEMENTED;
 
+    /// <summary>
+    /// Whether a query failed because the filesystem declined the question rather than because
+    /// answering it went wrong.
+    /// </summary>
+    /// <remarks>
+    /// A reply this layer found malformed carries one of the same statuses but is classified
+    /// as unknown rather than read from the table, and is a failure to answer, not a refusal to
+    /// be asked.
+    /// </remarks>
+    public static bool IsDeclined(CapError error) =>
+        error.Source == CapErrorSource.NtStatus &&
+        (error.Category is CapErrorCategory.NotSupported or CapErrorCategory.InvalidArgument) &&
+        IsUnsupportedClass(error.RawCode);
+
     /// <summary>Reads an <c>NTSTATUS</c> as a portable category.</summary>
     public static CapErrorCategory Classify(int status)
     {

@@ -3126,7 +3126,14 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <summary>
     /// The same question asked of a raw handle, for the operations that hold one directly.
     /// </summary>
-    private static unsafe CapError QueryId(nint handle, out FileIdInformation result)
+    /// <remarks>
+    /// Falls back to the older questions on a filesystem that declines the 128-bit one; why,
+    /// and what the identity then is, is <see cref="FileIdentity"/>'s.
+    /// </remarks>
+    private static CapError QueryId(nint handle, out FileIdInformation result) =>
+        FileIdentity.Query(handle, QueryWideId, QueryInternalId, QueryVolumeSerial, out result);
+
+    private static unsafe CapError QueryWideId(nint handle, out FileIdInformation result)
     {
         result = default;
 
@@ -3145,6 +3152,52 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         }
 
         result = value;
+        return CapError.Success;
+    }
+
+    private static unsafe CapError QueryInternalId(nint handle, out long result)
+    {
+        result = 0;
+
+        IoStatusBlock status = default;
+        long value = 0;
+        int nt = NtNative.NtQueryInformationFile(
+            handle,
+            &status,
+            &value,
+            sizeof(long),
+            NtConstants.FileInternalInformationClass);
+
+        if (NtStatusCodes.IsFailure(nt))
+        {
+            return NtStatusCodes.ToError(nt);
+        }
+
+        result = value;
+        return CapError.Success;
+    }
+
+    private static unsafe CapError QueryVolumeSerial(nint handle, out uint result)
+    {
+        result = 0;
+
+        IoStatusBlock status = default;
+        FileFsVolumeInformation value = default;
+        int nt = NtNative.NtQueryVolumeInformationFile(
+            handle,
+            &status,
+            &value,
+            (uint)sizeof(FileFsVolumeInformation),
+            NtConstants.FileFsVolumeInformationClass);
+
+        // A volume with a label longer than the one character there is room for reports an
+        // overflow, having filled in every fixed field first, and the serial is one of those.
+        if (NtStatusCodes.IsFailure(nt) && nt != NtStatusCodes.STATUS_BUFFER_OVERFLOW)
+        {
+            return NtStatusCodes.ToError(nt);
+        }
+
+        result = value.VolumeSerialNumber;
         return CapError.Success;
     }
 }

@@ -218,6 +218,37 @@ internal struct FileIdInformation
     public ulong FileIdHigh;
 }
 
+/// <summary>The fixed part of the reply to a request for a volume's serial and label.</summary>
+/// <remarks>
+/// The label follows as a run of characters the declaration gives room for only one of. Only
+/// the serial is wanted, so the reply is asked for into this structure alone, and the overflow
+/// the system then reports for a volume with a label still leaves every fixed field filled in.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileFsVolumeInformation
+{
+    /// <summary>When the volume was formatted, in 100-nanosecond ticks since 1601.</summary>
+    public long VolumeCreationTime;
+
+    /// <summary>The 32-bit serial the volume was given when it was formatted.</summary>
+    public uint VolumeSerialNumber;
+
+    /// <summary>Length of the label in bytes.</summary>
+    public uint VolumeLabelLength;
+
+    /// <summary>Whether the filesystem supports object identifiers. A native one-byte boolean.</summary>
+    public byte SupportsObjects;
+
+    /// <summary>
+    /// The first UTF-16 unit of the label, declared as a number so that nothing marshals it as
+    /// a one-byte character.
+    /// </summary>
+    public ushort VolumeLabel;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileFsVolumeInformation);
+}
+
 /// <summary>The reply to a request for a file's times, size and attributes together.</summary>
 /// <remarks>
 /// <para>

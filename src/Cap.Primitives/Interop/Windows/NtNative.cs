@@ -164,6 +164,15 @@ internal static unsafe partial class NtNative
         uint length,
         uint fileInformationClass);
 
+    /// <summary>Reads one class of information about the volume an open file is on.</summary>
+    [LibraryImport("ntdll.dll")]
+    internal static partial int NtQueryVolumeInformationFile(
+        nint fileHandle,
+        IoStatusBlock* ioStatusBlock,
+        void* fsInformation,
+        uint length,
+        uint fsInformationClass);
+
     /// <summary>
     /// Translates a status into the Win32 error the system considers equivalent.
     /// </summary>
@@ -542,6 +551,23 @@ internal static class NtConstants
 
     /// <summary>Asks for the volume serial and the 128-bit file identifier.</summary>
     public const uint FileIdInformationClass = 59;
+
+    /// <summary>Asks for the 64-bit file identifier alone.</summary>
+    /// <remarks>
+    /// The oldest form of the question, answered by every filesystem since the first release
+    /// of the platform. Asked only where <see cref="FileIdInformationClass"/> is declined, and
+    /// the identifier it answers with is the one the 64-bit directory read reports.
+    /// </remarks>
+    public const uint FileInternalInformationClass = 6;
+
+    /// <summary>
+    /// Asks a volume for its creation time, its 32-bit serial and its label.
+    /// </summary>
+    /// <remarks>
+    /// A volume question, asked of any handle on the volume. The serial is what supplies the
+    /// volume half of an identity where the file query that would carry a wider one is declined.
+    /// </remarks>
+    public const uint FileFsVolumeInformationClass = 1;
 
     /// <summary>Asks for the sizes, the link count and the deletion and directory flags.</summary>
     public const uint FileStandardInformationClass = 5;

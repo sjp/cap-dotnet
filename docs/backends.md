@@ -505,7 +505,7 @@ different calls:
 |---|---|---|
 | Linux | `statx` | One fixed layout on every architecture, unlike `struct stat` |
 | macOS | `fstatat` / `fstat`, 64-bit-inode form | The entry point is chosen by architecture; on Intel the undecorated name still means the old layout |
-| Windows | `NtQueryInformationFile` | Two queries normally, three when the entry redirects |
+| Windows | `NtQueryInformationFile` | Two queries normally, three when the entry redirects, two more where the 128-bit identity is declined |
 
 The same question is asked twice in this library, in two different ways, and the difference
 is deliberate. Resolution asks it of every component of every path, wants only the type and
@@ -529,6 +529,16 @@ kept the low half would report two distinct files as one file under two names â€
 only on the filesystems nobody has mounted on a build agent. Resolution's own identity check
 compares two things it looked at moments apart on one volume and does use the low half; the
 comparison offered to callers does not.
+
+**Where the 128-bit identity is declined, the 64-bit one stands in.** The 128-bit query is
+recent, and third-party and older network filesystems that do not offer the 128-bit directory
+read usually do not offer it either. Failing there would leave such a volume listable but
+impossible to open a `Dir` on, since resolution describes every component. So a declined query
+is answered instead from the two older questions every filesystem answers, the 64-bit
+identifier and the volume's 32-bit serial, with the high half zero. That is the identifier the
+64-bit directory read reports, so an entry and the object it names still compare equal. If
+either older question fails, the description fails with it rather than reporting an identity
+with an invented volume.
 
 **A creation time is absent rather than invented.** Linux reports per call whether the
 filesystem supplied one, and several do not. macOS and Windows have nowhere to say so and

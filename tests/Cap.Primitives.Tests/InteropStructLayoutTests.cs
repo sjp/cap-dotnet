@@ -194,6 +194,32 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The fixed part of a volume's description puts the serial at byte 8 and the label at 18,
+    /// and is padded to 24.
+    /// </summary>
+    /// <remarks>
+    /// The serial is the volume half of an identity on a filesystem that declines the 128-bit
+    /// file identity query, and one read from the wrong offset would be the label's length:
+    /// the same for most volumes, so different volumes would compare as one.
+    /// </remarks>
+    [Fact]
+    public void Windows_volume_information_matches_the_native_layout()
+    {
+        Assert.Equal(24, FileFsVolumeInformation.StructSize);
+
+        Assert.Equal(
+            0, Marshal.OffsetOf<FileFsVolumeInformation>(nameof(FileFsVolumeInformation.VolumeCreationTime)).ToInt32());
+        Assert.Equal(
+            8, Marshal.OffsetOf<FileFsVolumeInformation>(nameof(FileFsVolumeInformation.VolumeSerialNumber)).ToInt32());
+        Assert.Equal(
+            12, Marshal.OffsetOf<FileFsVolumeInformation>(nameof(FileFsVolumeInformation.VolumeLabelLength)).ToInt32());
+        Assert.Equal(
+            16, Marshal.OffsetOf<FileFsVolumeInformation>(nameof(FileFsVolumeInformation.SupportsObjects)).ToInt32());
+        Assert.Equal(
+            18, Marshal.OffsetOf<FileFsVolumeInformation>(nameof(FileFsVolumeInformation.VolumeLabel)).ToInt32());
+    }
+
+    /// <summary>
     /// The running process reads the table for its own architecture, and is one of the three
     /// that have one.
     /// </summary>
