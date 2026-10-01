@@ -189,6 +189,57 @@ public sealed class CapPathComponentTests
         Assert.True(name.IsEmpty);
     }
 
+    /// <summary>
+    /// The normal spelling, which a backend that takes the whole path is handed, leaves out
+    /// only what names nothing and keeps the ending that changes the request.
+    /// </summary>
+    /// <remarks>
+    /// <c>name/</c> and <c>name/.</c> are different requests to a creating open, so neither
+    /// ending may be turned into the other or dropped. Whatever the spelling, it has to parse
+    /// to the same components and the same facts as the caller's text, and be its own normal
+    /// spelling.
+    /// </remarks>
+    [Theory]
+    [InlineData("a", CapPathSyntax.Unix, "a", true)]
+    [InlineData("a/b", CapPathSyntax.Unix, "a/b", true)]
+    [InlineData("a//b", CapPathSyntax.Unix, "a/b", false)]
+    [InlineData("./a/./b", CapPathSyntax.Unix, "a/b", false)]
+    [InlineData("./a", CapPathSyntax.Unix, "a", false)]
+    [InlineData("a/", CapPathSyntax.Unix, "a/", true)]
+    [InlineData("a//", CapPathSyntax.Unix, "a/", false)]
+    [InlineData("a/.", CapPathSyntax.Unix, "a/.", true)]
+    [InlineData("a/./", CapPathSyntax.Unix, "a/.", false)]
+    [InlineData("a//././/.//", CapPathSyntax.Unix, "a/.", false)]
+    [InlineData("a/..", CapPathSyntax.Unix, "a/..", true)]
+    [InlineData("./../.", CapPathSyntax.Unix, "../.", false)]
+    [InlineData("a/../b/", CapPathSyntax.Unix, "a/../b/", true)]
+    [InlineData("a\\\\b\\", CapPathSyntax.Windows, "a\\b\\", false)]
+    [InlineData("a\\./b", CapPathSyntax.Windows, "a/b", false)]
+    [InlineData("a\\b/c", CapPathSyntax.Windows, "a\\b/c", true)]
+    public void The_normal_spelling_drops_only_what_names_nothing(
+        string raw,
+        CapPathSyntax syntax,
+        string expected,
+        bool alreadyNormal)
+    {
+        CapPath path = ParseOrFail(raw, syntax, ParentLinkPolicy.Preserve);
+
+        Span<char> written = new char[raw.Length];
+        string normal = written[..path.WriteNormal(written)].ToString();
+
+        Assert.Equal(expected, normal);
+        Assert.Equal(alreadyNormal, path.IsNormal);
+
+        CapPath reparsed = ParseOrFail(normal, syntax, ParentLinkPolicy.Preserve);
+        Assert.True(reparsed.IsNormal);
+        Assert.Equal(Components(path), Components(reparsed));
+        Assert.Equal(path.RequiresDirectory, reparsed.RequiresDirectory);
+        Assert.Equal(path.IsSingleComponent, reparsed.IsSingleComponent);
+        Assert.Equal(
+            CapPath.EndsInSeparatorAfterName(path.Raw, syntax, out _),
+            CapPath.EndsInSeparatorAfterName(reparsed.Raw, syntax, out _));
+    }
+
     /// <summary>A default instance is inert rather than a trap.</summary>
     [Fact]
     public void Default_instance_names_nothing()

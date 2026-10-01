@@ -1,3 +1,4 @@
+using System.Buffers;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Primitives.Interop;
@@ -53,10 +54,13 @@ internal static class Resolver
         bool followFinalLink = true)
     {
         IPlatformOps ops = root.Backend;
+        if (!ops.Capabilities.SupportsConfinedOpen)
+        {
+            return PortableResolver.OpenDirectory(root, in path, access, options, followFinalLink);
+        }
 
-        return ops.Capabilities.SupportsConfinedOpen
-            ? ops.OpenConfinedDirectory(root, path.Raw, access, options, followFinalLink)
-            : PortableResolver.OpenDirectory(root, in path, access, options, followFinalLink);
+        using NormalSpelling text = new(in path);
+        return ops.OpenConfinedDirectory(root, text.Span, access, options, followFinalLink);
     }
 
     /// <summary>
@@ -87,10 +91,13 @@ internal static class Resolver
         ConfinedResolveOptions options)
     {
         IPlatformOps ops = root.Backend;
+        if (!ops.Capabilities.SupportsConfinedOpen)
+        {
+            return PortableResolver.OpenFile(root, in path, in request, options);
+        }
 
-        return ops.Capabilities.SupportsConfinedOpen
-            ? ops.OpenConfinedFile(root, path.Raw, in request, options)
-            : PortableResolver.OpenFile(root, in path, in request, options);
+        using NormalSpelling text = new(in path);
+        return ops.OpenConfinedFile(root, text.Span, in request, options);
     }
 
     /// <summary>
@@ -124,10 +131,13 @@ internal static class Resolver
         }
 
         IPlatformOps ops = root.Backend;
+        if (!ops.Capabilities.SupportsConfinedOpen)
+        {
+            return PortableResolver.OpenNode(root, in path, in request, options);
+        }
 
-        return ops.Capabilities.SupportsConfinedOpen
-            ? ops.OpenConfinedNode(root, path.Raw, in request, options)
-            : PortableResolver.OpenNode(root, in path, in request, options);
+        using NormalSpelling text = new(in path);
+        return ops.OpenConfinedNode(root, text.Span, in request, options);
     }
 
     /// <summary>
@@ -170,7 +180,8 @@ internal static class Resolver
             return PortableResolver.ResolveParent(root, in path, options);
         }
 
-        if (!path.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
+        using NormalSpelling text = new(in path);
+        if (!CapPath.TrySplitLastComponent(text.Span, path.Syntax, out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
         {
             return CapResult<ResolvedParent>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
@@ -184,7 +195,7 @@ internal static class Resolver
         // another, so the whole path is resolved here just as far, and refused afterwards.
         if (name.SequenceEqual(".."))
         {
-            CapResult<SafeDirHandle> climbed = ops.OpenConfinedDirectory(root, path.Raw, CapAccess.None, options);
+            CapResult<SafeDirHandle> climbed = ops.OpenConfinedDirectory(root, text.Span, CapAccess.None, options);
             if (!climbed.IsSuccess)
             {
                 return CapResult<ResolvedParent>.Fail(climbed.Error);
@@ -201,5 +212,55 @@ internal static class Resolver
         return directory.IsSuccess
             ? CapResult<ResolvedParent>.Ok(new ResolvedParent(directory.Value, name.ToString()))
             : CapResult<ResolvedParent>.Fail(directory.Error);
+    }
+
+    /// <summary>
+    /// The text a backend that resolves a whole path at once is handed: the path's normal
+    /// spelling, which is the caller's own string whenever that is already normal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk resolves the components a path names, so a <c>.</c> or a repeated separator
+    /// costs it nothing. The kernel's confined open measures the whole text against its limit
+    /// before it looks anything up, so given the caller's characters it would refuse for length
+    /// a path the walk reaches, and the same path would resolve on one backend and not on the
+    /// other. Handed the normal spelling, both are limited by what is actually resolved. What
+    /// is left out cannot change which object is reached (see <see cref="CapPath.WriteNormal"/>).
+    /// </para>
+    /// <para>
+    /// Only the backend sees it. Messages go on quoting the path the caller passed.
+    /// </para>
+    /// <para>
+    /// A path that is already normal is passed through as it is, so the common case costs
+    /// nothing; any other is written into a buffer borrowed from the shared pool for the length
+    /// of the call.
+    /// </para>
+    /// </remarks>
+    private readonly ref struct NormalSpelling
+    {
+        private readonly char[]? _rented;
+
+        public NormalSpelling(scoped in CapPath path)
+        {
+            if (path.IsNormal)
+            {
+                _rented = null;
+                Span = path.Raw;
+                return;
+            }
+
+            _rented = ArrayPool<char>.Shared.Rent(path.Raw.Length);
+            Span = _rented.AsSpan(0, path.WriteNormal(_rented));
+        }
+
+        public ReadOnlySpan<char> Span { get; }
+
+        public void Dispose()
+        {
+            if (_rented is not null)
+            {
+                ArrayPool<char>.Shared.Return(_rented);
+            }
+        }
     }
 }

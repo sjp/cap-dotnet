@@ -126,7 +126,7 @@ backends are described in [backends.md](backends.md).
 | L2 | Absolute path (`/etc/passwd`, `C:\Windows`) | Rejected | path parsing | `CapPathParseTests.Rejects_absolute`; escape corpus: `absolute-*`, `windows-absolute`, `windows-absolute-forward-slashes` |
 | L3 | Drive-relative (`C:file`) and root-relative (`\file`) on Windows | Rejected | path parsing | `CapPathParseTests.Rejects_paths_relative_to_ambient_state`; escape corpus: `windows-root-relative`, `windows-drive-relative` |
 | L4 | UNC (`\\server\share`) and device namespace (`\\?\`, `\\.\`) | Rejected | path parsing | `CapPathParseTests.Rejects_unc`, `.Rejects_device_namespace`, `WindowsReservedNameTests.A_device_namespace_prefix_on_a_device_name_is_refused`; escape corpus: `windows-unc`, `unc-forward-slashes`, `windows-device-namespace-*`, `device-namespace-forward-slashes`, `windows-object-manager-namespace` |
-| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components`; escape corpus: `empty`, `dot`, `dot-slash-dot`, `doubled-separator`, `dot-components`, `many-dot-components`, `trailing-separator-*`, `nul-*` |
+| L5 | Empty component, `.`, repeated separators | Normalised or rejected, never silently skipped past a check | path parsing | `CapPathParseTests.Rejects_empty`, `CapPathComponentTests.Enumerates_components`, `CapPathComponentTests.The_normal_spelling_drops_only_what_names_nothing`, `ConfinedOpenTests.A_path_of_dot_components_past_the_kernels_limit_reaches_its_target`; escape corpus: `empty`, `dot`, `dot-slash-dot`, `doubled-separator`, `dot-components`, `many-dot-components`, `trailing-separator-*`, `nul-*` |
 | L6 | Very long paths / deep nesting | Bounded; fails cleanly rather than stack-overflowing | path parsing; component walk | `CapPathParseTests.Rejects_paths_and_components_that_are_too_long`, `PortableWalkTests.A_path_deeper_than_the_walk_will_descend_is_refused`; escape corpus: `component-too-long`, `path-too-long`, `longer-than-the-kernel-takes-at-once`, `ten-thousand-components`, `many-dot-components`, `deeper-than-the-walk-descends`, `longer-than-the-win32-path-limit` |
 
 `..` deserves a note. The obvious implementation — collapse `a/../b` to `b` before touching
@@ -410,7 +410,6 @@ stops being true fails its test like any other wrong expectation.
 |---|---|---|---|
 | `deeper-than-the-walk-descends` | `openat2` | Resolves the path | The depth bound belongs to the walk, which holds a handle per level; the kernel's confined open holds none |
 | `longer-than-the-kernel-takes-at-once`, `ten-thousand-components` | `openat2` | Refused for length, where the walk reports the first missing name | The kernel is handed the whole path at once and refuses one longer than its own limit |
-| `many-dot-components` | `openat2` | Refused for length, where the walk drops every `.` and reaches the file | The kernel is handed the path as the caller wrote it, `.` components included, and refuses one longer than its own limit |
 
 ## 5. Explicit non-goals
 

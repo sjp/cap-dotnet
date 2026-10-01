@@ -312,23 +312,14 @@ internal static class EscapeCorpus
         });
 
         // Sixteen thousand "." components in front of an ordinary path, close to the longest
-        // the parser takes. The walk drops each, so what is left is two names, and the path
-        // reaches the file however many there were. Stored in a link, the same text is longer
-        // than any filesystem keeps as a target.
+        // the parser takes. Every backend drops each, so what is left is two names, and the
+        // path reaches the file however many there were: the walk resolves only the names, and
+        // the confined open hands the kernel the path's normal spelling, so the kernel's limit
+        // applies to those two names and not to the dots. Stored in a link, the same text is
+        // longer than any filesystem keeps as a target.
         string manyDots = string.Concat(Enumerable.Repeat("./", 16_000)) + $"{PlainDirectory}/{PlainFile}";
         Expectation throughDots = ExistingFile().With(Operation.CreateSymlinkTo, Outcome.Refused);
-        cases.Add(new("many-dot-components", ["L5", "L6"], manyDots, throughDots, throughDots)
-        {
-            Differences =
-            [
-                new(
-                    [Backends.ConfinedOpen, Backends.InMemoryConfined],
-                    Uniform(Outcome.Refused),
-                    "the confined open passes the path to the kernel as the caller wrote it, dots " +
-                    "and all, and the kernel refuses one longer than its own limit before looking " +
-                    "anything up. The in-memory filesystem's confined open answers as the kernel does."),
-            ],
-        });
+        cases.Add(new("many-dot-components", ["L5", "L6"], manyDots, throughDots, throughDots));
 
         // Deeper than the walk will go. The bound exists because the walk holds a handle for
         // every level it has descended through; the confined open holds none, so it has no

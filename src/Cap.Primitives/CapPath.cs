@@ -87,6 +87,7 @@ public readonly struct CapPath
         None = 0,
         ContainsParentLink = 1 << 0,
         RequiresDirectory = 1 << 1,
+        Redundant = 1 << 2,
     }
 
     /// <summary>The rules this path was parsed under.</summary>
@@ -149,7 +150,84 @@ public readonly struct CapPath
     /// run the portable walk for one iteration, the same code path as any longer path.
     /// </remarks>
     public bool IsSingleComponent =>
-        _componentCount == 1 && _flags == Flags.None;
+        _componentCount == 1 && (_flags & ~Flags.Redundant) == Flags.None;
+
+    /// <summary>
+    /// Whether the caller's text is already its own normal spelling: no <c>.</c> component
+    /// and no repeated separator that <see cref="WriteNormal"/> would leave out.
+    /// </summary>
+    internal bool IsNormal => (_flags & Flags.Redundant) == 0;
+
+    /// <summary>
+    /// Writes the path as a backend that takes it whole should be handed it: the components
+    /// the enumerator yields, each behind the separator the caller wrote before it, and the
+    /// caller's ending kept as a single separator, or as a separator and <c>.</c> where
+    /// a <c>.</c> followed the last component.
+    /// </summary>
+    /// <param name="destination">At least as long as <see cref="Raw"/>.</param>
+    /// <returns>How many characters were written.</returns>
+    /// <remarks>
+    /// <para>
+    /// The kernel's confined open measures the text it is given against its own limit before
+    /// it looks anything up. Given the caller's raw text, a path the walk resolves by dropping
+    /// its <c>.</c> components would be refused for length on that backend alone. Given this,
+    /// both measure what is actually resolved.
+    /// </para>
+    /// <para>
+    /// Nothing left out can change what is resolved: a <c>.</c> ahead of another component and
+    /// a repeated separator name nothing. The ending is kept because it can: <c>name/</c> is a
+    /// different request from <c>name</c>, and a creating open of <c>name/</c> is refused
+    /// before the name is looked at, where <c>name/.</c> is resolved. Every character written
+    /// is one of the caller's, in order, so the result is never longer than
+    /// <see cref="Raw"/>, and equal to it exactly when <see cref="IsNormal"/>.
+    /// </para>
+    /// </remarks>
+    internal int WriteNormal(Span<char> destination)
+    {
+        ReadOnlySpan<char> raw = _raw;
+        int written = 0;
+        int start = 0;
+        int lastEnd = 0;
+
+        for (int i = 0; i <= raw.Length; i++)
+        {
+            if (i < raw.Length && !IsSeparator(raw[i], _syntax))
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> component = raw[start..i];
+            int componentStart = start;
+            start = i + 1;
+
+            if (component.IsEmpty || component.SequenceEqual("."))
+            {
+                continue;
+            }
+
+            if (written > 0)
+            {
+                destination[written++] = raw[componentStart - 1];
+            }
+
+            component.CopyTo(destination[written..]);
+            written += component.Length;
+            lastEnd = i;
+        }
+
+        int ending = NormalEnding(raw[lastEnd..], _syntax, out int dot);
+        if (ending == 2)
+        {
+            destination[written++] = raw[lastEnd + dot - 1];
+            destination[written++] = '.';
+        }
+        else if (ending == 1)
+        {
+            destination[written++] = raw[lastEnd];
+        }
+
+        return written;
+    }
 
     /// <summary>
     /// Parses <paramref name="raw"/> under the rules of the running platform, refusing
@@ -264,9 +342,20 @@ public readonly struct CapPath
     /// copied; both results are slices of the original string.
     /// </para>
     /// </remarks>
-    internal bool TrySplitLastComponent(out ReadOnlySpan<char> parent, out ReadOnlySpan<char> name)
+    internal bool TrySplitLastComponent(out ReadOnlySpan<char> parent, out ReadOnlySpan<char> name) =>
+        TrySplitLastComponent(_raw, _syntax, out parent, out name);
+
+    /// <summary>
+    /// <see cref="TrySplitLastComponent(out ReadOnlySpan{char}, out ReadOnlySpan{char})"/>
+    /// over text that is not the caller's own, such as the spelling
+    /// <see cref="WriteNormal"/> produced from it.
+    /// </summary>
+    internal static bool TrySplitLastComponent(
+        ReadOnlySpan<char> raw,
+        CapPathSyntax syntax,
+        out ReadOnlySpan<char> parent,
+        out ReadOnlySpan<char> name)
     {
-        ReadOnlySpan<char> raw = _raw;
         parent = default;
         name = default;
 
@@ -276,7 +365,7 @@ public readonly struct CapPath
 
         for (int i = 0; i <= raw.Length; i++)
         {
-            if (i < raw.Length && !IsSeparator(raw[i], _syntax))
+            if (i < raw.Length && !IsSeparator(raw[i], syntax))
             {
                 continue;
             }
@@ -401,6 +490,8 @@ public readonly struct CapPath
         }
 
         int start = 0;
+        int normalLength = 0;
+        int lastEnd = 0;
         for (int i = 0; i <= raw.Length; i++)
         {
             if (i < raw.Length && !IsSeparator(raw[i], syntax))
@@ -429,6 +520,8 @@ public readonly struct CapPath
                 }
 
                 flags |= Flags.ContainsParentLink;
+                normalLength += componentCount == 0 ? 2 : 3;
+                lastEnd = i;
                 componentCount++;
                 continue;
             }
@@ -447,6 +540,8 @@ public readonly struct CapPath
                 return componentError;
             }
 
+            normalLength += componentCount == 0 ? component.Length : component.Length + 1;
+            lastEnd = i;
             componentCount++;
         }
 
@@ -462,7 +557,51 @@ public readonly struct CapPath
             flags |= Flags.RequiresDirectory;
         }
 
+        // The normal spelling keeps only the caller's own characters, in order, so it is the
+        // same text exactly when it is the same length.
+        normalLength += NormalEnding(raw[lastEnd..], syntax, out _);
+        if (normalLength != raw.Length)
+        {
+            flags |= Flags.Redundant;
+        }
+
         return CapPathError.None;
+    }
+
+    /// <summary>
+    /// How many characters the normal spelling keeps of what follows the last component: none
+    /// when nothing does, a separator and <c>.</c> when a <c>.</c> component does, and
+    /// otherwise the one separator.
+    /// </summary>
+    /// <param name="ending">Everything after the last component the enumerator yields.</param>
+    /// <param name="syntax">The syntax the path was parsed under.</param>
+    /// <param name="dot">Where in <paramref name="ending"/> the first <c>.</c> component starts, when there is one.</param>
+    private static int NormalEnding(ReadOnlySpan<char> ending, CapPathSyntax syntax, out int dot)
+    {
+        dot = -1;
+        if (ending.IsEmpty)
+        {
+            return 0;
+        }
+
+        int start = 0;
+        for (int i = 0; i <= ending.Length; i++)
+        {
+            if (i < ending.Length && !IsSeparator(ending[i], syntax))
+            {
+                continue;
+            }
+
+            if (ending[start..i].SequenceEqual("."))
+            {
+                dot = start;
+                return 2;
+            }
+
+            start = i + 1;
+        }
+
+        return 1;
     }
 
     /// <summary>

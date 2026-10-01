@@ -101,6 +101,7 @@ internal static class CapPathTarget
             $"{shown} misreports whether it is a single lookup.");
 
         CheckSplit(raw, path, components, shown);
+        CheckNormalSpelling(raw, path, components, shown);
         CheckRenderedForm(components, syntax, parentLinks, expected.RequiresDirectory, shown);
 
         // Windows rules refuse strictly more than POSIX ones, except that a backslash divides
@@ -138,6 +139,37 @@ internal static class CapPathTarget
         Require(
             components.Count == 1 ? parent.IsEmpty || parentError == CapPathError.Empty : parentError == CapPathError.None,
             $"{shown}: what comes ahead of the last component does not parse as the rest of the path.");
+    }
+
+    /// <summary>
+    /// The normal spelling a backend that takes the whole path is handed must name what the
+    /// caller's text names: the same components, the same insistence on a directory, the same
+    /// ending after a name, and only the caller's own characters, so no longer than they are.
+    /// </summary>
+    private static void CheckNormalSpelling(string raw, CapPath path, List<string> components, string shown)
+    {
+        char[] buffer = new char[raw.Length];
+        string normal = new(buffer, 0, path.WriteNormal(buffer));
+
+        Require(
+            path.IsNormal == (normal == raw),
+            $"{shown} says it is{(path.IsNormal ? "" : " not")} its own normal spelling, which is {Show(normal)}.");
+        Require(
+            CapPath.TryParse(normal, path.Syntax, ParentLinkPolicy.Preserve, out CapPath reparsed, out CapPathError error),
+            $"{shown}: its normal spelling {Show(normal)} is refused as {error}.");
+
+        List<string> reparsedComponents = [];
+        foreach (ReadOnlySpan<char> component in reparsed.EnumerateComponents())
+        {
+            reparsedComponents.Add(component.ToString());
+        }
+
+        Require(
+            reparsedComponents.SequenceEqual(components) &&
+            reparsed.RequiresDirectory == path.RequiresDirectory &&
+            CapPath.EndsInSeparatorAfterName(normal, path.Syntax, out _) == CapPath.EndsInSeparatorAfterName(raw, path.Syntax, out _),
+            $"{shown}: its normal spelling {Show(normal)} names something else.");
+        Require(reparsed.IsNormal, $"{shown}: its normal spelling {Show(normal)} is not normal itself.");
     }
 
     /// <summary>
