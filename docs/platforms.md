@@ -25,6 +25,8 @@ what a program moving between Linux, macOS and Windows will notice.
 | Access time | unless the filesystem keeps none, when it is null | yes | yes |
 | Appending (`append: true`, `CapFile.IsAppending`) | a flag on the open file, shared with streams taken from it | a flag on the open file, shared with streams taken from it, but a stream's writes go to its own position rather than the end; `CapFile`'s own writes go to the end | applied by `CapFile` to its own writes; a stream taken while it is on gets a handle that can only append |
 | Refusing to replace on rename (`replaceExisting: false`) | `renameat2(RENAME_NOREPLACE)`; fails on kernels and filesystems without it ([below](#linux-which-backend)) | `renameatx_np(RENAME_EXCL)`; fails on volumes without it, such as SMB, NFS and some FUSE ([below](#macos)) | always, as part of the rename itself |
+| Removing a file another handle holds open | removes the name | removes the name | refused with `UnauthorizedAccessException` unless every holder shares `FileShare.Delete`; a removal that succeeds frees the name at once, as on Unix ([below](#windows)) |
+| Removing a read-only file (`DeleteFile`) | removes it: only the directory's permissions matter | removes it | refused with `UnauthorizedAccessException`; `DeleteTree` clears the flag and removes it ([below](#windows)) |
 | Walking through a directory that grants search but not read (`0711`) | yes | no: every directory handle can also list ([why](backends.md#directories-opened-only-to-be-traversed)) | yes |
 | Committing a directory's entries (`Dir.Flush(toDisk: true)`) | `fsync` on the directory | `F_FULLFSYNC` on the directory, falling back to `fsync` where the volume refuses it | not possible; returns false |
 | Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
@@ -41,7 +43,7 @@ form when a system or filesystem does not offer it:
 | `NtQueryDirectoryFileEx` (an ntdll export from Windows 10 1709) | `NtQueryDirectoryFile`, chosen once per process |
 | `FileIdExtdDirectoryInformation` (128-bit identifiers in a directory listing) | `FileIdFullDirectoryInformation` |
 | `FileDispositionInformationEx` (a removed name disappears at once, as on Unix) | `FileDispositionInformation`: the name lingers until the last handle closes |
-| `FileRenameInformationEx` (replacing a name that is open, as on Unix) | `FileRenameInformation` |
+| `FileRenameInformationEx` (replacing a name that is open, an empty directory or a link to a directory, as on Unix) | `FileRenameInformation`: a replacing rename onto a directory is refused, as `CapErrorKind.IsADirectory`, or as `CapErrorKind.SymbolicLink` for a link to a directory or a junction |
 | `FileNormalizedNameInformation` (the stored name, for the check on names containing `~`) | `FileAlternateNameInformation`: the entry's short name (see below) |
 | `FileIdInformation` (the 128-bit identifier and the volume serial) | `FileInternalInformation` and the volume's 32-bit serial |
 | `FileStatInformation` (times, length, attributes, reparse tag and link count in one reply, from Windows 10 1709) | `FileNetworkOpenInformation`, `FileStandardInformation` and, for a reparse point, `FileAttributeTagInformation` |
@@ -145,6 +147,23 @@ hidden. The settable bits are `ReadOnly`, `Hidden`, `System`, `Archive`, `Tempor
 (`0x100000`). Bits the filesystem owns (`Directory`, `ReparsePoint`, `Compressed`,
 `Encrypted`, `SparseFile`, `IntegrityStream` and the like) are ignored rather than refused,
 so attributes read from one entry can be written to another unchanged.
+
+**Two removals that Unix allows are refused.** Each surfaces as an
+`UnauthorizedAccessException`, which reads like a permissions problem, so look here before
+looking at an ACL.
+
+- *A file another handle holds open.* Linux and macOS remove the name whoever has the file
+  open. On Windows each opener says what it shares, and `DeleteFile` throws
+  `UnauthorizedAccessException` (a sharing violation) unless every handle open on the file
+  shares `FileShare.Delete`. When they all do, the removal succeeds, the name is gone at once
+  and can be reused straight away, and the holders keep reading the old contents, as on Unix;
+  Windows' own convention of leaving the name in place until the last handle closes applies
+  only on a filesystem without the newer removal call (see the table above). The same rule
+  applies to renaming the file, and to replacing it by a rename.
+- *A read-only file.* The read-only attribute refuses removal, where on Unix a file's own
+  mode does not matter, so `DeleteFile` throws `UnauthorizedAccessException`. `DeleteTree`
+  (from `Cap.Fs.Ext`, on a `Dir`) clears the attribute on an entry it could not remove and
+  tries again.
 
 **Paths.** `/` and `\` both separate components. Drive-relative (`C:file`), root-relative
 (`\file`), UNC (`\\server\share`) and device-namespace (`\\?\`, `\\.\`) paths are refused;

@@ -1354,16 +1354,19 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// absent, so it costs no extra call and leaves no window.
     /// </para>
     /// <para>
-    /// A directory symbolic link or a junction is a directory entry on this platform, and the
-    /// filesystem will not move anything over a directory, so replacing one fails where on
-    /// Unix the link would simply be replaced. The refusal is kept, because the alternative,
-    /// moving the link aside and then moving the entry in, leaves a moment in which the name
-    /// holds nothing. What the filesystem reports for it reads as a permissions refusal or as
-    /// a directory in the way, neither of which says a link was the obstacle, so a failed
-    /// replacement looks at what holds the destination and reports a directory link there as
-    /// <see cref="CapErrorCategory.SymbolicLink"/>. The look comes after the failure and only
-    /// chooses how it is reported, so a change to the name in between can at worst mislabel
-    /// a refusal; it cannot turn one into a replacement.
+    /// A replacement asks for POSIX semantics, under which the filesystem answers as
+    /// <c>rename(2)</c> does: a name held open is replaced, a directory replaces an empty
+    /// directory, and a directory symbolic link or a junction is replaced as the name it is.
+    /// Where only the older form is implemented, the filesystem will not move anything over a
+    /// directory, and a directory link or junction is a directory entry on this platform, so
+    /// replacing one fails where on Unix the link would simply be replaced. The refusal is
+    /// kept, because the alternative, moving the link aside and then moving the entry in,
+    /// leaves a moment in which the name holds nothing. What the filesystem reports for it
+    /// reads as a permissions refusal or as a directory in the way, neither of which says a
+    /// link was the obstacle, so a failed replacement looks at what holds the destination and
+    /// reports a directory link there as <see cref="CapErrorCategory.SymbolicLink"/>. The
+    /// look comes after the failure and only chooses how it is reported, so a change to the
+    /// name in between can at worst mislabel a refusal; it cannot turn one into a replacement.
     /// </para>
     /// </remarks>
     public CapError RenameChild(

@@ -1039,14 +1039,6 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return error;
             }
 
-            // Windows opens the name as a directory before removing it, and the host backend
-            // reports a link made as the file kind, which that open refuses as the wrong kind,
-            // as the link it is.
-            if (_fs.WindowsRules && node!.Type == CapNodeType.SymbolicLink && !node.LinkIsDirectory)
-            {
-                return CapError.FromCategory(CapErrorCategory.SymbolicLink);
-            }
-
             if (_fs.IsReadOnly)
             {
                 return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);

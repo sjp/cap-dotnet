@@ -109,8 +109,8 @@ public sealed class WindowsRulesTests
 
     /// <summary>
     /// Windows asks what kind of object a name holds before it asks whether the name is free,
-    /// so a directory is refused as one where Linux would call the name taken, and a directory
-    /// removal names the file link it found.
+    /// so a directory is refused as one where Linux would call the name taken. A directory
+    /// removal of a file link is refused as not a directory, as on Linux.
     /// </summary>
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
@@ -129,7 +129,7 @@ public sealed class WindowsRulesTests
         CapIOException linked = Assert.ThrowsAny<CapIOException>(() => root.CreateHardLink("inner", root, "empty"));
         Assert.Equal(CapErrorKind.IsADirectory, linked.Kind);
         CapIOException removed = Assert.ThrowsAny<CapIOException>(() => root.DeleteDir("link"));
-        Assert.Equal(CapErrorKind.SymbolicLink, removed.Kind);
+        Assert.Equal(CapErrorKind.NotADirectory, removed.Kind);
         CapIOException symlinked = Assert.ThrowsAny<CapIOException>(() => root.CreateSymlink("inner", "plain"));
         Assert.Equal(CapErrorKind.IsADirectory, symlinked.Kind);
     }

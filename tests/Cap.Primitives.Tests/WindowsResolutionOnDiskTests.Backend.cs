@@ -270,6 +270,110 @@ public sealed partial class WindowsResolutionOnDiskTests
     }
 
     /// <summary>
+    /// Removing a file another handle holds open without sharing deletion is refused as a
+    /// permissions refusal, and the file stays.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the case above, and the one Unix has no counterpart of: there the
+    /// name goes whoever has the file open. The sharing violation is what Windows answers,
+    /// and it is reported as permission denied, which <c>docs/platforms.md</c> says.
+    /// </remarks>
+    [Fact]
+    public void Removing_a_file_held_open_without_sharing_deletion_is_refused()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Sharing modes are a Windows rule.");
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        string path = Path.Join(Sandbox, "held");
+        File.WriteAllText(path, "x");
+
+        using SafeDirHandle root = OpenSandbox();
+        using (File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            CapError refused = PlatformOps.Host.RemoveChildFile(root, "held");
+            Assert.Equal(CapErrorCategory.PermissionDenied, refused.Category);
+            Assert.Equal(NtStatusCodes.STATUS_SHARING_VIOLATION, refused.RawCode);
+        }
+
+        Assert.True(File.Exists(path));
+    }
+
+    /// <summary>
+    /// A replacing rename moves a directory over an empty directory, as Unix does, and is
+    /// refused over one that is not empty as not empty.
+    /// </summary>
+    /// <remarks>
+    /// Windows' own rename will not move anything over a directory. The replacing form asked
+    /// for first carries POSIX semantics, and with them the filesystem answers as
+    /// <c>rename(2)</c> does; the in-memory Windows rules model this answer.
+    /// </remarks>
+    [Fact]
+    public void A_replacing_rename_replaces_an_empty_directory_and_refuses_a_full_one()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("POSIX rename semantics are a Windows request.");
+            return;
+        }
+
+        Directory.CreateDirectory(Path.Join(Sandbox, "moving"));
+        File.WriteAllText(Path.Join(Sandbox, "moving", "inner"), "x");
+        Directory.CreateDirectory(Path.Join(Sandbox, "empty"));
+        Directory.CreateDirectory(Path.Join(Sandbox, "full"));
+        File.WriteAllText(Path.Join(Sandbox, "full", "child"), "c");
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapError refused = PlatformOps.Host.RenameChild(root, "moving", root, "full", replaceExisting: true);
+        Assert.Equal(CapErrorCategory.NotEmpty, refused.Category);
+        Assert.Equal("c", File.ReadAllText(Path.Join(Sandbox, "full", "child")));
+
+        CapError renamed = PlatformOps.Host.RenameChild(root, "moving", root, "empty", replaceExisting: true);
+        Assert.True(renamed.IsSuccess, renamed.FailureDescription);
+        Assert.False(Directory.Exists(Path.Join(Sandbox, "moving")));
+        Assert.Equal("x", File.ReadAllText(Path.Join(Sandbox, "empty", "inner")));
+    }
+
+    /// <summary>
+    /// A replacing rename moves a file over a junction at the destination, replacing the
+    /// junction as a name and leaving the directory it pointed at as it was.
+    /// </summary>
+    /// <remarks>
+    /// A junction is a directory entry here, and the older rename class refuses to move a file
+    /// over it; the replacing form asked for first treats it as a name, as Unix treats a link.
+    /// </remarks>
+    [Fact]
+    public void A_replacing_rename_replaces_a_junction_and_leaves_its_target_alone()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Junctions exist only on Windows.");
+            return;
+        }
+
+        string target = Path.Join(Sandbox, "target");
+        Directory.CreateDirectory(target);
+        File.WriteAllText(Path.Join(target, "inner"), "untouched");
+        File.WriteAllText(Path.Join(Sandbox, "incoming"), "new");
+        string link = Path.Join(Sandbox, "published");
+        CreateJunction(link, target);
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapError renamed = PlatformOps.Host.RenameChild(root, "incoming", root, "published", replaceExisting: true);
+        Assert.True(renamed.IsSuccess, renamed.FailureDescription);
+
+        Assert.Equal(0, (int)(File.GetAttributes(link) & (FileAttributes.ReparsePoint | FileAttributes.Directory)));
+        Assert.Equal("new", File.ReadAllText(link));
+        Assert.Equal(["inner"], Directory.GetFileSystemEntries(target).Select(Path.GetFileName));
+        Assert.Equal("untouched", File.ReadAllText(Path.Join(target, "inner")));
+    }
+
+    /// <summary>
     /// A read-only file cannot be removed until its removal block is cleared, and then can.
     /// </summary>
     [Fact]
