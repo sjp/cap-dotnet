@@ -532,9 +532,11 @@ comparison offered to callers does not.
 
 **A creation time is absent rather than invented.** Linux reports per call whether the
 filesystem supplied one, and several do not. macOS and Windows have nowhere to say so and
-leave the field at zero instead, which is read as absence: a file created at the start of
+leave the field all zero instead, which is read as absence: a file created at the start of
 1970, or of 1601, is not a thing that happens, and reporting one would be a worse answer than
-reporting none.
+reporting none. Only the all-zero value means that. Any other value is a recorded time, and
+that includes one before 1970, which HFS+ dates and a creation time set through
+`setattrlist` can both hold.
 
 **So, on Linux, is an access time the filesystem does not keep.** The kernel leaves
 `STATX_ATIME` out of the reply for a filesystem whose superblock is marked as keeping no

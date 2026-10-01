@@ -604,6 +604,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// Turns what the kernel wrote into the caller-facing snapshot.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This platform keeps a creation time in the same structure as every other timestamp,
     /// so nothing in the reply says whether the filesystem holding the object actually
     /// maintains one. A filesystem that does not leaves the field at zero, and that is read
@@ -611,15 +612,26 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// instant the epoch began is not a thing that happens, and reporting one would be a
     /// worse answer than reporting none. The status-change time gets no such reading: the
     /// kernel keeps it for every object on every filesystem, so it is always reported.
+    /// </para>
+    /// <para>
+    /// Only the value that is zero in both halves is read as absence. Any other value is a
+    /// time something recorded, and that includes one before 1970: HFS+ dates run from 1904,
+    /// and anything allowed to set attributes can store any creation time at all. Treating
+    /// every value at or before the epoch as absent would turn those into "not recorded".
+    /// </para>
+    /// <para>
+    /// Kept apart from the call so that a reply no file on a test host produces can still be
+    /// fed through it.
+    /// </para>
     /// </remarks>
-    private static CapNodeStat Describe(in DarwinStat raw) => new(
+    internal static CapNodeStat Describe(in DarwinStat raw) => new(
         UnixFileTypes.FromMode(raw.Mode),
         raw.VolumeId,
         raw.Inode,
         raw.Size,
         UnixTimestamps.FromParts(raw.AccessTime.Seconds, raw.AccessTime.Nanoseconds),
         UnixTimestamps.FromParts(raw.ModifyTime.Seconds, raw.ModifyTime.Nanoseconds),
-        raw.BirthTime.Seconds > 0
+        raw.BirthTime.Seconds != 0 || raw.BirthTime.Nanoseconds != 0
             ? UnixTimestamps.FromParts(raw.BirthTime.Seconds, raw.BirthTime.Nanoseconds)
             : null,
         UnixTimestamps.FromParts(raw.ChangeTime.Seconds, raw.ChangeTime.Nanoseconds),

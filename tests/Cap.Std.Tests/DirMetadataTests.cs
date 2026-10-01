@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Cap.Primitives;
 
 namespace Cap.Std.Tests;
@@ -31,7 +32,7 @@ namespace Cap.Std.Tests;
 /// </para>
 /// </remarks>
 [Collection(DirTestGroup.Name)]
-public sealed class DirMetadataTests : IDisposable
+public sealed partial class DirMetadataTests : IDisposable
 {
     private readonly ScratchTree _tree = new();
 
@@ -115,6 +116,39 @@ public sealed class DirMetadataTests : IDisposable
         {
             Assert.InRange(created, before, after);
         }
+    }
+
+    /// <summary>A creation time recorded before 1970 is reported, not taken for a missing one.</summary>
+    /// <remarks>
+    /// macOS has nowhere to say that a filesystem keeps no creation time, and leaves the
+    /// field all zero instead. A creation time before the epoch is a different thing — HFS+
+    /// dates run from 1904, and setting attributes can store any value — and reading every
+    /// value at or before the epoch as absent would lose it.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("Needs a creation time set on the host's filesystem.")]
+    public void A_creation_time_before_the_epoch_is_reported()
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            Assert.Skip("Only macOS lets a creation time be set and reads absence from its value.");
+        }
+
+        DateTimeOffset expected = new(1960, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        HostFile.WriteAllText(Host("old"), "x");
+
+        AttributeList attributes = new() { BitmapCount = AttributeBitmapCount, CommonAttributes = CreationTimeAttribute };
+        Timespec value = new() { Seconds = expected.ToUnixTimeSeconds() };
+        if (SetAttributeList(Host("old"), ref attributes, ref value, (nuint)Marshal.SizeOf<Timespec>(), 0) != 0)
+        {
+            Assert.Skip($"A creation time could not be set here: {Marshal.GetLastPInvokeError()}.");
+        }
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("old");
+
+        Assert.Equal(expected, root.GetMetadata("old").CreationTime);
+        Assert.Equal(expected, file.GetMetadata().CreationTime);
     }
 
     /// <summary>
@@ -793,4 +827,36 @@ public sealed class DirMetadataTests : IDisposable
         Assert.True(CapPermissions.FromUnixMode(UnixFileMode.SetUser | UnixFileMode.StickyBit).TryGetUnixMode(out _));
         Assert.False(CapPermissions.FromWindowsAttributes(FileAttributes.Hidden).TryGetUnixMode(out _));
     }
+
+    private const ushort AttributeBitmapCount = 5;
+
+    private const uint CreationTimeAttribute = 0x0000_0200;
+
+    /// <summary>The macOS <c>struct attrlist</c>: which attributes a call reads or writes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct AttributeList
+    {
+        public ushort BitmapCount;
+        public ushort Reserved;
+        public uint CommonAttributes;
+        public uint VolumeAttributes;
+        public uint DirectoryAttributes;
+        public uint FileAttributes;
+        public uint ForkAttributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Timespec
+    {
+        public long Seconds;
+        public long Nanoseconds;
+    }
+
+    [LibraryImport("libc", EntryPoint = "setattrlist", SetLastError = true)]
+    private static partial int SetAttributeList(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        ref AttributeList attributes,
+        ref Timespec buffer,
+        nuint bufferSize,
+        uint options);
 }
