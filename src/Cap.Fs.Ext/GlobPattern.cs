@@ -121,9 +121,12 @@ public sealed class GlobPattern
     /// <remarks>
     /// <para>
     /// The pattern is relative, like every other name this library takes. A pattern that
-    /// begins at a root, or that asks to climb above one, is refused rather than resolved:
-    /// there is nothing above the directory a handle grants, and a pattern that reached there
-    /// would be asking for authority nobody handed out.
+    /// is rooted under the path syntax it is divided by, or that asks to climb above one, is
+    /// refused rather than resolved: there is nothing above the directory a handle grants,
+    /// and a pattern that reached there would be asking for authority nobody handed out.
+    /// Under Windows rules every rooted form counts — <c>C:\logs\*</c>, the drive-relative
+    /// <c>C:logs</c>, <c>\\server\share\*</c> and <c>\\?\C:\x</c> as well as a leading
+    /// separator.
     /// </para>
     /// <para>
     /// The pattern is divided into levels by the running machine's rules, since there is no
@@ -139,7 +142,7 @@ public sealed class GlobPattern
     /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="pattern"/> is null.</exception>
     /// <exception cref="ArgumentException">
-    /// The pattern names no level, begins at a root, or contains a piece that climbs.
+    /// The pattern names no level, is rooted, or contains a piece that climbs.
     /// </exception>
     public static GlobPattern Parse(string pattern, bool ignoreCase = false) =>
         Parse(pattern, ignoreCase, CapPath.HostSyntax);

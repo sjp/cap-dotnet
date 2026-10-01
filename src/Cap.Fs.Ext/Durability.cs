@@ -55,6 +55,12 @@ public enum Durability
     /// conservative flash controller is the dominant cost of writing a small file.
     /// </para>
     /// <para>
+    /// <strong>On macOS</strong> both commits are full flushes (<c>F_FULLFSYNC</c>), carried
+    /// through the drive's own cache, so the name is as durable as the contents. A volume
+    /// that refuses the full flush, as some network and FUSE filesystems do, gets plain
+    /// <c>fsync</c> for both, which hands the write to the drive and no further.
+    /// </para>
+    /// <para>
     /// <strong>Windows cannot commit a directory</strong> for a process that does not hold
     /// volume-level privilege, and asking here does not fail there — it does what
     /// <see cref="File"/> does. Refusing instead would make the safe default unusable on that
