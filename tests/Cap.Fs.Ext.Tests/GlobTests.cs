@@ -437,6 +437,107 @@ public sealed class GlobTests : IDisposable
     }
 
     /// <summary>The names a pattern matches in the scratch tree.</summary>
+    /// <summary>
+    /// A pattern with more pieces than a live set can keep as bits matches what the same
+    /// pattern with fewer pieces matches.
+    /// </summary>
+    /// <remarks>
+    /// Up to 64 pieces a live set is kept as one bit per piece, and beyond that it is built as
+    /// a list instead, so the boundary is tested on both sides. A run of crossing pieces
+    /// means what one crossing piece means.
+    /// </remarks>
+    [Theory]
+    [InlineData(63)]
+    [InlineData(64)]
+    [InlineData(100)]
+    public void A_pattern_with_many_pieces_matches_as_a_short_one_does(int crossings)
+    {
+        string pattern = string.Concat(Enumerable.Repeat("**" + Path.DirectorySeparatorChar, crossings)) + "*.txt";
+
+        Assert.Equal(Matches(Path.Combine("**", "*.txt")).Order(), Matches(pattern).Order());
+    }
+
+    /// <summary>One parsed pattern drives many searches on many threads at once.</summary>
+    /// <remarks>
+    /// A pattern keeps the live sets its searches find, so that each is one shared array; the
+    /// searches are run together so that two of them can find a new set at the same moment.
+    /// </remarks>
+    [Fact]
+    public void A_parsed_pattern_drives_concurrent_searches()
+    {
+        string[] expected = [.. Matches(Path.Combine("**", "b", "*.txt")).Order()];
+        Assert.Equal(["three.txt"], expected);
+
+        GlobPattern pattern = GlobPattern.Parse(Path.Combine("**", "b", "*.txt"));
+        string[][] found = new string[16][];
+
+        Parallel.For(0, found.Length, i => found[i] = [.. Names(pattern).Order()]);
+
+        Assert.All(found, names => Assert.Equal(expected, names));
+    }
+
+    /// <summary>
+    /// A search under a crossing piece costs nothing per name beyond what walking the same
+    /// tree costs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The walk itself allocates per name — the name is a string the directory read
+    /// produced — so the search is measured against a walk of the same tree rather than
+    /// against zero. Matching a name against the live pieces, and working out the pieces live
+    /// beneath it, must add nothing that grows with the tree: the set inside a directory is
+    /// almost always the set it was read with, and any other is one the pattern has kept.
+    /// </para>
+    /// <para>
+    /// The search yields fewer entries than the walk, so it is held to at most what the walk
+    /// cost plus a little for the pattern's own one-time work.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void A_search_under_a_crossing_piece_allocates_nothing_per_name()
+    {
+        for (int d = 0; d < 10; d++)
+        {
+            for (int f = 0; f < 100; f++)
+            {
+                Make("many", $"d{d}", $"f{f}{(f % 2 == 0 ? ".txt" : ".md")}");
+            }
+        }
+
+        using Dir many = _tree.Directory.OpenDir("many");
+        GlobPattern pattern = GlobPattern.Parse(Path.Combine("**", "*.txt"));
+
+        // Warm both paths, so that what is measured is the search and the walk rather than
+        // the once-per-process work of getting to them.
+        Assert.Equal(500, Drain(many.Glob(pattern)));
+        Assert.Equal(1010, Drain(many.Walk()));
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        _ = Drain(many.Walk());
+        long walked = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        _ = Drain(many.Glob(pattern));
+        long searched = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(
+            searched <= walked + 4096,
+            $"Searching 1010 names for '**/*.txt' allocated {searched} bytes, and walking the " +
+            $"same tree {walked}. The search is supposed to add nothing per name.");
+    }
+
+    /// <summary>Runs a search or a walk to its end, answering how many entries it yielded.</summary>
+    private static int Drain(IEnumerable<WalkEntry> entries)
+    {
+        int count = 0;
+        foreach (WalkEntry entry in entries)
+        {
+            count++;
+        }
+
+        return count;
+    }
+
     private string[] Matches(string pattern) => Names(GlobPattern.Parse(pattern));
 
     /// <summary>The names a parsed pattern matches in the scratch tree.</summary>

@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using System.Numerics;
 
 namespace Cap.Fs.Ext;
 
@@ -60,15 +61,51 @@ public sealed class GlobPattern
     /// <summary>The piece that matches any number of levels.</summary>
     private const string Crossing = "**";
 
+    /// <summary>
+    /// The most pieces a pattern may have for its live sets to be kept as one bit per piece.
+    /// </summary>
+    private const int MaskedPieces = 64;
+
     private readonly string[] _segments;
     private readonly bool _ignoreCase;
     private readonly string _text;
+
+    /// <summary>
+    /// For each piece, the live set it brings with it: itself, and whatever a crossing piece
+    /// lets start after it. Null when the pattern has too many pieces to keep a set as bits.
+    /// </summary>
+    private readonly ulong[]? _closures;
+
+    /// <summary>
+    /// Every live set a search has produced so far, so that each is one shared array however
+    /// many directories it is live in.
+    /// </summary>
+    /// <remarks>
+    /// Filled as searches find new sets rather than worked out when the pattern is parsed:
+    /// which sets can occur depends on the names a tree holds, and the sets a pattern could
+    /// produce in principle grow with every piece. A search finds only a handful, and finds
+    /// each one once.
+    /// </remarks>
+    private readonly Dictionary<ulong, int[]>? _interned;
+    private readonly Lock _gate = new();
 
     private GlobPattern(string[] segments, bool ignoreCase, string text)
     {
         _segments = segments;
         _ignoreCase = ignoreCase;
         _text = text;
+
+        if (segments.Length <= MaskedPieces)
+        {
+            _closures = new ulong[segments.Length];
+            for (int i = segments.Length - 1; i >= 0; i--)
+            {
+                _closures[i] = (1UL << i) |
+                    (segments[i] == Crossing && i + 1 < segments.Length ? _closures[i + 1] : 0);
+            }
+
+            _interned = [];
+        }
     }
 
     /// <summary>
@@ -185,6 +222,11 @@ public sealed class GlobPattern
     /// </remarks>
     internal int[] Start()
     {
+        if (_closures is not null)
+        {
+            return Interned(_closures[0]);
+        }
+
         List<int> states = [];
         Extend(0, states);
         return [.. states];
@@ -195,13 +237,99 @@ public sealed class GlobPattern
     /// </summary>
     /// <param name="states">The pieces live in the directory the name was read from.</param>
     /// <param name="name">The name.</param>
+    /// <param name="mayEnter">
+    /// Whether the search could enter the name at all. When it could not — a file, or a link
+    /// the search is not following — the pieces beneath it are not worked out.
+    /// </param>
     /// <param name="matched">Whether the name is one the whole pattern describes.</param>
     /// <returns>
     /// The pieces that would be live inside this name, or null when nothing the pattern could
     /// still match lies beneath it — which is how a walk driven by a pattern avoids entering
-    /// most of a tree.
+    /// most of a tree. Never a new array once a search has settled: a set equal to
+    /// <paramref name="states"/> is that same array, and any other is one this pattern has
+    /// produced before, so a search allocates nothing per name.
     /// </returns>
-    internal int[]? Step(ReadOnlySpan<int> states, string name, out bool matched)
+    internal int[]? Step(int[] states, string name, bool mayEnter, out bool matched)
+    {
+        if (_closures is null)
+        {
+            return StepUnmasked(states, name, mayEnter, out matched);
+        }
+
+        matched = false;
+        int last = _segments.Length - 1;
+        ulong parent = 0;
+        ulong children = 0;
+
+        foreach (int state in states)
+        {
+            parent |= 1UL << state;
+
+            if (_segments[state] == Crossing)
+            {
+                // A crossing piece matches this name whatever it is, and stays live inside it.
+                // The piece after it is already live here, because it was added when this one
+                // was, so there is nothing else to do for it.
+                matched |= state == last;
+                children |= _closures[state];
+                continue;
+            }
+
+            if ((state < last && !mayEnter) ||
+                !Matches(_segments[state].AsSpan(), name.AsSpan(), _ignoreCase))
+            {
+                continue;
+            }
+
+            if (state == last)
+            {
+                matched = true;
+            }
+            else
+            {
+                children |= _closures[state + 1];
+            }
+        }
+
+        if (!mayEnter || children == 0)
+        {
+            return null;
+        }
+
+        // Under a crossing piece the set inside a directory is almost always the set it was
+        // read with, so that case is answered without looking anything up.
+        return children == parent ? states : Interned(children);
+    }
+
+    /// <summary>
+    /// The one array this pattern keeps for a live set, made the first time the set is seen.
+    /// </summary>
+    private int[] Interned(ulong set)
+    {
+        lock (_gate)
+        {
+            if (_interned!.TryGetValue(set, out int[]? states))
+            {
+                return states;
+            }
+
+            states = new int[ulong.PopCount(set)];
+            int next = 0;
+            for (ulong rest = set; rest != 0; rest &= rest - 1)
+            {
+                states[next++] = BitOperations.TrailingZeroCount(rest);
+            }
+
+            _interned.Add(set, states);
+            return states;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Step"/> for a pattern with more pieces than a set can keep as bits, which
+    /// builds each set afresh.
+    /// </summary>
+    private int[]? StepUnmasked(int[] states, string name, bool mayEnter, out bool matched)
     {
         matched = false;
         int last = _segments.Length - 1;
@@ -211,15 +339,17 @@ public sealed class GlobPattern
         {
             if (_segments[state] == Crossing)
             {
-                // A crossing piece matches this name whatever it is, and stays live inside it.
-                // The piece after it is already live here, because it was added when this one
-                // was, so there is nothing else to do for it.
                 matched |= state == last;
-                Extend(state, children ??= []);
+                if (mayEnter)
+                {
+                    Extend(state, children ??= []);
+                }
+
                 continue;
             }
 
-            if (!Matches(_segments[state].AsSpan(), name.AsSpan(), _ignoreCase))
+            if ((state < last && !mayEnter) ||
+                !Matches(_segments[state].AsSpan(), name.AsSpan(), _ignoreCase))
             {
                 continue;
             }

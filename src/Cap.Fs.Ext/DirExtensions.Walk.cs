@@ -197,7 +197,8 @@ public static partial class DirExtensions
                     continue;
                 }
 
-                int[]? beneath = pattern.Step(level.States, entry.Name, out bool matched);
+                int[]? beneath = pattern.Step(
+                    level.States!, entry.Name, descent.MayDescend(entry.Type), out bool matched);
 
                 if (matched)
                 {
@@ -259,7 +260,8 @@ public static partial class DirExtensions
                     continue;
                 }
 
-                int[]? beneath = pattern.Step(level.States, entry.Name, out bool matched);
+                int[]? beneath = pattern.Step(
+                    level.States!, entry.Name, descent.MayDescend(entry.Type), out bool matched);
 
                 if (matched)
                 {
@@ -458,7 +460,7 @@ public static partial class DirExtensions
         /// the filesystem declined to classify is a candidate because it might be a directory,
         /// and the cost of being wrong is one refused open.
         /// </remarks>
-        private bool MayDescend(CapFileType type) => type switch
+        public bool MayDescend(CapFileType type) => type switch
         {
             CapFileType.Directory or CapFileType.Unknown => true,
             CapFileType.Symlink => _options.FollowSymlinks,

@@ -142,6 +142,88 @@ public class WalkTree
         files == Files ? files : throw new InvalidOperationException($"Walked {files} files, expected {Files}.");
 }
 
+/// <summary>Find the text files in a tree of fifty thousand files, counting them.</summary>
+/// <remarks>
+/// <para>
+/// The tree <see cref="WalkTree"/> walks, with half of each directory's files named
+/// <c>*.txt</c> and half <c>*.md</c>, searched for <c>**/*.txt</c>. The cap-dotnet side
+/// matches each name against the pattern as the walk reads it; the baseline is
+/// <see cref="Directory.EnumerateFiles(string, string, SearchOption)"/> with the same
+/// filter, which composes a path for each match.
+/// </para>
+/// <para>
+/// Set against <see cref="WalkTree"/>, the Allocated column is the price of the pattern: it
+/// should be the walk's figure less the paths of the names the search does not yield, and
+/// grow with nothing else.
+/// </para>
+/// </remarks>
+[MemoryDiagnoser]
+public class GlobTree
+{
+    private const int Branches = 10;
+    private const int FilesPerDirectory = 500;
+    private const int Matches = Branches * Branches * FilesPerDirectory / 2;
+    private Fixture _fixture = null!;
+    private string _ambientPath = null!;
+    private Dir _tree = null!;
+    private GlobPattern _pattern = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _fixture = Fixture.Create();
+        for (int outer = 0; outer < Branches; outer++)
+        {
+            for (int inner = 0; inner < Branches; inner++)
+            {
+                _fixture.CreateEmptyFiles($"tree/d{outer}/d{inner}", FilesPerDirectory / 2, ".txt");
+                _fixture.CreateEmptyFiles($"tree/d{outer}/d{inner}", FilesPerDirectory / 2, ".md");
+            }
+        }
+
+        _ambientPath = _fixture.Combine("tree");
+        _tree = _fixture.Root.OpenDir("tree");
+        _pattern = GlobPattern.Parse("**/*.txt");
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _tree.Dispose();
+        _fixture.Dispose();
+    }
+
+    [Benchmark(Baseline = true)]
+    public int SystemIO()
+    {
+        int files = 0;
+        foreach (string _ in Directory.EnumerateFiles(_ambientPath, "*.txt", SearchOption.AllDirectories))
+        {
+            files++;
+        }
+
+        return Checked(files);
+    }
+
+    [Benchmark]
+    public int CapDotnet()
+    {
+        int files = 0;
+        foreach (WalkEntry entry in _tree.Glob(_pattern))
+        {
+            if (entry.Type == CapFileType.File)
+            {
+                files++;
+            }
+        }
+
+        return Checked(files);
+    }
+
+    private static int Checked(int files) =>
+        files == Matches ? files : throw new InvalidOperationException($"Found {files} files, expected {Matches}.");
+}
+
 /// <summary>Create ten thousand empty files and delete them again, reported per file.</summary>
 /// <remarks>
 /// The baseline opens with <see cref="File.OpenHandle"/> rather than <see cref="File.Create(string)"/>.

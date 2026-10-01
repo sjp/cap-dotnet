@@ -70,6 +70,7 @@ Ratio column the price in garbage.
 | `StatFile` | When a file last changed | `File.GetLastWriteTimeUtc` | ✓ |
 | `EnumerateDirectory` | List a directory of 100,000 entries | `Directory.EnumerateFiles` | |
 | `WalkTree` | Walk a tree of 50,000 files, 100 directories two levels deep | `Directory.EnumerateFiles(…, AllDirectories)` | |
+| `GlobTree` | Find the 25,000 `*.txt` files in the same tree with `**/*.txt` | `Directory.EnumerateFiles(…, "*.txt", AllDirectories)` | |
 | `CreateDeleteFiles` | Create an empty file and delete it, 10,000 times, reported per file | `File.OpenHandle` / `File.Delete` | |
 | `CapPathBenchmarks` | Parse and validate a path | none — see below | ✓ |
 
@@ -94,6 +95,7 @@ workflow on 2026-09-30. The tables are BenchmarkDotNet's GitHub-flavoured report
 uploaded them, with the `EnvironmentVariables` column dropped since the Job column already names
 the backend. On Linux every filesystem class has one group of rows per job, `openat2` and `walk`;
 Windows and macOS each have a single job, so their tables have no Job column.
+`GlobTree` was added after that run and has no table until they are next refreshed.
 
 A Ratio is only comparable with another from the same run, and on Windows and macOS even that is
 loose: see [the regression gate](#the-regression-gate) for how far their runners move on unchanged

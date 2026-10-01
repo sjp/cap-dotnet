@@ -51,19 +51,20 @@ internal sealed class Fixture : IDisposable
     }
 
     /// <summary>
-    /// Fills <paramref name="relative"/> with <paramref name="count"/> empty files.
+    /// Fills <paramref name="relative"/> with <paramref name="count"/> empty files, each name
+    /// ending in <paramref name="extension"/>.
     /// </summary>
     /// <remarks>
     /// Empty because enumeration reads names, not contents, and so that a tree of this size is
     /// quick to build and to remove before every run.
     /// </remarks>
-    public void CreateEmptyFiles(string relative, int count)
+    public void CreateEmptyFiles(string relative, int count, string extension = "")
     {
         string directory = Combine(relative);
         Directory.CreateDirectory(directory);
         for (int i = 0; i < count; i++)
         {
-            File.OpenHandle(System.IO.Path.Join(directory, $"f{i:D6}"), FileMode.CreateNew, FileAccess.Write).Dispose();
+            File.OpenHandle(System.IO.Path.Join(directory, $"f{i:D6}{extension}"), FileMode.CreateNew, FileAccess.Write).Dispose();
         }
     }
 
