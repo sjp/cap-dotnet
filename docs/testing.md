@@ -340,3 +340,11 @@ Continuous integration sets it on every leg for what its runner provides, and on
 the `filesystems` job for what that volume holds; only the vfat leg, which exists to show that a
 volume without links refuses to make one, leaves the links out. It is read by the tests in
 `tests/Shared/HostFeatures.cs`, which every test assembly compiles.
+
+One Windows case is about Developer Mode rather than a feature of the volume. Without the
+privilege to create symbolic links, the platform's own API still makes one in Developer Mode,
+and the backend, which writes the link data itself, has to make one wherever that API does.
+`CAPDOTNET_EXPECT_DEVELOPER_MODE=1` says the host is in Developer Mode, so that the case fails
+rather than deciding nothing when the API refuses. The Windows leg turns Developer Mode on after
+its full run and runs that case alone again, since with it on the case that checks the refusal
+without the privilege has nothing to observe.

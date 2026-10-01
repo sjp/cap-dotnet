@@ -198,6 +198,26 @@ jobs:
           dotnet test CapDotnet.slnx --configuration Release --no-build
           -- --coverage --coverage-output-format cobertura
 
+      # ---------------------------------------------------------------------------------
+      # The documentation promises symbolic links to accounts in Developer Mode, which the
+      # platform's own API grants with a flag this backend has no way to pass: it writes the
+      # link data itself. So the comparison with that API is run again with Developer Mode on,
+      # where the API makes the link without the privilege and the backend has to as well.
+      # After the full suite rather than before it, because with Developer Mode on the case that
+      # takes the privilege away has no refusal left to observe, and would stand aside.
+      # ---------------------------------------------------------------------------------
+      - name: Compare link creation with the platform's in Developer Mode
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && runner.os == 'Windows' && !matrix.passes_only }}
+        shell: pwsh
+        env:
+          CAPDOTNET_EXPECT_DEVELOPER_MODE: '1'
+        run: |
+          reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet test tests/Cap.Primitives.Tests/Cap.Primitives.Tests.csproj --configuration Release --no-build `
+            -- --filter-method '*Links_can_be_made_here_wherever_the_platform_makes_them*'
+          exit $LASTEXITCODE
+
       - name: Run the samples
         if: ${{ !cancelled() && steps.build.outcome == 'success' && !matrix.passes_only }}
         shell: bash

@@ -734,6 +734,87 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     }
 
     /// <summary>
+    /// Without the privilege, a symbolic link can be made here wherever the platform's own
+    /// API makes one, and is refused as a permission failure wherever it refuses.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The platform's API asks for the link with a flag that lets an account in Developer
+    /// Mode create it without the privilege. This backend does not go through that API: it
+    /// creates the object itself and writes the link data with <c>FSCTL_SET_REPARSE_POINT</c>,
+    /// which carries no such request. The documentation promises links to Developer-Mode
+    /// accounts all the same, and this is the case that holds it to that.
+    /// </para>
+    /// <para>
+    /// The privilege is taken away as in the case above, since the build agents run
+    /// elevated, and the framework's <see cref="Directory.CreateSymbolicLink"/>, which passes
+    /// the flag, is asked first as the oracle. Outside Developer Mode both refuse; in it the
+    /// oracle succeeds and so must the backend. A host that is supposed to be in Developer
+    /// Mode says so with <c>CAPDOTNET_EXPECT_DEVELOPER_MODE</c>, and there an oracle that
+    /// refuses is a broken harness rather than an answer, since the comparison would decide
+    /// nothing.
+    /// </para>
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Links_can_be_made_here_wherever_the_platform_makes_them(bool targetIsDirectory)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("These are Windows's own resolution rules.");
+            return;
+        }
+
+        const string Contents = "read through a link";
+        Directory.CreateDirectory(Path.Join(Sandbox, "deeper"));
+        File.WriteAllText(Path.Join(Sandbox, "deeper", "marker"), Contents);
+        File.WriteAllText(Path.Join(Sandbox, "file.txt"), Contents);
+        string target = targetIsDirectory ? "deeper" : "file.txt";
+
+        using SafeDirHandle root = OpenSandbox();
+
+        bool platformMadeOne;
+        CapError error;
+        using (WithoutSymbolicLinkPrivilege())
+        {
+            platformMadeOne = targetIsDirectory
+                ? TryCreateDirectoryLink(Path.Join(Sandbox, "probe"), target)
+                : TryCreateFileLink(Path.Join(Sandbox, "probe"), target);
+            error = PlatformOps.Host.CreateChildSymbolicLink(root, "link", target, targetIsDirectory);
+        }
+
+        Assert.False(
+            !platformMadeOne && Environment.GetEnvironmentVariable("CAPDOTNET_EXPECT_DEVELOPER_MODE") == "1",
+            "the platform refused a link without the privilege, but this host was set up in Developer " +
+            "Mode. The comparison cannot be made as configured.");
+
+        if (!platformMadeOne)
+        {
+            Assert.Equal(CapErrorCategory.PermissionDenied, error.Category);
+            Assert.Equal(Win32Errors.ERROR_PRIVILEGE_NOT_HELD, error.RawCode);
+            Assert.False(Path.Exists(Path.Join(Sandbox, "link")), "the stub made to hold the link was left behind.");
+            return;
+        }
+
+        Assert.True(
+            error.IsSuccess,
+            $"the platform made a link without the privilege and this backend did not: {error.FailureDescription}");
+
+        string link = Path.Join(Sandbox, "link");
+        string throughLink = targetIsDirectory ? @"link\marker" : "link";
+        Assert.Equal(Contents, File.ReadAllText(Path.Join(Sandbox, throughLink)));
+        Assert.Equal(target, targetIsDirectory ? new DirectoryInfo(link).LinkTarget : new FileInfo(link).LinkTarget);
+
+        FileOpenRequest read = new(FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0);
+        CapResult<SafeFileHandle> opened = PortableResolver.OpenFile(
+            root, Parse(throughLink), in read, ConfinedResolveOptions.None);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using SafeFileHandle file = opened.Value!;
+        Assert.Equal(Contents, System.Text.Encoding.UTF8.GetString(ReadAll(file)));
+    }
+
+    /// <summary>
     /// Makes the calling thread act under a copy of the process token that does not hold the
     /// privilege to create symbolic links, until the result is disposed.
     /// </summary>
