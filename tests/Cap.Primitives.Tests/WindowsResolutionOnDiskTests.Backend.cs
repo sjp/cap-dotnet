@@ -350,6 +350,62 @@ public sealed partial class WindowsResolutionOnDiskTests
         }
     }
 
+    /// <summary>
+    /// Removing a directory by a name that holds a link is refused as not a directory whatever
+    /// kind the link was made as, and the link is then removed as a file, leaving its target.
+    /// </summary>
+    /// <remarks>
+    /// The file kind is the case that needs saying. Asked for a directory, the open of a
+    /// file-kind link is refused before the link is visible, and the walk explains that
+    /// refusal as the link so it can follow it; a removal ends at the name, so it reports what
+    /// Unix reports for every link there, and a caller that falls back to removing a file on
+    /// that answer does so on every platform.
+    /// </remarks>
+    [Theory]
+    [InlineData("junction")]
+    [InlineData("directory link")]
+    [InlineData("file link")]
+    public void Removing_a_link_as_a_directory_is_refused_as_not_a_directory(string kind)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The kinds of link are Windows ones.");
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        string link = Path.Join(Sandbox, "link");
+        string target = Path.Join(Sandbox, "target");
+        if (kind == "file link")
+        {
+            File.WriteAllText(target, "x");
+        }
+        else
+        {
+            Directory.CreateDirectory(target);
+        }
+
+        if (kind == "junction")
+        {
+            CreateJunction(link, target);
+        }
+        else if (!(kind == "file link" ? TryCreateFileLink(link, target) : TryCreateDirectoryLink(link, target)))
+        {
+            Assert.Skip("This host will not create symbolic links for this process.");
+        }
+
+        using SafeDirHandle root = OpenSandbox();
+
+        CapError refused = PlatformOps.Host.RemoveChildDirectory(root, "link");
+        Assert.Equal(CapErrorCategory.NotADirectory, refused.Category);
+        Assert.Equal(FileAttributes.ReparsePoint, File.GetAttributes(link) & FileAttributes.ReparsePoint);
+
+        CapError removed = PlatformOps.Host.RemoveChildFile(root, "link");
+        Assert.True(removed.IsSuccess, removed.FailureDescription);
+        Assert.False(Path.Exists(link));
+        Assert.True(Path.Exists(target));
+    }
+
     // --- aliases, times and appending ----------------------------------------------------------
 
     /// <summary>

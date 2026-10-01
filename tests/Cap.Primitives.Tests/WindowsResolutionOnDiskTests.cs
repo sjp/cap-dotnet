@@ -1036,6 +1036,27 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     }
 
     /// <summary>
+    /// Creates a file symbolic link, reporting whether the host allowed it rather than
+    /// throwing.
+    /// </summary>
+    private static bool TryCreateFileLink(string link, string target)
+    {
+        try
+        {
+            File.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// The short name the volume generated for a path's last component, or
     /// <see langword="null"/> when it has none.
     /// </summary>

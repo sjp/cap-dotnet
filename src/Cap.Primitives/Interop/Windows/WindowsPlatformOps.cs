@@ -1290,6 +1290,9 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// point at a directory is still a link, and removing it is removing a name rather than
     /// removing a directory. A directory whose reparse point only says which filter serves it
     /// — a cloud placeholder, a projected directory — is a directory, and is removed as one.
+    /// A link made as the file kind is refused by the open itself, before it is seen to be a
+    /// link, and that refusal is kept rather than explained the way a walk explains it: this
+    /// ends at the name, so either kind of link is reported as not a directory, as on Unix.
     /// Emptiness is left to the filesystem to enforce, because only the filesystem can decide
     /// it without a window in which something is added.
     /// </remarks>
@@ -1301,7 +1304,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             NtConstants.DELETE | NtConstants.FILE_READ_ATTRIBUTES | NtConstants.SYNCHRONIZE,
             NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT |
             NtConstants.FILE_OPEN_REPARSE_POINT,
-            out nint raw);
+            out nint raw,
+            explainLinks: false);
 
         if (error.IsFailure)
         {
@@ -1623,7 +1627,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <remarks>
     /// <para>
     /// The creating twin of
-    /// <see cref="OpenRelative(SafeDirHandle, ReadOnlySpan{char}, uint, uint, out nint)"/>, with
+    /// <see cref="OpenRelative(SafeDirHandle, ReadOnlySpan{char}, uint, uint, out nint, bool)"/>, with
     /// the same counted name and the same directory handle as the resolution root, and the
     /// same refusal of anything that
     /// is not a filesystem object. It does not ask whether the name reached its object
@@ -2271,18 +2275,28 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// Opens a name as an entry of an already-open directory.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The name is passed as a counted string with the directory handle as the resolution
     /// root, which is what confines the open to that directory. A name that begins with a
     /// separator would be read as a path from the object manager's own root instead; the
     /// path parser refuses those long before they arrive here, and this refuses them again
     /// because a single missed case would be an escape rather than a bug.
+    /// </para>
+    /// <para>
+    /// An open that asks for the reparse point and is refused for asking the wrong kind of a
+    /// link is reported as the link, as <see cref="ExplainKindMismatch"/> describes. That is
+    /// the answer a walk needs, since it goes on to follow the link. An operation that ends at
+    /// the name passes <see langword="false"/> for <c>explainLinks</c> and gets the refusal as
+    /// the filesystem gave it.
+    /// </para>
     /// </remarks>
     private static CapError OpenRelative(
         SafeDirHandle parent,
         ReadOnlySpan<char> name,
         uint desiredAccess,
         uint openOptions,
-        out nint handle)
+        out nint handle,
+        bool explainLinks = true)
     {
         handle = 0;
 
@@ -2298,7 +2312,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
             return HandleLease.ClosedError;
         }
 
-        return OpenRelative(lease.Raw, name, desiredAccess, openOptions, out handle);
+        return OpenRelative(lease.Raw, name, desiredAccess, openOptions, out handle, explainLinks);
     }
 
     /// <summary>
@@ -2326,7 +2340,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         ReadOnlySpan<char> name,
         uint desiredAccess,
         uint openOptions,
-        out nint handle)
+        out nint handle,
+        bool explainLinks = true)
     {
         handle = 0;
 
@@ -2367,7 +2382,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
             if (NtStatusCodes.IsFailure(result))
             {
-                return (openOptions & NtConstants.FILE_OPEN_REPARSE_POINT) != 0
+                return explainLinks && (openOptions & NtConstants.FILE_OPEN_REPARSE_POINT) != 0
                     ? ExplainKindMismatch(parent, name, result)
                     : NtStatusCodes.ToError(result);
             }
