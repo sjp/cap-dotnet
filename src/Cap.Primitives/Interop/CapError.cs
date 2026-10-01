@@ -71,7 +71,7 @@ internal readonly struct CapError : IEquatable<CapError>
     /// Classification lives with the platform, not here. The obvious-looking alternative — a
     /// single errno table — is wrong: only the first thirty-odd values are common POSIX, and
     /// above those Linux and macOS disagree outright. <c>EAGAIN</c> is 11 on Linux and 35 on
-    /// macOS, where 35 is <c>EDEADLK</c>; a shared table would read a deadlock report as the
+    /// macOS, where 11 is <c>EDEADLK</c>; a shared table would read a deadlock report as the
     /// retry signal that confined resolution depends on.
     /// </remarks>
     public static CapError Create(CapErrorCategory category, CapErrorSource source, int rawCode) =>

@@ -13,7 +13,8 @@ public sealed class PlatformErrorTests
 {
     /// <summary>
     /// The retry signal a confined open depends on is a different number on each Unix, and
-    /// each number means something else on the other platform.
+    /// each number means something else on the other platform. Only Linux reads it as a race:
+    /// macOS has no confined open, so its <c>EAGAIN</c> is never a lost resolution.
     /// </summary>
     /// <remarks>
     /// This is the case that would be silently wrong if the two tables were merged. Reading
@@ -27,7 +28,7 @@ public sealed class PlatformErrorTests
         Assert.Equal(35, DarwinErrno.EAGAIN);
 
         Assert.Equal(CapErrorCategory.Raced, LinuxErrno.Classify(LinuxErrno.EAGAIN));
-        Assert.Equal(CapErrorCategory.Raced, DarwinErrno.Classify(DarwinErrno.EAGAIN));
+        Assert.Equal(CapErrorCategory.Unknown, DarwinErrno.Classify(DarwinErrno.EAGAIN));
 
         // Each platform's number, read by the other's table, is not the retry signal.
         Assert.NotEqual(CapErrorCategory.Raced, DarwinErrno.Classify(LinuxErrno.EAGAIN));

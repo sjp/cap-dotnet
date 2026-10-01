@@ -14,7 +14,9 @@ internal static class DarwinErrno
 {
     /// <summary>
     /// Resource temporarily unavailable. 35 here, where Linux has 11 — and 11 on macOS is
-    /// <c>EDEADLK</c>.
+    /// <c>EDEADLK</c>. Never a resolution race here — there is no confined open, so nothing
+    /// to retry — only a full non-blocking pipe, a locked terminal or exhausted resources,
+    /// so it reads as unknown rather than <see cref="CapErrorCategory.Raced"/>.
     /// </summary>
     public const int EAGAIN = 35;
 
@@ -49,7 +51,6 @@ internal static class DarwinErrno
 
         return errno switch
         {
-            EAGAIN => CapErrorCategory.Raced,
             ELOOP => CapErrorCategory.SymbolicLinkLoop,
             ENAMETOOLONG => CapErrorCategory.NameTooLong,
             ENOSYS or ENOTSUP or EOPNOTSUPP => CapErrorCategory.NotSupported,
