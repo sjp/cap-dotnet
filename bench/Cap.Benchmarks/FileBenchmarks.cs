@@ -74,6 +74,45 @@ public class OpenReadFiveComponents
     public byte[] CapDotnet() => _fixture.Root.ReadAllBytes(Name);
 }
 
+/// <summary>Open and read a small UTF-8 text file named by one component.</summary>
+/// <remarks>
+/// <para>
+/// The baseline builds a stream and a reader with buffers of their own; the cap-dotnet side
+/// reads the file into one exact-size array, as <see cref="OpenReadSingleComponent"/> does, and
+/// decodes that, so the row should show it allocating little more than the bytes and the string.
+/// </para>
+/// <para>
+/// The regression gate holds this class to its allocation only. The open and the read are the
+/// same syscalls <see cref="OpenReadSingleComponent"/> already times, so the time ratio here
+/// would add a noisier copy of that figure and nothing about the decoding worth gating.
+/// </para>
+/// </remarks>
+[MemoryDiagnoser]
+[BenchmarkCategory(Categories.HotPath, Categories.AllocationOnly)]
+public class ReadTextSingleComponent
+{
+    private const string Name = "small.txt";
+    private Fixture _fixture = null!;
+    private string _ambientPath = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _fixture = Fixture.Create();
+        _ambientPath = _fixture.Combine(Name);
+        File.WriteAllText(_ambientPath, string.Concat(Enumerable.Repeat("{\"key\": \"välue\"}\n", 200)));
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _fixture.Dispose();
+
+    [Benchmark(Baseline = true)]
+    public string SystemIO() => File.ReadAllText(_ambientPath);
+
+    [Benchmark]
+    public string CapDotnet() => _fixture.Root.ReadAllText(Name);
+}
+
 /// <summary>Read 4 KiB at an offset from a file that is already open.</summary>
 /// <remarks>
 /// Nothing is resolved here -- both sides hold an open handle -- so this row measures only

@@ -65,6 +65,7 @@ Ratio column the price in garbage.
 |---|---|---|:---:|
 | `OpenReadSingleComponent` | Open and read a 4 KiB file named by one component | `File.ReadAllBytes` | ✓ |
 | `OpenReadFiveComponents` | The same, five components down | `File.ReadAllBytes` | ✓ |
+| `ReadTextSingleComponent` | Open and read a 4 KB UTF-8 text file named by one component | `File.ReadAllText` | ✓ |
 | `PositionalRead` | Read 4 KiB at an offset from an open file | `RandomAccess.Read` on a raw handle | ✓ |
 | `StatFile` | When a file last changed | `File.GetLastWriteTimeUtc` | ✓ |
 | `EnumerateDirectory` | List a directory of 100,000 entries | `Directory.EnumerateFiles` | |
@@ -492,6 +493,12 @@ component against several. That moves by a fifth between hosted runners on uncha
 while holding to under 1% within a single run, so it measures the runner rather than the
 library. The ratio is still reported. A class opts into this with the `AllocationOnly`
 benchmark category, as the parser does.
+
+**`ReadTextSingleComponent` is gated on allocation only.** Its open and read are the same
+syscalls `OpenReadSingleComponent` already times, so its ratio would be a noisier copy of that
+figure. What it adds is the decoding, and the decoding shows in the Allocated column: the bytes
+and the string, with no stream or reader buffers. It is not gated until a baseline holds its row;
+until then the gate reports it as "not gated: no baseline".
 
 **Windows and macOS are gated on allocation only.** Their time ratios are reported but not held
 to the tolerance, because the hosted runners move them too far on unchanged code. A Windows

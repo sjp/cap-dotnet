@@ -595,8 +595,7 @@ public sealed partial class Dir
     public string ReadAllText(string path)
     {
         using CapFile file = OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead);
-        using StreamReader reader = OpenReader(file);
-        return reader.ReadToEnd();
+        return DecodeText(ReadToEnd(file), Encoding.UTF8);
     }
 
     /// <summary>Reads a whole file beneath this handle as text in a given encoding.</summary>
@@ -629,8 +628,7 @@ public sealed partial class Dir
         ArgumentNullException.ThrowIfNull(encoding);
 
         using CapFile file = OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead);
-        using StreamReader reader = OpenReader(file, encoding);
-        return reader.ReadToEnd();
+        return DecodeText(ReadToEnd(file), encoding);
     }
 
     /// <summary>Reads a whole file beneath this handle as lines of text.</summary>
@@ -1017,8 +1015,7 @@ public sealed partial class Dir
         using CapFile file = OpenFile(
             path, FileMode.Open, FileAccess.Read, FileShare.Read, SequentialRead | FileOptions.Asynchronous);
 
-        using StreamReader reader = OpenReader(file);
-        return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+        return DecodeText(await ReadToEndAsync(file, cancellationToken).ConfigureAwait(false), Encoding.UTF8);
     }
 
     /// <summary>
@@ -1408,12 +1405,12 @@ public sealed partial class Dir
     /// Presents a file as a text reader, giving the stream the handle so that disposing the
     /// reader closes everything.
     /// </summary>
-    private static StreamReader OpenReader(CapFile file, Encoding? encoding = null)
+    private static StreamReader OpenReader(CapFile file, Encoding encoding)
     {
         Stream stream = file.AsStream(leaveOpen: false);
         try
         {
-            return new(stream, encoding ?? Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            return new(stream, encoding, detectEncodingFromByteOrderMarks: true);
         }
         catch
         {
@@ -1421,6 +1418,61 @@ public sealed partial class Dir
             throw;
         }
     }
+
+    /// <summary>
+    /// Decodes a whole file's bytes exactly as a <see cref="StreamReader"/> that detects
+    /// byte-order marks would, without the stream, the reader and their buffers.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The reader looks for <paramref name="encoding"/>'s own preamble first, and when the
+    /// file opens with it, drops it and looks no further. A file shorter than that preamble
+    /// which matches as far as it goes is decoded whole in <paramref name="encoding"/>, mark
+    /// and all, since the reader is still waiting for the rest of the preamble when the file
+    /// ends. Otherwise the marks are tried in the reader's order: UTF-16 big-endian, then
+    /// little-endian unless two zero bytes follow and make it UTF-32, then UTF-8, then UTF-32
+    /// big-endian; a file with none of them is <paramref name="encoding"/> throughout.
+    /// </para>
+    /// <para>
+    /// Decoding the whole array at once gives the same characters the reader's chunked
+    /// decoder does, invalid sequences included, because that decoder carries a partial
+    /// sequence over from one chunk to the next and flushes it at the end.
+    /// </para>
+    /// </remarks>
+    private static string DecodeText(ReadOnlySpan<byte> bytes, Encoding encoding)
+    {
+        ReadOnlySpan<byte> preamble = encoding.Preamble;
+        if (preamble.Length > 0)
+        {
+            int compared = Math.Min(bytes.Length, preamble.Length);
+            if (bytes[..compared].SequenceEqual(preamble[..compared]))
+            {
+                return encoding.GetString(compared == preamble.Length ? bytes[compared..] : bytes);
+            }
+        }
+
+        if (bytes.Length >= 2)
+        {
+            switch (bytes[0], bytes[1])
+            {
+                case (0xFE, 0xFF):
+                    return Encoding.BigEndianUnicode.GetString(bytes[2..]);
+                case (0xFF, 0xFE):
+                    return bytes.Length >= 4 && bytes[2] == 0 && bytes[3] == 0
+                        ? Encoding.UTF32.GetString(bytes[4..])
+                        : Encoding.Unicode.GetString(bytes[2..]);
+                case (0xEF, 0xBB) when bytes.Length >= 3 && bytes[2] == 0xBF:
+                    return Encoding.UTF8.GetString(bytes[3..]);
+                case (0x00, 0x00) when bytes.Length >= 4 && bytes[2] == 0xFE && bytes[3] == 0xFF:
+                    return Utf32BigEndian.GetString(bytes[4..]);
+            }
+        }
+
+        return encoding.GetString(bytes);
+    }
+
+    /// <summary>The UTF-32 big-endian encoding a reader switches to on seeing its mark.</summary>
+    private static readonly UTF32Encoding Utf32BigEndian = new(bigEndian: true, byteOrderMark: true);
 
     /// <summary>
     /// UTF-8 with no byte-order mark, refusing to encode a string that is not valid UTF-16,
