@@ -375,6 +375,16 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<DirectoryReader>.Fail(DarwinErrno.ToError(Marshal.GetLastPInvokeError()));
         }
 
+        // Linux refuses the lookup above once the directory has been removed. This platform
+        // does not: the re-open succeeds and the read finds nothing, so a removed directory
+        // would list as an empty one. What it does refuse is a path for it, since a removed
+        // directory has none, and that refusal is the same answer Linux gives.
+        if (HasBeenRemoved(fd))
+        {
+            new SafeDirHandle(fd, this, CapAccess.Read).Dispose();
+            return CapResult<DirectoryReader>.Fail(DarwinErrno.ToError(PosixErrno.ENOENT));
+        }
+
         nint stream = DarwinNative.FdOpenDir(fd);
         if (stream == 0)
         {
@@ -1208,6 +1218,24 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         }
 
         return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <summary>Whether the directory a descriptor refers to has been removed.</summary>
+    /// <remarks>
+    /// Asked by asking for its path, which a directory still in the tree always has and a
+    /// removed one has not. Only that refusal counts: any other failure, such as a path too
+    /// long for the reply, says nothing about whether the directory is still there, and is
+    /// left for the read to meet or not.
+    /// </remarks>
+    private static unsafe bool HasBeenRemoved(int fd)
+    {
+        // Exactly the size the platform demands, as in GetHandlePath.
+        Span<byte> buffer = stackalloc byte[DarwinConstants.MaxPathBytes];
+        fixed (byte* target = buffer)
+        {
+            return DarwinNative.FcntlBuffer(fd, DarwinConstants.F_GETPATH, target) < 0
+                && Marshal.GetLastPInvokeError() == PosixErrno.ENOENT;
+        }
     }
 
     /// <summary>Removes one name beneath a directory descriptor.</summary>
