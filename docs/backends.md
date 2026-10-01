@@ -166,7 +166,7 @@ semantics:
 | Chain exceeding the budget, or a cycle | Refused as a link loop |
 | Reparse point whose tag stands for another object but is not a filesystem link | Refused, never read as a link |
 | Reparse point whose tag only names the filter serving the entry (a compressed file, a cloud placeholder) | Opened as the file or directory it is, through its filter; never read as a link |
-| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one; then refused as crossing a device, not as an escape. A Windows junction is not this case: it is a reparse point that redirects, and is refused |
+| A second filesystem mounted inside the root | Crossed, unless the caller asked not to cross one; then refused as crossing a device, not as an escape. A Windows junction is not this case: it is a reparse point that redirects, and is refused. Nor is a volume mounted at a folder on Windows: it is a junction whose target is the volume's identifier, so it is refused as an escape like any other junction, and Windows has no counterpart of crossing a mount |
 | Any link at all, where the handle's policy refuses them | Refused as a link, without being read — so which way it pointed is never learned |
 
 The last row is the one caller-visible choice. It is fixed when a sandbox root is opened and

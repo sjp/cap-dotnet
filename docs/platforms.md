@@ -102,8 +102,11 @@ way). The name Windows displays keeps the spelling you passed. A stored `/` in a
 elsewhere is still read as a separator here, although Windows treats that link as dangling.
 Creating either needs the privilege Windows grants to administrators and to
 Developer Mode. Junctions always store an absolute target, so they are always refused on
-the way through, whatever the symbolic-link policy says — but `ReadLink` still reports what one
-holds, since reading a link is not following it, and what comes back is the target the
+the way through, whatever the symbolic-link policy says. A volume mounted at a folder is a
+junction whose target is the volume's identifier (`\??\Volume{GUID}\`), so a mounted volume
+beneath a `Dir` is refused the same way, as an escape, for every path beneath it; there is no
+Windows counterpart of crossing a mount as Linux and macOS do. `ReadLink` still reports what a
+junction holds, since reading a link is not following it, and what comes back is the target the
 filesystem acts on, which for a rooted one is spelled the way the filesystem stores it
 (`\??\C:\...`, or `\??\UNC\server\share\...` for a network path) rather than the way it is
 displayed. A directory-kind link and a junction are directory entries here, so `CreateHardLink` cannot give one a second name, as it can on Unix.
