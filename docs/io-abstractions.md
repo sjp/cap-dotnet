@@ -169,6 +169,9 @@ test is skipped for it. The skips are:
 - copying a file onto a directory with `overwrite: true` does not throw. `System.IO`, and
   `DirFileSystem`, throw `UnauthorizedAccessException`;
 - moving a file onto an existing file throws an `IOException` whose message names no path;
+- creating a directory beneath a file does not throw. `System.IO`, and `DirFileSystem`,
+  throw `DirectoryNotFoundException`;
+- a symbolic link to a target that does not exist cannot be created;
 - `Directory.SetCurrentDirectory` accepts a directory that does not exist;
 - a relative symbolic link target is taken against the current directory rather than the
   directory holding the link;

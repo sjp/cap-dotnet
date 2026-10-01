@@ -169,7 +169,52 @@ public abstract class FileSystemBehaviourTests : IDisposable
     {
         Fs.File.WriteAllText(P("a"), "file");
 
-        Assert.ThrowsAny<IOException>(() => Fs.Directory.CreateDirectory(P("a")));
+        IOException ex = Assert.ThrowsAny<IOException>(() => Fs.Directory.CreateDirectory(P("a")));
+        Assert.IsNotType<DirectoryNotFoundException>(ex);
+        Assert.Contains("already exists", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Creating_a_directory_where_a_file_is_through_a_trailing_dot_fails()
+    {
+        Fs.File.WriteAllText(P("a"), "file");
+
+        IOException ex = Assert.ThrowsAny<IOException>(() => Fs.Directory.CreateDirectory(P("a", ".")));
+        Assert.IsNotType<DirectoryNotFoundException>(ex);
+        Assert.Contains("already exists", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Creating_a_directory_beneath_a_file_throws_directory_not_found()
+    {
+        MockDiffers("creating a directory beneath a file does not throw.");
+        Fs.File.WriteAllText(P("a"), "file");
+
+        Assert.Throws<DirectoryNotFoundException>(() => Fs.Directory.CreateDirectory(P("a", "sub")));
+    }
+
+    [Fact]
+    public void Creating_a_directory_where_a_link_to_a_file_is_fails()
+    {
+        TestLinks.Require(_fixture.SupportsLinks);
+        Fs.File.WriteAllText(P("a.txt"), "file");
+        Fs.File.CreateSymbolicLink(P("link"), "a.txt");
+
+        IOException ex = Assert.ThrowsAny<IOException>(() => Fs.Directory.CreateDirectory(P("link")));
+        Assert.IsNotType<DirectoryNotFoundException>(ex);
+        Assert.Contains("already exists", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Creating_a_directory_where_a_dangling_link_is_fails()
+    {
+        TestLinks.Require(_fixture.SupportsLinks);
+        MockDiffers("a link to a missing target cannot be created.");
+        Fs.File.CreateSymbolicLink(P("link"), "missing");
+
+        IOException ex = Assert.ThrowsAny<IOException>(() => Fs.Directory.CreateDirectory(P("link")));
+        Assert.IsNotType<DirectoryNotFoundException>(ex);
+        Assert.Contains("already exists", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

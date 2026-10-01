@@ -223,6 +223,36 @@ internal sealed class VirtualPath
     }
 
     /// <summary>
+    /// Whether a leading portion of a <see cref="Cap.Std.Dir"/>-relative path, as
+    /// <see cref="CreatablePrefixes"/> gives it, ends in the path's last name: nothing but
+    /// separators and <c>.</c> follow it.
+    /// </summary>
+    /// <remarks>
+    /// A <c>..</c> after it means the name was only passed through, as <c>a</c> is in
+    /// <c>a/..</c>.
+    /// </remarks>
+    public bool EndsInLastName(string relative, string prefix)
+    {
+        int start = prefix.Length;
+        for (int i = start; i <= relative.Length; i++)
+        {
+            if (i < relative.Length && !IsSeparator(relative[i]))
+            {
+                continue;
+            }
+
+            if (relative.AsSpan(start, i - start) is not "" and not ".")
+            {
+                return false;
+            }
+
+            start = i + 1;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// The request for the directory that holds a request's last name: the caller's string
     /// with that name sliced off.
     /// </summary>

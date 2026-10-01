@@ -448,11 +448,23 @@ public sealed class DirFileSystem : IFileSystem
             Dir directory;
             try
             {
-                directory = Dir.OpenDir(prefix);
+                try
+                {
+                    directory = Dir.OpenDir(prefix);
+                }
+                catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    directory = Dir.OpenOrCreateDir(prefix);
+                }
             }
-            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+            catch (CapIOException e) when (
+                e.Kind is CapErrorKind.NotADirectory or CapErrorKind.SymbolicLink
+                && Paths.EndsInLastName(request.Relative, prefix))
             {
-                directory = Dir.OpenOrCreateDir(prefix);
+                // The name asked for holds something other than a directory: a file, or a link
+                // to one or to nothing. System.IO says it is taken; a missing part of the path
+                // is what it says only of a name further up.
+                throw Failures.FileExists(request.Virtual, e);
             }
 
             directory.Dispose();

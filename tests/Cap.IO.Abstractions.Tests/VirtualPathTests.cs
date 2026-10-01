@@ -115,6 +115,18 @@ public sealed class VirtualPathTests
     }
 
     [Theory]
+    [InlineData("a/b", "a/b", true)]
+    [InlineData("a/b/", "a/b", true)]
+    [InlineData("a/./", "a", true)]
+    [InlineData("a/b", "a", false)]
+    [InlineData("a/..", "a", false)]
+    [InlineData("a/../.", "a", false)]
+    public void A_prefix_ends_in_the_last_name_when_only_separators_and_dots_follow(string relative, string prefix, bool last)
+    {
+        Assert.Equal(last, Posix.EndsInLastName(relative, prefix));
+    }
+
+    [Theory]
     [InlineData("/a/b", "/a")]
     [InlineData("/a", "/")]
     [InlineData("/a/b/", "/a")]
