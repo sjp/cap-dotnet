@@ -135,6 +135,31 @@ public sealed class CopyOptions
     public bool PreserveTimes { get; init; }
 
     /// <summary>
+    /// Whether the holes in a sparse source file stay holes in the copy.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Off, so that a file is copied as the bytes it reads as: a range the source stores
+    /// nothing for reads as zeroes, and those zeroes are written, so the copy can take more
+    /// room on disk than the source did. With it on, the copy asks the source where its data
+    /// is, writes only that, and leaves every other range a hole in the destination, at the
+    /// same length. The source's own record of its holes is what is followed; a range of
+    /// zeroes the source stores is copied as stored.
+    /// </para>
+    /// <para>
+    /// Linux and macOS report holes on the filesystems that keep them, and Windows on NTFS and
+    /// ReFS, marking the destination sparse first. Where the source's filesystem cannot say,
+    /// the file is copied whole, as with the option off. A copy that shares storage with its
+    /// source keeps the source's holes either way.
+    /// </para>
+    /// <para>
+    /// On, the destination's room is not reserved before its contents are written, since
+    /// reserving it would fill the holes the option keeps.
+    /// </para>
+    /// </remarks>
+    public bool PreserveSparseness { get; init; }
+
+    /// <summary>
     /// How many levels below the source the copy will descend.
     /// </summary>
     /// <remarks>

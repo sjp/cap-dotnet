@@ -51,10 +51,16 @@ internal sealed class FakePlatformOps : IPlatformOps
     private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, MemoryNode> _open = [];
     private readonly System.Collections.Concurrent.ConcurrentDictionary<nint, OpenFile> _files = [];
     private readonly List<SafeHandle> _issued = [];
+    private readonly List<long> _reservations = [];
     private nint _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
     private long _componentOpens;
     private int _handleLookups;
+    private int _clones;
+    private int _cloneAttempts;
+    private int _rangeCopies;
+    private int _rangeCopyAttempts;
+    private int _sparseMarks;
 
     public FakePlatformOps(FakeFileSystem fileSystem) => _fileSystem = fileSystem;
 
@@ -773,6 +779,189 @@ internal sealed class FakePlatformOps : IPlatformOps
 
     /// <summary>How many times a file has been asked to commit its contents to storage.</summary>
     public int FileFlushes => Volatile.Read(ref _fileFlushes);
+
+    // The shortcuts for moving contents are each off until a test turns them on, so that by
+    // default a caller is driven down the reads and writes it falls back on everywhere a
+    // shortcut is unavailable. Each one that is on is counted, so a test can tell which way the
+    // contents actually went.
+
+    /// <summary>Whether a file can be made to share another's storage, as a reflink does.</summary>
+    public bool SharesStorage { get; set; }
+
+    /// <summary>Whether a new name can be made as a clone of an open file, as macOS's clone does.</summary>
+    public bool ClonesByName { get; set; }
+
+    /// <summary>Whether ranges are copied between files inside the kernel.</summary>
+    public bool CopiesRanges { get; set; }
+
+    /// <summary>The most one range copy moves, when set, so that short counts are exercised.</summary>
+    public long? RangeCopyLimit { get; set; }
+
+    /// <summary>
+    /// When set, a range copy at or past this offset reports nothing copied, as one from a file
+    /// on <c>/proc</c> does although there is more to read.
+    /// </summary>
+    public long? RangeCopyEndsEarlyAt { get; set; }
+
+    /// <summary>
+    /// When set, the stretches of each file that hold data, as start and exclusive end, in
+    /// order; everything else is a hole. When null, where data is cannot be asked.
+    /// </summary>
+    public Func<MemoryNode, IReadOnlyList<(long Start, long End)>>? DataStretches { get; set; }
+
+    /// <summary>How many files were made to share another's storage.</summary>
+    public int Clones => Volatile.Read(ref _clones);
+
+    /// <summary>How many clones were asked for, of either kind, whether or not they were made.</summary>
+    public int CloneAttempts => Volatile.Read(ref _cloneAttempts);
+
+    /// <summary>How many range copies were asked for, whether or not they moved anything.</summary>
+    public int RangeCopyAttempts => Volatile.Read(ref _rangeCopyAttempts);
+
+    /// <summary>How many range copies moved something.</summary>
+    public int RangeCopies => Volatile.Read(ref _rangeCopies);
+
+    /// <summary>How many times a file was marked sparse.</summary>
+    public int SparseMarks => Volatile.Read(ref _sparseMarks);
+
+    /// <summary>The lengths storage was reserved up to, in order.</summary>
+    public IReadOnlyList<long> Reservations => _reservations;
+
+    /// <inheritdoc/>
+    public CapError CloneFileContents(SafeFileHandle source, SafeFileHandle destination)
+    {
+        _ = Interlocked.Increment(ref _cloneAttempts);
+        if (!SharesStorage)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        MemoryNode from = DemandFile(source, FileAccess.Read, out _);
+        MemoryNode to = DemandFile(destination, FileAccess.Write, out _);
+        to.SetLength(0);
+        to.WriteAt(Contents(from), 0);
+        _ = Interlocked.Increment(ref _clones);
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError CloneFileToChild(SafeFileHandle source, SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        _ = Interlocked.Increment(ref _cloneAttempts);
+        if (!ClonesByName)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        MemoryNode from = DemandFile(source, FileAccess.Read, out _);
+        CapError error = ResolveDirectory(parent, out MemoryNode? directory);
+        if (error.IsFailure)
+        {
+            return error;
+        }
+
+        string entry = name.ToString();
+        if (_fileSystem.Lookup(directory!, entry) is not null)
+        {
+            return CapError.FromCategory(CapErrorCategory.AlreadyExists);
+        }
+
+        MemoryNode created = new()
+        {
+            Type = CapNodeType.File,
+            VolumeId = directory!.VolumeId,
+            NodeId = _fileSystem.NextNodeId(),
+            UnixMode = from.UnixMode,
+            LastWriteTime = from.LastWriteTime,
+            LastAccessTime = from.LastAccessTime,
+        };
+        created.WriteAt(Contents(from), 0);
+        directory.Entries[entry] = created;
+        _ = Interlocked.Increment(ref _clones);
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError CopyFileRange(
+        SafeFileHandle source,
+        SafeFileHandle destination,
+        long fileOffset,
+        long length,
+        out long copied)
+    {
+        copied = 0;
+        _ = Interlocked.Increment(ref _rangeCopyAttempts);
+        if (!CopiesRanges)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        MemoryNode from = DemandFile(source, FileAccess.Read, out _);
+        MemoryNode to = DemandFile(destination, FileAccess.Write, out _);
+        if (fileOffset >= RangeCopyEndsEarlyAt)
+        {
+            return CapError.Success;
+        }
+
+        byte[] piece = new byte[Math.Min(length, RangeCopyLimit ?? length)];
+        int read = from.ReadAt(piece, fileOffset);
+        to.WriteAt(piece.AsSpan(0, read), fileOffset);
+        copied = read;
+        if (read > 0)
+        {
+            _ = Interlocked.Increment(ref _rangeCopies);
+        }
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError FindFileData(SafeFileHandle handle, long fileOffset, out long start, out long end)
+    {
+        start = -1;
+        end = -1;
+        if (DataStretches is not { } stretches)
+        {
+            return CapError.FromCategory(CapErrorCategory.NotSupported);
+        }
+
+        MemoryNode node = DemandFile(handle, FileAccess.Read, out _);
+        foreach ((long from, long to) in stretches(node))
+        {
+            if (to > fileOffset)
+            {
+                start = Math.Max(from, fileOffset);
+                end = to;
+                break;
+            }
+        }
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError MarkFileSparse(SafeFileHandle handle)
+    {
+        _ = DemandFile(handle, FileAccess.Write, out _);
+        _ = Interlocked.Increment(ref _sparseMarks);
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError ReserveFileSpace(SafeFileHandle handle, long length)
+    {
+        _ = DemandFile(handle, FileAccess.Write, out _);
+        _reservations.Add(length);
+        return CapError.Success;
+    }
+
+    /// <summary>A file's whole contents, as a copy.</summary>
+    private static byte[] Contents(MemoryNode node)
+    {
+        byte[] contents = new byte[node.Length];
+        _ = node.ReadAt(contents, 0);
+        return contents;
+    }
 
     private int _fileFlushes;
 

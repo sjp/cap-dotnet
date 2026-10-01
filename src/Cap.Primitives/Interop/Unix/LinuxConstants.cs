@@ -409,6 +409,20 @@ internal static class LinuxConstants
     /// </remarks>
     public const int FALLOC_FL_KEEP_SIZE = 0x01;
 
+    // --- Moving contents ----------------------------------------------------------------------
+
+    /// <summary>
+    /// The <c>ioctl</c> that makes one file share another's extents: <c>_IOW(0x94, 9, int)</c>,
+    /// the same on every target.
+    /// </summary>
+    public const uint FICLONE = 0x40049409;
+
+    /// <summary><c>lseek</c>: the next offset at or after the one given that holds data.</summary>
+    public const int SEEK_DATA = 3;
+
+    /// <summary><c>lseek</c>: the next offset at or after the one given that is in a hole.</summary>
+    public const int SEEK_HOLE = 4;
+
     // --- fcntl ------------------------------------------------------------------------------
 
     public const int F_GETFL = 3;
@@ -505,6 +519,22 @@ internal static class LinuxConstants
     /// <summary><c>getdents64</c>: 217 on x86-64 and on 32-bit ARM, 61 on AArch64.</summary>
     public static nint SYS_getdents64 => Getdents64Number(s_abi);
 
+    /// <summary><c>copy_file_range</c>: 326 on x86-64, 285 on AArch64, 391 on 32-bit ARM.</summary>
+    /// <remarks>
+    /// By number for the reason the others are: glibc gained a wrapper only in 2.27, and its
+    /// offsets are passed by pointer, so the same call serves every target.
+    /// </remarks>
+    public static nint SYS_copy_file_range => CopyFileRangeNumber(s_abi);
+
+    /// <summary><see cref="SYS_copy_file_range"/> in a given table.</summary>
+    internal static nint CopyFileRangeNumber(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 326,
+        LinuxAbi.Arm64 => 285,
+        LinuxAbi.Arm => 391,
+        _ => throw Unsupported(),
+    };
+
     /// <summary><see cref="SYS_statx"/> in a given table.</summary>
     internal static nint StatxNumber(LinuxAbi abi) => abi switch
     {
@@ -550,6 +580,12 @@ internal static class LinuxConstants
     /// 32-bit call would fail with an overflow.
     /// </summary>
     public const nint SYS_arm_fstatfs64 = 267;
+
+    /// <summary>
+    /// <c>_llseek</c> on 32-bit ARM, which takes the offset as two words and writes the
+    /// result through a pointer, so neither is cut to 32 bits.
+    /// </summary>
+    public const nint SYS_arm_llseek = 140;
 
     /// <summary>
     /// <c>utimensat_time64</c> on 32-bit ARM (Linux 5.1 and later): the call that takes a

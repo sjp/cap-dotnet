@@ -66,6 +66,13 @@ public static partial class DirExtensions
     /// <paramref name="toDir"/>'s policy as for any other path.
     /// </para>
     /// <para>
+    /// <strong>The contents are moved by the quickest means both ends share</strong>, as
+    /// <see cref="CopyTo"/> describes: on the host's filesystem the copy may share the
+    /// source's storage or be made inside the kernel, and is otherwise read and written in
+    /// pieces. On macOS a copy that shares storage carries the source's extended attributes
+    /// as well.
+    /// </para>
+    /// <para>
     /// Safe to call from any thread, concurrently with other work on either handle.
     /// </para>
     /// </remarks>
@@ -107,11 +114,13 @@ public static partial class DirExtensions
 
         using ParentLocation location = ParentLocation.Resolve(toDir, to, nameof(to), mayNameDirectory: false);
         IDir directory = location.Directory;
+        ContentTransfer transfer = new(keepHoles: false);
 
         if (!overwrite)
         {
-            using ICapFile created = directory.CreateNewFile(location.Name);
-            return FillCopy(source, created, metadata, directory);
+            ICapFile? clone = transfer.CloneNew(directory, location.Name, source, asynchronous: false);
+            using ICapFile created = clone ?? directory.CreateNewFile(location.Name);
+            return FillCopy(transfer, source, created, metadata, directory, cloned: clone is not null);
         }
 
         if (directory.TryGetMetadata(location.Name, out CapMetadata existing) &&
@@ -123,13 +132,18 @@ public static partial class DirExtensions
                 $"remove the directory first if it is meant to go.");
         }
 
-        string? scratch = Claim(directory, asynchronous: false, ownerOnly: false, out ICapFile target);
+        bool cloned = true;
+        if (!transfer.TryCloneScratch(directory, source, asynchronous: false, out string? scratch, out ICapFile? target))
+        {
+            cloned = false;
+            scratch = Claim(directory, asynchronous: false, ownerOnly: false, out target);
+        }
         try
         {
             long copied;
             using (target)
             {
-                copied = FillCopy(source, target, metadata, directory);
+                copied = FillCopy(transfer, source, target, metadata, directory, cloned);
             }
 
             // Windows refuses to replace a file open without FileShare.Delete, and the
@@ -149,9 +163,21 @@ public static partial class DirExtensions
     /// Writes a source file's contents into a new file, and its permissions where the
     /// destination records the same kind.
     /// </summary>
-    private static long FillCopy(ICapFile source, ICapFile target, in CapMetadata metadata, IDir destination)
+    /// <remarks>
+    /// A file made as a clone already holds the contents, and is only given the time it was
+    /// made, as a written file would carry.
+    /// </remarks>
+    private static long FillCopy(
+        ContentTransfer transfer,
+        ICapFile source,
+        ICapFile target,
+        in CapMetadata metadata,
+        IDir destination,
+        bool cloned)
     {
-        long copied = Transfer(source, target);
+        long copied = cloned
+            ? ContentTransfer.Cloned(target, keepTimes: false)
+            : transfer.Transfer(source, target, metadata.Length, CancellationToken.None);
 
         CapPermissions permissions = metadata.Permissions;
         bool recordsWindows = Handles.SyntaxOf(destination) == CapPathSyntax.Windows;

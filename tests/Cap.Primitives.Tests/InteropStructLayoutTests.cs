@@ -242,6 +242,7 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(LinuxConstants.StatxNumber(expected), LinuxConstants.SYS_statx);
         Assert.Equal(LinuxConstants.Renameat2Number(expected), LinuxConstants.SYS_renameat2);
         Assert.Equal(LinuxConstants.Getdents64Number(expected), LinuxConstants.SYS_getdents64);
+        Assert.Equal(LinuxConstants.CopyFileRangeNumber(expected), LinuxConstants.SYS_copy_file_range);
         Assert.Equal(expected == LinuxAbi.Arm, LinuxConstants.HasNarrowCTypes);
 
         // Unlike the ones above, these are the same everywhere.
@@ -249,6 +250,9 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(0x200000, LinuxConstants.O_PATH);
         Assert.Equal(-100, LinuxConstants.AT_FDCWD);
         Assert.Equal(437, LinuxConstants.SYS_openat2);
+        Assert.Equal(0x40049409u, LinuxConstants.FICLONE);
+        Assert.Equal(3, LinuxConstants.SEEK_DATA);
+        Assert.Equal(4, LinuxConstants.SEEK_HOLE);
     }
 
     /// <summary>
@@ -300,17 +304,18 @@ public sealed class InteropStructLayoutTests
     /// fails every call, or a different call entirely.
     /// </remarks>
     [Theory]
-    [InlineData(nameof(LinuxAbi.X64), 332, 316, 217)]
-    [InlineData(nameof(LinuxAbi.Arm64), 291, 276, 61)]
-    [InlineData(nameof(LinuxAbi.Arm), 397, 382, 217)]
+    [InlineData(nameof(LinuxAbi.X64), 332, 316, 217, 326)]
+    [InlineData(nameof(LinuxAbi.Arm64), 291, 276, 61, 285)]
+    [InlineData(nameof(LinuxAbi.Arm), 397, 382, 217, 391)]
     public void Linux_syscall_numbers_match_each_architecture(
-        string abiName, int statx, int renameat2, int getdents64)
+        string abiName, int statx, int renameat2, int getdents64, int copyFileRange)
     {
         LinuxAbi abi = Enum.Parse<LinuxAbi>(abiName);
 
         Assert.Equal(statx, LinuxConstants.StatxNumber(abi));
         Assert.Equal(renameat2, LinuxConstants.Renameat2Number(abi));
         Assert.Equal(getdents64, LinuxConstants.Getdents64Number(abi));
+        Assert.Equal(copyFileRange, LinuxConstants.CopyFileRangeNumber(abi));
     }
 
     /// <summary>
@@ -324,6 +329,7 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(352, LinuxConstants.SYS_arm_fallocate);
         Assert.Equal(267, LinuxConstants.SYS_arm_fstatfs64);
         Assert.Equal(412, LinuxConstants.SYS_arm_utimensat_time64);
+        Assert.Equal(140, LinuxConstants.SYS_arm_llseek);
         Assert.Equal(84u, LinuxConstants.ArmStatfs64Bytes);
         Assert.True(LinuxConstants.ArmStatfs64Bytes <= (nuint)LinuxConstants.StatfsBufferBytes);
     }
@@ -392,6 +398,53 @@ public sealed class InteropStructLayoutTests
         Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.StatxNumber(LinuxAbi.Unsupported));
         Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Renameat2Number(LinuxAbi.Unsupported));
         Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Getdents64Number(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.CopyFileRangeNumber(LinuxAbi.Unsupported));
+    }
+
+    /// <summary>
+    /// The structures a Windows copy hands the filesystem: the clone request leads with the
+    /// source's handle, padded to eight bytes on every process width, and the range and
+    /// integrity replies are laid out as their native declarations.
+    /// </summary>
+    /// <remarks>
+    /// A clone request read at the wrong offsets would share a different range from the one
+    /// asked for, or a range of a different file.
+    /// </remarks>
+    [Fact]
+    public void Windows_copy_structures_match_the_native_layout()
+    {
+        Assert.Equal(32, DuplicateExtentsData.StructSize);
+        Assert.Equal(8, Marshal.OffsetOf<DuplicateExtentsData>(nameof(DuplicateExtentsData.SourceFileOffset)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<DuplicateExtentsData>(nameof(DuplicateExtentsData.TargetFileOffset)).ToInt32());
+        Assert.Equal(24, Marshal.OffsetOf<DuplicateExtentsData>(nameof(DuplicateExtentsData.ByteCount)).ToInt32());
+
+        Assert.Equal(16, FileAllocatedRangeBuffer.StructSize);
+        Assert.Equal(8, Marshal.OffsetOf<FileAllocatedRangeBuffer>(nameof(FileAllocatedRangeBuffer.Length)).ToInt32());
+
+        Assert.Equal(16, IntegrityInformationBuffer.StructSize);
+        Assert.Equal(
+            12,
+            Marshal.OffsetOf<IntegrityInformationBuffer>(nameof(IntegrityInformationBuffer.ClusterSizeInBytes)).ToInt32());
+    }
+
+    /// <summary>
+    /// The control codes a Windows copy sends, built as the SDK's <c>CTL_CODE</c> builds them:
+    /// the filesystem device, the function number, the transfer method and the access the
+    /// handle must hold.
+    /// </summary>
+    [Fact]
+    public void Windows_copy_control_codes_match_the_sdk()
+    {
+        const uint FileSystem = 9;
+        static uint Code(uint function, uint method, uint access) =>
+            (FileSystem << 16) | (access << 14) | (function << 2) | method;
+
+#pragma warning disable CA1416 // Constants compiled into the test; nothing here calls Windows.
+        Assert.Equal(NtConstants.FSCTL_GET_INTEGRITY_INFORMATION, Code(159, 0, 0));
+        Assert.Equal(NtConstants.FSCTL_DUPLICATE_EXTENTS_TO_FILE, Code(209, 0, 2));
+        Assert.Equal(NtConstants.FSCTL_QUERY_ALLOCATED_RANGES, Code(51, 3, 1));
+        Assert.Equal(NtConstants.FSCTL_SET_SPARSE, Code(49, 0, 0));
+#pragma warning restore CA1416
     }
 
     /// <summary>
@@ -652,5 +705,12 @@ public sealed class InteropStructLayoutTests
         Assert.NotEqual(LinuxConstants.AT_SYMLINK_NOFOLLOW, DarwinConstants.AT_SYMLINK_NOFOLLOW);
         Assert.Equal(-2, DarwinConstants.AT_FDCWD);
         Assert.Equal(0x0100, DarwinConstants.O_NOFOLLOW);
+
+        // The two lseek questions are numbered the other way round, so a value borrowed from
+        // the other platform would ask for holes where data was meant, and copy nothing.
+        Assert.Equal(LinuxConstants.SEEK_DATA, DarwinConstants.SEEK_HOLE);
+        Assert.Equal(LinuxConstants.SEEK_HOLE, DarwinConstants.SEEK_DATA);
+        Assert.Equal(1u, DarwinConstants.CLONE_NOFOLLOW);
+        Assert.Equal(2u, DarwinConstants.CLONE_NOOWNERCOPY);
     }
 }

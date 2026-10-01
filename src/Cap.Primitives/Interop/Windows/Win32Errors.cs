@@ -44,6 +44,12 @@ internal static class Win32Errors
     public const int ERROR_NOT_SUPPORTED = 50;
 
     /// <summary>
+    /// The reply did not fit. A query of ranges answers with as many as fit, the first among
+    /// them, and reports this.
+    /// </summary>
+    public const int ERROR_MORE_DATA = 234;
+
+    /// <summary>
     /// The process token does not hold a privilege the operation requires. What writing a
     /// symbolic link reports through the last-error slot where that is still privileged.
     /// </summary>

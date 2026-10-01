@@ -52,11 +52,19 @@ public readonly struct CopyReport
     /// </summary>
     public int Skipped { get; }
 
-    /// <summary>How many bytes of file contents were written.</summary>
+    /// <summary>How many bytes of file contents were copied.</summary>
     /// <remarks>
-    /// What was written, not what the source occupied. A file with holes in it is read as the
-    /// zeroes it reports and written as those zeroes, so a sparse source becomes a destination
-    /// that is larger on disk than the source was.
+    /// <para>
+    /// The length of each copied file, counted however its contents went: read and written,
+    /// copied inside the kernel, or shared with the source. It is the bytes the copies read
+    /// as, not the room they take.
+    /// </para>
+    /// <para>
+    /// A file with holes in it is read as the zeroes it reports and written as those zeroes,
+    /// so a sparse source becomes a destination that is larger on disk than the source was,
+    /// unless <see cref="CopyOptions.PreserveSparseness"/> keeps the holes. Either way the
+    /// holes are counted here, as part of the file's length.
+    /// </para>
     /// </remarks>
     public long Bytes { get; }
 }

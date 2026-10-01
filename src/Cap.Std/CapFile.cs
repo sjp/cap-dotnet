@@ -39,7 +39,7 @@ namespace Cap.Std;
 /// resolution arrived at, and no member here consults a name again.
 /// </para>
 /// </remarks>
-public sealed class CapFile : ICapFile
+public sealed partial class CapFile : ICapFile
 {
     /// <summary>
     /// The buffer a stream taken from this handle is given, when the caller names no size.

@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Std;
 
@@ -1990,6 +1991,82 @@ public sealed partial class Dir : IDir
         CapPathError pathError = OpenFileCore(name, in request, out file, out CapError error);
 
         return pathError == CapPathError.None ? error : CapError.FromCategory(CapErrorCategory.InvalidArgument);
+    }
+
+    /// <summary>
+    /// Creates a file beneath this one as a clone of <paramref name="source"/>, sharing its
+    /// storage, and opens it for writing.
+    /// </summary>
+    /// <param name="source">The file whose contents the new one starts with.</param>
+    /// <param name="name">A single component, which must not already be taken.</param>
+    /// <param name="options">How the new file is opened, such as for asynchronous writes.</param>
+    /// <param name="file">A handle on the new file, on success.</param>
+    /// <returns>
+    /// The platform's answer. <see cref="CapErrorCategory.NotSupported"/> wherever a clone is
+    /// not made by name — every platform but macOS, and a filesystem there that cannot share
+    /// storage — and <see cref="CapErrorCategory.AlreadyExists"/> when the name is taken.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Internal, for the convenience layer's copies. The clone claims the name exclusively,
+    /// as <see cref="CreateOwnedFile"/> does, and never follows a link at it. It carries the
+    /// source's mode and extended attributes, which is why a copy that is not asked to keep
+    /// permissions does not use it.
+    /// </para>
+    /// <para>
+    /// The clone makes a name and not a handle, so the name is opened afterwards, refusing a
+    /// link, and what was opened is checked to be a file with no other name. Between the two
+    /// steps someone able to write to this directory could swap the name for a hard link to
+    /// another file. They would be refused here, with the clone left behind under the name
+    /// they took, rather than having the copy's permissions and times written onto their file.
+    /// </para>
+    /// </remarks>
+    internal CapError CloneFile(CapFile source, string name, FileOptions options, out CapFile? file)
+    {
+        file = null;
+
+        CapPathError pathError = Locate(name, out NameLookup lookup, out CapError error);
+        using (lookup)
+        {
+            if (pathError != CapPathError.None || lookup.RequiresDirectory || lookup.NamesDirectoryItself)
+            {
+                return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+            }
+
+            if (error.IsFailure)
+            {
+                return error;
+            }
+
+            error = source.CloneInto(lookup.Directory, Ops, lookup.Name);
+            if (error.IsFailure)
+            {
+                return error;
+            }
+
+            FileOpenRequest request = new(
+                FileMode.Open, FileAccess.Write, FileShare.Read, options, preallocationSize: 0, noFollow: true);
+            CapResult<SafeFileHandle> opened = Ops.OpenChildFile(lookup.Directory, lookup.Name, in request);
+            if (!opened.IsSuccess)
+            {
+                return opened.Error;
+            }
+
+            CapError described = Ops.DescribeHandle(opened.Value, out CapNodeStat stat);
+            if (described.IsFailure || stat.Type != CapFileType.File || stat.LinkCount != 1)
+            {
+                opened.Value.Dispose();
+                return described.IsFailure ? described : CapError.FromCategory(CapErrorCategory.Raced);
+            }
+
+            file = new CapFile(
+                opened.Value,
+                Ops,
+                FileAccess.Write,
+                request.IsAsynchronous && Ops.Capabilities.SupportsOverlappedFileHandles,
+                appending: false);
+            return CapError.Success;
+        }
     }
 
     /// <summary>

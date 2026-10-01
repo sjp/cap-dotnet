@@ -909,6 +909,45 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         }
     }
 
+    // Contents are moved by reads and writes alone here: there is no storage for two files to
+    // share and no holes to find, so every shortcut below is reported as unavailable, which
+    // is the answer a caller has to be ready for from any filesystem.
+
+    /// <inheritdoc/>
+    public CapError CloneFileContents(SafeFileHandle source, SafeFileHandle destination) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    public CapError CloneFileToChild(SafeFileHandle source, SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    public CapError CopyFileRange(
+        SafeFileHandle source,
+        SafeFileHandle destination,
+        long fileOffset,
+        long length,
+        out long copied)
+    {
+        copied = 0;
+        return CapError.FromCategory(CapErrorCategory.NotSupported);
+    }
+
+    /// <inheritdoc/>
+    public CapError FindFileData(SafeFileHandle handle, long fileOffset, out long start, out long end)
+    {
+        start = -1;
+        end = -1;
+        return CapError.FromCategory(CapErrorCategory.NotSupported);
+    }
+
+    /// <inheritdoc/>
+    public CapError MarkFileSparse(SafeFileHandle handle) => CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    public CapError ReserveFileSpace(SafeFileHandle handle, long length) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
     /// <inheritdoc/>
     public Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync)
     {

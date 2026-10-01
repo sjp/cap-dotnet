@@ -1249,6 +1249,119 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     public void FlushFileToDisk(SafeFileHandle handle) => HostFileContent.FlushToDisk(handle);
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// A filesystem that has no such request answers that the descriptor does not understand
+    /// it rather than that the operation is unsupported, and is reported as the second.
+    /// </remarks>
+    public CapError CloneFileContents(SafeFileHandle source, SafeFileHandle destination)
+    {
+        using HandleLease from = new(source);
+        using HandleLease to = new(destination);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        if (LinuxNative.CloneFile(to.Descriptor, from.Descriptor) == 0)
+        {
+            return CapError.Success;
+        }
+
+        int errno = Marshal.GetLastPInvokeError();
+        return errno == PosixErrno.ENOTTY
+            ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
+            : LinuxErrno.ToError(errno);
+    }
+
+    /// <inheritdoc/>
+    public CapError CloneFileToChild(SafeFileHandle source, SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    public unsafe CapError CopyFileRange(
+        SafeFileHandle source,
+        SafeFileHandle destination,
+        long fileOffset,
+        long length,
+        out long copied)
+    {
+        copied = 0;
+        using HandleLease from = new(source);
+        using HandleLease to = new(destination);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        long readAt = fileOffset;
+        long writeAt = fileOffset;
+        nint result = LinuxNative.CopyFileRange(
+            from.Descriptor, &readAt, to.Descriptor, &writeAt, (nuint)Math.Min(length, int.MaxValue));
+        if (result < 0)
+        {
+            return LinuxErrno.ToError(Marshal.GetLastPInvokeError());
+        }
+
+        copied = result;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A kernel or filesystem that cannot tell data from holes refuses the question as an
+    /// invalid argument, and is reported as not supporting it.
+    /// </remarks>
+    public CapError FindFileData(SafeFileHandle handle, long fileOffset, out long start, out long end)
+    {
+        start = -1;
+        end = -1;
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        long data = LinuxNative.Seek(lease.Descriptor, fileOffset, LinuxConstants.SEEK_DATA);
+        if (data < 0)
+        {
+            int errno = Marshal.GetLastPInvokeError();
+            return errno switch
+            {
+                PosixErrno.ENXIO => CapError.Success,
+                PosixErrno.EINVAL => CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno),
+                _ => LinuxErrno.ToError(errno),
+            };
+        }
+
+        long hole = LinuxNative.Seek(lease.Descriptor, data, LinuxConstants.SEEK_HOLE);
+        if (hole < 0)
+        {
+            return LinuxErrno.ToError(Marshal.GetLastPInvokeError());
+        }
+
+        start = data;
+        end = hole;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError MarkFileSparse(SafeFileHandle handle) => CapError.Success;
+
+    /// <inheritdoc/>
+    public CapError ReserveFileSpace(SafeFileHandle handle, long length)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        return LinuxNative.Fallocate(lease.Descriptor, LinuxConstants.FALLOC_FL_KEEP_SIZE, 0, length) == 0
+            ? CapError.Success
+            : LinuxErrno.ToError(Marshal.GetLastPInvokeError());
+    }
+
+    /// <inheritdoc/>
     public Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync) =>
         HostFileContent.OpenStream(handle, access, bufferSize, isAsync);
 

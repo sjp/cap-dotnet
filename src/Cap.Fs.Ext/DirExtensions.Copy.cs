@@ -1,4 +1,3 @@
-using System.Buffers;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 using Cap.Std;
@@ -35,17 +34,6 @@ namespace Cap.Fs.Ext;
 /// </remarks>
 public static partial class DirExtensions
 {
-    /// <summary>
-    /// How much is read from a file before it is written to the destination.
-    /// </summary>
-    /// <remarks>
-    /// Large enough that a big file is not copied in thousands of round trips, small enough
-    /// that the buffer comes from the shared pool rather than from the heap segment reserved
-    /// for large objects — which it would if it were any larger, making every copy a source of
-    /// collections that cannot be compacted.
-    /// </remarks>
-    private const int TransferBufferSize = 64 * 1024;
-
     /// <summary>
     /// Copies everything beneath this handle into another directory.
     /// </summary>
@@ -123,11 +111,22 @@ public static partial class DirExtensions
     /// <see cref="CopyOptions.Overwrite"/>.
     /// </para>
     /// <para>
+    /// <strong>How the contents are moved.</strong> By the quickest means both ends share:
+    /// the destination is made to share the source's storage where the filesystem allows
+    /// (a reflink on Linux, block cloning on Windows, and on macOS a clone made in place of
+    /// creating the file when <see cref="CopyOptions.PreservePermissions"/> is on, which also
+    /// carries the source's extended attributes); failing that, on Linux, the kernel copies the
+    /// contents 8 MiB at a time; failing that, they are read and written 64 KiB at a time, with
+    /// the destination's room reserved first. A shortcut that fails is never reported: the next
+    /// way is taken, and a real fault is met by the reads and writes. Holes in a sparse source
+    /// are written as zeroes unless <see cref="CopyOptions.PreserveSparseness"/> keeps them.
+    /// </para>
+    /// <para>
     /// <strong>The two handles may be on different backends.</strong> Everything is read
     /// through the source handle and written through the destination handle, and nothing
     /// from one is ever handed to the other. So a tree held in memory can be filled from one
     /// on disk, or the reverse. A destination on another backend cannot be inside the source,
-    /// so that check is not made.
+    /// so that check is not made, and the contents are always read and written.
     /// </para>
     /// <para>
     /// <strong>Handles that are not a <see cref="Dir"/>.</strong> Either side may be any
@@ -194,7 +193,9 @@ public static partial class DirExtensions
     /// file contents are moved with reads and writes the operating system can complete by
     /// itself where it offers that. Opening, creating, describing, renaming and carrying
     /// permissions and times are short calls no platform here performs asynchronously, and
-    /// happen on whichever thread the copy resumes on.
+    /// happen on whichever thread the copy resumes on. So are the shortcuts that move contents
+    /// without reading them: a clone holds that thread for an instant, and a copy inside the
+    /// kernel for at most one 8 MiB piece at a time.
     /// </para>
     /// <para>
     /// The arguments and options are checked before the task is made; everything else,
@@ -268,68 +269,6 @@ public static partial class DirExtensions
         return await copier.RunAsync(dir).ConfigureAwait(false);
     }
 
-    /// <summary>Reads a file to its end, writing everything read.</summary>
-    /// <remarks>
-    /// Position by position rather than through a stream, so the two handles keep no
-    /// shared state and a short read is handled as what it is: the amount available now,
-    /// and not a statement about what follows. The token is looked at before each piece, so a
-    /// large file does not hold up a copy that has been asked to stop.
-    /// </remarks>
-    private static long Transfer(ICapFile source, ICapFile target, CancellationToken cancellationToken = default)
-    {
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
-        try
-        {
-            long offset = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int read = source.Read(buffer, offset);
-                if (read == 0)
-                {
-                    return offset;
-                }
-
-                target.Write(buffer.AsSpan(0, read), offset);
-                offset += read;
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
-    /// <summary>Reads a file to its end without holding the calling thread, writing everything read.</summary>
-    /// <remarks>As <see cref="Transfer"/>, a piece at a time and position by position.</remarks>
-    private static async ValueTask<long> TransferAsync(
-        ICapFile source, ICapFile target, CancellationToken cancellationToken)
-    {
-        byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferSize);
-        try
-        {
-            long offset = 0;
-            while (true)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                int read = await source.ReadAsync(buffer, offset, cancellationToken).ConfigureAwait(false);
-                if (read == 0)
-                {
-                    return offset;
-                }
-
-                await target.WriteAsync(buffer.AsMemory(0, read), offset, cancellationToken).ConfigureAwait(false);
-                offset += read;
-            }
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
-    }
-
     /// <summary>The state one copy carries while it runs.</summary>
     /// <remarks>
     /// A class rather than a set of parameters threaded through a recursion, because the copy
@@ -349,6 +288,7 @@ public static partial class DirExtensions
         private readonly CancellationToken _cancellationToken;
         private readonly CapFileId? _destinationRoot;
         private readonly List<CopyLevel> _levels = [];
+        private readonly ContentTransfer _transfer;
 
         private int _directories;
         private int _files;
@@ -368,6 +308,7 @@ public static partial class DirExtensions
             _progress = progress;
             _asynchronous = asynchronous;
             _cancellationToken = cancellationToken;
+            _transfer = new ContentTransfer(options.PreserveSparseness);
 
             // A destination on another backend, such as a tree in memory being filled from
             // one on disk, cannot be inside the source, and the two backends number their
@@ -650,13 +591,15 @@ public static partial class DirExtensions
                 return;
             }
 
-            ICapFile target = Begin(level.Destination, entry.Name, out string? scratch);
+            ICapFile target = Begin(level.Destination, entry.Name, source, out string? scratch, out bool cloned);
             bool placed = false;
             try
             {
                 using (target)
                 {
-                    _bytes += Transfer(source, target, _cancellationToken);
+                    _bytes += cloned
+                        ? ContentTransfer.Cloned(target, _options.PreserveTimes)
+                        : _transfer.Transfer(source, target, metadata.Length, _cancellationToken);
                     Fill(target, metadata, entry.Name);
                 }
 
@@ -685,13 +628,17 @@ public static partial class DirExtensions
                 return;
             }
 
-            ICapFile target = Begin(level.Destination, entry.Name, out string? scratch);
+            ICapFile target = Begin(level.Destination, entry.Name, source, out string? scratch, out bool cloned);
             bool placed = false;
             try
             {
                 using (target)
                 {
-                    _bytes += await TransferAsync(source, target, _cancellationToken).ConfigureAwait(false);
+                    _bytes += cloned
+                        ? ContentTransfer.Cloned(target, _options.PreserveTimes)
+                        : await _transfer
+                            .TransferAsync(source, target, metadata.Length, _cancellationToken)
+                            .ConfigureAwait(false);
                     Fill(target, metadata, entry.Name);
                 }
 
@@ -772,9 +719,14 @@ public static partial class DirExtensions
         /// <summary>Creates the file a copied file's contents are written into.</summary>
         /// <param name="directory">The directory the file is copied into.</param>
         /// <param name="name">The name it is to have there.</param>
+        /// <param name="source">The file being copied.</param>
         /// <param name="scratch">
         /// The scratch name it was created under, to be moved onto <paramref name="name"/> once
         /// it is written; null when it was created under <paramref name="name"/> itself.
+        /// </param>
+        /// <param name="cloned">
+        /// Whether the file was made as a clone of <paramref name="source"/>, and already holds
+        /// its contents.
         /// </param>
         /// <remarks>
         /// <para>
@@ -789,15 +741,24 @@ public static partial class DirExtensions
         /// file, or a link to anything at all — is replaced and never written through. A link
         /// is gone afterwards and its target is left exactly as it was.
         /// </para>
+        /// <para>
+        /// Where the platform clones a file by making a new name, the file is made that way
+        /// when the copy carries permissions, under the same name and with the same
+        /// exclusivity. A clone takes the source's mode with it, which a copy that leaves
+        /// permissions to the destination must not do.
+        /// </para>
         /// </remarks>
-        private ICapFile Begin(IDir directory, string name, out string? scratch)
+        private ICapFile Begin(IDir directory, string name, ICapFile source, out string? scratch, out bool cloned)
         {
+            bool mayClone = _options.PreservePermissions;
             if (!_options.Overwrite)
             {
                 scratch = null;
-                return _asynchronous
+                ICapFile? clone = mayClone ? _transfer.CloneNew(directory, name, source, _asynchronous) : null;
+                cloned = clone is not null;
+                return clone ?? (_asynchronous
                     ? directory.OpenFile(name, FileMode.CreateNew, FileAccess.Write, FileShare.Read, FileOptions.Asynchronous)
-                    : directory.CreateNewFile(name);
+                    : directory.CreateNewFile(name));
             }
 
             if (directory.TryGetMetadata(name, out CapMetadata existing) &&
@@ -810,6 +771,13 @@ public static partial class DirExtensions
                     $"first if it is meant to go.");
             }
 
+            if (mayClone && _transfer.TryCloneScratch(directory, source, _asynchronous, out scratch, out ICapFile? scratchClone))
+            {
+                cloned = true;
+                return scratchClone;
+            }
+
+            cloned = false;
             scratch = Claim(directory, _asynchronous, ownerOnly: false, out ICapFile target);
             return target;
         }

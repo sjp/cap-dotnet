@@ -132,6 +132,21 @@ internal static unsafe partial class DarwinNative
         int oldDirectoryFd, byte* oldPath, int newDirectoryFd, byte* newPath, int flags);
 
     /// <summary>
+    /// Creates a name relative to a directory descriptor as a new file sharing the storage of
+    /// the file open as <paramref name="sourceFd"/>. Fails if the name is taken.
+    /// </summary>
+    /// <remarks>macOS 10.12 and later, which is below the runtime's own floor.</remarks>
+    [LibraryImport("libc", EntryPoint = "fclonefileat", SetLastError = true)]
+    internal static partial int FCloneFileAt(int sourceFd, int directoryFd, byte* path, uint flags);
+
+    /// <summary>
+    /// Moves a descriptor's position, returning where it ended up, or -1 with the error set.
+    /// The offset is 64 bits on every target this platform has.
+    /// </summary>
+    [LibraryImport("libc", EntryPoint = "lseek", SetLastError = true)]
+    internal static partial long Seek(int fd, long offset, int whence);
+
+    /// <summary>
     /// Commits everything the kernel is holding for an open object to the storage it lives
     /// on.
     /// </summary>

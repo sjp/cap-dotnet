@@ -103,6 +103,57 @@ internal static unsafe partial class LinuxNative
     [LibraryImport("libc", EntryPoint = "fallocate", SetLastError = true)]
     private static partial int FallocateImport(int fd, int mode, long offset, long length);
 
+    /// <summary>
+    /// Makes the file open as <paramref name="destinationFd"/> share every extent of the one
+    /// open as <paramref name="sourceFd"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>ioctl</c> with <see cref="LinuxConstants.FICLONE"/>. The request is a word wide, as
+    /// glibc declares it; musl declares an int, which is the same register.
+    /// </remarks>
+    internal static int CloneFile(int destinationFd, int sourceFd) =>
+        IoctlImport(destinationFd, LinuxConstants.FICLONE, sourceFd);
+
+    [LibraryImport("libc", EntryPoint = "ioctl", SetLastError = true)]
+    private static partial int IoctlImport(int fd, nuint request, int argument);
+
+    /// <summary>
+    /// <c>copy_file_range</c>, by syscall number. Both offsets are read and advanced through
+    /// their pointers, so neither descriptor's position is used or moved.
+    /// </summary>
+    internal static nint CopyFileRange(int sourceFd, long* sourceOffset, int destinationFd, long* destinationOffset, nuint length) =>
+        CopyFileRangeImport(
+            LinuxConstants.SYS_copy_file_range, sourceFd, sourceOffset, destinationFd, destinationOffset, length, 0);
+
+    [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    private static partial nint CopyFileRangeImport(
+        nint number, int sourceFd, long* sourceOffset, int destinationFd, long* destinationOffset, nuint length, uint flags);
+
+    /// <summary>
+    /// Moves a descriptor's position, returning where it ended up, or -1 with the error set.
+    /// </summary>
+    /// <remarks>
+    /// Used to ask where data and holes are, which is answered by where the position lands.
+    /// On 32-bit ARM the plain call takes a 32-bit offset, so <c>_llseek</c> is called by
+    /// number there, with the offset as a pair of words and the result written back through a
+    /// pointer.
+    /// </remarks>
+    internal static long Seek(int fd, long offset, int whence)
+    {
+        if (!LinuxConstants.HasNarrowCTypes)
+        {
+            return SeekImport(fd, offset, whence);
+        }
+
+        long result = 0;
+        return ArmSyscall(LinuxConstants.SYS_arm_llseek, fd, High(offset), Low(offset), (nint)(&result), whence, 0) < 0
+            ? -1
+            : result;
+    }
+
+    [LibraryImport("libc", EntryPoint = "lseek", SetLastError = true)]
+    private static partial long SeekImport(int fd, long offset, int whence);
+
     /// <summary>Reads a symbolic link relative to a directory descriptor.</summary>
     /// <returns>The number of bytes written, which is <em>not</em> null-terminated.</returns>
     [LibraryImport("libc", EntryPoint = "readlinkat", SetLastError = true)]

@@ -383,3 +383,73 @@ internal struct FileStandardInformation
     /// <summary>The size the native API expects, checked by the layout tests.</summary>
     public static unsafe int StructSize => sizeof(FileStandardInformation);
 }
+
+/// <summary>
+/// The request to make a range of one file share the storage of a range of another
+/// (<c>DUPLICATE_EXTENTS_DATA</c>), sent to the file that receives it.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct DuplicateExtentsData
+{
+    /// <summary>The file whose storage is shared.</summary>
+    public nint FileHandle;
+
+    /// <summary>Where the range starts in that file. A multiple of the cluster size.</summary>
+    public long SourceFileOffset;
+
+    /// <summary>Where it lands in the receiving file. A multiple of the cluster size.</summary>
+    public long TargetFileOffset;
+
+    /// <summary>How long the range is. A multiple of the cluster size.</summary>
+    public long ByteCount;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(DuplicateExtentsData);
+}
+
+/// <summary>
+/// A range of a file (<c>FILE_ALLOCATED_RANGE_BUFFER</c>): the question asked of a file about
+/// where its storage is, and each stretch of the answer.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileAllocatedRangeBuffer
+{
+    /// <summary>Where the range starts.</summary>
+    public long FileOffset;
+
+    /// <summary>How long it is.</summary>
+    public long Length;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(FileAllocatedRangeBuffer);
+}
+
+/// <summary>
+/// The reply to a request for a file's integrity settings
+/// (<c>FSCTL_GET_INTEGRITY_INFORMATION_BUFFER</c>), asked for its cluster size.
+/// </summary>
+/// <remarks>
+/// Only a filesystem that can share storage between files answers it, so the answer is also
+/// how a clone finds out whether there is any point trying.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential)]
+internal struct IntegrityInformationBuffer
+{
+    /// <summary>The checksum the file's contents carry, if any.</summary>
+    public ushort ChecksumAlgorithm;
+
+    /// <summary>Unused.</summary>
+    public ushort Reserved;
+
+    /// <summary>Integrity flags.</summary>
+    public uint Flags;
+
+    /// <summary>How much of the file each checksum covers.</summary>
+    public uint ChecksumChunkSizeInBytes;
+
+    /// <summary>The volume's cluster size, which every shared range is a multiple of.</summary>
+    public uint ClusterSizeInBytes;
+
+    /// <summary>The size the native API expects, checked by the layout tests.</summary>
+    public static unsafe int StructSize => sizeof(IntegrityInformationBuffer);
+}

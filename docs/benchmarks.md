@@ -24,8 +24,15 @@ Anything after `--` other than `gate` is passed to BenchmarkDotNet, so its usual
 
 Every benchmark creates its own scratch tree under the system temporary directory and removes
 it afterwards, so the numbers are for whatever filesystem that is. The enumeration and tree
-benchmarks create a hundred and fifty thousand files between them per backend; expect the full
-suite to take the better part of an hour.
+benchmarks create a hundred and fifty thousand files between them per backend, and the tree copy
+another ten thousand that it copies once per iteration; expect the full suite to take the better
+part of an hour.
+
+The copy rows depend on the filesystem more than any other. Both sides move contents by
+whatever shortcut it offers — a reflink or `copy_file_range` on Linux, a clone on APFS, block
+cloning on ReFS — so a run on btrfs measures the bookkeeping around a clone, and one on ext4 a
+copy inside the kernel. See
+[How the contents are moved](convenience-layer.md#how-the-contents-are-moved).
 
 ## One job per backend
 
@@ -72,6 +79,8 @@ Ratio column the price in garbage.
 | `WalkTree` | Walk a tree of 50,000 files, 100 directories two levels deep | `Directory.EnumerateFiles(…, AllDirectories)` | |
 | `GlobTree` | Find the 25,000 `*.txt` files in the same tree with `**/*.txt` | `Directory.EnumerateFiles(…, "*.txt", AllDirectories)` | |
 | `CreateDeleteFiles` | Create an empty file and delete it, 10,000 times, reported per file | `File.OpenHandle` / `File.Delete` | |
+| `CopyLargeFile` | Copy a 64 MiB file onto a name it replaces, with `CopyFile` | `File.Copy` | |
+| `CopyTree` | Copy 10,000 files of 4 KiB in 100 directories into an empty one, with `CopyTo`, reported per file | `Directory.CreateDirectory` and `File.Copy` per entry | |
 | `CapPathBenchmarks` | Parse and validate a path | none — see below | ✓ |
 
 Two choices of baseline are worth explaining.
@@ -95,7 +104,8 @@ workflow on 2026-09-30. The tables are BenchmarkDotNet's GitHub-flavoured report
 uploaded them, with the `EnvironmentVariables` column dropped since the Job column already names
 the backend. On Linux every filesystem class has one group of rows per job, `openat2` and `walk`;
 Windows and macOS each have a single job, so their tables have no Job column.
-`GlobTree` was added after that run and has no table until they are next refreshed.
+`GlobTree`, `CopyLargeFile` and `CopyTree` were added after that run and have no table until
+they are next refreshed.
 
 A Ratio is only comparable with another from the same run, and on Windows and macOS even that is
 loose: see [the regression gate](#the-regression-gate) for how far their runners move on unchanged

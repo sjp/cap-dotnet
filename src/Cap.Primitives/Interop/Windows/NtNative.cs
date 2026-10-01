@@ -303,6 +303,21 @@ internal static unsafe partial class NtNative
         uint* bytesWritten,
         NativeOverlapped* overlapped);
 
+    /// <summary>
+    /// Issues a filesystem control code against a raw handle, overlapped when the handle is.
+    /// </summary>
+    [LibraryImport("kernel32.dll", EntryPoint = "DeviceIoControl", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool DeviceIoControlOverlapped(
+        nint device,
+        uint controlCode,
+        void* inBuffer,
+        uint inBufferSize,
+        void* outBuffer,
+        uint outBufferSize,
+        uint* bytesReturned,
+        NativeOverlapped* overlapped);
+
     /// <summary>Waits for an overlapped operation to finish and reports how much it moved.</summary>
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -505,6 +520,9 @@ internal static class NtConstants
     /// </remarks>
     public const uint FILE_ATTRIBUTE_READONLY = 0x00000001;
 
+    /// <summary>The file has been marked sparse, and may have holes.</summary>
+    public const uint FILE_ATTRIBUTE_SPARSE_FILE = 0x00000200;
+
     // --- Information classes ------------------------------------------------------------------
 
     /// <summary>
@@ -641,6 +659,24 @@ internal static class NtConstants
     /// by removing the stub if the second step fails.
     /// </remarks>
     public const uint FSCTL_SET_REPARSE_POINT = 0x000900A4;
+
+    /// <summary>
+    /// Asks a file for its integrity settings, which carry the volume's cluster size. Only a
+    /// filesystem that can share storage between files answers.
+    /// </summary>
+    public const uint FSCTL_GET_INTEGRITY_INFORMATION = 0x0009027C;
+
+    /// <summary>Makes a range of the receiving file share the storage of a range of another.</summary>
+    public const uint FSCTL_DUPLICATE_EXTENTS_TO_FILE = 0x00098344;
+
+    /// <summary>Asks which ranges of a file have storage behind them.</summary>
+    public const uint FSCTL_QUERY_ALLOCATED_RANGES = 0x000940CF;
+
+    /// <summary>
+    /// Marks a file as one whose unwritten ranges take no storage, so that extending it or
+    /// writing past its end leaves a hole rather than stored zeroes.
+    /// </summary>
+    public const uint FSCTL_SET_SPARSE = 0x000900C4;
 
     // --- Information classes for writing --------------------------------------------------------
 

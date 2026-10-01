@@ -682,6 +682,126 @@ internal interface IPlatformOps
     /// <summary>Waits for what has been written to an open file to reach storage.</summary>
     void FlushFileToDisk(SafeFileHandle handle);
 
+    // The members from here to the stream move a file's contents without passing them through
+    // the process, where the platform has a way to. Each is an optimisation with a plain read
+    // and write behind it, so unlike the members above they report failure as a CapError: the
+    // caller has to tell "not here" from a failure cheaply, on every file, and goes on with the
+    // reads and writes either way. Where the platform has no such call they report
+    // NotSupported without asking the system anything.
+
+    /// <summary>
+    /// Makes <paramref name="destination"/> hold the whole of <paramref name="source"/>'s
+    /// contents, sharing the source's storage rather than copying it.
+    /// </summary>
+    /// <param name="source">The file whose contents are taken. Open for reading.</param>
+    /// <param name="destination">
+    /// The file that receives them, open for writing and not appending. Whatever it held is
+    /// replaced, and its length becomes the source's.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// A reflink on Linux (<c>FICLONE</c>, on btrfs, XFS and the other filesystems that share
+    /// extents), and block cloning on Windows (<c>FSCTL_DUPLICATE_EXTENTS_TO_FILE</c>, on ReFS
+    /// and Dev Drive). The two files then share their storage until either is written, so the
+    /// copy is made in a time and a space that do not depend on the length.
+    /// </para>
+    /// <para>
+    /// All or nothing as far as the caller can tell: on failure the destination is left
+    /// empty, as it was handed over. Reports <see cref="CapErrorCategory.NotSupported"/>
+    /// where the filesystem cannot share storage and
+    /// <see cref="CapErrorCategory.CrossDevice"/> where the two files are on different ones.
+    /// </para>
+    /// </remarks>
+    CapError CloneFileContents(SafeFileHandle source, SafeFileHandle destination);
+
+    /// <summary>
+    /// Creates <paramref name="name"/> directly beneath <paramref name="parent"/> as a new
+    /// file sharing <paramref name="source"/>'s storage.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For macOS, whose clone (<c>fclonefileat</c>) makes a new name rather than filling an
+    /// open file. It claims the name as an exclusive creation does, failing with
+    /// <see cref="CapErrorCategory.AlreadyExists"/> when anything holds it, a link included,
+    /// and never follows a link in it. The new file belongs to the caller, as a created one
+    /// would, and carries the source's mode and extended attributes.
+    /// </para>
+    /// <para>
+    /// Reports <see cref="CapErrorCategory.NotSupported"/> on every other platform, and where
+    /// the filesystem cannot share storage.
+    /// </para>
+    /// </remarks>
+    CapError CloneFileToChild(SafeFileHandle source, SafeDirHandle parent, ReadOnlySpan<char> name);
+
+    /// <summary>
+    /// Copies up to <paramref name="length"/> bytes from one open file to another, at the
+    /// same offset in both, inside the kernel.
+    /// </summary>
+    /// <param name="source">The file read from. Open for reading.</param>
+    /// <param name="destination">The file written to. Open for writing and not appending.</param>
+    /// <param name="fileOffset">Where in both files the range starts.</param>
+    /// <param name="length">The most to copy.</param>
+    /// <param name="copied">
+    /// How many bytes were copied, which may be fewer than asked for. Zero at the end of the
+    /// source, and also from some filesystems that cannot answer, so a caller confirms a zero
+    /// with a read before treating it as the end.
+    /// </param>
+    /// <remarks>
+    /// <c>copy_file_range</c> on Linux, which a filesystem may carry out by sharing extents, by
+    /// a copy on a file server, or by moving pages within the kernel.
+    /// </remarks>
+    CapError CopyFileRange(
+        SafeFileHandle source,
+        SafeFileHandle destination,
+        long fileOffset,
+        long length,
+        out long copied);
+
+    /// <summary>
+    /// Finds the next stretch of a file that holds data, at or after
+    /// <paramref name="fileOffset"/>.
+    /// </summary>
+    /// <param name="handle">The file.</param>
+    /// <param name="fileOffset">Where to start looking.</param>
+    /// <param name="start">
+    /// Where the stretch starts, or -1 when nothing at or after the offset holds data.
+    /// </param>
+    /// <param name="end">Where it ends, exclusive; -1 with <paramref name="start"/>.</param>
+    /// <remarks>
+    /// <para>
+    /// What lies between stretches is a hole: a range the filesystem stores nothing for and
+    /// that reads as zeroes. A filesystem that keeps no holes reports the whole file as one
+    /// stretch. Reports <see cref="CapErrorCategory.NotSupported"/> where the platform cannot
+    /// tell.
+    /// </para>
+    /// <para>
+    /// On Linux and macOS this moves the descriptor's position, which nothing that reads and
+    /// writes by position depends on.
+    /// </para>
+    /// </remarks>
+    CapError FindFileData(SafeFileHandle handle, long fileOffset, out long start, out long end);
+
+    /// <summary>
+    /// Marks a file as one whose unwritten stretches take no storage.
+    /// </summary>
+    /// <remarks>
+    /// Windows alone needs to be told: a file there fills a gap left by a write past its end,
+    /// or by extending it, with zeroes it stores, unless it has been marked first. Succeeds
+    /// without doing anything on Linux and macOS, where every file is that way.
+    /// </remarks>
+    CapError MarkFileSparse(SafeFileHandle handle);
+
+    /// <summary>
+    /// Reserves storage for a file up to <paramref name="length"/> bytes, leaving its length
+    /// as it is.
+    /// </summary>
+    /// <remarks>
+    /// So that writing a file of a known size claims its storage in one piece, rather than a
+    /// write at a time. The reservation is advice the caller can do without: a failure says
+    /// only that it was not made.
+    /// </remarks>
+    CapError ReserveFileSpace(SafeFileHandle handle, long length);
+
     /// <summary>
     /// Builds a stream over an open file, giving it ownership of the handle.
     /// </summary>

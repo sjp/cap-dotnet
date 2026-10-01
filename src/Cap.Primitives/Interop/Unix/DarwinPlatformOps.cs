@@ -1039,6 +1039,128 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     public void FlushFileToDisk(SafeFileHandle handle) => HostFileContent.FlushToDisk(handle);
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Not on this platform: its clone makes a new name rather than filling an open file,
+    /// and is reached through <see cref="CloneFileToChild"/>.
+    /// </remarks>
+    public CapError CloneFileContents(SafeFileHandle source, SafeFileHandle destination) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    public CapError CloneFileToChild(SafeFileHandle source, SafeDirHandle parent, ReadOnlySpan<char> name)
+    {
+        using HandleLease from = new(source);
+        using HandleLease lease = parent.Lease();
+        if (!from.IsValid || !lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        Span<byte> scratch = stackalloc byte[PathScratchBytes];
+        using UnixPathBuffer path = UnixPathBuffer.Create(name, scratch);
+        if (!path.IsValid)
+        {
+            return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        int result;
+        int errno = 0;
+        unsafe
+        {
+            fixed (byte* bytes = path.Bytes)
+            {
+                result = DarwinNative.FCloneFileAt(
+                    from.Descriptor,
+                    lease.Descriptor,
+                    bytes,
+                    DarwinConstants.CLONE_NOFOLLOW | DarwinConstants.CLONE_NOOWNERCOPY);
+                if (result < 0)
+                {
+                    errno = Marshal.GetLastPInvokeError();
+                }
+            }
+        }
+
+        return result < 0 ? DarwinErrno.ToError(errno) : CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError CopyFileRange(
+        SafeFileHandle source,
+        SafeFileHandle destination,
+        long fileOffset,
+        long length,
+        out long copied)
+    {
+        copied = 0;
+        return CapError.FromCategory(CapErrorCategory.NotSupported);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// A filesystem that cannot tell data from holes refuses the question as an invalid
+    /// argument, and is reported as not supporting it.
+    /// </remarks>
+    public CapError FindFileData(SafeFileHandle handle, long fileOffset, out long start, out long end)
+    {
+        start = -1;
+        end = -1;
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        long data = DarwinNative.Seek(lease.Descriptor, fileOffset, DarwinConstants.SEEK_DATA);
+        if (data < 0)
+        {
+            int errno = Marshal.GetLastPInvokeError();
+            return errno switch
+            {
+                PosixErrno.ENXIO => CapError.Success,
+                PosixErrno.EINVAL => CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno),
+                _ => DarwinErrno.ToError(errno),
+            };
+        }
+
+        long hole = DarwinNative.Seek(lease.Descriptor, data, DarwinConstants.SEEK_HOLE);
+        if (hole < 0)
+        {
+            return DarwinErrno.ToError(Marshal.GetLastPInvokeError());
+        }
+
+        start = data;
+        end = hole;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError MarkFileSparse(SafeFileHandle handle) => CapError.Success;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// This platform's reservation is measured from the end of the file, so what is asked for
+    /// is the room between the file's length and <paramref name="length"/>.
+    /// </remarks>
+    public CapError ReserveFileSpace(SafeFileHandle handle, long length)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        long current = HostFileContent.GetLength(handle);
+        if (length <= current)
+        {
+            return CapError.Success;
+        }
+
+        int errno = Reserve(lease.Descriptor, length - current);
+        return errno == 0 ? CapError.Success : DarwinErrno.ToError(errno);
+    }
+
+    /// <inheritdoc/>
     public Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync) =>
         HostFileContent.OpenStream(handle, access, bufferSize, isAsync);
 
@@ -1463,31 +1585,37 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapError.Success;
         }
 
-        int errno = 0;
-        unsafe
-        {
-            FileStore store = new()
-            {
-                Flags = DarwinConstants.F_ALLOCATECONTIG | DarwinConstants.F_ALLOCATEALL,
-                PositionMode = DarwinConstants.F_PEOFPOSMODE,
-                Offset = 0,
-                Length = request.PreallocationSize,
-                BytesAllocated = 0,
-            };
-
-            if (DarwinNative.FcntlStore(fd, DarwinConstants.F_PREALLOCATE, &store) < 0)
-            {
-                store.Flags = DarwinConstants.F_ALLOCATEALL;
-                if (DarwinNative.FcntlStore(fd, DarwinConstants.F_PREALLOCATE, &store) < 0)
-                {
-                    errno = Marshal.GetLastPInvokeError();
-                }
-            }
-        }
-
+        int errno = Reserve(fd, request.PreallocationSize);
         return errno is PosixErrno.ENOSPC or PosixErrno.EFBIG
             ? DarwinErrno.ToError(errno)
             : CapError.Success;
+    }
+
+    /// <summary>
+    /// Claims <paramref name="length"/> bytes of storage behind the end of a file, contiguous
+    /// if the filesystem can manage it and scattered if not.
+    /// </summary>
+    /// <returns>Zero, or the error the second attempt met.</returns>
+    private static unsafe int Reserve(int fd, long length)
+    {
+        FileStore store = new()
+        {
+            Flags = DarwinConstants.F_ALLOCATECONTIG | DarwinConstants.F_ALLOCATEALL,
+            PositionMode = DarwinConstants.F_PEOFPOSMODE,
+            Offset = 0,
+            Length = length,
+            BytesAllocated = 0,
+        };
+
+        if (DarwinNative.FcntlStore(fd, DarwinConstants.F_PREALLOCATE, &store) == 0)
+        {
+            return 0;
+        }
+
+        store.Flags = DarwinConstants.F_ALLOCATEALL;
+        return DarwinNative.FcntlStore(fd, DarwinConstants.F_PREALLOCATE, &store) == 0
+            ? 0
+            : Marshal.GetLastPInvokeError();
     }
 
     /// <summary>

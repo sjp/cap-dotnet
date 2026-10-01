@@ -173,6 +173,27 @@ internal static class DarwinConstants
     /// <summary>Measure the reservation from the end of the file.</summary>
     public const int F_PEOFPOSMODE = 3;
 
+    /// <summary><c>lseek</c>: the next offset at or after the one given that is in a hole.</summary>
+    /// <remarks>The reverse of Linux's numbering, where this is 4.</remarks>
+    public const int SEEK_HOLE = 3;
+
+    /// <summary><c>lseek</c>: the next offset at or after the one given that holds data.</summary>
+    /// <remarks>The reverse of Linux's numbering, where this is 3.</remarks>
+    public const int SEEK_DATA = 4;
+
+    /// <summary><c>fclonefileat</c>: refuse to follow a link at the source's name.</summary>
+    /// <remarks>
+    /// The source here is a descriptor, so there is no name to follow; passed so the call
+    /// never acts on anything but the object the descriptor holds.
+    /// </remarks>
+    public const uint CLONE_NOFOLLOW = 0x0001;
+
+    /// <summary>
+    /// <c>fclonefileat</c>: give the clone the caller's ownership rather than the source's,
+    /// as a file the caller created would have.
+    /// </summary>
+    public const uint CLONE_NOOWNERCOPY = 0x0002;
+
     /// <summary>
     /// The size this platform requires of the buffer handed to <see cref="F_GETPATH"/>.
     /// </summary>

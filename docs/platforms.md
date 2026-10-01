@@ -29,6 +29,8 @@ what a program moving between Linux, macOS and Windows will notice.
 | Removing a read-only file (`DeleteFile`) | removes it: only the directory's permissions matter | removes it | refused with `UnauthorizedAccessException`; `DeleteTree` clears the flag and removes it ([below](#windows)) |
 | Walking through a directory that grants search but not read (`0711`) | yes | no: every directory handle can also list ([why](backends.md#directories-opened-only-to-be-traversed)) | yes |
 | Committing a directory's entries (`Dir.Flush(toDisk: true)`) | `fsync` on the directory | `F_FULLFSYNC` on the directory, falling back to `fsync` where the volume refuses it | not possible; returns false |
+| How a copy moves contents (`CopyTo`, `CopyFile`) | reflink (`FICLONE`), then `copy_file_range`, then reads and writes | `fclonefileat` on APFS when permissions are carried (with the source's extended attributes), then reads and writes | block cloning on ReFS and Dev Drive, then reads and writes ([details](convenience-layer.md#how-the-contents-are-moved)) |
+| Finding the holes in a sparse file (`PreserveSparseness`) | `SEEK_DATA`/`SEEK_HOLE` | `SEEK_DATA`/`SEEK_HOLE` | `FSCTL_QUERY_ALLOCATED_RANGES`, with the copy marked sparse |
 | Earliest time `SetTimes` can store | any a `DateTimeOffset` holds (the filesystem may clamp it) | same | after 1 January 1601; earlier is `ArgumentOutOfRangeException` |
 | Processor architectures | x86-64, AArch64, 32-bit ARM; any other is refused ([below](#linux-architectures)) | any .NET runs on | any .NET runs on |
 

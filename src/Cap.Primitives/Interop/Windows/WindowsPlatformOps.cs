@@ -1146,6 +1146,269 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <inheritdoc/>
     public void FlushFileToDisk(SafeFileHandle handle) => HostFileContent.FlushToDisk(handle);
 
+    /// <summary>
+    /// The most one request to share storage covers: a whole number of clusters for every
+    /// cluster size a volume can have, and well under the 4 GiB a single request is limited to.
+    /// </summary>
+    private const long CloneChunkBytes = 1L << 30;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// Block cloning, which ReFS and Dev Drive volumes offer. Whether the source's volume can
+    /// share storage is asked first, through its integrity settings, which only such a volume
+    /// answers. The answer also carries the cluster size, which every shared range must be a
+    /// whole number of. The destination is given the source's length, and marked sparse when
+    /// the source is, as the request requires. The ranges are then shared a gigabyte at a time, the
+    /// last rounded up to a whole cluster.
+    /// </para>
+    /// <para>
+    /// A failure part way through empties the destination again, so that it is as it was
+    /// handed over.
+    /// </para>
+    /// </remarks>
+    public unsafe CapError CloneFileContents(SafeFileHandle source, SafeFileHandle destination)
+    {
+        using HandleLease from = new(source);
+        using HandleLease to = new(destination);
+        if (!from.IsValid || !to.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        IntegrityInformationBuffer integrity = default;
+        CapError asked = Control(
+            source,
+            from.Raw,
+            NtConstants.FSCTL_GET_INTEGRITY_INFORMATION,
+            null,
+            0,
+            &integrity,
+            (uint)IntegrityInformationBuffer.StructSize,
+            out _);
+        if (asked.IsFailure || integrity.ClusterSizeInBytes == 0)
+        {
+            return CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Win32, Win32Errors.ERROR_NOT_SUPPORTED);
+        }
+
+        long length = HostFileContent.GetLength(source);
+        if (length == 0)
+        {
+            return CapError.Success;
+        }
+
+        if (QueryAttributeTag(from.Raw, out FileAttributeTagInformation attributes).IsSuccess &&
+            (attributes.FileAttributes & NtConstants.FILE_ATTRIBUTE_SPARSE_FILE) != 0)
+        {
+            CapError marked = Control(destination, to.Raw, NtConstants.FSCTL_SET_SPARSE, null, 0, null, 0, out _);
+            if (marked.IsFailure)
+            {
+                return marked;
+            }
+        }
+
+        CapError sized = SetEndOfFile(to.Raw, length);
+        if (sized.IsFailure)
+        {
+            return sized;
+        }
+
+        long cluster = integrity.ClusterSizeInBytes;
+        long rounded = (length + cluster - 1) / cluster * cluster;
+        for (long offset = 0; offset < rounded; offset += CloneChunkBytes)
+        {
+            DuplicateExtentsData request = new()
+            {
+                FileHandle = from.Raw,
+                SourceFileOffset = offset,
+                TargetFileOffset = offset,
+                ByteCount = Math.Min(CloneChunkBytes, rounded - offset),
+            };
+
+            CapError shared = Control(
+                destination,
+                to.Raw,
+                NtConstants.FSCTL_DUPLICATE_EXTENTS_TO_FILE,
+                &request,
+                (uint)DuplicateExtentsData.StructSize,
+                null,
+                0,
+                out _);
+            if (shared.IsFailure)
+            {
+                SetEndOfFile(to.Raw, 0);
+                return shared;
+            }
+        }
+
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public CapError CloneFileToChild(SafeFileHandle source, SafeDirHandle parent, ReadOnlySpan<char> name) =>
+        CapError.FromCategory(CapErrorCategory.NotSupported);
+
+    /// <inheritdoc/>
+    public CapError CopyFileRange(
+        SafeFileHandle source,
+        SafeFileHandle destination,
+        long fileOffset,
+        long length,
+        out long copied)
+    {
+        copied = 0;
+        return CapError.FromCategory(CapErrorCategory.NotSupported);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Asks which ranges from the offset to the end have storage behind them, and takes the
+    /// first. A reply with more ranges than room is still a reply about the first. A file
+    /// that is not sparse has storage behind all of it and is reported as one stretch. A
+    /// filesystem with no notion of ranges, such as FAT, refuses the request and is reported
+    /// as not supporting it.
+    /// </remarks>
+    public unsafe CapError FindFileData(SafeFileHandle handle, long fileOffset, out long start, out long end)
+    {
+        start = -1;
+        end = -1;
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        long length = HostFileContent.GetLength(handle);
+        if (fileOffset >= length)
+        {
+            return CapError.Success;
+        }
+
+        FileAllocatedRangeBuffer question = new() { FileOffset = fileOffset, Length = length - fileOffset };
+        FileAllocatedRangeBuffer answer = default;
+        CapError asked = Control(
+            handle,
+            lease.Raw,
+            NtConstants.FSCTL_QUERY_ALLOCATED_RANGES,
+            &question,
+            (uint)FileAllocatedRangeBuffer.StructSize,
+            &answer,
+            (uint)FileAllocatedRangeBuffer.StructSize,
+            out uint returned,
+            Win32Errors.ERROR_MORE_DATA);
+        if (asked.IsFailure)
+        {
+            return asked;
+        }
+
+        if (returned < (uint)FileAllocatedRangeBuffer.StructSize)
+        {
+            return CapError.Success;
+        }
+
+        start = Math.Max(answer.FileOffset, fileOffset);
+        end = answer.FileOffset + answer.Length;
+        return CapError.Success;
+    }
+
+    /// <inheritdoc/>
+    public unsafe CapError MarkFileSparse(SafeFileHandle handle)
+    {
+        using HandleLease lease = new(handle);
+        return lease.IsValid
+            ? Control(handle, lease.Raw, NtConstants.FSCTL_SET_SPARSE, null, 0, null, 0, out _)
+            : HandleLease.ClosedError;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Only ever grows the room: an allocation set below the file's length here would cut
+    /// the file short to fit it.
+    /// </remarks>
+    public unsafe CapError ReserveFileSpace(SafeFileHandle handle, long length)
+    {
+        using HandleLease lease = new(handle);
+        if (!lease.IsValid)
+        {
+            return HandleLease.ClosedError;
+        }
+
+        if (length <= HostFileContent.GetLength(handle))
+        {
+            return CapError.Success;
+        }
+
+        IoStatusBlock status = default;
+        long allocation = length;
+        int nt = NtNative.NtSetInformationFile(
+            lease.Raw, &status, &allocation, sizeof(long), NtConstants.FileAllocationInformationClass);
+
+        return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
+    }
+
+    /// <summary>Sets an open file's length through its raw handle.</summary>
+    private static unsafe CapError SetEndOfFile(nint handle, long length)
+    {
+        IoStatusBlock status = default;
+        long end = length;
+        int nt = NtNative.NtSetInformationFile(
+            handle, &status, &end, sizeof(long), NtConstants.FileEndOfFileInformationClass);
+
+        return NtStatusCodes.IsFailure(nt) ? NtStatusCodes.ToError(nt) : CapError.Success;
+    }
+
+    /// <summary>
+    /// Issues a filesystem control code against an open file, waiting for it here when the
+    /// file was opened for overlapped operation.
+    /// </summary>
+    /// <param name="handle">The file, asked whether it is overlapped.</param>
+    /// <param name="raw">Its raw value, which the caller holds a lease on.</param>
+    /// <param name="code">The control code.</param>
+    /// <param name="input">The request, or null.</param>
+    /// <param name="inputSize">Its size in bytes.</param>
+    /// <param name="output">Where the reply goes, or null.</param>
+    /// <param name="outputSize">Its size in bytes.</param>
+    /// <param name="returned">How many bytes of reply were written.</param>
+    /// <param name="tolerated">An error that still leaves a usable reply, or zero for none.</param>
+    /// <remarks>
+    /// The event an overlapped request signals is marked, as <see cref="WriteAppending"/>'s is,
+    /// so that the completion is not also delivered to a thread pool the handle is bound to.
+    /// </remarks>
+    private static unsafe CapError Control(
+        SafeFileHandle handle,
+        nint raw,
+        uint code,
+        void* input,
+        uint inputSize,
+        void* output,
+        uint outputSize,
+        out uint returned,
+        int tolerated = 0)
+    {
+        using ManualResetEvent? signal = handle.IsAsync ? new ManualResetEvent(initialState: false) : null;
+
+        NativeOverlapped overlapped = default;
+        if (signal is not null)
+        {
+            overlapped.EventHandle = signal.SafeWaitHandle.DangerousGetHandle() | 1;
+        }
+
+        uint count = 0;
+        bool done = NtNative.DeviceIoControlOverlapped(
+            raw, code, input, inputSize, output, outputSize, &count, signal is null ? null : &overlapped);
+        int error = done ? 0 : Marshal.GetLastPInvokeError();
+
+        if (signal is not null && (done || error == Win32Errors.ERROR_IO_PENDING))
+        {
+            // The count an overlapped request reports on the call is not reliable; the record's is.
+            done = NtNative.GetOverlappedResult(raw, &overlapped, &count, wait: true);
+            error = done ? 0 : Marshal.GetLastPInvokeError();
+        }
+
+        returned = count;
+        return done || (tolerated != 0 && error == tolerated) ? CapError.Success : Win32Errors.ToError(error);
+    }
+
     /// <inheritdoc/>
     public Stream OpenFileStream(SafeFileHandle handle, FileAccess access, int bufferSize, bool isAsync) =>
         HostFileContent.OpenStream(handle, access, bufferSize, isAsync);

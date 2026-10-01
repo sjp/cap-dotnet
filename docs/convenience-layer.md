@@ -293,14 +293,57 @@ Progress is reported after each directory, file and link is made and each entry 
 the counts never go down and the last report equals the one returned. It is called on the
 thread doing the copy; `Progress<T>` posts each report on to the context it was made on.
 
-The token is looked at before each entry and between the 64 KiB pieces a file is copied in.
-Cancelled mid-copy, the copy throws `OperationCanceledException` and leaves what a failure
+The token is looked at before each entry and between the pieces a file is copied in: 8 MiB
+for a copy made inside the kernel, 64 KiB for one read and written (see below). A clone is one
+step and is not interrupted. Cancelled mid-copy, the copy throws `OperationCanceledException` and leaves what a failure
 leaves: files already copied stay, no scratch (`cap-*`) file remains, and the file being
 written is not published — it is removed from its real name, or under `Overwrite` its scratch
 copy is removed and whatever held the name keeps it. The same is true of any other failure
 part of the way through a file, so no name in the destination ever holds a partly written
 file. Directories already made stay, and under `PreservePermissions` keep the owner-only
 permissions they are given while they are filled.
+
+### How the contents are moved
+
+Each file's contents go by the quickest means both ends share, tried in this order:
+
+1. **Shared storage.** The destination is made to share the source's storage, which takes the
+   same time whatever the file's length. Linux asks for a reflink (`FICLONE`), which btrfs,
+   XFS and the other filesystems that share extents grant. Windows asks for block cloning
+   (`FSCTL_DUPLICATE_EXTENTS_TO_FILE`), which ReFS and Dev Drive volumes grant. macOS clones
+   with `fclonefileat` on APFS. That call makes a new name rather than filling a file already
+   created, so it is used in place of creating the destination, under the same exclusivity,
+   and only with `PreservePermissions` on: a clone carries the source's mode, which a copy that
+   leaves permissions to the destination must not do. It also carries the source's extended
+   attributes, which no other way of copying does. A clone is given the time it was made,
+   unless `PreserveTimes` asks for the source's.
+2. **A copy inside the kernel.** Linux moves the contents with `copy_file_range`, 8 MiB at a
+   time, without bringing them into the process. A filesystem may carry it out by sharing
+   extents, or on the server for NFS and SMB.
+3. **Reads and writes**, 64 KiB at a time, position by position. Before the first write the
+   destination's room is reserved, up to the source's length, so a large file is not claimed
+   a write at a time and fragmented (`fallocate` on Linux, `F_PREALLOCATE` on macOS, the
+   allocation size on Windows).
+
+A shortcut that fails is never reported. The copy goes on to the next way, and a real fault
+such as a full disk or a failing device is met, and reported, by the reads and writes. One the
+platform says it does not have at all is not tried again for the rest of the copy. A kernel copy
+that reports nothing copied before the end, as one from `/proc` or `/sys` does, is not taken for
+the end: the rest is read and written. Both ends have to be on the host's filesystem for the
+first two; between a tree on disk and one in memory the contents are always read and written.
+
+`PreserveSparseness` keeps the holes in a sparse file, the ranges the source stores nothing for
+and that read as zeroes. Without it, holes are read as zeroes and written as zeroes, so a sparse
+source becomes a copy that takes more room. With it, the copy asks the source where its data is
+(`SEEK_DATA`/`SEEK_HOLE` on Linux and macOS, `FSCTL_QUERY_ALLOCATED_RANGES` on Windows) and
+writes only that, by either of the last two ways. It marks the destination sparse first on
+Windows, and gives the destination the source's length, so the holes stay holes, the one at the
+end included. A source whose filesystem cannot say where its data is is copied whole. Nothing is
+reserved while holes are kept, since a reservation would fill them. A copy that shares storage
+keeps the source's holes either way.
+
+`CopyReport.Bytes` counts the bytes each copy reads as: its length, holes included, however the
+contents went.
 
 ### What happens to each kind
 
@@ -359,6 +402,8 @@ the source had and the copy's caller did not ask for.
   directory's are set after everything inside it has been copied, since adding entries moves
   its last-write time on. Creation times are not carried, and the directory the copy writes
   into keeps its own.
+- `PreserveSparseness` (off): a hole in a sparse source file stays a hole in the copy, as
+  [How the contents are moved](#how-the-contents-are-moved) describes.
 - `MaxDepth` (256): as for a walk. A directory at the limit is looked into before its copy
   is made, so an empty one is copied and one with anything in it stops the copy with nothing
   created for it.
@@ -374,6 +419,10 @@ part of the way through, for the caller to remove.
 **Windows: an alternate data stream is not copied.** A file with one arrives at the
 destination holding only its main contents, silently, because there is no portable way to
 carry it and no way to report it that is not noise for the trees that do not have any.
+
+**macOS: extended attributes travel with a clone and with nothing else.** A file cloned on
+APFS (with `PreservePermissions` on) arrives with the source's extended attributes, quarantine
+flag included. One read and written does not, and neither does a copy on any other platform.
 
 ## Copying one file
 
@@ -392,6 +441,9 @@ end named by a handle and a path beneath it. It returns the number of bytes copi
   `PreserveTimes` does that.
 - Without `overwrite`, a failure part of the way through the contents leaves the partial file
   at `to`.
+- The contents are moved as `CopyTo` moves them, by the quickest means both ends share. Since
+  the permissions always travel, a macOS clone is made whenever APFS allows. Holes are written
+  as zeroes; `CopyTo` with `PreserveSparseness` keeps them.
 
 The two handles may be on different backends, as for `CopyTo`.
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Cap.Primitives;
+using Cap.Primitives.Interop.Unix;
 using Cap.Std;
 using Cap.Std.Testing;
 using Cap.Tests;
@@ -978,6 +979,64 @@ public sealed class CopyTests : IDisposable
         AssertNothingHalfWritten(destination, overwrite);
     }
 
+    /// <summary>
+    /// A file many times the size of a piece arrives whole, by whichever means this host's
+    /// filesystem offers: shared storage, a copy inside the kernel, or reads and writes.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_large_file_is_copied_whole(bool asynchronous)
+    {
+        byte[] contents = Contents((8 * 1024 * 1024) + 13);
+        MakeBytes(contents, "source", "large.bin");
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+
+        CopyReport report = await Run(asynchronous, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(contents.Length, report.Bytes);
+        Assert.Equal(contents, HostFile.ReadAllBytes(Path.Combine(_tree.HostPath, "destination", "large.bin")));
+    }
+
+    /// <summary>
+    /// A sparse file asked to be copied with its holes arrives at the same length with the
+    /// same contents, and on Linux takes no more room than the data it holds.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_sparse_file_keeps_its_length_and_its_holes_when_asked(bool asynchronous)
+    {
+        const long Length = 64L * 1024 * 1024;
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "source"));
+        HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
+        using (CapFile sparse = _tree.Directory.OpenFile("source/sparse.bin", FileMode.CreateNew, FileAccess.Write))
+        {
+            sparse.SetLength(Length);
+            sparse.Write(Contents(4096), 1024 * 1024);
+            sparse.Write([7], Length - 1);
+        }
+
+        CopyReport report = await Run(
+            asynchronous,
+            new CopyOptions { PreserveSparseness = true },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        string copied = Path.Combine(_tree.HostPath, "destination", "sparse.bin");
+        byte[] expected = new byte[Length];
+        Contents(4096).CopyTo(expected, 1024 * 1024);
+        expected[^1] = 7;
+        Assert.Equal(Length, report.Bytes);
+        Assert.True(expected.AsSpan().SequenceEqual(HostFile.ReadAllBytes(copied)));
+
+        if (OperatingSystem.IsLinux() && !HostTree.InMemory)
+        {
+            Assert.True(
+                AllocatedBytes(copied) < Length / 2,
+                $"The copy occupies {AllocatedBytes(copied)} bytes for {Length} of mostly holes.");
+        }
+    }
+
     /// <summary>A copy asked to stop before it starts writes nothing.</summary>
     [Theory]
     [InlineData(false)]
@@ -1088,6 +1147,22 @@ public sealed class CopyTests : IDisposable
         string path = Path.Combine([_tree.HostPath, .. parts]);
         HostDirectory.CreateDirectory(Path.GetDirectoryName(path)!);
         HostFile.WriteAllText(path, "contents");
+    }
+
+    /// <summary>How much storage a file on the host occupies, as Linux counts it.</summary>
+    private static unsafe long AllocatedBytes(string path)
+    {
+        const uint StatxBlocks = 0x0400;
+        byte[] name = System.Text.Encoding.UTF8.GetBytes(path + "\0");
+        StatxBuffer described = default;
+        fixed (byte* raw = name)
+        {
+            Assert.Equal(
+                0,
+                LinuxNative.Statx(LinuxConstants.SYS_statx, LinuxConstants.AT_FDCWD, raw, 0, StatxBlocks, &described));
+        }
+
+        return (long)described.Blocks * 512;
     }
 
     /// <summary>Creates a named pipe, which the framework has no call for.</summary>
