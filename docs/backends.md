@@ -468,6 +468,13 @@ walked as relative, which the filesystem reading it would never do. A junction h
 flag and is never relative — its target is recorded as a path from a volume root, which is why
 one can never be followed while staying beneath a directory handle.
 
+A symbolic link this backend writes is always relative. A rooted target is refused with
+`InvalidArgument` before anything is created, as `Dir` refuses it before it gets that far
+(threat model S16), so every target is stored exactly as given and the flag is always the
+relative one. Storing a rooted target would mean respelling it in the object manager's syntax,
+each kind of full path differently, which is one more place for the flag and the characters to
+come apart.
+
 Every offset and length inside a reparse point is checked against the bytes actually returned
 rather than against the length the structure claims for itself. Inside a sandbox that data is
 attacker-controlled: anything that can create a file there can create a reparse point with

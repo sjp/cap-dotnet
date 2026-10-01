@@ -848,6 +848,13 @@ internal interface IPlatformOps
     /// depending on where the link ends up, which is not knowable when it is created.
     /// </para>
     /// <para>
+    /// The one exception is Windows, which refuses a rooted target with
+    /// <see cref="CapErrorCategory.InvalidArgument"/>. A link there records whether its target
+    /// is rooted in a flag beside the text, and a rooted target would have to be respelled in
+    /// the object manager's syntax rather than stored as given. <c>Dir</c> refuses rooted
+    /// targets on every platform before this is reached (threat model S16).
+    /// </para>
+    /// <para>
     /// Reports <see cref="CapErrorCategory.NotSupported"/> where the filesystem has no
     /// symbolic links, and <see cref="CapErrorCategory.PermissionDenied"/> where creating
     /// one needs a privilege the process does not hold.

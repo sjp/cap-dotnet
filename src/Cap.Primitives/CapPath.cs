@@ -607,7 +607,8 @@ public readonly struct CapPath
     /// <summary>
     /// Rejects every path shape but a plain relative one, each with its own reason.
     /// </summary>
-    private static CapPathError ClassifyPrefix(ReadOnlySpan<char> raw, CapPathSyntax syntax)
+    /// <remarks><paramref name="raw"/> must not be empty.</remarks>
+    internal static CapPathError ClassifyPrefix(ReadOnlySpan<char> raw, CapPathSyntax syntax)
     {
         if (syntax == CapPathSyntax.Unix)
         {

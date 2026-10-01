@@ -101,8 +101,8 @@ Developer Mode. Junctions always store an absolute target, so they are always re
 the way through, whatever the symbolic-link policy says — but `ReadLink` still reports what one
 holds, since reading a link is not following it, and what comes back is the target the
 filesystem acts on, which for a rooted one is spelled the way the filesystem stores it
-(`\??\C:\...`) rather than the way it is displayed. A directory-kind link and a junction are
-directory entries here, so `CreateHardLink` cannot give one a second name, as it can on Unix.
+(`\??\C:\...`, or `\??\UNC\server\share\...` for a network path) rather than the way it is
+displayed. A directory-kind link and a junction are directory entries here, so `CreateHardLink` cannot give one a second name, as it can on Unix.
 
 **Other reparse points are split by whether they redirect.** A reparse point whose tag stands
 for another object — a container link, a distributed file system link, or any tag with the

@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using Cap.Fuzz.Targets;
+using Cap.Primitives;
 using Cap.Primitives.Interop.Windows;
 using CsCheck;
 
@@ -56,15 +57,20 @@ public sealed class ReparseDataPropertyTests
             },
             iter: PropertySettings.Iterations);
 
-    /// <summary>A link this library writes reads back as the link it meant to write.</summary>
+    /// <summary>
+    /// A link this library writes reads back as the link it meant to write, flagged rooted
+    /// exactly when the parser reads its target as rooted, and with a rooted target spelled
+    /// the way the system's own call spells it.
+    /// </summary>
     [Fact]
     public void A_link_written_here_reads_back_as_written() =>
-        Gen.Select(Targets, Gen.Bool).Sample(
-            (target, rooted) =>
+        Targets.Sample(
+            target =>
             {
+                bool rooted = CapPath.IsRooted(target, CapPathSyntax.Windows);
                 byte[] buffer = SymbolicLink(target, rooted);
                 Assert.True(ReparseData.TryReadTarget(buffer, out string stored, out bool isRelative));
-                Assert.Equal(rooted ? ReparseData.ObjectManagerPrefix + target : target, stored);
+                Assert.Equal(Substitute(target, rooted), stored);
                 Assert.Equal(!rooted, isRelative);
                 ReparseDataTarget.Check(buffer);
             },
@@ -138,6 +144,21 @@ public sealed class ReparseDataPropertyTests
             .Where(value => value is >= 0 and <= ushort.MaxValue)
             .Distinct();
     }
+
+    /// <summary>
+    /// The substitute name the system's own call stores, read from the documented spellings
+    /// rather than from the builder: a drive path behind the object manager's prefix, a
+    /// network path's <c>\\</c> and a device path's <c>\\?\</c> or <c>\\.\</c> replaced
+    /// by it, and anything else as written.
+    /// </summary>
+    private static string Substitute(string target, bool rooted) => target switch
+    {
+        _ when !rooted => target,
+        ['\\' or '/', '\\' or '/', '?' or '.', '\\' or '/', ..] => @"\??\" + target[4..],
+        ['\\' or '/', '\\' or '/', ..] => @"\??\UNC\" + target[2..],
+        [var drive, ':', '\\' or '/', ..] when char.IsAsciiLetter(drive) => @"\??\" + target,
+        _ => target,
+    };
 
     private static byte[] SymbolicLink(string target, bool rooted)
     {

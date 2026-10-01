@@ -38,17 +38,26 @@ public sealed class WindowsReparseDataTests
     /// <para>
     /// The reader is already exercised against hand-built structures on every platform, so
     /// pairing the writer with it costs nothing and turns a Windows-only unknown into an
-    /// assertion that runs on every build agent. The rooted case is the one worth insisting
+    /// assertion that runs on every build agent. The rooted cases are the ones worth insisting
     /// on: what the filesystem resolves and what a reader is shown are deliberately not the
-    /// same characters there.
+    /// same characters there, and each kind of full path is respelled differently. The backend
+    /// never writes one, but the escape corpus builds them to test the reader against, so they
+    /// have to look like the links the system's own call makes.
     /// </para>
     /// </remarks>
     [Theory]
-    [InlineData("inside\\target", false)]
-    [InlineData("..\\sibling", false)]
-    [InlineData("C:\\elsewhere\\file", true)]
-    public void A_link_written_here_reads_back_as_what_was_written(string target, bool rooted)
+    [InlineData(@"inside\target", @"inside\target")]
+    [InlineData(@"..\sibling", @"..\sibling")]
+    [InlineData(@"C:\elsewhere\file", @"\??\C:\elsewhere\file")]
+    [InlineData(@"\\srv\share\x", @"\??\UNC\srv\share\x")]
+    [InlineData(@"\\?\C:\x", @"\??\C:\x")]
+    [InlineData(@"\\.\C:\x", @"\??\C:\x")]
+    [InlineData(@"\\?\UNC\srv\share", @"\??\UNC\srv\share")]
+    [InlineData(@"C:x", @"C:x")]
+    [InlineData(@"\x", @"\x")]
+    public void A_link_written_here_reads_back_as_what_was_written(string target, string substitute)
     {
+        bool rooted = CapPath.IsRooted(target, CapPathSyntax.Windows);
         byte[] buffer = new byte[ReparseData.SymbolicLinkSize(target, rooted)];
 
         Assert.True(ReparseData.TryBuildSymbolicLink(target, rooted, buffer, out int written));
@@ -56,7 +65,9 @@ public sealed class WindowsReparseDataTests
 
         Assert.True(ReparseData.TryReadTarget(buffer, out string stored, out bool isRelative));
         Assert.Equal(!rooted, isRelative);
-        Assert.Equal(rooted ? ReparseData.ObjectManagerPrefix + target : target, stored);
+        Assert.Equal(substitute, stored);
+        Assert.False(stored.StartsWith(ReparseData.ObjectManagerPrefix + @"\", StringComparison.Ordinal));
+        Assert.Equal(rooted, CapPath.IsRooted(stored, CapPathSyntax.Windows));
     }
 
     /// <summary>A destination that is too small is refused rather than half filled.</summary>

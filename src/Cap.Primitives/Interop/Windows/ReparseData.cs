@@ -179,10 +179,17 @@ internal static class ReparseData
     /// The prefix that makes a rooted path a name the object manager resolves.
     /// </summary>
     /// <remarks>
-    /// What the system's own link-creating call stores for a target that is not relative.
-    /// The displayed name keeps the caller's spelling; this is what the filesystem acts on.
+    /// What the system's own link-creating call stores in front of a drive path, and in place
+    /// of a device path's <c>\\?\</c> or <c>\\.\</c>. The displayed name keeps the caller's
+    /// spelling; this is what the filesystem acts on.
     /// </remarks>
     public const string ObjectManagerPrefix = @"\??\";
+
+    /// <summary>
+    /// The object manager's spelling of the start of a network path, which stands in for the
+    /// leading <c>\\</c> of <c>\\server\share</c>.
+    /// </summary>
+    public const string ObjectManagerUncPrefix = @"\??\UNC\";
 
     /// <summary>
     /// How many bytes a symbolic link's data occupies for a given target.
@@ -216,9 +223,21 @@ internal static class ReparseData
     /// <para>
     /// The substitute name is the one the filesystem resolves and the print name the one a
     /// reader is shown. They are the same characters for a relative target; for a rooted one
-    /// the substitute name is spelled in the object manager's syntax and the print name keeps
-    /// the caller's spelling, which is what the system's own call stores. Each is followed by
-    /// a terminator that its declared length does not count, again to match.
+    /// that names a full path the substitute name is spelled in the object manager's syntax
+    /// and the print name keeps the caller's spelling, which is what the system's own call
+    /// stores. Each is followed by a terminator that its declared length does not count, again
+    /// to match.
+    /// </para>
+    /// <para>
+    /// The object manager's spelling depends on which kind of full path the target is, so it
+    /// is decided by the same parser that decides <paramref name="rooted"/>: a drive path is
+    /// prefixed with <see cref="ObjectManagerPrefix"/>, a network path has its leading
+    /// <c>\\</c> replaced by <see cref="ObjectManagerUncPrefix"/>, and a device path has its
+    /// <c>\\?\</c> or <c>\\.\</c> replaced by <see cref="ObjectManagerPrefix"/>, since all
+    /// three already lead to the object manager. A target relative to a drive's or the current
+    /// volume's root names no full path at all and is stored as written. The backend never
+    /// creates a rooted link; these spellings are what a rooted link made by the system looks
+    /// like, which is what the reader has to be tested against.
     /// </para>
     /// </remarks>
     public static bool TryBuildSymbolicLink(
@@ -253,16 +272,10 @@ internal static class ReparseData
             structure[SymbolicLinkFlagsOffset..], rooted ? 0 : SymbolicLinkFlagRelative);
 
         Span<byte> substitute = structure.Slice(SymbolicLinkPathOffset, substituteBytes);
-        if (rooted)
-        {
-            System.Text.Encoding.Unicode.GetBytes(ObjectManagerPrefix, substitute);
-            System.Text.Encoding.Unicode.GetBytes(
-                target, substitute[(ObjectManagerPrefix.Length * sizeof(char))..]);
-        }
-        else
-        {
-            System.Text.Encoding.Unicode.GetBytes(target, substitute);
-        }
+        string prefix = SubstitutePrefix(target, rooted, out int replaced);
+        System.Text.Encoding.Unicode.GetBytes(prefix, substitute);
+        System.Text.Encoding.Unicode.GetBytes(
+            target[replaced..], substitute[(prefix.Length * sizeof(char))..]);
 
         System.Text.Encoding.Unicode.GetBytes(
             target, structure[(SymbolicLinkPathOffset + printOffset)..]);
@@ -272,7 +285,37 @@ internal static class ReparseData
     }
 
     private static int SubstituteChars(ReadOnlySpan<char> target, bool rooted) =>
-        rooted ? ObjectManagerPrefix.Length + target.Length : target.Length;
+        SubstitutePrefix(target, rooted, out int replaced).Length + target.Length - replaced;
+
+    /// <summary>
+    /// What the substitute name starts with in place of the target's first
+    /// <paramref name="replaced"/> characters.
+    /// </summary>
+    private static string SubstitutePrefix(ReadOnlySpan<char> target, bool rooted, out int replaced)
+    {
+        replaced = 0;
+        if (!rooted || target.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        switch (CapPath.ClassifyPrefix(target, CapPathSyntax.Windows))
+        {
+            case CapPathError.Absolute:
+                return ObjectManagerPrefix;
+
+            case CapPathError.Unc:
+                replaced = 2;
+                return ObjectManagerUncPrefix;
+
+            case CapPathError.DeviceNamespace:
+                replaced = 4;
+                return ObjectManagerPrefix;
+
+            default:
+                return string.Empty;
+        }
+    }
 
     /// <summary>Reads the tag from a returned buffer.</summary>
     public static bool TryReadTag(ReadOnlySpan<byte> buffer, out uint tag)

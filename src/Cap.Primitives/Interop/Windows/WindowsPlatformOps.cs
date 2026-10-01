@@ -1556,10 +1556,15 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// The link records which kind it is, and the rest of the system will not traverse the
     /// wrong kind, which is why the kind is asked for rather than guessed from what the target
     /// happens to be today. It also records separately whether its target is rooted, and the filesystem
-    /// acts on that flag rather than on the spelling — so the flag is set from the same
-    /// reading of the text that resolution uses, and a rooted target is additionally stored
-    /// in the syntax the object manager resolves, which is what the system's own call
-    /// stores. The name shown to a reader keeps the caller's spelling either way.
+    /// acts on that flag rather than on the spelling.
+    /// </para>
+    /// <para>
+    /// A rooted target is refused with <see cref="CapErrorCategory.InvalidArgument"/>, as
+    /// <c>Dir</c> refuses it before it gets here (threat model S16). Whether a target is rooted
+    /// is decided by the same parser resolution uses, so every link written here is flagged
+    /// relative and stored exactly as given, and the flag and the characters cannot disagree.
+    /// Storing a rooted one would also mean a second spelling of each kind of rooted path in
+    /// the object manager's syntax, which is one more place for the two to come apart.
     /// </para>
     /// </remarks>
     public CapError CreateChildSymbolicLink(
@@ -1568,7 +1573,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         ReadOnlySpan<char> target,
         bool targetIsDirectory)
     {
-        if (target.IsEmpty || target.Contains('\0'))
+        if (target.IsEmpty || target.Contains('\0') || CapPath.IsRooted(target, CapPathSyntax.Windows))
         {
             return CapError.Create(
                 CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
@@ -1864,13 +1869,12 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </summary>
     /// <remarks>
     /// The structure itself is built beside the code that reads one back, so that the two
-    /// cannot come to disagree about where the names live. Whether the target is rooted is
-    /// decided here, by the same parser resolution uses, because the filesystem acts on that
-    /// flag rather than on how the target is spelled.
+    /// cannot come to disagree about where the names live. The target is always relative:
+    /// a rooted one has already been refused, by the same parser resolution uses.
     /// </remarks>
     private static unsafe CapError WriteSymbolicLinkData(SafeFileHandle handle, ReadOnlySpan<char> target)
     {
-        bool rooted = CapPath.IsRooted(target, CapPathSyntax.Windows);
+        const bool rooted = false;
         int size = ReparseData.SymbolicLinkSize(target, rooted);
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(size);

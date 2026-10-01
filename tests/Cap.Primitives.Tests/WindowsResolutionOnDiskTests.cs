@@ -448,10 +448,11 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
     /// what Explorer, the shell and every other tool on the machine will read them with.
     /// </para>
     /// <para>
-    /// The targets cover both kinds of link and both ways a target is stored: relative from the
-    /// directory holding the link, including one that climbs out of it, and rooted, which is
-    /// stored behind the object manager's prefix. Where a link lands relative to the sandbox is
-    /// of no interest to the system, so nothing here is refused.
+    /// The targets cover both kinds of link and relative targets from the directory holding the
+    /// link, including one that climbs out of it. Where a link lands relative to the sandbox is
+    /// of no interest to the system, so none of those is refused. A rooted target is refused and
+    /// leaves nothing behind: storing one would mean respelling it in the object manager's
+    /// syntax, and the backend stores every target exactly as given.
     /// </para>
     /// </remarks>
     [Fact]
@@ -483,8 +484,19 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         CreateLink(root, "dlink", @"inside\deeper", targetIsDirectory: true);
         CreateLink(root, "sibling", @"..\outside", targetIsDirectory: true);
-        CreateLink(root, "rooted", rootedTarget, targetIsDirectory: true);
-        CreateLink(root, "rootedfile", Path.Join(rootedTarget, "secret"), targetIsDirectory: false);
+        foreach (string rooted in new[]
+        {
+            rootedTarget,
+            @"\\?\" + rootedTarget,
+            @"\\localhost\share\x",
+            @"C:x",
+            @"\x",
+        })
+        {
+            CapError refused = PlatformOps.Host.CreateChildSymbolicLink(root, "rooted", rooted, targetIsDirectory: true);
+            Assert.Equal(CapErrorCategory.InvalidArgument, refused.Category);
+            Assert.False(Path.Exists(Path.Join(Sandbox, "rooted")), rooted);
+        }
 
         string fileLink = Path.Join(Sandbox, "flink");
         Assert.Equal(Contents, File.ReadAllText(fileLink));
@@ -494,11 +506,6 @@ public sealed partial class WindowsResolutionOnDiskTests : IDisposable
 
         AssertDirectoryLink("dlink", @"inside\deeper", "marker");
         AssertDirectoryLink("sibling", @"..\outside", "secret");
-        AssertDirectoryLink("rooted", rootedTarget, "secret");
-
-        string rootedFileLink = Path.Join(Sandbox, "rootedfile");
-        Assert.Equal("x", File.ReadAllText(rootedFileLink));
-        Assert.Equal(Path.Join(rootedTarget, "secret"), new FileInfo(rootedFileLink).LinkTarget);
 
         static void CreateLink(SafeDirHandle root, string name, string target, bool targetIsDirectory)
         {
