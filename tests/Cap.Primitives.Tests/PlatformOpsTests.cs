@@ -313,6 +313,39 @@ public sealed partial class PlatformOpsTests : IDisposable
     }
 
     /// <summary>
+    /// On macOS, relabelling a directory handle's access duplicates it rather than resolving
+    /// a name, so it works on a directory removed since it was opened.
+    /// </summary>
+    /// <remarks>
+    /// Every directory descriptor there is opened for reading whatever access was asked for,
+    /// so a re-open would grant nothing a duplicate does not. An open of <c>.</c> would also
+    /// fail on a removed directory, which is what shows the duplicate is what ran. On Linux
+    /// the re-open is a real change of descriptor mode and has to resolve <c>.</c>.
+    /// </remarks>
+    [Fact]
+    public void Relabelling_a_directory_on_macOS_resolves_no_name()
+    {
+        Assert.SkipUnless(OperatingSystem.IsMacOS(), "Only macOS directory access is a label alone.");
+
+        string path = Path.Combine(_root, "removed");
+        Directory.CreateDirectory(path);
+
+        CapResult<SafeDirHandle> opened = Ops.OpenAmbientDirectory(path, CapAccess.None);
+        Assert.True(opened.IsSuccess, opened.Error.FailureDescription);
+        using SafeDirHandle traversal = opened.Value;
+        Directory.Delete(path);
+
+        CapResult<SafeDirHandle> relabelled = Ops.ReopenDirectory(traversal, CapAccess.Read);
+        Assert.True(relabelled.IsSuccess, relabelled.Error.FailureDescription);
+
+        using SafeDirHandle readable = relabelled.Value;
+        Assert.Equal(CapAccess.Read, readable.Access);
+        Assert.True(Ops.StatHandle(traversal, out CapNodeInfo original).IsSuccess);
+        Assert.True(Ops.StatHandle(readable, out CapNodeInfo copy).IsSuccess);
+        Assert.True(original.IsSameNodeAs(copy));
+    }
+
+    /// <summary>
     /// A rename told not to replace its destination either refuses it in the same call or says
     /// it cannot, and never replaces it.
     /// </summary>

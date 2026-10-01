@@ -554,6 +554,25 @@ internal interface IPlatformOps
     CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access);
 
     /// <summary>
+    /// Opens for reading, a second time, the directory a handle this library did not open
+    /// refers to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For a handle a caller brings from elsewhere, which may not be a directory and may have
+    /// been opened with any access at all. Unlike <see cref="ReopenDirectory"/>, which may
+    /// assume a handle one of its own opens produced, this always asks the filesystem for a
+    /// new open, so that what comes back is checked to be a directory, is checked against the
+    /// directory's own permissions, and can list it whatever the caller's handle could do.
+    /// </para>
+    /// <para>
+    /// A handle that does not refer to a directory is refused as
+    /// <see cref="CapErrorCategory.NotADirectory"/>.
+    /// </para>
+    /// </remarks>
+    CapResult<SafeDirHandle> ReopenForeignDirectory(SafeDirHandle handle);
+
+    /// <summary>
     /// Produces a second, independent handle to the same open file.
     /// </summary>
     /// <remarks>

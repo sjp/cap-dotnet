@@ -485,7 +485,11 @@ granting listing — mode `0711`, the usual way a shared parent is kept from dis
 is beneath it — can be walked through on Linux, which has a form of open that takes no read
 access, and on Windows, which grants traverse and list separately. macOS has neither, so
 every directory handle there can also list, and a tree using that permission pattern is
-reachable on the other two platforms and not on that one.
+reachable on the other two platforms and not on that one. It also means a walk that ends on
+a directory it passed through, as `sub/..` does, has nothing to gain on macOS from opening
+it again for reading, so it duplicates the handle it holds instead of resolving `.`. A handle
+brought in from outside through `Dir.FromHandle` is still opened again on every platform, so
+that it is checked to be a directory the process may list.
 
 It is a platform limitation rather than a policy: macOS offers no way to ask for less. It is
 recorded here so that the failure is recognisable when it appears, because nothing about the

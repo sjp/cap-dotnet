@@ -1094,6 +1094,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<SafeDirHandle> ReopenForeignDirectory(SafeDirHandle handle) =>
+        ReopenDirectory(handle, CapAccess.Read);
+
+    /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
     {
         using HandleLease lease = new(handle);

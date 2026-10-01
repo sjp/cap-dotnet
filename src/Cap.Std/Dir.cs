@@ -369,7 +369,7 @@ public sealed partial class Dir : IDir
             handle.DangerousAddRef(ref added);
 
             using SafeDirHandle borrowed = new(handle.DangerousGetHandle(), backend, CapAccess.None, ownsHandle: false);
-            CapResult<SafeDirHandle> reopened = backend.ReopenDirectory(borrowed, CapAccess.Read);
+            CapResult<SafeDirHandle> reopened = backend.ReopenForeignDirectory(borrowed);
             if (!reopened.IsSuccess)
             {
                 return reopened.Error;

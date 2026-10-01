@@ -942,6 +942,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<SafeDirHandle> ReopenForeignDirectory(SafeDirHandle handle) =>
+        ReopenDirectory(handle, CapAccess.Read);
+
+    /// <inheritdoc/>
     public unsafe CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle)
     {
         using HandleLease lease = new(handle);

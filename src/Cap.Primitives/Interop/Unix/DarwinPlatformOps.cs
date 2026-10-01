@@ -829,7 +829,21 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
-    /// <remarks>An open of <c>.</c> beneath the handle.</remarks>
+    /// <remarks>
+    /// <para>
+    /// A duplicate of the descriptor carrying the new label, the same as
+    /// <see cref="DuplicateDirectory"/> produces. Every directory this backend opens is opened
+    /// for reading whatever access it was asked for, because macOS has no open that takes
+    /// less, so the access is only a label here and a second open would grant nothing the
+    /// first did not. Nothing is resolved, not even <c>.</c>, so a directory removed since it
+    /// was opened is relabelled as readily as any other.
+    /// </para>
+    /// <para>
+    /// The label is never wider than <see cref="CapAccess.Read"/>, which is what the
+    /// descriptor already grants. A handle from outside this backend goes through
+    /// <see cref="ReopenForeignDirectory"/> instead.
+    /// </para>
+    /// </remarks>
     public CapResult<SafeDirHandle> ReopenDirectory(SafeDirHandle handle, CapAccess access)
     {
         if (!IsDirectoryAccess(access))
@@ -837,6 +851,29 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
+        using HandleLease lease = handle.Lease();
+        if (!lease.IsValid)
+        {
+            return CapResult<SafeDirHandle>.Fail(HandleLease.ClosedError);
+        }
+
+        int fd = DarwinNative.Fcntl(lease.Descriptor, DarwinConstants.F_DUPFD_CLOEXEC, 0);
+        if (fd < 0)
+        {
+            return CapResult<SafeDirHandle>.Fail(DarwinErrno.ToError(Marshal.GetLastPInvokeError()));
+        }
+
+        return CapResult<SafeDirHandle>.Ok(new SafeDirHandle(fd, this, access));
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// An open of <c>.</c> beneath the handle. A duplicate would keep whatever the caller's
+    /// descriptor was opened with, which need not be a directory nor able to list one.
+    /// </remarks>
+    public CapResult<SafeDirHandle> ReopenForeignDirectory(SafeDirHandle handle)
+    {
+        const CapAccess access = CapAccess.Read;
         using HandleLease lease = handle.Lease();
         if (!lease.IsValid)
         {

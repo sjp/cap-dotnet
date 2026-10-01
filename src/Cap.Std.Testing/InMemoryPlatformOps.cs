@@ -704,6 +704,10 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    public CapResult<SafeDirHandle> ReopenForeignDirectory(SafeDirHandle handle) =>
+        ReopenDirectory(handle, CapAccess.Read);
+
+    /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: false);
 
     /// <inheritdoc/>

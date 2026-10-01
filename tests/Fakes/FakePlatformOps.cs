@@ -618,6 +618,10 @@ internal sealed class FakePlatformOps : IPlatformOps
     private int _directoryReopens;
 
     /// <inheritdoc/>
+    public CapResult<SafeDirHandle> ReopenForeignDirectory(SafeDirHandle handle) =>
+        ReopenDirectory(handle, CapAccess.Read);
+
+    /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: false);
 
     /// <inheritdoc/>
