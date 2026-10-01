@@ -240,10 +240,24 @@ public sealed partial class DirEnumerationTests : IDisposable
             Assert.Skip("Names are UTF-16 on this platform and cannot be ill-formed bytes.");
         }
 
+        using Dir root = OpenRoot();
+
+        if (OperatingSystem.IsMacOS())
+        {
+            // APFS and HFS+ store names as UTF-8 and refuse any that is not, so there is no
+            // such entry to enumerate. What is pinned instead is that the refusal reads as the
+            // caller's mistake rather than an unknown failure. "\udcff" is the escaped spelling
+            // of the byte 0xFF.
+            CapIOException refused = Assert.ThrowsAny<CapIOException>(
+                () => root.OpenFile("b\udcffb", FileMode.CreateNew, FileAccess.Write).Dispose());
+            Assert.Equal(CapErrorKind.InvalidArgument, refused.Kind);
+            Assert.Empty(root.EnumerateEntries());
+            return;
+        }
+
         HostFile.WriteAllText(Host("ordinary"), "x");
         CreateRawName([0x62, 0xFF, 0x62]);
 
-        using Dir root = OpenRoot();
         DirEntry[] entries = [.. root.EnumerateEntries()];
 
         Assert.Equal(2, entries.Length);

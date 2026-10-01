@@ -21,6 +21,14 @@ internal static class LinuxErrno
     public const int ENOSYS = 38;
     public const int ENOTEMPTY = 39;
     public const int ELOOP = 40;
+
+    /// <summary>
+    /// Illegal byte sequence. Linux names are bytes, but a filesystem that stores names as
+    /// text — a casefolded ext4 or f2fs directory with strict encoding, or vfat and exFAT
+    /// mounted with <c>utf8</c> — refuses with this a name it cannot encode.
+    /// </summary>
+    public const int EILSEQ = 84;
+
     public const int EOPNOTSUPP = 95;
     public const int ESTALE = 116;
 
@@ -40,6 +48,7 @@ internal static class LinuxErrno
             ENOSYS or EOPNOTSUPP => CapErrorCategory.NotSupported,
             ENOTEMPTY => CapErrorCategory.NotEmpty,
             ESTALE => CapErrorCategory.NotFound,
+            EILSEQ => CapErrorCategory.InvalidArgument,
             _ => CapErrorCategory.Unknown,
         };
     }

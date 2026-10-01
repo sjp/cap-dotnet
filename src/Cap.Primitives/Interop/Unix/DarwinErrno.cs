@@ -29,6 +29,14 @@ internal static class DarwinErrno
     public const int ENAMETOOLONG = 63;
     public const int ENOTEMPTY = 66;
     public const int ENOSYS = 78;
+
+    /// <summary>
+    /// Illegal byte sequence. 92 here, where Linux has 84. APFS and HFS+ store names as
+    /// UTF-8 and refuse with this any name that is not, so a name carried from Linux with
+    /// escaped bytes cannot be created or opened here.
+    /// </summary>
+    public const int EILSEQ = 92;
+
     public const int EOPNOTSUPP = 102;
 
     /// <summary>Reads a macOS <c>errno</c> as a portable category.</summary>
@@ -46,6 +54,7 @@ internal static class DarwinErrno
             ENAMETOOLONG => CapErrorCategory.NameTooLong,
             ENOSYS or ENOTSUP or EOPNOTSUPP => CapErrorCategory.NotSupported,
             ENOTEMPTY => CapErrorCategory.NotEmpty,
+            EILSEQ => CapErrorCategory.InvalidArgument,
             _ => CapErrorCategory.Unknown,
         };
     }

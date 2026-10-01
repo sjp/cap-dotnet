@@ -47,6 +47,20 @@ public sealed class PlatformErrorTests
         Assert.NotEqual(LinuxErrno.ENAMETOOLONG, DarwinErrno.ENAMETOOLONG);
     }
 
+    /// <summary>
+    /// A name the volume cannot store as text is the caller's mistake, not an unknown
+    /// failure, and each table reads its own number for it that way.
+    /// </summary>
+    [Fact]
+    public void An_illegal_byte_sequence_is_an_invalid_argument_on_each_unix()
+    {
+        Assert.Equal(84, LinuxErrno.EILSEQ);
+        Assert.Equal(92, DarwinErrno.EILSEQ);
+
+        Assert.Equal(CapErrorCategory.InvalidArgument, LinuxErrno.Classify(LinuxErrno.EILSEQ));
+        Assert.Equal(CapErrorCategory.InvalidArgument, DarwinErrno.Classify(DarwinErrno.EILSEQ));
+    }
+
     /// <summary>The low range is shared, and both tables agree on it.</summary>
     [Theory]
     [InlineData(PosixErrno.ENOENT, CapErrorCategory.NotFound)]

@@ -87,7 +87,8 @@ public enum CapErrorKind
 
     /// <summary>
     /// The filesystem understood the request and could not carry it out as asked, such as
-    /// moving a directory to a name beneath itself.
+    /// moving a directory to a name beneath itself, or creating a name the volume cannot
+    /// store (on macOS, one that is not valid UTF-8).
     /// </summary>
     InvalidArgument,
 

@@ -105,13 +105,15 @@ internal static class FailureTranslation
             // request and it was not one it could carry out as written. Moving a directory to a
             // name inside itself is the case a caller is most likely to meet; a path ending in
             // `..`, which names a directory by where it sits and leaves no name in its parent to
-            // create, remove or rename, is the other.
+            // create, remove or rename, is another. A name the volume cannot store is the third:
+            // APFS and HFS+ refuse any name that is not valid UTF-8.
             CapErrorCategory.InvalidArgument =>
                 new CapIOException(KindOf(error.Category),
                     $"'{path}' was not a request the filesystem could carry out as asked. " +
                     $"Moving a directory to a name beneath itself is the usual cause, and a " +
                     $"path ending in '..' is another: it leaves no name for the operation to act " +
-                    $"on. ({error})"),
+                    $"on. A name the volume cannot store, such as one that is not valid UTF-8 on " +
+                    $"macOS, is a third. ({error})"),
 
             CapErrorCategory.ReadOnlyFilesystem =>
                 new CapIOException(KindOf(error.Category), $"'{path}' is on a filesystem mounted read-only. ({error})"),

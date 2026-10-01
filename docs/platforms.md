@@ -14,7 +14,7 @@ what a program moving between Linux, macOS and Windows will notice.
 | Path separators | `/` | `/` | `/` and `\` |
 | Case | sensitive (unless the volume folds) | insensitive on the default APFS volume | insensitive |
 | Unicode normalisation | none: names are bytes | the filesystem may return a name in a different normal form | none |
-| Names refused beyond `..`, absolute paths and `NUL` | none | none | device names, trailing dots and spaces, `:`, `* ? < > " \|`, control characters |
+| Names refused beyond `..`, absolute paths and `NUL` | none | anything not valid UTF-8 (APFS, HFS+) | device names, trailing dots and spaces, `:`, `* ? < > " \|`, control characters |
 | Alternate data streams | — | — | refused |
 | 8.3 short names | — | — | refused as aliases |
 | Creating symbolic links | anyone | anyone | administrators, or accounts with Developer Mode on |
@@ -140,6 +140,12 @@ passed to the kernel exactly as given, and containment is never decided by compa
 so a check cannot be passed in one form and the file opened in the other. A program that
 compares names from an enumeration with names it holds should normalise both itself.
 
+**Names must be valid UTF-8.** APFS and HFS+ store names as text and refuse any name that is
+not valid UTF-8, so the "names are bytes" rule of Linux stops at the macOS boundary. A name
+carried from a Linux enumeration with escaped bytes (see
+[paths.md](paths.md#characters-and-encoding)) cannot be created or opened here: it fails with
+`CapErrorKind.InvalidArgument`.
+
 **Case.** The default volume is case-insensitive, with the same consequence as on Windows.
 
 **`/tmp` and `/var` are links** to `/private/tmp` and `/private/var`. Opening a root through
@@ -177,7 +183,10 @@ window macOS and Windows have. The choice is made once per process. Read it with
 not be valid UTF-8. A name that is not is carried through .NET strings with each undecodable
 byte escaped to a lone surrogate, so it can be listed and reopened unchanged; see
 [paths.md](paths.md#characters-and-encoding). Nothing a Windows filesystem would refuse is
-refused here: `CON` and `name.` are ordinary files.
+refused here: `CON` and `name.` are ordinary files. The exception is a filesystem that stores
+names as text — a casefolded ext4 or f2fs directory with strict encoding, or vfat and exFAT
+mounted with `utf8` — which refuses a name it cannot encode with
+`CapErrorKind.InvalidArgument`, as macOS does.
 
 **Case** is significant, unless the volume folds it (vfat, or ext4 with casefolding enabled),
 in which case the Windows remarks apply.
