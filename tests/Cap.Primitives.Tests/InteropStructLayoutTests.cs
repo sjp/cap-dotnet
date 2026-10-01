@@ -152,6 +152,27 @@ public sealed class InteropStructLayoutTests
     }
 
     /// <summary>
+    /// The macOS space-reservation request is two 32-bit fields and then three 64-bit ones,
+    /// 32 bytes in all.
+    /// </summary>
+    /// <remarks>
+    /// The kernel does not reject a malformed request: it reads whatever lies where it expects
+    /// the length, so a field shifted by one word asks for a reservation of some other size and
+    /// the call succeeds.
+    /// </remarks>
+    [Fact]
+    public void Macos_preallocation_request_matches_fstore_layout()
+    {
+        Assert.Equal(32, Marshal.SizeOf<FileStore>());
+
+        Assert.Equal(0, Marshal.OffsetOf<FileStore>(nameof(FileStore.Flags)).ToInt32());
+        Assert.Equal(4, Marshal.OffsetOf<FileStore>(nameof(FileStore.PositionMode)).ToInt32());
+        Assert.Equal(8, Marshal.OffsetOf<FileStore>(nameof(FileStore.Offset)).ToInt32());
+        Assert.Equal(16, Marshal.OffsetOf<FileStore>(nameof(FileStore.Length)).ToInt32());
+        Assert.Equal(24, Marshal.OffsetOf<FileStore>(nameof(FileStore.BytesAllocated)).ToInt32());
+    }
+
+    /// <summary>
     /// The Windows structures are laid out at natural alignment, which on a 64-bit process
     /// puts every pointer on an eight-byte boundary.
     /// </summary>
