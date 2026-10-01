@@ -95,9 +95,12 @@ public sealed class TreeOperationTests
             }
 
             // A copy makes each directory of the tree beneath the destination and opens it by name.
+            // It goes in the order the directory lists in, so one that stops at a link may stop
+            // before it has opened any of the tree's directories; only a copy that finished is
+            // sure to have resolved one.
             if (operation is TreeOperation.CopyRecreatingLinks or TreeOperation.CopySkippingLinks or TreeOperation.CopyRefusingLinks)
             {
-                scope.AssertItRanOpeningWhatItCreated(resolvedAPath: true);
+                scope.AssertItRanOpeningWhatItCreated(resolvedAPath: observation.Outcome == Outcome.Success);
             }
             else
             {

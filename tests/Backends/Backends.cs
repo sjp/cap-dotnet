@@ -213,7 +213,8 @@ internal sealed class BackendScope : IDisposable
     /// <param name="resolvedAPath">
     /// Whether the operation had a path to resolve before it could create anything: for a
     /// single directory, a parent, which is a path the parser accepts that names more than one
-    /// component; for a whole tree, the tree.
+    /// component; for a whole tree, one of its directories, which an operation that stops at an
+    /// early entry may never reach.
     /// </param>
     public void AssertItRanOpeningWhatItCreated(bool resolvedAPath)
     {
