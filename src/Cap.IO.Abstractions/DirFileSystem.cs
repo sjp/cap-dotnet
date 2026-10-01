@@ -491,7 +491,19 @@ public sealed class DirFileSystem : IFileSystem
 
             if (!recursive)
             {
-                Dir.DeleteDir(request.Relative);
+                try
+                {
+                    Dir.DeleteDir(request.Relative);
+                }
+                catch (CapIOException e) when (
+                    e.Kind is CapErrorKind.NotADirectory or CapErrorKind.SymbolicLink
+                    && Dir.GetMetadata(request.Relative).Type == CapFileType.Symlink)
+                {
+                    // Only a name that is not a directory is described again, so removing an
+                    // ordinary directory costs nothing more.
+                    DeleteLink(request);
+                }
+
                 return;
             }
 
@@ -502,16 +514,22 @@ public sealed class DirFileSystem : IFileSystem
                     Dir.DeleteTree(request.Relative);
                     break;
                 case CapFileType.Symlink:
-                    // The link is removed, and what it points at is not reached, as with
-                    // System.IO. On Windows a link to a directory is removed as a directory.
-                    if (!Dir.TryDeleteFile(request.Relative))
-                    {
-                        Dir.DeleteDir(request.Relative);
-                    }
-
+                    DeleteLink(request);
                     break;
                 default:
                     throw new CapIOException(CapErrorKind.NotADirectory, $"'{request.Virtual}' is not a directory.");
             }
         });
+
+    /// <summary>
+    /// Removes the link a directory path names. What it points at is not reached, as with
+    /// <c>System.IO</c>. On Windows a link to a directory is removed as a directory.
+    /// </summary>
+    private void DeleteLink(in Request request)
+    {
+        if (!Dir.TryDeleteFile(request.Relative))
+        {
+            Dir.DeleteDir(request.Relative);
+        }
+    }
 }

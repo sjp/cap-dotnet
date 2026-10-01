@@ -410,6 +410,32 @@ public abstract class FileSystemBehaviourTests : IDisposable
         Assert.False(Fs.Directory.Exists(P("d")));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Deleting_a_link_to_a_directory_removes_the_link_only(bool recursive)
+    {
+        TestLinks.Require(_fixture.SupportsLinks);
+        Fs.Directory.CreateDirectory(P("d"));
+        Fs.File.WriteAllText(P("d", "a.txt"), "kept");
+        Fs.Directory.CreateSymbolicLink(P("dlink"), "d");
+
+        Fs.Directory.Delete(P("dlink"), recursive);
+
+        Assert.False(Fs.Directory.Exists(P("dlink")));
+        Assert.True(Fs.Directory.Exists(P("d")));
+        Assert.Equal("kept", Fs.File.ReadAllText(P("d", "a.txt")));
+    }
+
+    [Fact]
+    public void Removing_a_file_as_a_directory_fails()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "file");
+
+        Assert.ThrowsAny<IOException>(() => Fs.Directory.Delete(P("a.txt")));
+        Assert.True(Fs.File.Exists(P("a.txt")));
+    }
+
     [Fact]
     public void Removing_a_missing_directory_throws_directory_not_found()
     {
