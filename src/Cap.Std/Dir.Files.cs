@@ -1803,7 +1803,26 @@ public sealed partial class Dir
 
     /// <summary>Makes room in a whole-file read's buffer once the file has proved longer than it.</summary>
     private static void Grow(ref byte[] buffer) =>
-        Array.Resize(ref buffer, buffer.Length == 0 ? GrowthStep : buffer.Length * 2);
+        Array.Resize(ref buffer, NextCapacity(buffer.Length));
+
+    /// <summary>
+    /// The size a whole-file read's buffer grows to from <paramref name="current"/>.
+    /// </summary>
+    /// <remarks>
+    /// Doubling stops at the largest array rather than wrapping past it, and a buffer already
+    /// that large is refused the way <see cref="Capacity"/> refuses a file that says it is
+    /// too big: the file has proved to hold at least one byte more than one array can return.
+    /// </remarks>
+    internal static int NextCapacity(int current)
+    {
+        if (current >= Array.MaxLength)
+        {
+            throw TooLargeForOneArray((long)Array.MaxLength + 1, exact: false);
+        }
+
+        long doubled = current == 0 ? GrowthStep : (long)current * 2;
+        return (int)Math.Min(doubled, Array.MaxLength);
+    }
 
     /// <summary>
     /// The first allocation for a whole-file read, from the length the file reports.
@@ -1818,13 +1837,20 @@ public sealed partial class Dir
     {
         if (length > Array.MaxLength)
         {
-            throw new CapIOException(
-                $"The file holds {length} bytes, which is more than can be returned as one " +
-                $"array. Open it and read it in parts instead.");
+            throw TooLargeForOneArray(length, exact: true);
         }
 
         return length > 0 ? (int)length : 0;
     }
+
+    /// <summary>
+    /// The refusal for a whole-file read of a file too large for one array, whether its
+    /// reported length said so or it only proved so while being read.
+    /// </summary>
+    private static CapIOException TooLargeForOneArray(long length, bool exact) =>
+        new(
+            $"The file holds {(exact ? "" : "at least ")}{length} bytes, which is more than " +
+            $"can be returned as one array. Open it and read it in parts instead.");
 
     /// <summary>
     /// How much room a whole-file read adds when it has run out and the file is still
