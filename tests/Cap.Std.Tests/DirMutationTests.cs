@@ -723,6 +723,68 @@ public sealed class DirMutationTests : IDisposable
     }
 
     /// <summary>
+    /// A move or a second name that fails at the destination quotes the destination, not the
+    /// source.
+    /// </summary>
+    /// <remarks>
+    /// Both ends are resolved by one shared helper and the failure comes back as one error, so
+    /// without care every message quotes the source, and a caller is sent looking at a path
+    /// that is fine.
+    /// </remarks>
+    [Fact]
+    public void A_refusal_of_the_destination_names_the_destination()
+    {
+        HostFile.WriteAllText(Host("top"), "contents");
+        HostFile.WriteAllText(Host("taken"), "contents");
+        HostDirectory.CreateDirectory(Host("empty"));
+        HostDirectory.CreateDirectory(Host("full"));
+        HostFile.WriteAllText(Host("full", "inner"), "contents");
+
+        using Dir root = OpenRoot();
+
+        AssertQuotes("missing/x", "top", Assert.Throws<DirectoryNotFoundException>(
+            () => root.Rename("top", root, "missing/x")));
+        AssertQuotes("missing/x", "top", Assert.Throws<DirectoryNotFoundException>(
+            () => root.CreateHardLink("top", root, "missing/x")));
+
+        CapIOException taken = Assert.Throws<CapIOException>(() => root.Rename("top", root, "taken"));
+        Assert.Equal(CapErrorKind.AlreadyExists, taken.Kind);
+        AssertQuotes("taken", "top", taken);
+
+        CapIOException linked = Assert.Throws<CapIOException>(() => root.CreateHardLink("top", root, "taken"));
+        Assert.Equal(CapErrorKind.AlreadyExists, linked.Kind);
+        AssertQuotes("taken", "top", linked);
+
+        // Windows refuses this as access denied, which the backend reports as it finds it.
+        if (!OperatingSystem.IsWindows())
+        {
+            CapIOException full = Assert.Throws<CapIOException>(
+                () => root.Rename("empty", root, "full", replaceExisting: true));
+            Assert.Equal(CapErrorKind.NotEmpty, full.Kind);
+            AssertQuotes("full", "empty", full);
+        }
+    }
+
+    /// <summary>
+    /// A move that fails at the source still quotes the source.
+    /// </summary>
+    [Fact]
+    public void A_refusal_of_the_source_names_the_source()
+    {
+        using Dir root = OpenRoot();
+
+        AssertQuotes("missing", "x", Assert.Throws<FileNotFoundException>(() => root.Rename("missing", root, "x")));
+        AssertQuotes("missing", "x", Assert.Throws<FileNotFoundException>(
+            () => root.CreateHardLink("missing", root, "x")));
+    }
+
+    private static void AssertQuotes(string quoted, string notQuoted, Exception thrown)
+    {
+        Assert.Contains($"'{quoted}'", thrown.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain($"'{notQuoted}'", thrown.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A link target with a NUL in it is refused as a bad argument, as a path with one is.
     /// </summary>
     /// <remarks>

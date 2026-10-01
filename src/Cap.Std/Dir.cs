@@ -1008,12 +1008,12 @@ public sealed partial class Dir : IDir
     {
         CapError error = LinkCore(
             from, toDir, to, rename: true, replaceExisting, followLink: false,
-            out CapPathError fromError, out CapPathError toError, out ExpectedTarget expected);
+            out CapPathError fromError, out CapPathError toError, out ExpectedTarget expected, out bool aboutDestination);
 
         ThrowForPaths(fromError, from, nameof(from), toError, to, nameof(to));
         if (error.IsFailure)
         {
-            throw FailureTranslation.ToException(error, from, expected);
+            throw FailureTranslation.ToException(error, aboutDestination ? to : from, expected, destination: to);
         }
     }
 
@@ -1038,7 +1038,7 @@ public sealed partial class Dir : IDir
     {
         CapError error = LinkCore(
             from, toDir, to, rename: true, replaceExisting, followLink: false,
-            out CapPathError fromError, out CapPathError toError, out _);
+            out CapPathError fromError, out CapPathError toError, out _, out _);
 
         return fromError == CapPathError.None && toError == CapPathError.None && error.IsSuccess;
     }
@@ -1057,7 +1057,7 @@ public sealed partial class Dir : IDir
     {
         CapError error = LinkCore(
             from, toDir, to, rename: true, replaceExisting, followLink: false,
-            out CapPathError fromError, out CapPathError toError, out expected);
+            out CapPathError fromError, out CapPathError toError, out expected, out _);
 
         ThrowForPaths(fromError, from, nameof(from), toError, to, nameof(to));
         return error;
@@ -1321,12 +1321,12 @@ public sealed partial class Dir : IDir
     {
         CapError error = LinkCore(
             path, toDir, to, rename: false, replaceExisting: false, followLink,
-            out CapPathError fromError, out CapPathError toError, out ExpectedTarget expected);
+            out CapPathError fromError, out CapPathError toError, out ExpectedTarget expected, out bool aboutDestination);
 
         ThrowForPaths(fromError, path, nameof(path), toError, to, nameof(to));
         if (error.IsFailure)
         {
-            throw FailureTranslation.ToException(error, path, expected);
+            throw FailureTranslation.ToException(error, aboutDestination ? to : path, expected, destination: to);
         }
     }
 
@@ -1355,7 +1355,7 @@ public sealed partial class Dir : IDir
     {
         CapError error = LinkCore(
             path, toDir, to, rename: false, replaceExisting: false, followLink,
-            out CapPathError fromError, out CapPathError toError, out _);
+            out CapPathError fromError, out CapPathError toError, out _, out _);
 
         return fromError == CapPathError.None && toError == CapPathError.None && error.IsSuccess;
     }
@@ -2962,7 +2962,9 @@ public sealed partial class Dir : IDir
     /// The two share everything but the final call. Each end is resolved against its own
     /// handle and under that handle's own policy, which is what makes the operation exactly
     /// as confined as the weaker of the two capabilities rather than as confined as whichever
-    /// one the caller happened to start from.
+    /// one the caller happened to start from. A failure that is about the destination name
+    /// rather than the source sets <c>aboutDestination</c>, so that the caller can quote the
+    /// path it concerns; one about the pair, or that could be about either end, leaves it unset.
     /// </remarks>
     private CapError LinkCore(
         string from,
@@ -2973,7 +2975,8 @@ public sealed partial class Dir : IDir
         bool followLink,
         out CapPathError fromError,
         out CapPathError toError,
-        out ExpectedTarget expected)
+        out ExpectedTarget expected,
+        out bool aboutDestination)
     {
         ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(toDir);
@@ -2982,6 +2985,7 @@ public sealed partial class Dir : IDir
         fromError = CapPathError.None;
         toError = CapPathError.None;
         expected = ExpectedTarget.Name;
+        aboutDestination = false;
 
         // Two handles from different filesystems, such as a simulated tree and the disk, can
         // no more share an entry than two mounted volumes can, and the kernel refuses a rename
@@ -3021,6 +3025,7 @@ public sealed partial class Dir : IDir
                 if (toError != CapPathError.None || error.IsFailure)
                 {
                     expected = ExpectedTarget.Parent;
+                    aboutDestination = true;
                     return error;
                 }
 
@@ -3045,6 +3050,7 @@ public sealed partial class Dir : IDir
                     // spelling promised.
                     if (!rename && !source.RequiresDirectory && info.Type != CapNodeType.Directory)
                     {
+                        aboutDestination = true;
                         return RefuseAsDirectory(
                             destination.Directory, destination.Name, existing: CapErrorCategory.AlreadyExists);
                     }
@@ -3060,8 +3066,10 @@ public sealed partial class Dir : IDir
 
                 if (rename)
                 {
-                    return Ops.RenameChild(
+                    CapError moved = Ops.RenameChild(
                         source.Directory, source.Name, destination.Directory, destination.Name, replaceExisting);
+                    aboutDestination = IsAboutDestination(moved);
+                    return moved;
                 }
 
                 CapError linked = Ops.CreateChildHardLink(
@@ -3080,9 +3088,16 @@ public sealed partial class Dir : IDir
                     return CapError.FromCategory(CapErrorCategory.IsADirectory);
                 }
 
+                aboutDestination = IsAboutDestination(linked);
                 return linked;
             }
         }
+
+        // Only a taken name, or a directory there that still has entries, is unambiguously
+        // about the destination. A missing entry is the source's, and the rest are about the
+        // pair or could be about either end, so they stay with the source.
+        static bool IsAboutDestination(CapError error) =>
+            error.Category is CapErrorCategory.AlreadyExists or CapErrorCategory.NotEmpty;
     }
 
     /// <summary>Reads a link's stored target.</summary>

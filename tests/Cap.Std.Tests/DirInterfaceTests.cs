@@ -196,6 +196,10 @@ public sealed class DirInterfaceTests : IDisposable
         AssertCrossDevice(() => ((IDir)root).Rename("entry", standIn, "moved"));
         AssertCrossDevice(() => ((IDir)root).CreateHardLink("entry", standIn, "linked"));
 
+        // The refusal is about the pair, so it quotes both ends.
+        CapIOException refused = Assert.Throws<CapIOException>(() => root.Rename("entry", standIn, "moved"));
+        Assert.Contains("'entry' and 'moved'", refused.Message, StringComparison.Ordinal);
+
         standInMock.VerifyNoOtherCalls();
         Assert.Equal(["entry"], HostDirectory.GetFileSystemEntries(_tree.HostPath).Select(Path.GetFileName));
         Assert.Equal("contents", HostFile.ReadAllText(Host("entry")));

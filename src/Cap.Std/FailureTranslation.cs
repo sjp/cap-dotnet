@@ -60,10 +60,15 @@ internal static class FailureTranslation
     /// for each — so a caller porting a <c>catch</c> clause keeps matching what it matched
     /// before.
     /// </param>
+    /// <param name="destination">
+    /// For an operation with two ends, the destination path, quoted alongside
+    /// <paramref name="path"/> when the failure is about the pair rather than either end.
+    /// </param>
     public static Exception ToException(
         CapError error,
         string path,
-        ExpectedTarget expected = ExpectedTarget.Directory) => error.Category switch
+        ExpectedTarget expected = ExpectedTarget.Directory,
+        string? destination = null) => error.Category switch
         {
             // Another thread disposed the handle while this call was using it. The same answer a
             // call on an already-disposed handle gets, since that is what it was by the time the
@@ -95,7 +100,7 @@ internal static class FailureTranslation
 
             CapErrorCategory.CrossDevice =>
                 new CapIOException(KindOf(error.Category),
-                    $"'{path}' and the destination are on different filesystems, so the entry " +
+                    $"'{path}' and {(destination is null ? "the destination" : $"'{destination}'")} are on different filesystems, so the entry " +
                     $"cannot be moved between them. It is not copied instead: a copy has " +
                     $"different timing, different failure modes and a different result for a " +
                     $"hard link, and doing one under the name of a move would quietly stop the " +
