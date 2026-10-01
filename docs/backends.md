@@ -53,7 +53,8 @@ Two knobs select it, checked in this order:
 2. **Environment variable** `CAPDOTNET_DISABLE_OPENAT2=1`
 
    This exists mainly so CI can set it per job, and so an operator can turn `openat2` off
-   without a rebuild if a kernel regresses.
+   without a rebuild if a kernel regresses. See [Environment variable values](#environment-variable-values)
+   for the spellings it accepts.
 
 A switch, not a `#if`. The binary that is tested with the fallback forced is bit-identical
 to the one users ship, which is the only way the fallback leg in CI means anything.
@@ -79,13 +80,31 @@ entry up instead, on Linux and macOS:
 2. **Environment variable** `CAPDOTNET_ALWAYS_LOOK_UP_ENTRY_KIND=1`
 
 Read once when an enumeration begins, so a directory being read does not change its mind
-part of the way through, and free when unset. Neither does anything on Windows, where the
+part of the way through, and free when unset. The variable accepts the spellings listed under
+[Environment variable values](#environment-variable-values). Neither does anything on Windows, where the
 kind arrives with the entry and there is no separate lookup to force.
 
 The lookup never follows a link, so an entry holding one is still reported as a link and not
 as whatever it leads to. An entry removed between the read and the lookup is reported as
 being of no known kind, which is the only honest answer left: the alternative is to say what
 it used to be.
+
+## Environment variable values
+
+Both variables above are read the same way, ignoring case:
+
+| Value | Meaning |
+|---|---|
+| `1`, `true`, `yes`, `on` | On |
+| unset, empty, `0`, `false`, `no`, `off` | Off |
+| anything else | Refused with an `InvalidOperationException` naming the variable and its value |
+
+A value outside the table is refused rather than read as off, because the mistake it guards
+against is a switch someone meant to turn on being silently ignored, leaving the process in a
+posture other than the one its operator configured. For `CAPDOTNET_DISABLE_OPENAT2` the
+refusal surfaces at the first filesystem call, wrapped in a `TypeInitializationException`
+whose inner exception carries the message; for `CAPDOTNET_ALWAYS_LOOK_UP_ENTRY_KIND` it
+surfaces each time a directory enumeration begins.
 
 ## What the component-by-component walk does
 

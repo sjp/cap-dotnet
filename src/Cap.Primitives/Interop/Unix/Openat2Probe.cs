@@ -64,8 +64,7 @@ internal readonly struct Openat2Probe
             return new Openat2Probe(false, 0, $"disabled by the {DisableSwitchName} application context switch");
         }
 
-        string? variable = Environment.GetEnvironmentVariable(DisableVariableName);
-        if (variable is "1" or "true" or "TRUE")
+        if (EnvironmentSwitch.IsEnabled(DisableVariableName))
         {
             return new Openat2Probe(false, 0, $"disabled by the {DisableVariableName} environment variable");
         }

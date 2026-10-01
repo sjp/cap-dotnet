@@ -93,7 +93,7 @@ internal static class UnixFileTypes
     /// </remarks>
     public static bool AlwaysLookUpKind =>
         (AppContext.TryGetSwitch(AlwaysLookUpKindSwitchName, out bool enabled) && enabled) ||
-        Environment.GetEnvironmentVariable(AlwaysLookUpKindVariableName) is "1" or "true" or "TRUE";
+        EnvironmentSwitch.IsEnabled(AlwaysLookUpKindVariableName);
 
     /// <summary>Reads the permission, set-id and sticky bits of a mode.</summary>
     public static UnixFileMode PermissionsFromMode(ushort mode) => (UnixFileMode)(mode & S_IPERM);

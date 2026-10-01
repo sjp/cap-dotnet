@@ -15,10 +15,11 @@ namespace Cap.Primitives.Interop.Unix;
 /// holds.
 /// </para>
 /// <para>
-/// Two of these go through <c>syscall</c> by number instead of a named C function, because
+/// Four of these go through <c>syscall</c> by number instead of a named C function, because
 /// the C library exposes no wrapper for them that can be relied on — <c>openat2</c> has none
-/// at all, and a <c>statx</c> wrapper is only present in newer library versions. Calling by
-/// number sidesteps the question of which C library the process was linked against.
+/// at all, and glibc only gained <c>statx</c> and <c>renameat2</c> in 2.28 and
+/// <c>getdents64</c> in 2.30. Calling by number sidesteps the question of which C library,
+/// and which version of it, the process was linked against.
 /// </para>
 /// <para>
 /// On 32-bit ARM the C library's default interfaces take a 32-bit file offset and a 32-bit

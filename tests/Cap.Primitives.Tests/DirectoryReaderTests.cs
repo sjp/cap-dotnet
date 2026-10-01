@@ -147,7 +147,7 @@ public sealed class DirectoryReaderTests : IDisposable
             Assert.Skip("The directory read on this platform always reports the kind; there is no lookup to force.");
         }
 
-        if (Environment.GetEnvironmentVariable(UnixFileTypes.AlwaysLookUpKindVariableName) is not null)
+        if (EnvironmentSwitch.IsEnabled(UnixFileTypes.AlwaysLookUpKindVariableName))
         {
             Assert.Skip("The lookup is already forced for this whole run, so the two halves cannot differ.");
         }
