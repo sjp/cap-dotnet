@@ -34,7 +34,7 @@ internal readonly struct CapNodeStat
         ulong volumeId,
         UInt128 nodeId,
         long length,
-        DateTimeOffset lastAccessTime,
+        DateTimeOffset? lastAccessTime,
         DateTimeOffset lastWriteTime,
         DateTimeOffset? creationTime,
         DateTimeOffset? changeTime,
@@ -82,8 +82,11 @@ internal readonly struct CapNodeStat
     /// <summary>The length the filesystem reports for the object, in bytes.</summary>
     public long Length { get; }
 
-    /// <summary>When the object's contents were last read.</summary>
-    public DateTimeOffset LastAccessTime { get; }
+    /// <summary>
+    /// When the object's contents were last read, or null where the filesystem does not
+    /// record it.
+    /// </summary>
+    public DateTimeOffset? LastAccessTime { get; }
 
     /// <summary>When the object's contents were last changed.</summary>
     public DateTimeOffset LastWriteTime { get; }

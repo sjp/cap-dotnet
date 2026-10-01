@@ -104,7 +104,8 @@ public sealed class DirMetadataTests : IDisposable
         CapMetadata metadata = root.GetMetadata("fresh");
 
         Assert.InRange(metadata.LastWriteTime, before, after);
-        Assert.InRange(metadata.LastAccessTime, before, after);
+        Assert.NotNull(metadata.LastAccessTime);
+        Assert.InRange(metadata.LastAccessTime.Value, before, after);
 
         // Absent is a legitimate answer: several filesystems do not record a creation time
         // at all, and saying so is the point of the field being nullable. What is not

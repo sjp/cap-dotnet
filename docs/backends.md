@@ -500,6 +500,14 @@ leave the field at zero instead, which is read as absence: a file created at the
 1970, or of 1601, is not a thing that happens, and reporting one would be a worse answer than
 reporting none.
 
+**So, on Linux, is an access time the filesystem does not keep.** The kernel leaves
+`STATX_ATIME` out of the reply for a filesystem whose superblock is marked as keeping no
+access times, and what sits in the field then is a placeholder. The description is still
+returned with the access time absent, like the creation and status-change times. The other
+fields are different: a length, an inode or a link count the kernel did not fill in reads as
+zero, which looks like an answer, so a reply missing any of them still fails the whole call
+as `NotSupported`. macOS and Windows always report an access time.
+
 **Timestamps outside the range the framework can hold are clamped, not refused.** Anything
 that can write a file can set its timestamps, and a filesystem image can be crafted with any
 value at all, so an absurd one is ordinary hostile input. Failing the call instead would

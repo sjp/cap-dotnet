@@ -770,18 +770,41 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return LinuxErrno.ToError(errno);
         }
 
-        // Everything but the two optional times is required, for the same reason the
+        return TranslateStatx(buffer, out stat);
+    }
+
+    /// <summary>
+    /// Turns a <c>statx</c> reply into a caller-facing snapshot, refusing one that left out a
+    /// field the snapshot cannot do without.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from the call so that a reply no filesystem on a test host produces — one
+    /// without an access time, say — can still be fed through it.
+    /// </remarks>
+    internal static CapError TranslateStatx(in StatxBuffer buffer, out CapNodeStat stat)
+    {
+        stat = default;
+
+        // Everything but the three optional times is required, for the same reason the
         // resolution stat requires its own fields: a value the kernel did not fill in reads
         // as zero, and a zero length, a zero inode or a zero link count is a
         // plausible-looking answer rather than an obviously missing one. The creation time is
-        // genuinely optional on this platform, and the status-change time is one a
-        // filesystem that synthesises its metadata may leave out; both are reported as
-        // absent rather than as the epoch.
-        const uint Required = Wanted & ~(LinuxConstants.STATX_BTIME | LinuxConstants.STATX_CTIME);
+        // genuinely optional on this platform, the status-change time is one a filesystem
+        // that synthesises its metadata may leave out, and the access time is one the kernel
+        // withholds from a filesystem that marks its superblock as keeping no access times;
+        // all three are reported as absent rather than as the epoch.
+        const uint Required =
+            LinuxConstants.STATX_TYPE | LinuxConstants.STATX_MODE | LinuxConstants.STATX_INO |
+            LinuxConstants.STATX_SIZE | LinuxConstants.STATX_MTIME | LinuxConstants.STATX_UID |
+            LinuxConstants.STATX_NLINK;
         if ((buffer.Mask & Required) != Required)
         {
             return CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, LinuxErrno.EOPNOTSUPP);
         }
+
+        DateTimeOffset? accessed = (buffer.Mask & LinuxConstants.STATX_ATIME) != 0
+            ? UnixTimestamps.FromParts(buffer.AccessTime.Seconds, buffer.AccessTime.Nanoseconds)
+            : null;
 
         DateTimeOffset? created = (buffer.Mask & LinuxConstants.STATX_BTIME) != 0
             ? UnixTimestamps.FromParts(buffer.BirthTime.Seconds, buffer.BirthTime.Nanoseconds)
@@ -796,7 +819,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             buffer.VolumeId,
             buffer.Inode,
             (long)Math.Min(buffer.Size, long.MaxValue),
-            UnixTimestamps.FromParts(buffer.AccessTime.Seconds, buffer.AccessTime.Nanoseconds),
+            accessed,
             UnixTimestamps.FromParts(buffer.ModifyTime.Seconds, buffer.ModifyTime.Nanoseconds),
             created,
             changed,

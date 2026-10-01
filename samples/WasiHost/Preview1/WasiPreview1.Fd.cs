@@ -638,8 +638,8 @@ public sealed partial class WasiPreview1
     private static ulong Inode(in CapMetadata metadata) => (ulong)metadata.FileId.NodeId;
 
     /// <summary>
-    /// Writes a <c>filestat</c> record. A status-change time the filesystem does not record is
-    /// written as zero, which is the only way the record has of saying nothing.
+    /// Writes a <c>filestat</c> record. An access or status-change time the filesystem does not
+    /// record is written as zero, which is the only way the record has of saying nothing.
     /// </summary>
     private static Errno WriteFilestat(GuestMemory memory, uint address, FileType type, CapMetadata? metadata)
     {
@@ -656,7 +656,11 @@ public sealed partial class WasiPreview1
             BinaryPrimitives.WriteUInt64LittleEndian(record[8..], Inode(known));
             BinaryPrimitives.WriteUInt64LittleEndian(record[24..], (ulong)known.LinkCount);
             BinaryPrimitives.WriteUInt64LittleEndian(record[32..], (ulong)known.Length);
-            BinaryPrimitives.WriteUInt64LittleEndian(record[40..], Nanoseconds(known.LastAccessTime));
+            if (known.LastAccessTime is { } accessed)
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(record[40..], Nanoseconds(accessed));
+            }
+
             BinaryPrimitives.WriteUInt64LittleEndian(record[48..], Nanoseconds(known.LastWriteTime));
             if (known.ChangeTime is { } changed)
             {

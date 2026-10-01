@@ -33,6 +33,7 @@ internal static class Difference
     public const string Permissions = "Changing permissions or attributes: SetAttributes, SetUnixFileMode, the Attributes, IsReadOnly and UnixFileMode setters";
     public const string CreationMode = "Creating with a Unix mode: Directory.CreateDirectory(path, mode), FileStreamOptions.UnixCreateMode";
     public const string CreationTime = "Setting a creation time";
+    public const string AbsentAccessTime = "Reading an access time the filesystem does not keep";
     public const string Handles = "Members that take a SafeFileHandle, RandomAccess, and Wrap on the factories";
     public const string OpenHandle = "File.OpenHandle";
     public const string HostServices = "DriveInfo, FileSystemWatcher, FileVersionInfo, access control lists, Encrypt, Decrypt";

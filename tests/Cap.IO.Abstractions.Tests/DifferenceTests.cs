@@ -1,5 +1,6 @@
 using System.IO.Abstractions;
 using Cap.Std;
+using Cap.Std.Testing;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.IO.Abstractions.Tests;
@@ -294,6 +295,24 @@ public abstract class DifferenceTests : IDisposable
         Fs.Directory.SetLastAccessTimeUtc("d", when);
         Assert.Equal(when, Fs.File.GetLastWriteTimeUtc("a.txt"));
         Assert.Equal(when, Fs.Directory.GetLastAccessTimeUtc("d"));
+    }
+
+    /// <summary>
+    /// No filesystem a test host mounts withholds the access time, so the description is made
+    /// rather than read; what is under test is the reading of it every access-time member shares.
+    /// </summary>
+    [Fact]
+    [Trait(Difference.Name, Difference.AbsentAccessTime)]
+    public void An_access_time_the_filesystem_does_not_keep_reads_as_the_write_time()
+    {
+        DateTimeOffset written = new(2001, 2, 3, 4, 5, 6, TimeSpan.Zero);
+        CapMetadata metadata = new CapMetadataBuilder()
+            .WithLastWriteTime(written)
+            .WithLastAccessTime(null)
+            .Build();
+
+        Assert.Equal(written.UtcDateTime, Descriptions.TimeOf(metadata, TimeKind.Access, utc: true));
+        Assert.Equal(written.LocalDateTime, Descriptions.TimeOf(metadata, TimeKind.Access, utc: false));
     }
 
     [Fact]

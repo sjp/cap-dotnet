@@ -30,7 +30,10 @@ internal static class Descriptions
     {
         DateTimeOffset value = kind switch
         {
-            TimeKind.Access => metadata.LastAccessTime,
+            // Where the filesystem keeps no access time, the write time stands in for it: the
+            // last time anyone is known to have touched the contents, which is what a reader
+            // comparing it against other times can make sense of.
+            TimeKind.Access => metadata.LastAccessTime ?? metadata.LastWriteTime,
             TimeKind.Write => metadata.LastWriteTime,
 
             // Where the filesystem records no birth time, the older of the write and change

@@ -354,7 +354,8 @@ the source had and the copy's caller did not ask for.
   alone, as `cp -p` leaves it. A link's own permissions are never carried across on any
   platform, because setting them would mean following the link.
 - `PreserveTimes` (off): each copied file, directory and recreated link is given the source's
-  last-access and last-write times. A link's own times are set, not its target's. A
+  last-access and last-write times; a source with no access time leaves the copy's own. A
+  link's own times are set, not its target's. A
   directory's are set after everything inside it has been copied, since adding entries moves
   its last-write time on. Creation times are not carried, and the directory the copy writes
   into keeps its own.

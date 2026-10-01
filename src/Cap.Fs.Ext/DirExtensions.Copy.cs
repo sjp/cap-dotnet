@@ -857,7 +857,7 @@ public static partial class DirExtensions
             if (_options.PreserveTimes)
             {
                 target.SetTimes(
-                    CapFileTime.At(metadata.LastAccessTime), CapFileTime.At(metadata.LastWriteTime));
+                    Accessed(metadata), CapFileTime.At(metadata.LastWriteTime));
             }
         }
 
@@ -982,7 +982,7 @@ public static partial class DirExtensions
             if (_options.PreserveTimes)
             {
                 level.Destination.SetTimes(
-                    entry.Name, CapFileTime.At(metadata.LastAccessTime), CapFileTime.At(metadata.LastWriteTime));
+                    entry.Name, Accessed(metadata), CapFileTime.At(metadata.LastWriteTime));
             }
 
             _symlinks++;
@@ -1041,7 +1041,7 @@ public static partial class DirExtensions
             if (_options.PreserveTimes)
             {
                 destination.SetTimes(
-                    CapFileTime.At(source.LastAccessTime), CapFileTime.At(source.LastWriteTime));
+                    Accessed(source), CapFileTime.At(source.LastWriteTime));
             }
         }
 
@@ -1062,6 +1062,14 @@ public static partial class DirExtensions
                 target.SetPermissions(permissions);
             }
         }
+
+        /// <summary>The access time to give a copy: the source's, or none where it has none.</summary>
+        /// <remarks>
+        /// A source on a filesystem that keeps no access times has nothing to carry over, and
+        /// leaving the copy's own in place is closer to that than stamping it with a date.
+        /// </remarks>
+        private static CapFileTime Accessed(in CapMetadata metadata) =>
+            metadata.LastAccessTime is { } accessed ? CapFileTime.At(accessed) : CapFileTime.Unchanged;
 
         /// <summary>Whether a directory has anything in it.</summary>
         private static bool HasEntries(IDir directory)

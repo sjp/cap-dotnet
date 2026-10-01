@@ -77,6 +77,16 @@ public sealed class TestValueTests
     }
 
     [Fact]
+    public void An_access_time_can_be_described_as_absent()
+    {
+        CapMetadata metadata = new CapMetadataBuilder()
+            .WithLastAccessTime(null)
+            .Build();
+
+        Assert.Null(metadata.LastAccessTime);
+    }
+
+    [Fact]
     public void Setting_one_kind_of_permission_clears_the_other()
     {
         CapMetadataBuilder builder = new CapMetadataBuilder()

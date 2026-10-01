@@ -144,6 +144,7 @@ test checks that every row has one and that no such test names a row missing fro
 | Changing permissions or attributes: `SetAttributes`, `SetUnixFileMode`, the `Attributes`, `IsReadOnly` and `UnixFileMode` setters | supported | `NotSupportedException`: `Cap.Std` cannot change them beneath a handle. The `Attributes` and `IsReadOnly` setters accept the value already there |
 | Creating with a Unix mode: `Directory.CreateDirectory(path, mode)`, `FileStreamOptions.UnixCreateMode` | supported | `NotSupportedException`. Ignoring the mode would create something more permissive than asked for |
 | Setting a creation time | supported | `NotSupportedException`. Access and write times can be set |
+| Reading an access time the filesystem does not keep | on Linux, whatever placeholder the kernel left in the field | the last-write time, which a reader comparing times can make sense of |
 | Members that take a `SafeFileHandle`, `RandomAccess`, and `Wrap` on the factories | supported | `NotSupportedException`: the handle, or the host path inside a `FileInfo`, `DirectoryInfo` or `FileStream`, was not opened beneath the `Dir` |
 | `File.OpenHandle` | supported | `NotSupportedException`: nothing in the adapter accepts the handle back. `File.Open` returns a stream that reads and writes at any position |
 | `DriveInfo`, `FileSystemWatcher`, `FileVersionInfo`, access control lists, `Encrypt`, `Decrypt` | supported | `NotSupportedException`, saying why |

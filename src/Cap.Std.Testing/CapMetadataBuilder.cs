@@ -46,7 +46,7 @@ public sealed class CapMetadataBuilder
 
     private CapFileType _type = CapFileType.File;
     private long _length;
-    private DateTimeOffset _lastAccessTime = DefaultTime;
+    private DateTimeOffset? _lastAccessTime = DefaultTime;
     private DateTimeOffset _lastWriteTime = DefaultTime;
     private DateTimeOffset? _creationTime = DefaultTime;
     private DateTimeOffset? _changeTime = DefaultTime;
@@ -95,10 +95,10 @@ public sealed class CapMetadataBuilder
         return this;
     }
 
-    /// <summary>Sets when the contents were last read.</summary>
-    /// <param name="time">The time.</param>
+    /// <summary>Sets when the contents were last read, or null for a filesystem that does not record it.</summary>
+    /// <param name="time">The time, or null.</param>
     /// <returns>This builder.</returns>
-    public CapMetadataBuilder WithLastAccessTime(DateTimeOffset time)
+    public CapMetadataBuilder WithLastAccessTime(DateTimeOffset? time)
     {
         _lastAccessTime = time;
         return this;

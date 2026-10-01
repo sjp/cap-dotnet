@@ -87,14 +87,22 @@ public readonly struct CapMetadata
     public DateTimeOffset LastWriteTime => _stat.LastWriteTime;
 
     /// <summary>
-    /// When the object's contents were last read.
+    /// When the object's contents were last read, or null where nothing recorded it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The least dependable field here. Filesystems are routinely mounted so that reads do
     /// not update it, because updating it turns every read into a write, so a value far in
     /// the past may mean the object has not been read or may mean nobody is recording.
+    /// </para>
+    /// <para>
+    /// Null where the filesystem says outright that it is not recording: on Linux, one
+    /// whose superblock is marked as keeping no access times has the kernel withhold the
+    /// field, and what it would otherwise report is a placeholder rather than a time. Every
+    /// other platform always answers.
+    /// </para>
     /// </remarks>
-    public DateTimeOffset LastAccessTime => _stat.LastAccessTime;
+    public DateTimeOffset? LastAccessTime => _stat.LastAccessTime;
 
     /// <summary>
     /// When the object was created, or null where nothing recorded it.

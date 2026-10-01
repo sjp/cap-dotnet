@@ -64,7 +64,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `File.GetAttributes(p)` | `dir.GetMetadata(p).Permissions.TryGetWindowsAttributes(out var a)` | |
 | `File.GetUnixFileMode(p)` | `dir.GetMetadata(p).Permissions.TryGetUnixMode(out var m)` | |
 | `File.GetLastWriteTimeUtc(p)` | `dir.GetMetadata(p).LastWriteTime` | A `DateTimeOffset`. A symbolic link at `p` is described as itself; `dir.GetMetadata(p, followLink: true)` describes what it leads to. |
-| `File.GetLastAccessTimeUtc(p)` | `dir.GetMetadata(p).LastAccessTime` | |
+| `File.GetLastAccessTimeUtc(p)` | `dir.GetMetadata(p).LastAccessTime` | Null where the filesystem keeps no access time, which Linux reports for some filesystems. |
 | `File.GetCreationTimeUtc(p)` | `dir.GetMetadata(p).CreationTime` | Null where the filesystem records none, rather than a made-up date. |
 | `new FileInfo(p).Length` | `dir.GetMetadata(p).Length` | |
 | No equivalent: the link count, `st_nlink` | `dir.GetMetadata(p).LinkCount` | |
