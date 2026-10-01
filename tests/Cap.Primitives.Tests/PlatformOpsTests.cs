@@ -247,6 +247,35 @@ public sealed class PlatformOpsTests : IDisposable
         child.Value.Dispose();
     }
 
+    /// <summary>
+    /// A rename told not to replace its destination either refuses it in the same call or says
+    /// it cannot, and never replaces it.
+    /// </summary>
+    /// <remarks>
+    /// The categories are the ones <see cref="IPlatformOps.RenameChild"/> documents: a taken
+    /// destination where the filesystem can refuse atomically, and otherwise
+    /// <see cref="CapErrorCategory.NotSupported"/> or, where the filesystem answers with the
+    /// code for a malformed request, <see cref="CapErrorCategory.InvalidArgument"/>. A
+    /// fallback that looked the destination up and then renamed would pass on an idle tree
+    /// and race on a busy one; the unchanged contents are what would show it had been added.
+    /// </remarks>
+    [Fact]
+    public void A_no_replace_rename_on_this_filesystem_is_refused_atomically_or_says_it_cannot_be()
+    {
+        File.WriteAllText(Path.Combine(_root, "a"), "source");
+        File.WriteAllText(Path.Combine(_root, "b"), "destination");
+
+        using SafeDirHandle root = OpenRoot();
+        CapError error = Ops.RenameChild(root, "a", root, "b", replaceExisting: false);
+
+        Assert.True(error.IsFailure);
+        Assert.Contains(
+            error.Category,
+            new[] { CapErrorCategory.AlreadyExists, CapErrorCategory.NotSupported, CapErrorCategory.InvalidArgument });
+        Assert.Equal("source", File.ReadAllText(Path.Combine(_root, "a")));
+        Assert.Equal("destination", File.ReadAllText(Path.Combine(_root, "b")));
+    }
+
     /// <summary>A closed handle is refused rather than used, and cannot reach a recycled object.</summary>
     [Fact]
     public void A_closed_handle_cannot_be_used()

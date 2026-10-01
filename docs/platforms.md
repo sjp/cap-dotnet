@@ -181,6 +181,16 @@ refused here: `CON` and `name.` are ordinary files.
 **Case** is significant, unless the volume folds it (vfat, or ext4 with casefolding enabled),
 in which case the Windows remarks apply.
 
+**Rename without replacing** uses `renameat2` with `RENAME_NOREPLACE`, so the refusal of a
+taken destination is part of the move itself. A kernel without the call, or a filesystem that
+reports the flag unsupported, fails the move with `CapErrorKind.NotSupported`. Some
+filesystems (older NFS, several FUSE filesystems) answer `EINVAL` instead, and that comes
+through as `CapErrorKind.InvalidArgument`. That is also the code for a request that is itself
+wrong, such as moving a directory beneath itself, and telling the two apart would take a
+lookup before the move: that is the race the flag exists to close. On such a filesystem, ask
+for `replaceExisting: true` if replacing is acceptable. The library never falls back to
+checking first.
+
 ### Linux architectures
 
 The Linux backend supports the architectures .NET itself supports on Linux: **x86-64,

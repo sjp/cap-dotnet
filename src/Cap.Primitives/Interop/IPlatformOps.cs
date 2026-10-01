@@ -788,8 +788,14 @@ internal interface IPlatformOps
     /// be atomic silently stop being so.
     /// </para>
     /// <para>
-    /// A platform that cannot refuse an existing destination atomically reports
-    /// <see cref="CapErrorCategory.NotSupported"/> rather than falling back to a check.
+    /// A platform that cannot refuse an existing destination atomically never falls back to a
+    /// check. Where it can tell that this is why the move failed — the call is missing, or
+    /// the filesystem says the flag is unsupported — it reports
+    /// <see cref="CapErrorCategory.NotSupported"/>. A filesystem that answers the flag with
+    /// an invalid argument instead, as some network and FUSE filesystems do, is reported as
+    /// <see cref="CapErrorCategory.InvalidArgument"/>: the same code is the one for a request
+    /// that is itself wrong, such as moving a directory beneath itself, and telling the two
+    /// apart would take a lookup that reopens the window the flag exists to close.
     /// </para>
     /// </remarks>
     CapError RenameChild(

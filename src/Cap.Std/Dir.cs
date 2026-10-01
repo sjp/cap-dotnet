@@ -947,7 +947,10 @@ public sealed partial class Dir : IDir
     /// when not asked for, is equally part of the one operation: it is not a check followed
     /// by a move, because something appearing between those two would be destroyed by the
     /// very call that was told not to destroy anything. A filesystem that cannot make that
-    /// refusal part of the move reports so rather than falling back to the check.
+    /// refusal part of the move reports so rather than falling back to the check — as
+    /// <see cref="CapErrorKind.NotSupported"/> where the platform can tell, and on a
+    /// filesystem that answers with the code for a malformed request, as some network and
+    /// FUSE filesystems do on Unix, as <see cref="CapErrorKind.InvalidArgument"/>.
     /// </para>
     /// <para>
     /// <strong>A move between filesystems fails.</strong> It is not quietly turned into a
