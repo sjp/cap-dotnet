@@ -564,10 +564,18 @@ internal static class PortableResolver
     /// <c>a/..</c>, or a link storing <c>.</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The held handle was opened only to pass through, and on some systems cannot list or
-    /// commit the directory, so unless it already has the access asked for it is reopened with
-    /// that access. Handing it back as it is would give the caller a directory that fails the
-    /// first time it is read, and only when the path happened to end on a climb.
+    /// commit the directory, so unless it already carries the access asked for it is reopened
+    /// with that access. Handing it back as it is would give the caller a directory that fails
+    /// the first time it is read, and only when the path happened to end on a climb.
+    /// </para>
+    /// <para>
+    /// A handle carrying more than was asked for is handed back as it is rather than narrowed.
+    /// It is a copy of something the caller already holds, so it grants nothing new, and the
+    /// recorded access is never consulted to permit an operation; reopening it would cost a
+    /// duplicate, an open and a close to produce a handle that can do less.
+    /// </para>
     /// </remarks>
     private static CapError FinishAtStack(
         IPlatformOps ops,
@@ -589,7 +597,7 @@ internal static class PortableResolver
                 }
 
                 SafeDirHandle directory = held.Value!;
-                if (directory.Access != access)
+                if ((directory.Access & access) != access)
                 {
                     CapResult<SafeDirHandle> reopened = ops.ReopenDirectory(directory, access);
                     directory.Dispose();

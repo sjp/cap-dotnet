@@ -154,6 +154,64 @@ public sealed class PortableWalkTests
         });
     }
 
+    /// <summary>
+    /// A path ending back on a directory the walk already holds with the access asked for,
+    /// or more, hands that directory back without reopening it.
+    /// </summary>
+    /// <remarks>
+    /// The root is held for reading, so <c>a/..</c> asked for with no access or for reading
+    /// already has everything it needs. Reopening it to narrow it would cost syscalls on
+    /// every <c>..</c>-spelled name the higher layers check, to grant nothing.
+    /// </remarks>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Ending_on_a_held_directory_does_not_reopen_it_when_it_already_has_the_access_asked_for(
+        bool forReading)
+    {
+        CapAccess access = forReading ? CapAccess.Read : CapAccess.None;
+        FakeFileSystem fs = Sandbox();
+        _ = fs.AddDirectory("sandbox/a");
+        MemoryNode sandbox = fs.Find("sandbox")!;
+
+        Run(fs, (ops, root) =>
+        {
+            int before = ops.DirectoryReopens;
+
+            CapResult<SafeDirHandle> result =
+                PortableResolver.OpenDirectory(root, Parse("a/.."), access, ConfinedResolveOptions.None);
+            Assert.True(result.IsSuccess, result.Error.FailureDescription);
+            using SafeDirHandle opened = result.Value!;
+
+            Assert.Equal(before, ops.DirectoryReopens);
+            Assert.Equal(CapAccess.Read, opened.Access);
+            AssertIs(ops, sandbox, opened);
+        });
+    }
+
+    /// <summary>
+    /// A path ending back on a directory the walk only passed through is reopened with the
+    /// access asked for, so the caller can read what it was handed.
+    /// </summary>
+    [Fact]
+    public void Ending_on_a_traversal_only_directory_reopens_it_for_reading()
+    {
+        FakeFileSystem fs = Sandbox();
+        MemoryNode a = fs.AddDirectory("sandbox/a");
+        _ = fs.AddDirectory("sandbox/a/b");
+
+        Run(fs, (ops, root) =>
+        {
+            int before = ops.DirectoryReopens;
+
+            using SafeDirHandle opened = OpenDirectory(ops, root, "a/b/..");
+
+            Assert.Equal(before + 1, ops.DirectoryReopens);
+            Assert.Equal(CapAccess.Read, opened.Access);
+            AssertIs(ops, a, opened);
+        });
+    }
+
     /// <summary>A link whose target stays inside is followed.</summary>
     [Fact]
     public void A_link_inside_the_sandbox_is_followed()

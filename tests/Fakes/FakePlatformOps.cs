@@ -596,8 +596,14 @@ internal sealed class FakePlatformOps : IPlatformOps
             return CapResult<SafeDirHandle>.Fail(CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
+        _ = Interlocked.Increment(ref _directoryReopens);
         return CapResult<SafeDirHandle>.Ok(Register(node!, access));
     }
+
+    /// <summary>How many times a directory handle has been reopened with other access.</summary>
+    public int DirectoryReopens => Volatile.Read(ref _directoryReopens);
+
+    private int _directoryReopens;
 
     /// <inheritdoc/>
     public CapResult<SafeFileHandle> DuplicateFile(SafeFileHandle handle) => Duplicate(handle, appendOnly: false);
