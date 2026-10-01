@@ -220,6 +220,34 @@ public sealed class DirInterfaceTests : IDisposable
         AssertCrossDevice(() => root.CreateHardLink("../outside", standIn, "linked"));
     }
 
+    /// <summary>
+    /// A path that is not usable at either end is reported as such ahead of the refusal of a
+    /// stand-in, and the stand-in's name is read under this handle's rules.
+    /// </summary>
+    [Fact]
+    public void A_malformed_path_is_reported_before_a_stand_in_destination_is_refused()
+    {
+        Mock<IDir> standInMock = new(MockBehavior.Strict);
+        IDir standIn = standInMock.Object;
+
+        using Dir root = OpenRoot();
+
+        _ = Assert.Throws<SandboxEscapeException>(() => root.Rename("/abs", standIn, "x"));
+        _ = Assert.Throws<SandboxEscapeException>(() => root.CreateHardLink("/abs", standIn, "x"));
+        _ = Assert.Throws<SandboxEscapeException>(() => root.Rename("entry", standIn, "/abs"));
+        Assert.Equal("from", Assert.ThrowsAny<ArgumentException>(() => root.Rename("", standIn, "x")).ParamName);
+        Assert.Equal("to", Assert.ThrowsAny<ArgumentException>(() => root.Rename("entry", standIn, "")).ParamName);
+        Assert.Equal("path", Assert.ThrowsAny<ArgumentException>(() => root.CreateHardLink("", standIn, "x")).ParamName);
+        Assert.False(root.TryRename("/abs", standIn, "x"));
+        Assert.False(root.TryCreateHardLink("entry", standIn, ""));
+
+        // A name for the directory itself is a usable path, refused only for what is asked of
+        // it, so the pair is refused first.
+        AssertCrossDevice(() => root.Rename(".", standIn, "x"));
+
+        standInMock.VerifyNoOtherCalls();
+    }
+
     /// <summary>A null destination is still a null argument, whatever its declared type.</summary>
     [Fact]
     public void A_null_destination_is_an_argument_error()

@@ -1,5 +1,6 @@
 using Cap.Primitives;
 using Cap.Tests;
+using Moq;
 
 namespace Cap.Std.Tests;
 
@@ -861,6 +862,33 @@ public sealed class DirMutationTests : IDisposable
         _ = Assert.Throws<ObjectDisposedException>(() => root.Exists("x"));
         _ = Assert.Throws<ObjectDisposedException>(() => root.ReadLink("x"));
         _ = Assert.Throws<ObjectDisposedException>(() => root.TryDeleteFile("x"));
+    }
+
+    /// <summary>
+    /// A disposed handle at either end of a move or a second name is reported as disposed,
+    /// whatever the other end is, rather than as a refusal of the pair.
+    /// </summary>
+    [Fact]
+    public void A_disposed_handle_at_either_end_of_a_move_is_reported_as_disposed()
+    {
+        IDir standIn = new Mock<IDir>(MockBehavior.Strict).Object;
+        using Dir open = OpenRoot();
+        Dir disposed = OpenRoot();
+        disposed.Dispose();
+
+        _ = Assert.Throws<ObjectDisposedException>(() => disposed.Rename("a", standIn, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => disposed.TryRename("a", standIn, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => disposed.CreateHardLink("a", standIn, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => disposed.TryCreateHardLink("a", standIn, "b"));
+
+        _ = Assert.Throws<ObjectDisposedException>(() => disposed.Rename("a", open, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => open.Rename("a", disposed, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => open.TryRename("a", disposed, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => open.CreateHardLink("a", disposed, "b"));
+        _ = Assert.Throws<ObjectDisposedException>(() => open.TryCreateHardLink("a", disposed, "b"));
+
+        // A malformed path does not get ahead of the disposal either.
+        _ = Assert.Throws<ObjectDisposedException>(() => disposed.Rename("/abs", standIn, "b"));
     }
 
     // --- making a chain of directories -----------------------------------------------------------

@@ -2511,6 +2511,24 @@ public sealed partial class Dir : IDir
         error == CapPathError.Empty && path.Length != 0;
 
     /// <summary>
+    /// The refusal <see cref="Locate"/> would give a path before resolving any of it, for a
+    /// member that has to report an unusable path ahead of something else it refuses.
+    /// </summary>
+    /// <remarks>
+    /// A path naming the directory itself is not refused here: what is wrong with it depends
+    /// on what is asked of it, and <see cref="Locate"/> answers that once it is.
+    /// </remarks>
+    private static CapPathError CheckCallerPath(string path, CapPathSyntax syntax)
+    {
+        if (!CapPath.TryParse(path, syntax, ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError error))
+        {
+            return NamesThisDirectory(path, error) ? CapPathError.None : error;
+        }
+
+        return parsed.TrySplitLastComponent(out _, out _) ? CapPathError.None : CapPathError.Empty;
+    }
+
+    /// <summary>
     /// The rules a path handed to this handle is read under: the running platform's, unless
     /// the handle is on a filesystem that chose others.
     /// </summary>
@@ -2982,10 +3000,26 @@ public sealed partial class Dir : IDir
         ArgumentNullException.ThrowIfNull(toDir);
         ArgumentNullException.ThrowIfNull(to);
 
-        fromError = CapPathError.None;
-        toError = CapPathError.None;
+        Dir? destinationDir = toDir as Dir;
+        ObjectDisposedException.ThrowIf(_handle.IsClosed, this);
+        if (destinationDir is not null)
+        {
+            ObjectDisposedException.ThrowIf(destinationDir._handle.IsClosed, destinationDir);
+        }
+
         expected = ExpectedTarget.Name;
         aboutDestination = false;
+
+        // A path that is not usable is the caller's mistake whatever the other end is, so it
+        // is reported ahead of the refusal of the pair below. Parsing resolves nothing, so the
+        // refusal still comes before either name is looked up. A stand-in has no rules of its
+        // own to read its name under, and the destination name is read under this handle's.
+        fromError = CheckCallerPath(from, PathSyntax);
+        toError = CheckCallerPath(to, destinationDir?.PathSyntax ?? PathSyntax);
+        if (fromError != CapPathError.None || toError != CapPathError.None)
+        {
+            return CapError.Success;
+        }
 
         // Two handles from different filesystems, such as a simulated tree and the disk, can
         // no more share an entry than two mounted volumes can, and the kernel refuses a rename
@@ -2997,7 +3031,7 @@ public sealed partial class Dir : IDir
         // A destination that is not a Dir at all, such as a test's stub of the interface, is
         // refused the same way and for a stronger reason: it holds no handle, so there is
         // nothing a backend could be given as the other end of the call.
-        if (toDir is not Dir destinationDir || !_handle.SharesBackendWith(destinationDir._handle))
+        if (destinationDir is null || !_handle.SharesBackendWith(destinationDir._handle))
         {
             return CapError.FromCategory(CapErrorCategory.CrossDevice);
         }
