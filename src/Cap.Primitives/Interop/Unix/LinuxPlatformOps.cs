@@ -1792,7 +1792,10 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// Only for an open that starts the file from nothing. Reserving space on a file that
     /// was opened as it stood would extend somebody else's data, which is not what the
     /// request means, and there is no honest way to tell from here whether a name that could
-    /// have been created was.
+    /// have been created was. So an open-or-create or an append, which may have found the
+    /// file already there, asks the descriptor its length and reserves only on an empty
+    /// file; the modes that create exclusively or empty the file are known to leave it
+    /// empty and spend no call on the question.
     /// </para>
     /// <para>
     /// The file's length is left alone. The reservation claims room behind the end of the
@@ -1821,6 +1824,12 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapError.Success;
         }
 
+        bool knownEmpty = request.Truncates || request.Mode == FileMode.CreateNew;
+        if (!knownEmpty && !IsEmpty(fd))
+        {
+            return CapError.Success;
+        }
+
         if (LinuxNative.Fallocate(
             fd, LinuxConstants.FALLOC_FL_KEEP_SIZE, 0, request.PreallocationSize) == 0)
         {
@@ -1831,6 +1840,35 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         return errno is PosixErrno.ENOSPC or PosixErrno.EFBIG
             ? LinuxErrno.ToError(errno)
             : CapError.Success;
+    }
+
+    /// <summary>Asks an open descriptor whether the file it refers to holds no bytes.</summary>
+    /// <remarks>
+    /// An answer that cannot be had counts as not empty, so the reservation is skipped: the
+    /// file is perfectly usable without it, and reserving on a file that holds data is the
+    /// thing to avoid. Asked with the synchronising flag because the length is the field a
+    /// network filesystem's cached answer is wrong about.
+    /// </remarks>
+    private static bool IsEmpty(int fd)
+    {
+        ReadOnlySpan<byte> empty = [0];
+        StatxBuffer buffer = default;
+        long result;
+        unsafe
+        {
+            fixed (byte* name = empty)
+            {
+                result = LinuxNative.Statx(
+                    LinuxConstants.SYS_statx,
+                    fd,
+                    name,
+                    LinuxConstants.AT_EMPTY_PATH | LinuxConstants.AT_STATX_SYNC_AS_STAT,
+                    LinuxConstants.STATX_SIZE,
+                    &buffer);
+            }
+        }
+
+        return result == 0 && (buffer.Mask & LinuxConstants.STATX_SIZE) != 0 && buffer.Size == 0;
     }
 
     /// <summary>

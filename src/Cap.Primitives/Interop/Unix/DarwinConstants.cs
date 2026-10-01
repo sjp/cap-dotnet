@@ -159,8 +159,8 @@ internal static class DarwinConstants
     /// </summary>
     /// <remarks>
     /// It reserves without extending: the file's length is unchanged and only the space
-    /// behind it is claimed, so a reservation has to be followed by a truncation to the
-    /// requested length for the result to mean what the caller asked for.
+    /// behind it is claimed. The length is deliberately left alone, which is what Linux's
+    /// <c>FALLOC_FL_KEEP_SIZE</c> does too.
     /// </remarks>
     public const int F_PREALLOCATE = 42;
 

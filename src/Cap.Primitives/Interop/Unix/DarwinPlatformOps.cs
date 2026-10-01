@@ -179,8 +179,8 @@ internal sealed class DarwinPlatformOps : IPlatformOps
 
         ClearNonBlocking(fd);
 
-        CapError kind = RefuseIfDirectory(fd);
-        CapError reserved = kind.IsFailure ? kind : Preallocate(fd, in request);
+        CapError kind = RefuseIfDirectory(fd, out long length);
+        CapError reserved = kind.IsFailure ? kind : Preallocate(fd, in request, length);
         if (reserved.IsFailure)
         {
             new SafeFileHandle(fd, ownsHandle: true).Dispose();
@@ -206,10 +206,14 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// Asked of the descriptor rather than of the name: the name may already refer to
     /// something else, and the descriptor is what was opened.
     /// </para>
+    /// <para>
+    /// The same question reports the file's length, which is what <see cref="Preallocate"/>
+    /// needs and would otherwise cost a second <c>fstat</c>.
+    /// </para>
     /// </remarks>
-    private static CapError RefuseIfDirectory(int fd)
+    private static CapError RefuseIfDirectory(int fd, out long length)
     {
-        CapError error = IsDirectory(fd, out bool isDirectory);
+        CapError error = IsDirectory(fd, out bool isDirectory, out length);
         if (error.IsFailure)
         {
             return error;
@@ -220,10 +224,11 @@ internal sealed class DarwinPlatformOps : IPlatformOps
             : CapError.Success;
     }
 
-    /// <summary>Asks an open descriptor whether it refers to a directory.</summary>
-    private static CapError IsDirectory(int fd, out bool isDirectory)
+    /// <summary>Asks an open descriptor whether it refers to a directory, and how long it is.</summary>
+    private static CapError IsDirectory(int fd, out bool isDirectory, out long length)
     {
         isDirectory = false;
+        length = 0;
 
         DarwinStat stat = default;
         int result;
@@ -243,6 +248,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
         }
 
         isDirectory = stat.NodeType == CapNodeType.Directory;
+        length = stat.Size;
         return CapError.Success;
     }
 
@@ -302,7 +308,7 @@ internal sealed class DarwinPlatformOps : IPlatformOps
 
         ClearNonBlocking(fd);
 
-        CapError kind = IsDirectory(fd, out bool isDirectory);
+        CapError kind = IsDirectory(fd, out bool isDirectory, out _);
         if (kind.IsFailure)
         {
             new SafeFileHandle(fd, ownsHandle: true).Dispose();
@@ -1389,10 +1395,18 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// </para>
     /// <para>
     /// Only for an open that starts the file from nothing: reserving on a file opened as it
-    /// stood would extend somebody else's data. A refusal for want of room fails the open,
-    /// because a caller who reserved in advance did so precisely so that a later write would
-    /// not fail for that reason, and every other complaint is ignored because the file is
-    /// perfectly usable without the reservation.
+    /// stood would extend somebody else's data. A mode that may create is not enough on its
+    /// own, because an open-or-create or an append that found the file already there has
+    /// not started it, so the length the open found decides. It matters more here than on
+    /// Linux: the reservation is measured from the end of the file, so on a file that
+    /// already held data it would claim that much again on top rather than the room up to
+    /// the requested size.
+    /// </para>
+    /// <para>
+    /// A refusal for want of room fails the open, because a caller who reserved in advance
+    /// did so precisely so that a later write would not fail for that reason, and every
+    /// other complaint is ignored because the file is perfectly usable without the
+    /// reservation.
     /// </para>
     /// <para>
     /// <strong>A file the open created is left behind when this fails.</strong> Removing it
@@ -1400,9 +1414,9 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     /// alternative to leaving debris is deleting a stranger's file.
     /// </para>
     /// </remarks>
-    private static CapError Preallocate(int fd, in FileOpenRequest request)
+    private static CapError Preallocate(int fd, in FileOpenRequest request, long length)
     {
-        if (request.PreallocationSize <= 0 || !(request.Creates || request.Truncates))
+        if (request.PreallocationSize <= 0 || !(request.Creates || request.Truncates) || length != 0)
         {
             return CapError.Success;
         }
