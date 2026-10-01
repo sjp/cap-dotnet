@@ -1587,13 +1587,6 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             ? CapError.Create(CapErrorCategory.NotSupported, CapErrorSource.Errno, errno)
             : LinuxErrno.ToError(errno);
 
-    private static int AccessFlags(CapAccess access) => access switch
-    {
-        CapAccess.ReadWrite => LinuxConstants.O_RDWR,
-        CapAccess.Write => LinuxConstants.O_WRONLY,
-        _ => LinuxConstants.O_RDONLY,
-    };
-
     /// <summary>
     /// Turns a file open request into the flags that express it, or reports that this
     /// platform cannot express it.

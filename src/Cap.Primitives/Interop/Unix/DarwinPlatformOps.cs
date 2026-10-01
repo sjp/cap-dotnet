@@ -1338,13 +1338,6 @@ internal sealed class DarwinPlatformOps : IPlatformOps
     private static bool IsDirectoryAccess(CapAccess access) =>
         access is CapAccess.None or CapAccess.Read;
 
-    private static int AccessFlags(CapAccess access) => access switch
-    {
-        CapAccess.ReadWrite => DarwinConstants.O_RDWR,
-        CapAccess.Write => DarwinConstants.O_WRONLY,
-        _ => DarwinConstants.O_RDONLY,
-    };
-
     /// <summary>
     /// Turns a file open request into the flags that express it, or reports that this
     /// platform cannot express it.
