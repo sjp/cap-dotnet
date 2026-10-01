@@ -64,6 +64,26 @@ public sealed class InterfaceHandleTests
         Assert.Equal(expected, actual);
     }
 
+    /// <summary>
+    /// Following links, a walk reads each directory's identity once, for the cycle check, and
+    /// keeps that reading for when it leaves the directory; not following them, it reads none.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_walk_that_follows_links_describes_each_directory_once(bool followSymlinks)
+    {
+        Tree();
+        using RecordingDir root = Root();
+
+        _ = root.Walk(new WalkOptions { FollowSymlinks = followSymlinks }).ToList();
+
+        string[] directories = [".", "./a", "./a/b", "./a/empty"];
+        Assert.Equal(
+            followSymlinks ? directories.Select(d => $"{d}: GetMetadata()") : [],
+            root.Log.Where(call => call.EndsWith(": GetMetadata()", StringComparison.Ordinal)).Order());
+    }
+
     [Fact]
     public void A_walk_through_the_interface_descends_by_single_names_refusing_links()
     {

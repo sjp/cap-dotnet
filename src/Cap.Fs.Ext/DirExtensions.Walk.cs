@@ -317,12 +317,14 @@ public static partial class DirExtensions
             _asynchronous = asynchronous;
             _cancellationToken = cancellationToken;
 
+            CapFileId id = default;
             if (options.FollowSymlinks)
             {
-                _entered = [root.GetMetadata().FileId];
+                id = root.GetMetadata().FileId;
+                _entered = [id];
             }
 
-            Push(root, name: null, owned: false, states: null);
+            Push(root, name: null, owned: false, id, states: null);
         }
 
         /// <summary>The level the walk is reading now, or null when it has finished.</summary>
@@ -393,7 +395,8 @@ public static partial class DirExtensions
             bool kept = false;
             try
             {
-                if (_entered is not null && !_entered.Add(child.GetMetadata().FileId))
+                CapFileId id = _entered is null ? default : child.GetMetadata().FileId;
+                if (_entered is not null && !_entered.Add(id))
                 {
                     // Already on the way down to here, so entering it again is a loop rather
                     // than a subtree. Reported as an entry like any other and not descended
@@ -401,7 +404,7 @@ public static partial class DirExtensions
                     return;
                 }
 
-                Push(child, entry.Name, owned: true, states);
+                Push(child, entry.Name, owned: true, id, states);
                 kept = true;
             }
             finally
@@ -554,10 +557,16 @@ public static partial class DirExtensions
             CapErrorKind.ConcurrentChange;
 
         /// <summary>Opens a directory's entries and makes it the level the walk is reading.</summary>
-        private void Push(IDir directory, string? name, bool owned, int[]? states)
+        /// <param name="directory">The directory to read.</param>
+        /// <param name="name">The directory's name in its parent, or null for the root.</param>
+        /// <param name="owned">Whether the walk disposes the handle when it leaves.</param>
+        /// <param name="id">
+        /// The directory's identity, already read by the caller for the cycle check, or the
+        /// default when links are not followed.
+        /// </param>
+        /// <param name="states">The per-pattern states a glob carries into this level.</param>
+        private void Push(IDir directory, string? name, bool owned, CapFileId id, int[]? states)
         {
-            CapFileId id = _entered is null ? default : directory.GetMetadata().FileId;
-
             WalkLevel level = new(
                 directory,
                 name,
