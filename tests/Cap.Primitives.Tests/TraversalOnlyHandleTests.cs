@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Unix;
 
 namespace Cap.Primitives.Tests;
 
@@ -222,6 +223,92 @@ public sealed class TraversalOnlyHandleTests : IDisposable
 
         Assert.True(result.IsSuccess, result.Error.FailureDescription);
         result.Value.Dispose();
+    }
+
+    /// <summary>
+    /// The times of a directory that may be entered but not listed can be set through a
+    /// traversal-only handle to it.
+    /// </summary>
+    /// <remarks>
+    /// Setting them by name in the parent needs nothing from the directory itself, so setting
+    /// them through a handle to it must not need more. On a kernel that accepts an empty name
+    /// this goes by the descriptor alone; the case below covers the route older kernels take.
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public void Times_can_be_set_through_a_traversal_only_handle_on_a_search_only_directory()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("Linux is the platform that separates traversing a directory from listing it.");
+            return;
+        }
+
+        string gate = CreateSearchOnlyDirectory();
+        using SafeDirHandle anchor = OpenSearchOnlyDirectory();
+
+        CapError error = Ops.SetHandleTimes(anchor, CapFileTime.At(FixedInstant), CapFileTime.At(FixedInstant));
+
+        Assert.True(error.IsSuccess, error.FailureDescription);
+        Assert.Equal(FixedInstant.UtcDateTime, Directory.GetLastWriteTimeUtc(gate));
+    }
+
+    /// <summary>
+    /// The route a kernel without empty names takes sets the times of a directory that may be
+    /// entered but not listed, rather than needing to open it for reading.
+    /// </summary>
+    /// <remarks>
+    /// Called directly, because the host running the suite may well accept the empty name and
+    /// so never reach it through <see cref="IPlatformOps.SetHandleTimes"/>.
+    /// </remarks>
+    [Fact]
+    [SupportedOSPlatform("linux")]
+    public unsafe void Times_set_through_the_self_entry_need_no_read_permission()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Assert.Skip("The self-entry route is the Linux backend's.");
+            return;
+        }
+
+        string gate = CreateSearchOnlyDirectory();
+        using SafeDirHandle anchor = OpenSearchOnlyDirectory();
+
+        UnixTimespec* times = stackalloc UnixTimespec[2];
+        times[0] = UnixTimestamps.ToTimespec(
+            CapFileTime.At(FixedInstant), LinuxConstants.UTIME_NOW, LinuxConstants.UTIME_OMIT);
+        times[1] = times[0];
+
+        CapError error;
+        using (HandleLease lease = anchor.Lease())
+        {
+            Assert.True(lease.IsValid);
+            error = LinuxPlatformOps.SetTimesThroughSelfEntry(lease.Descriptor, times);
+        }
+
+        Assert.True(error.IsSuccess, error.FailureDescription);
+        Assert.Equal(FixedInstant.UtcDateTime, Directory.GetLastWriteTimeUtc(gate));
+    }
+
+    private static readonly DateTimeOffset FixedInstant = new(2001, 2, 3, 4, 5, 6, TimeSpan.Zero);
+
+    /// <summary>Creates <c>gate</c> with write and search permission for its owner, and no read.</summary>
+    [SupportedOSPlatform("linux")]
+    private string CreateSearchOnlyDirectory()
+    {
+        string gate = Path.Combine(_root, "gate");
+        Directory.CreateDirectory(gate);
+        File.SetUnixFileMode(gate, UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return gate;
+    }
+
+    /// <summary>Opens <c>gate</c> for traversal alone, the only way it can be opened.</summary>
+    private SafeDirHandle OpenSearchOnlyDirectory()
+    {
+        using SafeDirHandle root = OpenRoot(CapAccess.Read);
+        CapResult<SafeDirHandle> anchored = Ops.OpenChildDirectory(root, "gate", CapAccess.None);
+        Assert.True(anchored.IsSuccess, anchored.Error.FailureDescription);
+        return anchored.Value;
     }
 
     private SafeDirHandle OpenRoot(CapAccess access)

@@ -934,8 +934,9 @@ internal sealed class LinuxPlatformOps : IPlatformOps
     /// </para>
     /// <para>
     /// A kernel that predates empty names for this call rejects that as an invalid argument.
-    /// The directory is then opened again through its own handle, as <c>.</c>, and set through
-    /// that. This needs read permission on the directory, which the owner normally has.
+    /// The directory is then set by its own <c>.</c> entry, through <see
+    /// cref="SetTimesThroughSelfEntry"/>, which needs permission to search the directory but
+    /// never to read it.
     /// </para>
     /// </remarks>
     public unsafe CapError SetHandleTimes(SafeHandle handle, CapFileTime lastAccess, CapFileTime lastWrite)
@@ -969,18 +970,31 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return LinuxErrno.ToError(errno);
         }
 
-        byte* self = stackalloc byte[] { (byte)'.', 0 };
-        int fd = LinuxNative.OpenAt(
-            lease.Descriptor,
-            self,
-            LinuxConstants.O_RDONLY | LinuxConstants.O_DIRECTORY | LinuxConstants.O_CLOEXEC);
-        if (fd < 0)
-        {
-            return LinuxErrno.ToError(Marshal.GetLastPInvokeError());
-        }
+        return SetTimesThroughSelfEntry(lease.Descriptor, times);
+    }
 
-        using SafeFileHandle reopened = new(fd, ownsHandle: true);
-        return LinuxNative.FUtimens(fd, times) < 0
+    /// <summary>
+    /// Sets the times of a directory by naming its own <c>.</c> entry through its descriptor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The fallback for a kernel that refuses an empty name. <c>.</c> resolves through the
+    /// descriptor to the directory it holds and to nothing else, and is never a link, so no
+    /// flags are needed. The kernel asks for permission to search the directory and never for
+    /// permission to read it, so a directory its owner may enter but not list has its times
+    /// set here as by its name in its parent. One its owner may not enter is refused, where
+    /// the empty name would have set it; that is why this is the fallback and not the only
+    /// route.
+    /// </para>
+    /// <para>
+    /// Separate from <see cref="SetHandleTimes"/> so that it can be tested on a kernel that
+    /// would never take this route.
+    /// </para>
+    /// </remarks>
+    internal static unsafe CapError SetTimesThroughSelfEntry(int directoryFd, UnixTimespec* times)
+    {
+        byte* self = stackalloc byte[] { (byte)'.', 0 };
+        return LinuxNative.UtimensAt(directoryFd, self, times, 0) < 0
             ? LinuxErrno.ToError(Marshal.GetLastPInvokeError())
             : CapError.Success;
     }
