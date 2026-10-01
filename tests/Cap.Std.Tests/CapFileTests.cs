@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text;
 using Cap.Primitives;
+using Cap.Primitives.Interop;
 
 namespace Cap.Std.Tests;
 
@@ -325,6 +326,90 @@ public sealed class CapFileTests : IDisposable
         Assert.Equal(8, await owned.ReadAsync(buffer, TestContext.Current.CancellationToken));
         Assert.Equal("contents", Encoding.UTF8.GetString(buffer));
         Assert.Throws<ObjectDisposedException>(() => file.Length);
+    }
+
+    /// <summary>
+    /// Every stream a file can give truncates the way a <see cref="FileStream"/> does: a
+    /// position past the new end moves back to it, so the next write lands there.
+    /// </summary>
+    /// <remarks>
+    /// Left where it was, the position would put the next write past the end and fill the gap
+    /// with zeros. Each kind is built directly over a file in the scratch tree, so all three run
+    /// on every host leg, whichever kind <see cref="CapFile.AsStream"/> would have chosen there.
+    /// </remarks>
+    [Theory]
+    [InlineData(nameof(FileStream))]
+    [InlineData(nameof(CapFileStream))]
+    [InlineData(nameof(PositionedFileStream))]
+    public void A_stream_moves_its_position_back_when_truncated(string kind)
+    {
+        HostFile.WriteAllText(Host("data"), "0123456789");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.ReadWrite);
+
+        using (Stream stream = kind switch
+        {
+            nameof(FileStream) => file.AsStream(),
+            nameof(CapFileStream) => new CapFileStream(file, ownsFile: false),
+
+            // A file held in memory has no handle to build one over, and is given one anyway.
+            _ when InMemoryLeg.FileSystem is not null => Assert.IsType<PositionedFileStream>(file.AsStream()),
+            _ => new PositionedFileStream(PlatformOps.Host, file.UnsafeGetHandle(), FileAccess.ReadWrite),
+        })
+        {
+            Assert.Equal(10, stream.Seek(0, SeekOrigin.End));
+
+            stream.SetLength(4);
+            Assert.Equal(4, stream.Position);
+
+            // Shorter than the position only moves it when it was past the new end.
+            stream.Position = 2;
+            stream.SetLength(3);
+            Assert.Equal(2, stream.Position);
+
+            stream.SetLength(0);
+            Assert.Equal(0, stream.Position);
+            stream.Write("new"u8);
+            Assert.Equal(3, stream.Position);
+            stream.Flush();
+        }
+
+        Assert.Equal("new", HostFile.ReadAllText(Host("data")));
+    }
+
+    /// <summary>
+    /// The stream over a handle the operating system completes work on truncates as a
+    /// <see cref="FileStream"/> does.
+    /// </summary>
+    /// <remarks>
+    /// The same check as above, through <see cref="CapFile.AsStream"/> itself. Only Windows has
+    /// such handles, so only there is the stream it chooses the library's own.
+    /// </remarks>
+    [Fact]
+    [NotInMemory("About the stream built over an operating-system handle. A file held in memory has a stream of its own.")]
+    public void A_stream_over_an_asynchronous_handle_moves_its_position_back_when_truncated()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Only Windows has file handles the operating system completes work on by itself.");
+        }
+
+        HostFile.WriteAllText(Host("data"), "0123456789");
+
+        using Dir root = OpenRoot();
+        using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.ReadWrite, FileShare.Read, FileOptions.Asynchronous);
+
+        using (Stream stream = file.AsStream())
+        {
+            Assert.IsType<CapFileStream>(stream);
+            stream.Seek(0, SeekOrigin.End);
+            stream.SetLength(0);
+            Assert.Equal(0, stream.Position);
+            stream.Write("new"u8);
+        }
+
+        Assert.Equal("new", HostFile.ReadAllText(Host("data")));
     }
 
     /// <summary>Disposing closes the file, and everything afterwards says so.</summary>

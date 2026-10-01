@@ -98,10 +98,12 @@ internal sealed class CapFileStream : Stream
     }
 
     /// <inheritdoc/>
+    /// <remarks>A position past the new end moves back to it, as a <see cref="FileStream"/>'s does.</remarks>
     public override void SetLength(long value)
     {
         DemandWrite();
         _file.SetLength(value);
+        _position = Math.Min(_position, value);
     }
 
     /// <inheritdoc/>

@@ -97,11 +97,13 @@ internal sealed class PositionedFileStream : Stream
     }
 
     /// <inheritdoc/>
+    /// <remarks>A position past the new end moves back to it, as a <see cref="FileStream"/>'s does.</remarks>
     public override void SetLength(long value)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(value);
         DemandWrite();
         _backend.SetFileLength(_handle, value);
+        _position = Math.Min(_position, value);
     }
 
     /// <inheritdoc/>
