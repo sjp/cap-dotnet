@@ -2149,8 +2149,8 @@ public sealed partial class Dir : IDir
         public static NameLookup ForDirectoryItself(SafeDirHandle directory) => new(directory);
 
         /// <summary>
-        /// Whether the path ended in <c>..</c>, so that <see cref="Directory"/> is what it named
-        /// and <see cref="Name"/> is empty.
+        /// Whether the path ended in <c>..</c>, or was nothing but <c>.</c>, so that
+        /// <see cref="Directory"/> is what it named and <see cref="Name"/> is empty.
         /// </summary>
         public bool NamesDirectoryItself { get; }
 
@@ -2195,6 +2195,11 @@ public sealed partial class Dir : IDir
     /// avoids a syscall — it is also what lets the whole common case run without allocating,
     /// which is what the failure-reporting overloads are for.
     /// </para>
+    /// <para>
+    /// A path of nothing but <c>.</c> and separators names this handle's own directory, as
+    /// one ending in <c>..</c> that climbs back to it does, and is treated the same way: it
+    /// can be described, and nothing can act on it as a name.
+    /// </para>
     /// </remarks>
     private CapPathError Locate(
         string path,
@@ -2211,7 +2216,26 @@ public sealed partial class Dir : IDir
 
         if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
-            return pathError;
+            if (!NamesThisDirectory(path, pathError))
+            {
+                return pathError;
+            }
+
+            if (!describing)
+            {
+                error = CapError.FromCategory(CapErrorCategory.InvalidArgument);
+                return CapPathError.None;
+            }
+
+            CapResult<SafeDirHandle> self = Ops.DuplicateDirectory(_handle);
+            if (!self.IsSuccess)
+            {
+                error = self.Error;
+                return CapPathError.None;
+            }
+
+            lookup = NameLookup.ForDirectoryItself(self.Value);
+            return CapPathError.None;
         }
 
         if (!parsed.TrySplitLastComponent(out _, out _))
@@ -2471,6 +2495,20 @@ public sealed partial class Dir : IDir
     /// </remarks>
     private bool TryParseCallerPath(string path, out CapPath parsed, out CapPathError error) =>
         CapPath.TryParse(path, PathSyntax, ParentLinkPolicy.Preserve, out parsed, out error);
+
+    /// <summary>
+    /// Whether a path the parser found to name nothing was spelled with something, and so
+    /// names this handle's own directory.
+    /// </summary>
+    /// <remarks>
+    /// The parser gives one answer for an empty string and for a path made only of <c>.</c>
+    /// and separators, since neither leaves a component to resolve. They are different
+    /// requests: the first is a mistake in the calling code, the second spells the directory
+    /// itself, as <c>openat(fd, ".")</c> does. The difference is drawn here rather than in the
+    /// parser, which every resolver shares and which has no directory to call its own.
+    /// </remarks>
+    private static bool NamesThisDirectory(string path, CapPathError error) =>
+        error == CapPathError.Empty && path.Length != 0;
 
     /// <summary>
     /// The rules a path handed to this handle is read under: the running platform's, unless
@@ -3094,6 +3132,14 @@ public sealed partial class Dir : IDir
 
         if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
+            // The handle's own directory: nothing is resolved, so there is no link to follow
+            // or refuse and no mount to cross, and the copy carries this handle's policy.
+            if (NamesThisDirectory(path, pathError))
+            {
+                error = CloneCore(out dir);
+                return CapPathError.None;
+            }
+
             return pathError;
         }
 

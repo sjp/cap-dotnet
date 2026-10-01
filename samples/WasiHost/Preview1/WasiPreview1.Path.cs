@@ -10,11 +10,11 @@ namespace WasiHost.Preview1;
 /// descriptor's <see cref="Dir"/> with the guest's path passed through as it arrived.
 /// </summary>
 /// <remarks>
-/// The adapter does not look inside a path, with one exception: a path that names the
-/// directory itself. The library has no spelling for "this directory" — a handle already is
-/// that — and it refuses <c>.</c>, so a path made only of <c>.</c> components is answered
-/// from the descriptor's own handle. No component is ever removed or collapsed, and
-/// <c>..</c> is passed to the library like everything else.
+/// The adapter does not look inside a path, with one exception: <c>path_open</c> of a path
+/// that names the directory itself. The library opens such a path as a directory, and a guest
+/// may ask to open it as a file, exclusively, or truncated, each of which WASI answers in its
+/// own way, so that open is answered from the descriptor's own handle. No component is ever
+/// removed or collapsed, and <c>..</c> is passed to the library like everything else.
 /// </remarks>
 public sealed partial class WasiPreview1
 {
@@ -284,15 +284,8 @@ public sealed partial class WasiPreview1
         }
 
         CapMetadata metadata = default;
-        if (NamesItself(path))
-        {
-            error = ErrorMapping.Run(() => metadata = directory.Dir.GetMetadata());
-        }
-        else
-        {
-            bool follow = (lookup & LookupFlags.SymlinkFollow) != 0;
-            error = ErrorMapping.Run(() => metadata = directory.Dir.GetMetadata(path, followLink: follow));
-        }
+        bool follow = (lookup & LookupFlags.SymlinkFollow) != 0;
+        error = ErrorMapping.Run(() => metadata = directory.Dir.GetMetadata(path, followLink: follow));
 
         return error != Errno.Success
             ? error
@@ -337,11 +330,6 @@ public sealed partial class WasiPreview1
 
         CapFileTime lastAccess = ToFileTime(atim, flags, FstFlags.Atim, FstFlags.AtimNow);
         CapFileTime lastWrite = ToFileTime(mtim, flags, FstFlags.Mtim, FstFlags.MtimNow);
-        if (NamesItself(path))
-        {
-            return ErrorMapping.Run(() => directory.Dir.SetTimes(lastAccess, lastWrite));
-        }
-
         bool follow = (lookup & LookupFlags.SymlinkFollow) != 0;
         return ErrorMapping.Run(() => directory.Dir.SetTimes(path, lastAccess, lastWrite, followLink: follow));
     }

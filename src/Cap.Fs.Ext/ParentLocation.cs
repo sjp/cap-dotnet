@@ -43,7 +43,7 @@ internal readonly struct ParentLocation : IDisposable
 
     /// <summary>
     /// Why there is no name to act on, when the path ended in <c>..</c> and so named a
-    /// directory by where it sits. Success otherwise. An operation must not go on to use
+    /// directory by where it sits, or was nothing but <c>.</c> and named the handle's own. Success otherwise. An operation must not go on to use
     /// <see cref="Name"/> when this is a failure.
     /// </summary>
     public CapError Refusal { get; }
@@ -74,7 +74,20 @@ internal readonly struct ParentLocation : IDisposable
         // same thing to these operations as it does to the handle's own members.
         if (!CapPath.TryParse(path, Handles.SyntaxOf(dir), ParentLinkPolicy.Preserve, out CapPath parsed, out CapPathError parseError))
         {
-            throw FailureTranslation.ToException(parseError, path, parameterName);
+            // Nothing but `.` and separators names the handle's own directory, which is
+            // refused as a path ending in `..` that climbs back to it is. An empty string is
+            // a mistake in the calling code and stays one.
+            if (parseError != CapPathError.Empty || path.Length == 0)
+            {
+                throw FailureTranslation.ToException(parseError, path, parameterName);
+            }
+
+            if (!mayNameDirectory)
+            {
+                throw NamesDirectory(path, parameterName);
+            }
+
+            return new ParentLocation(null, dir, string.Empty, CapError.FromCategory(CapErrorCategory.InvalidArgument));
         }
 
         if (!parsed.TrySplitLastComponent(out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
@@ -102,10 +115,7 @@ internal readonly struct ParentLocation : IDisposable
 
         if (!mayNameDirectory && parsed.RequiresDirectory)
         {
-            throw new ArgumentException(
-                $"'{path}' is spelled so that it has to name a directory, and this operation " +
-                $"acts on a file.",
-                parameterName);
+            throw NamesDirectory(path, parameterName);
         }
 
         if (prefix.IsEmpty)
@@ -119,6 +129,11 @@ internal readonly struct ParentLocation : IDisposable
         IDir parent = dir.OpenDir(new string(prefix));
         return new ParentLocation(parent, parent, new string(name));
     }
+
+    private static ArgumentException NamesDirectory(string path, string parameterName) => new(
+        $"'{path}' is spelled so that it has to name a directory, and this operation " +
+        $"acts on a file.",
+        parameterName);
 
     /// <summary>Closes the directory, if this one opened it.</summary>
     public void Dispose() => _owned?.Dispose();

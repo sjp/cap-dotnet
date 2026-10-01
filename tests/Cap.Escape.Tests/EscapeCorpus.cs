@@ -233,15 +233,14 @@ internal static class EscapeCorpus
         cases.Add(new("unc-forward-slashes", ["L4"], "//server/share/file", escape, escape));
         cases.Add(new("device-namespace-forward-slashes", ["L4"], "//./PhysicalDrive0", escape, escape));
 
-        // Names that name nothing. Refused as mistakes, not collapsed into the root: an
-        // operation on "." would otherwise act on the directory the caller already holds.
+        // A path that names nothing is a mistake in the calling code.
         cases.Add(new("empty", ["L5"], "", malformed, malformed));
 
-        // Stored in a link, the same text names the directory the link is in, which is not a
-        // file to open.
-        Expectation self = malformed.With(Operation.CreateSymlinkTo, Outcome.Refused);
-        cases.Add(new("dot", ["L5"], ".", self, self));
-        cases.Add(new("dot-slash-dot", ["L5"], "./.", self, self));
+        // One made only of "." names the root itself, as one ending in a parent step that
+        // climbs back to it does, and is held to the same outcomes. Stored in a link, the same
+        // text names the directory the link is in, which is not a file to open.
+        cases.Add(new("dot", ["L5"], ".", climbedBackTo, climbedBackTo));
+        cases.Add(new("dot-slash-dot", ["L5"], "./.", climbedBackTo, climbedBackTo));
 
         // Repeated and trailing separators, and "." components, are dropped -- and every
         // component that is left is still checked.

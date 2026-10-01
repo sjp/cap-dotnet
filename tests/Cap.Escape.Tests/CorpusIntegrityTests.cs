@@ -72,13 +72,18 @@ public sealed partial class CorpusIntegrityTests
                     wrong.Add($"'{entry.Name}' says {opened}; the parser says {(parsed ? "accepted" : error)}.");
                 }
             }
-            else if (!parsed)
+            else if (!parsed && !NamesTheRoot(path, error))
             {
                 wrong.Add($"'{entry.Name}' says its path reaches the filesystem; the parser says {error}.");
             }
         }
 
         Assert.True(wrong.Count == 0, $"Under {syntax} rules:\n{string.Join('\n', wrong)}");
+
+        // Nothing but `.` and separators leaves the parser no component, and a directory
+        // handle reads it as its own directory, which it reaches without resolving anything.
+        static bool NamesTheRoot(string path, CapPathError error) =>
+            error == CapPathError.Empty && path.Length != 0;
     }
 
     /// <summary>

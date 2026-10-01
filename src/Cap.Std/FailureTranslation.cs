@@ -465,8 +465,8 @@ internal static class FailureTranslation
     private static string Describe(CapPathError error, string path) => error switch
     {
         CapPathError.Empty =>
-            $"'{path}' names nothing beneath the handle. A path that resolves to the " +
-            "directory itself cannot be opened through it; the caller already holds it.",
+            $"'{path}' names nothing. A path has to name something beneath the handle, or " +
+            "spell the handle's own directory with '.'.",
 
         CapPathError.Absolute =>
             $"'{path}' is absolute. It names a location from a filesystem root the handle " +

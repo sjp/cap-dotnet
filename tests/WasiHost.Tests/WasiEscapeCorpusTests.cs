@@ -153,34 +153,16 @@ public sealed class WasiEscapeCorpusTests
 
         Outcome direct = expectation.Resolve(operation, deny, features);
 
-        // A WASI path of nothing but "." names the directory it is resolved against, and a
-        // guest may open that directory again, describe it and set its times; the library
-        // refuses such a path as naming nothing beneath the handle. So opening, describing
-        // or setting the times of it succeeds, whether or not the open says it wants a
-        // directory, opening it as a file to read or write is refused because it is a
-        // directory, and everything else — removing it, renaming it,
-        // linking it — is refused as before.
-        if (NamesItself(entry.Path) && operation is
-                Operation.OpenDir or Operation.OpenDirNoFollow or Operation.GetMetadata or
-                Operation.GetMetadataFollowing or Operation.SetTimes or Operation.SetTimesFollowing or
-                Operation.Exists or Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile or
-                Operation.OpenAny or Operation.OpenAnyNoFollow)
-        {
-            Outcome itself = operation is Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile
-                ? Outcome.Refused
-                : Outcome.Success;
-            return ([itself], "a WASI path of only '.' names the preopened directory itself");
-        }
-
-        // A path ending in `..` names a directory by where it sits and leaves no name in its
-        // parent, so the library refuses to create, remove, rename or link one as a request it
-        // cannot carry out, and the adapter answers EINVAL. POSIX answers the same requests
-        // with a different code per call -- EEXIST, EISDIR, ENOTEMPTY, EBUSY -- so no single
-        // code would be more faithful, and each is a refusal.
-        if (EndsInParentStep(entry.Path) && direct == Outcome.Refused && operation is not
+        // A path ending in `..` names a directory by where it sits, and one of nothing but "."
+        // the directory it is resolved against; neither leaves a name in a parent, so the
+        // library refuses to create, remove, rename or link one as a request it cannot carry
+        // out, and the adapter answers EINVAL. POSIX answers the same requests with a different
+        // code per call -- EEXIST, EISDIR, ENOTEMPTY, EBUSY -- so no single code would be more
+        // faithful, and each is a refusal.
+        if ((EndsInParentStep(entry.Path) || NamesItself(entry.Path)) && direct == Outcome.Refused && operation is not
                 (Operation.OpenFile or Operation.OpenFileNoFollow or Operation.CreateFile or Operation.CreateSymlinkTo))
         {
-            return ([Outcome.Refused, Outcome.Malformed], "a path ending in '..' leaves no name to act on, which the adapter reports as EINVAL");
+            return ([Outcome.Refused, Outcome.Malformed], "a path naming a directory by where it sits leaves no name to act on, which the adapter reports as EINVAL");
         }
 
         // rename(2) replaces what holds the destination name, and a guest's rename is that call.

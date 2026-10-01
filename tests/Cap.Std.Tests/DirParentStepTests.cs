@@ -100,6 +100,106 @@ public sealed class DirParentStepTests : IDisposable
         Assert.True(root.Exists("a/.."));
     }
 
+    /// <summary>
+    /// A path of nothing but <c>.</c> opens and describes the handle's own directory, as one
+    /// ending in a climb back to it does.
+    /// </summary>
+    [Theory]
+    [InlineData(".")]
+    [InlineData("./")]
+    [InlineData("./.")]
+    [InlineData("a/..")]
+    public void A_path_naming_the_directory_itself_opens_and_describes_it(string path)
+    {
+        HostDirectory.CreateDirectory(Host("a"));
+
+        using Dir root = OpenRoot();
+        CapFileId self = root.GetMetadata().FileId;
+
+        Assert.True(root.Exists(path));
+        Assert.Equal(self, root.GetMetadata(path).FileId);
+        Assert.True(root.TryGetMetadata(path, out CapMetadata described));
+        Assert.Equal(self, described.FileId);
+
+        using (Dir opened = root.OpenDir(path))
+        {
+            Assert.Equal(self, opened.GetMetadata().FileId);
+            Assert.Equal(root.SymlinkPolicy, opened.SymlinkPolicy);
+        }
+
+        Assert.True(root.TryOpenDir(path, out Dir? tried));
+        tried!.Dispose();
+
+        using (CapOpened any = root.OpenAny(path))
+        {
+            Assert.True(any.IsDirectory);
+        }
+
+        root.SetTimes(path, lastWrite: CapFileTime.At(new DateTimeOffset(2001, 9, 9, 1, 46, 40, TimeSpan.Zero)));
+        Assert.Equal(2001, root.GetMetadata().LastWriteTime.Year);
+    }
+
+    /// <summary>
+    /// A restricted handle's own directory, opened through <c>.</c>, keeps the restriction.
+    /// </summary>
+    [Fact]
+    public void The_directory_itself_opened_through_a_dot_keeps_the_handles_policy()
+    {
+        using Dir root = OpenRoot();
+        using Dir strict = root.Restrict(SymlinkPolicy.Deny);
+        using Dir opened = strict.OpenDir(".");
+
+        Assert.Equal(SymlinkPolicy.Deny, opened.SymlinkPolicy);
+    }
+
+    /// <summary>
+    /// Nothing that acts on a name can act on a path of nothing but <c>.</c>, as nothing can
+    /// on one ending in a climb, and only the empty string is an argument error.
+    /// </summary>
+    [Theory]
+    [InlineData(".")]
+    [InlineData("./")]
+    [InlineData("./.")]
+    public void A_path_naming_the_directory_itself_is_not_a_name_anything_can_act_on(string path)
+    {
+        MakeFile("kept", "kept");
+
+        using Dir root = OpenRoot();
+
+        Action[] acts =
+        [
+            () => root.CreateDir(path).Dispose(),
+            () => root.DeleteDir(path),
+            () => root.DeleteFile(path),
+            () => root.Rename(path, root, "moved"),
+            () => root.Rename("kept", root, path),
+            () => root.CreateSymlink(path, "kept"),
+            () => root.CreateHardLink(path, root, "linked"),
+            () => root.CreateHardLink("kept", root, path),
+            () => root.ReadLink(path),
+        ];
+
+        foreach (Action act in acts)
+        {
+            CapIOException thrown = Assert.ThrowsAny<CapIOException>(act);
+            Assert.Equal(CapErrorKind.InvalidArgument, thrown.Kind);
+        }
+
+        CapIOException opened = Assert.ThrowsAny<CapIOException>(() => root.OpenFile(path).Dispose());
+        Assert.Equal(CapErrorKind.IsADirectory, opened.Kind);
+        CapIOException created = Assert.ThrowsAny<CapIOException>(() => root.CreateFile(path).Dispose());
+        Assert.Equal(CapErrorKind.IsADirectory, created.Kind);
+
+        Assert.False(root.TryDeleteDir(path));
+        Assert.Equal("kept", HostFile.ReadAllText(Host("kept")));
+        Assert.True(HostDirectory.Exists(_tree.HostPath));
+        Assert.False(HostFile.Exists(Host("moved")) || HostFile.Exists(Host("linked")));
+
+        Assert.Throws<ArgumentException>(nameof(path), () => root.OpenDir("").Dispose());
+        Assert.Throws<ArgumentException>(nameof(path), () => root.GetMetadata(""));
+        Assert.False(root.Exists(""));
+    }
+
     /// <summary>A path ending in a climb above the handle is refused, and is not there.</summary>
     [Fact]
     public void A_path_ending_in_a_climb_above_the_handle_is_refused()

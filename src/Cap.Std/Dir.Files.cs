@@ -1220,6 +1220,14 @@ public sealed partial class Dir
 
         if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
+            // The handle's own directory, which is there and is a directory, so the refusal
+            // is the one a path ending in `..` that climbed back to it is given.
+            if (NamesThisDirectory(path, pathError))
+            {
+                error = CapError.FromCategory(CapErrorCategory.IsADirectory);
+                return CapPathError.None;
+            }
+
             return pathError;
         }
 
@@ -1271,7 +1279,22 @@ public sealed partial class Dir
 
         if (!TryParseCallerPath(path, out CapPath parsed, out CapPathError pathError))
         {
-            return pathError;
+            if (!NamesThisDirectory(path, pathError))
+            {
+                return pathError;
+            }
+
+            // The handle's own directory, opened as resolution would open it: only for a
+            // request a directory can satisfy.
+            if (!request.OpensAnyKind)
+            {
+                error = CapError.FromCategory(CapErrorCategory.InvalidArgument);
+                return CapPathError.None;
+            }
+
+            error = CloneCore(out Dir? self);
+            opened = self is null ? null : new CapOpened(self);
+            return CapPathError.None;
         }
 
         CapResult<OpenedNode> node = Resolver.OpenNode(_handle, in parsed, in request, _options);

@@ -157,7 +157,6 @@ public sealed class DirDerivationTests : IDisposable
     /// </remarks>
     [Theory]
     [InlineData("")]
-    [InlineData(".")]
     [InlineData("with\0null")]
     public void A_malformed_name_is_an_argument_error(string path)
     {

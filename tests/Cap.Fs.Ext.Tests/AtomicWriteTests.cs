@@ -54,6 +54,7 @@ public sealed class AtomicWriteTests : IDisposable
         Assert.Throws<SandboxEscapeException>(() => _tree.Directory.WriteAllTextAtomic("a/../../report", "leaked"));
         Assert.Throws<SandboxEscapeException>(() => _tree.Directory.WriteAllTextAtomic("..", "leaked"));
         Assert.Throws<ArgumentException>(() => _tree.Directory.WriteAllTextAtomic("a/..", "nowhere"));
+        Assert.Throws<ArgumentException>(() => _tree.Directory.WriteAllTextAtomic(".", "nowhere"));
     }
 
     /// <summary>

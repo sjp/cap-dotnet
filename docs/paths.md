@@ -109,6 +109,12 @@ step:
   or linking at it is refused with a `CapIOException` whose kind is `InvalidArgument`, after
   the path has been resolved, so that one climbing above the handle is still reported as an
   escape. A file open refuses it as it refuses any path spelled as a directory.
+- A path of nothing but `.` and separators — `.`, `./`, `./.` — names the handle's own
+  directory and is treated exactly as a path ending in `..` that climbs back to it: `Exists`
+  is true, it can be opened (a copy of the handle, under the same policy) and described, and
+  everything that acts on a name refuses it the same way. The parser reports it as naming
+  nothing, since no component is left to resolve; the handle tells it apart from the empty
+  string, which stays an `ArgumentException`.
 
 Refusing every `..` outright would not make a handle safer. A symbolic link inside the tree can
 already hold `..` in its target, and following it is the same walk under the same root test,

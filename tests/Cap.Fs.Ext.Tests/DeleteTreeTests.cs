@@ -169,6 +169,26 @@ public sealed class DeleteTreeTests : IDisposable
         Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "a", "b", "leaf.txt")));
     }
 
+    /// <summary>
+    /// A path of nothing but <c>.</c> is refused as one ending in a climb back to the handle's
+    /// own directory is, and removes nothing.
+    /// </summary>
+    [Theory]
+    [InlineData(".")]
+    [InlineData("./")]
+    [InlineData("./.")]
+    public void A_path_naming_the_directory_itself_removes_nothing(string path)
+    {
+        Make("a", "leaf.txt");
+
+        CapIOException thrown = Assert.ThrowsAny<CapIOException>(() => _tree.Directory.DeleteTree(path, TestContext.Current.CancellationToken));
+        Assert.Equal(CapErrorKind.InvalidArgument, thrown.Kind);
+        Assert.False(_tree.Directory.TryDeleteTree(path, TestContext.Current.CancellationToken));
+        Assert.Throws<ArgumentException>(() => _tree.Directory.DeleteTree("", TestContext.Current.CancellationToken));
+
+        Assert.True(HostFile.Exists(Path.Combine(_tree.HostPath, "a", "leaf.txt")));
+    }
+
     /// <summary>Emptying a directory leaves the directory.</summary>
     /// <remarks>
     /// The form a caller holding the root of a sandbox needs: there is no handle above that
