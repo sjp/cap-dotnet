@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+
 namespace Cap.Primitives.Tests;
 
 /// <summary>
@@ -133,6 +136,57 @@ public sealed class CapPathComponentTests
 
         Assert.Equal(Raw, path.ToString());
         Assert.True(path.Raw.SequenceEqual(Raw));
+    }
+
+    /// <summary>
+    /// The confined backends are handed <c>parent</c> as the path to open and then act on
+    /// <c>name</c> inside it, so the division has to be exact: the prefix keeps its trailing
+    /// separator (<c>"a"</c> where <c>"a/"</c> was meant would let a link named <c>a</c> be
+    /// treated differently by the kernel), <c>.</c> components ahead of the name stay where
+    /// they were written, and trailing separators and <c>.</c> components after it belong to
+    /// neither half. Both halves are slices of the caller's string, never copies.
+    /// </summary>
+    [Theory]
+    [InlineData("a/b", CapPathSyntax.Unix, "a/", "b")]
+    [InlineData("a/./b", CapPathSyntax.Unix, "a/./", "b")]
+    [InlineData("./x", CapPathSyntax.Unix, "./", "x")]
+    [InlineData("a\\b/c", CapPathSyntax.Windows, "a\\b/", "c")]
+    [InlineData("a\\b", CapPathSyntax.Unix, "", "a\\b")]
+    [InlineData("a/b/./", CapPathSyntax.Unix, "a/", "b")]
+    [InlineData("a/b//", CapPathSyntax.Unix, "a/", "b")]
+    [InlineData("../..", CapPathSyntax.Unix, "../", "..")]
+    [InlineData("x", CapPathSyntax.Unix, "", "x")]
+    [InlineData("x/", CapPathSyntax.Unix, "", "x")]
+    public void TrySplitLastComponent_divides_at_the_last_real_component(
+        string raw,
+        CapPathSyntax syntax,
+        string expectedParent,
+        string expectedName)
+    {
+        CapPath path = ParseOrFail(raw, syntax, ParentLinkPolicy.Preserve);
+
+        Assert.True(path.TrySplitLastComponent(out ReadOnlySpan<char> parent, out ReadOnlySpan<char> name));
+
+        Assert.Equal(expectedParent, parent.ToString());
+        Assert.Equal(expectedName, name.ToString());
+
+        // The prefix starts where the caller's string starts (an empty prefix included), and
+        // the name starts exactly where the prefix ends.
+        Assert.True(Unsafe.AreSame(
+            ref MemoryMarshal.GetReference(path.Raw),
+            ref MemoryMarshal.GetReference(parent)));
+        Assert.True(path.Raw.Overlaps(name, out int nameOffset));
+        Assert.Equal(parent.Length, nameOffset);
+    }
+
+    [Fact]
+    public void TrySplitLastComponent_is_false_for_a_default_path()
+    {
+        CapPath path = default;
+
+        Assert.False(path.TrySplitLastComponent(out ReadOnlySpan<char> parent, out ReadOnlySpan<char> name));
+        Assert.True(parent.IsEmpty);
+        Assert.True(name.IsEmpty);
     }
 
     /// <summary>A default instance is inert rather than a trap.</summary>
