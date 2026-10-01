@@ -118,6 +118,30 @@ public sealed class PlatformErrorTests
     public void Reparse_statuses_survive_translation(int status) =>
         Assert.Equal(CapErrorCategory.Reparse, NtStatusCodes.Classify(status));
 
+    /// <summary>
+    /// The statuses the table names outside the reparse family, including the ones a volume
+    /// without reparse points or a driver that predates a request answers with.
+    /// </summary>
+    [Theory]
+    [InlineData(NtStatusCodes.STATUS_NOT_IMPLEMENTED, CapErrorCategory.NotSupported)]
+    [InlineData(NtStatusCodes.STATUS_INVALID_DEVICE_REQUEST, CapErrorCategory.NotSupported)]
+    [InlineData(NtStatusCodes.STATUS_STOPPED_ON_SYMLINK, CapErrorCategory.SymbolicLink)]
+    [InlineData(NtStatusCodes.STATUS_DISK_FULL, CapErrorCategory.Unknown)]
+    internal void Statuses_are_read_from_their_own_table(int status, CapErrorCategory expected) =>
+        Assert.Equal(expected, NtStatusCodes.Classify(status));
+
+    /// <summary>
+    /// "Not a reparse point" arrives as a status from the native calls and as a Win32 error
+    /// from the control code that reads a link, and both mean the name holds no link: the
+    /// category every platform reports for reading a link that is not one.
+    /// </summary>
+    [Fact]
+    public void Both_tables_read_not_a_reparse_point_as_not_a_link()
+    {
+        Assert.Equal(CapErrorCategory.NotALink, NtStatusCodes.Classify(NtStatusCodes.STATUS_NOT_A_REPARSE_POINT));
+        Assert.Equal(CapErrorCategory.NotALink, Win32Errors.Classify(Win32Errors.ERROR_NOT_A_REPARSE_POINT));
+    }
+
     /// <summary>A non-negative status is not a failure, whatever else it says.</summary>
     [Fact]
     public void Only_negative_statuses_are_failures()
@@ -132,7 +156,7 @@ public sealed class PlatformErrorTests
     [InlineData(Win32Errors.ERROR_FILE_NOT_FOUND, CapErrorCategory.NotFound)]
     [InlineData(Win32Errors.ERROR_ACCESS_DENIED, CapErrorCategory.PermissionDenied)]
     [InlineData(Win32Errors.ERROR_DIR_NOT_EMPTY, CapErrorCategory.NotEmpty)]
-    [InlineData(Win32Errors.ERROR_NOT_A_REPARSE_POINT, CapErrorCategory.Reparse)]
+    [InlineData(Win32Errors.ERROR_NOT_A_REPARSE_POINT, CapErrorCategory.NotALink)]
     [InlineData(Win32Errors.ERROR_PRIVILEGE_NOT_HELD, CapErrorCategory.PermissionDenied)]
     [InlineData(Win32Errors.ERROR_NOT_SAME_DEVICE, CapErrorCategory.CrossDevice)]
     [InlineData(Win32Errors.ERROR_INVALID_FUNCTION, CapErrorCategory.NotSupported)]

@@ -82,6 +82,13 @@ name is refused. That includes a file whose real name is already an eight-plus-t
 with a tilde, like `PLAIN~1`, since the short name alone cannot tell the two apart. Names such
 as `~$report.docx` or `notes.txt~` are never eight-plus-three, so they are always accepted.
 
+The comparison with the real name ignores case using .NET's invariant rules, while NTFS uses the
+case table stored on the volume when it was formatted. The two disagree for a handful of
+characters, such as titlecase letters like `ǅ` and characters added to Unicode after the volume
+was formatted. A file whose name has a tilde and one of those characters, opened with its
+case changed at that character, can be refused as an alias although it is not one. Opening it
+with the case it is stored in always succeeds.
+
 **Case is not a boundary, and containment never relies on it.** `Secret` and `SECRET` are
 one file, and every open this library issues matches case-insensitively, as the rest of
 Windows does. Every containment decision is taken from an open handle rather than by

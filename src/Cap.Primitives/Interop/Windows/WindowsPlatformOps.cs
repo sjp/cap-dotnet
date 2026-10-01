@@ -141,6 +141,12 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// </remarks>
     private const int NameReplyLimit = 64 * 1024;
 
+    /// <summary>
+    /// How many times a question about a name is asked before a reply that keeps outgrowing
+    /// its buffer is given up on.
+    /// </summary>
+    private const int NameQueryAttempts = 3;
+
     private long _componentOpens;
 
     /// <inheritdoc/>
@@ -1674,16 +1680,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     {
         handle = 0;
 
-        if (name.Length > short.MaxValue)
+        CapError refusal = RefuseUnlessSingleName(name);
+        if (refusal.IsFailure)
         {
-            return CapError.Create(
-                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
-        }
-
-        if (name.Contains('\\') || name.Contains('/') || name.Contains('\0'))
-        {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+            return refusal;
         }
 
         using HandleLease lease = parent.Lease();
@@ -1810,17 +1810,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
         uint informationClass,
         uint flags)
     {
-        if (destinationName.Length > short.MaxValue)
+        CapError refusal = RefuseUnlessSingleName(destinationName);
+        if (refusal.IsFailure)
         {
-            return CapError.Create(
-                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
-        }
-
-        if (destinationName.Contains('\\') || destinationName.Contains('/') ||
-            destinationName.Contains('\0'))
-        {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+            return refusal;
         }
 
         using HandleLease lease = destinationParent.Lease();
@@ -1978,16 +1971,10 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     {
         handle = 0;
 
-        if (name.Length > short.MaxValue)
+        CapError refusal = RefuseUnlessSingleName(name);
+        if (refusal.IsFailure)
         {
-            return CapError.Create(
-                CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
-        }
-
-        if (name.Contains('\\') || name.Contains('/') || name.Contains('\0'))
-        {
-            return CapError.Create(
-                CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID);
+            return refusal;
         }
 
         using HandleLease lease = parent.Lease();
@@ -2339,7 +2326,12 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <summary>
     /// Refuses a name that is too long to pass, or that is not a single component.
     /// </summary>
-    private static CapError RefuseUnlessSingleName(ReadOnlySpan<char> name)
+    /// <remarks>
+    /// The two dot names are refused with the separators. The path parser never passes them
+    /// and NTFS refuses <c>..</c> relative to a handle, but this is the last check before the
+    /// name reaches the system, and is not the place to rely on either.
+    /// </remarks>
+    internal static CapError RefuseUnlessSingleName(ReadOnlySpan<char> name)
     {
         if (name.Length > short.MaxValue)
         {
@@ -2347,7 +2339,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 CapErrorCategory.NameTooLong, CapErrorSource.NtStatus, NtStatusCodes.STATUS_NAME_TOO_LONG);
         }
 
-        return name.Contains('\\') || name.Contains('/') || name.Contains('\0')
+        return name.Contains('\\') || name.Contains('/') || name.Contains('\0') ||
+            name.SequenceEqual(".") || name.SequenceEqual("..")
             ? CapError.Create(
                 CapErrorCategory.InvalidArgument, CapErrorSource.NtStatus, NtStatusCodes.STATUS_OBJECT_NAME_INVALID)
             : CapError.Success;
@@ -2356,15 +2349,25 @@ internal sealed class WindowsPlatformOps : IPlatformOps
     /// <summary>
     /// The same open made relative to a raw handle, for the operations that hold one directly.
     /// </summary>
+    /// <remarks>
+    /// The reparse point is always asked for, whatever the caller passed, since it is the one
+    /// option containment depends on. The exception is <c>throughFilter</c>, set only for the
+    /// reopen <see cref="AdmitDirectory"/> makes of an object a filter serves, through the
+    /// handle to it and with an empty name, so that the filter takes part.
+    /// </remarks>
     private static unsafe CapError OpenRelative(
         nint parent,
         ReadOnlySpan<char> name,
         uint desiredAccess,
         uint openOptions,
         out nint handle,
-        bool explainLinks = true)
+        bool explainLinks = true,
+        bool throughFilter = false)
     {
         handle = 0;
+        openOptions = throughFilter
+            ? openOptions & ~NtConstants.FILE_OPEN_REPARSE_POINT
+            : openOptions | NtConstants.FILE_OPEN_REPARSE_POINT;
 
         CapError refusal = RefuseUnlessSingleName(name);
         if (refusal.IsFailure)
@@ -2403,7 +2406,7 @@ internal sealed class WindowsPlatformOps : IPlatformOps
 
             if (NtStatusCodes.IsFailure(result))
             {
-                return explainLinks && (openOptions & NtConstants.FILE_OPEN_REPARSE_POINT) != 0
+                return explainLinks && !throughFilter
                     ? ExplainKindMismatch(parent, name, result)
                     : NtStatusCodes.ToError(result);
             }
@@ -2557,15 +2560,17 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                         handle, &status, raw, (uint)buffer.Length, informationClass);
                 }
 
-                if (nt == NtStatusCodes.STATUS_BUFFER_OVERFLOW && attempt == 0)
+                if (nt == NtStatusCodes.STATUS_BUFFER_OVERFLOW)
                 {
                     // The length is written even when the characters did not fit, and it is
                     // the end of the name that was lost, so the reply cannot be used as it
-                    // stands. One retry at the stated size is enough; a second overflow would
-                    // mean the filesystem is answering inconsistently, and guessing at a third
-                    // size would be worse than refusing.
+                    // stands. A retry at the stated size can overflow again only if the name
+                    // grew in between, under a rename of the object or of a directory above
+                    // it, so a few retries absorb that. A name still growing after them is
+                    // reported as too long rather than as a failure nobody can act on: no
+                    // buffer this layer would offer has been enough.
                     uint needed = BinaryPrimitives.ReadUInt32LittleEndian(buffer);
-                    if (needed > NameReplyLimit)
+                    if (needed > NameReplyLimit || attempt == NameQueryAttempts - 1)
                     {
                         return CapError.Create(
                             CapErrorCategory.NameTooLong,
@@ -2765,7 +2770,8 @@ internal sealed class WindowsPlatformOps : IPlatformOps
                 ReadOnlySpan<char>.Empty,
                 access,
                 NtConstants.FILE_DIRECTORY_FILE | NtConstants.FILE_SYNCHRONOUS_IO_NONALERT,
-                out nint through);
+                out nint through,
+                throughFilter: true);
             error = ConfirmReopenedThroughFilter(handle, error, ref through);
 
             if (error.IsSuccess)

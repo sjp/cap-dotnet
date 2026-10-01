@@ -71,8 +71,8 @@ internal static class Win32Errors
         ERROR_INVALID_FUNCTION or ERROR_NOT_SUPPORTED => CapErrorCategory.NotSupported,
         ERROR_INVALID_PARAMETER or ERROR_INVALID_NAME or ERROR_INVALID_HANDLE or ERROR_INVALID_REPARSE_DATA =>
             CapErrorCategory.InvalidArgument,
-        ERROR_NOT_A_REPARSE_POINT or ERROR_REPARSE_TAG_INVALID or ERROR_REPARSE_TAG_MISMATCH =>
-            CapErrorCategory.Reparse,
+        ERROR_NOT_A_REPARSE_POINT => CapErrorCategory.NotALink,
+        ERROR_REPARSE_TAG_INVALID or ERROR_REPARSE_TAG_MISMATCH => CapErrorCategory.Reparse,
         _ => CapErrorCategory.Unknown,
     };
 

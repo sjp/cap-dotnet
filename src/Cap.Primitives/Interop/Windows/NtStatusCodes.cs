@@ -96,6 +96,21 @@ internal static class NtStatusCodes
     public const int STATUS_NOT_A_REPARSE_POINT = unchecked((int)0xC0000275);
 
     /// <summary>
+    /// The device or filesystem has no handler for the request. What a volume without reparse
+    /// points (FAT, exFAT) answers to a reparse-point control code.
+    /// </summary>
+    public const int STATUS_INVALID_DEVICE_REQUEST = unchecked((int)0xC0000010);
+
+    /// <summary>The volume has no room for what was asked of it.</summary>
+    public const int STATUS_DISK_FULL = unchecked((int)0xC000007F);
+
+    /// <summary>
+    /// Resolution stopped at a symbolic link it was told not to follow. A warning rather than
+    /// an error, but no object was opened.
+    /// </summary>
+    public const int STATUS_STOPPED_ON_SYMLINK = unchecked((int)0x8000002D);
+
+    /// <summary>
     /// Resolution met a reparse point and stopped. Returned when the open did not ask to
     /// consume the reparse point itself.
     /// </summary>
@@ -173,8 +188,10 @@ internal static class NtStatusCodes
             case STATUS_IO_REPARSE_TAG_NOT_HANDLED:
             case STATUS_REPARSE:
                 return CapErrorCategory.Reparse;
+            case STATUS_STOPPED_ON_SYMLINK:
+                return CapErrorCategory.SymbolicLink;
             case STATUS_NOT_A_REPARSE_POINT:
-                return CapErrorCategory.NotSupported;
+                return CapErrorCategory.NotALink;
             case STATUS_OBJECT_NAME_INVALID:
             case STATUS_OBJECT_PATH_SYNTAX_BAD:
             case STATUS_INVALID_PARAMETER:
@@ -183,6 +200,7 @@ internal static class NtStatusCodes
             case STATUS_NOT_SUPPORTED:
             case STATUS_INVALID_INFO_CLASS:
             case STATUS_NOT_IMPLEMENTED:
+            case STATUS_INVALID_DEVICE_REQUEST:
                 return CapErrorCategory.NotSupported;
             case STATUS_NOT_SAME_DEVICE:
                 return CapErrorCategory.CrossDevice;
@@ -194,6 +212,10 @@ internal static class NtStatusCodes
                 return CapErrorCategory.ReadOnlyFilesystem;
             case STATUS_TOO_MANY_OPENED_FILES:
                 return CapErrorCategory.OutOfHandles;
+            case STATUS_DISK_FULL:
+                // No category says the volume is full, on any platform: ENOSPC is read the
+                // same way. Listed so that the answer is a decision rather than an omission.
+                return CapErrorCategory.Unknown;
             default:
                 return CapErrorCategory.Unknown;
         }

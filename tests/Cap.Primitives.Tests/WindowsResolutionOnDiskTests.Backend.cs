@@ -843,6 +843,51 @@ public sealed partial class WindowsResolutionOnDiskTests
         AssertFails(CapErrorCategory.NotFound, root, "sensitive/only");
     }
 
+    // --- names that are not a single component ---------------------------------------------------
+
+    /// <summary>
+    /// The two dot names are refused by the backend itself, whichever of its calls is handed
+    /// one, before anything is opened, created or renamed.
+    /// </summary>
+    /// <remarks>
+    /// The path parser never passes either name, so this is the backend's own check, and it
+    /// is the last one before the name reaches the system: <c>..</c> beneath a directory
+    /// handle would otherwise depend on NTFS refusing it.
+    /// </remarks>
+    [Fact]
+    public void The_dot_names_are_refused_by_every_call_that_takes_a_name()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The backend's own name check is exercised against a real volume.");
+            return;
+        }
+
+        Directory.CreateDirectory(Sandbox);
+        File.WriteAllText(Path.Join(Sandbox, "source.txt"), "kept");
+        using SafeDirHandle root = OpenSandbox();
+
+        FileOpenRequest create = new(FileMode.Create, FileAccess.ReadWrite, FileShare.None, FileOptions.None, 0);
+        foreach (string name in new[] { ".", ".." })
+        {
+            AssertRefusedAsName(PlatformOps.Host.OpenChildDirectory(root, name, CapAccess.Read).Error, name);
+            AssertRefusedAsName(PlatformOps.Host.OpenChildFile(root, name, in create).Error, name);
+            AssertRefusedAsName(PlatformOps.Host.CreateChildDirectory(root, name, CreationVisibility.SystemDefault), name);
+            AssertRefusedAsName(PlatformOps.Host.RenameChild(root, "source.txt", root, name, replaceExisting: true), name);
+        }
+
+        Assert.Equal("kept", File.ReadAllText(Path.Join(Sandbox, "source.txt")));
+        Assert.Equal(["source.txt"], Directory.EnumerateFileSystemEntries(Sandbox).Select(Path.GetFileName));
+
+        static void AssertRefusedAsName(CapError error, string name)
+        {
+            Assert.Equal(CapErrorCategory.InvalidArgument, error.Category);
+            Assert.True(
+                error.RawCode == NtStatusCodes.STATUS_OBJECT_NAME_INVALID,
+                $"'{name}' was refused by the system ({error.FailureDescription}), not by the backend.");
+        }
+    }
+
     // --- helpers ---------------------------------------------------------------------------------
 
     private static OpenedNode OpenNode(SafeDirHandle root, string name, in FileOpenRequest request)

@@ -38,7 +38,11 @@ namespace Cap.Primitives.Interop.Windows;
 /// </para>
 /// <para>
 /// The comparisons ignore case because the filesystem does, and a name differing from the
-/// stored one only in case is the same name by the only definition that matters here.
+/// stored one only in case is the same name by the only definition that matters here. They
+/// fold case by the runtime's invariant rules, where NTFS folds by the table the volume was
+/// formatted with; for the few characters on which the two disagree, a genuine name asked
+/// for in a different case can be refused. That errs towards refusal, and is not worth a call
+/// into the system's own comparison unless a real name meets it.
 /// </para>
 /// <para>
 /// The two questions are passed in rather than asked here so the decision can be exercised on
