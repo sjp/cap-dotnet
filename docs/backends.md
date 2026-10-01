@@ -137,6 +137,19 @@ resolution with the refusal a chain of links too long to follow gets, rather tha
 the caller forever. The second look decides nothing about containment — it goes through the
 same open that refuses links as the first.
 
+**A link costs one call more on macOS than on Linux.** The walk learns that a name is a link
+from the open that refused to follow it, then reads the link: two calls on Linux, where that
+open fails with `ELOOP`, which means a link and nothing else. macOS fails a directory open
+that refuses links with `ENOTDIR`, which it also reports for a plain file, so the backend
+asks the name once more with `fstatat` before it answers. That makes `openat`, `fstatat` and
+`readlinkat` for each link on macOS, and `openat` and `fstatat` for a plain file in a directory's
+position on either system. The extra question is only a hint about what to try next. Using
+`readlinkat` as the question instead saves nothing unless the target it read were handed on
+to the walk, because the walk reads the link again, and it makes the plain-file case dearer:
+`EINVAL` comes back for a directory as well as for a file, so the `fstatat` is still needed
+to tell a name swapped to a directory (looked at again) from a file (refused). The walk's
+own share is pinned by a test: one open and one read for each link, and no stat.
+
 **Nothing is collapsed as text.** `link/..` resolves to the parent of the link's *target*,
 which is where the kernel would land and is not where string arithmetic would.
 

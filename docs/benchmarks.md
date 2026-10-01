@@ -39,6 +39,12 @@ On Linux every benchmark that reaches the filesystem runs twice, as two Benchmar
 macOS has only the walk, and Windows only its relative native open, so each runs a single job
 named `walk` or `windows`.
 
+None of the paths measured go through a symbolic link. A link in a path costs the Linux walk
+two syscalls (`openat`, `readlinkat`) and the macOS walk three, because macOS reports a link
+met by a directory open as "not a directory" and the backend has to `fstatat` the name to
+tell it from a file; see
+[What the component-by-component walk does](backends.md#what-the-component-by-component-walk-does).
+
 Path parsing never touches the filesystem, so it measures the same thing under every backend and
 runs under one job only: `walk` on Linux and macOS, `windows` on Windows.
 

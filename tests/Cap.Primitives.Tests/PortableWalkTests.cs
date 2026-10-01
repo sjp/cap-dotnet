@@ -155,6 +155,41 @@ public sealed class PortableWalkTests
     }
 
     /// <summary>
+    /// A link met on the way costs the walk one open that reports it and one read of its
+    /// target, and nothing else: the walk never asks about the name a third time.
+    /// </summary>
+    /// <remarks>
+    /// Pinned here rather than per backend because this is the part of the cost the walk
+    /// decides. What a backend spends to report the link is its own affair, and differs: Linux
+    /// learns it from the failed open alone, and macOS asks the name once more because its
+    /// open reports a link exactly as it reports a plain file (see <c>docs/backends.md</c>).
+    /// </remarks>
+    [Fact]
+    public void A_link_on_the_way_costs_one_open_and_one_read()
+    {
+        FakeFileSystem fs = Sandbox();
+        MemoryNode target = fs.AddDirectory("sandbox/a/x/b/y/c");
+        _ = fs.AddSymbolicLink("sandbox/a/l1", "x");
+        _ = fs.AddSymbolicLink("sandbox/a/x/b/l2", "y");
+
+        Run(fs, (ops, root) =>
+        {
+            long opensBefore = ops.ComponentOpens;
+            int readsBefore = ops.LinkReads;
+            int statsBefore = ops.ChildStats;
+
+            using SafeDirHandle opened = OpenDirectory(ops, root, "a/l1/b/l2/c");
+            AssertIs(ops, target, opened);
+
+            // Five names in the path, each opened once; the two links, read once each; and
+            // the name each one points at, opened in its place.
+            Assert.Equal(5 + 2, ops.ComponentOpens - opensBefore);
+            Assert.Equal(2, ops.LinkReads - readsBefore);
+            Assert.Equal(0, ops.ChildStats - statsBefore);
+        });
+    }
+
+    /// <summary>
     /// A path ending back on a directory the walk already holds with the access asked for,
     /// or more, hands that directory back without reopening it.
     /// </summary>

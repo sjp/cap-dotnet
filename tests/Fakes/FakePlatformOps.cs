@@ -383,6 +383,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapResult<string> ReadChildLink(SafeDirHandle parent, ReadOnlySpan<char> name)
     {
+        _ = Interlocked.Increment(ref _linkReads);
         CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
         {
@@ -397,6 +398,7 @@ internal sealed class FakePlatformOps : IPlatformOps
     /// <inheritdoc/>
     public CapError StatChild(SafeDirHandle parent, ReadOnlySpan<char> name, out CapNodeInfo info)
     {
+        _ = Interlocked.Increment(ref _childStats);
         info = default;
         CapError error = ResolveChild(parent, name, out MemoryNode? node);
         if (error.IsFailure)
@@ -407,6 +409,16 @@ internal sealed class FakePlatformOps : IPlatformOps
         info = node!.Info;
         return CapError.Success;
     }
+
+    /// <summary>How many times a link has been asked for its target through <see cref="ReadChildLink"/>.</summary>
+    public int LinkReads => Volatile.Read(ref _linkReads);
+
+    private int _linkReads;
+
+    /// <summary>How many times a name has been described through <see cref="StatChild"/>.</summary>
+    public int ChildStats => Volatile.Read(ref _childStats);
+
+    private int _childStats;
 
     /// <inheritdoc/>
     public CapError StatHandle(SafeDirHandle handle, out CapNodeInfo info)
