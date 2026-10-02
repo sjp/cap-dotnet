@@ -16,8 +16,11 @@ name: Nightly stress and fuzzing
 # ---------------------------------------------------------------------------------------
 
 on:
+  # Every night at the same time. Sunday's run is its own entry so that the fuzz job can tell
+  # it apart and keep a copy of its corpus outside the cache (see below).
   schedule:
-    - cron: "23 3 * * *"
+    - cron: "23 3 * * 1-6"
+    - cron: "23 3 * * 0"
   workflow_dispatch:
     inputs:
       iterations:
@@ -93,19 +96,27 @@ jobs:
   # run on.
   #
   # Each target starts from the escape corpus plus whatever inputs earlier runs kept because
-  # they reached something new, carried between runs in the Actions cache. A lost cache costs
-  # only the time to find those inputs again.
+  # they reached something new, carried between runs in the Actions cache. The cache drops an
+  # entry unused for a week, and the oldest entries once the repository's share is full, so
+  # Sunday's scheduled run also uploads each corpus as an artifact kept for 90 days. A run
+  # whose cache restores nothing downloads the newest of those from a run on main instead,
+  # which is what `actions: read` is for. Having neither costs only the time to find those
+  # inputs again.
   #
   # An input that crashes or hangs a target fails the job and is uploaded as an artifact laid
   # out as fuzz/regressions/<target>/<file>. Unzipped at the root of a checkout it lands where
   # the replay tests look, and committing it makes it a regression test. Nothing is committed
-  # from here: this job holds a read-only token, and the artifact is kept for a week.
+  # from here: this job holds a read-only token. The artifact is kept for 90 days, so a
+  # failure has time to be triaged from the `nightly` issue the report job opens. Anyone who
+  # can see the repository can download it, so once a finding that reaches outside the
+  # sandbox has its input saved somewhere private, delete the artifact from the run.
   # -------------------------------------------------------------------------------------
   fuzz:
     name: fuzz (${{ matrix.target }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -120,11 +131,29 @@ jobs:
           global-json-file: global.json
 
       - name: Restore the inputs earlier runs kept
+        id: cache
         uses: actions/cache/restore@v6
         with:
           path: artifacts/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Download the last weekly copy of the inputs instead
+        if: steps.cache.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NAME: fuzz-corpus-${{ matrix.target }}
+        run: |
+          run=$(gh api "repos/$GH_REPO/actions/artifacts?name=$NAME&per_page=100" --jq '
+            [.artifacts[] | select(.expired | not) | select(.workflow_run.head_branch == "main")]
+            | sort_by(.created_at) | last | .workflow_run.id // empty')
+          if [ -z "$run" ]; then
+            echo "::warning::No cached or weekly copy of the $NAME inputs; starting from the escape corpus alone."
+            exit 0
+          fi
+          gh run download "$run" --name "$NAME" --dir "artifacts/fuzz/corpus/${{ matrix.target }}"
+          echo "Restored $(ls "artifacts/fuzz/corpus/${{ matrix.target }}" | wc -l) inputs from run $run."
 
       - name: Seed from the escape corpus
         env:
@@ -142,6 +171,15 @@ jobs:
         with:
           path: artifacts/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Keep a weekly copy of the inputs outside the cache
+        if: always() && github.event.schedule == '23 3 * * 0'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-${{ matrix.target }}
+          path: artifacts/fuzz/corpus/${{ matrix.target }}/
+          retention-days: 90
+          if-no-files-found: warn
 
       - name: Collect the inputs that failed
         if: failure()
@@ -163,7 +201,7 @@ jobs:
         with:
           name: fuzz-findings-${{ matrix.target }}
           path: findings/
-          retention-days: 7
+          retention-days: 90
           if-no-files-found: ignore
 
   # -------------------------------------------------------------------------------------

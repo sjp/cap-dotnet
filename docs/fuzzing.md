@@ -144,12 +144,19 @@ variable `CsCheck_Seed` to that seed replays exactly that case.
 
 `.github/workflows/nightly.yml` runs each target for an hour and the property tests at a
 million cases. Each target starts from the escape corpus plus the inputs earlier runs kept,
-which are carried between runs in the Actions cache.
+which are carried between runs in the Actions cache. The cache drops an entry that goes
+unused for a week, and drops the oldest entries once the repository's 10 GB is full. So the
+Sunday run also uploads each target's corpus as an artifact named `fuzz-corpus-<target>`,
+kept for 90 days. When the cache restores nothing, the run downloads the newest such artifact
+from a run on `main`. When there is neither, it starts from the escape corpus alone and says
+so in a warning.
 
 A run that finds a failing input fails. It uploads the input as an artifact laid out as
 `fuzz/regressions/<target>/<file>`, which lands in the right place when unzipped at the root of
-a checkout. The artifact is kept for a week. Nothing is committed automatically, and the job's
-token is read-only.
+a checkout. The artifact is kept for 90 days. Nothing is committed automatically, and the job's
+token is read-only. Anyone who can see the repository can download a run's artifacts. So once
+the input for a finding that reaches outside the sandbox is saved somewhere private, delete
+that artifact from the run.
 
 A failed night also opens an issue labelled `nightly`, or comments on the one already open,
 with a link to the run and the jobs that failed. It carries no input, only the run link, and
