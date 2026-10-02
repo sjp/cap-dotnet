@@ -136,3 +136,24 @@ the same rule by turning `CAP0007` on, or by marking its assembly
   holds the directory the object is created in, and the random bytes only choose its name
   inside that directory, never where it can reach. Requiring ambient authority there would
   log as an escape something that is not one.
+
+Key generation is deliberately not on the list, although it draws on the operating system's
+entropy too: `SymmetricAlgorithm.GenerateKey` and `GenerateIV`, `RSA.Create(int)`,
+`ECDsa.Create(ECCurve)`, `ECDiffieHellman.Create(ECCurve)`, and the same work done lazily
+when `Aes.Create()`'s `Key` is first read or `RSA.Create()`'s key is first used. There is no
+capability-shaped replacement to point at. Drawing key bytes from a `CapRandom` and assigning
+them to `Aes.Key` is worse practice than letting the algorithm generate its own key, and a
+list could catch only the explicit calls, not the lazy ones. A project that wants key
+generation audited adds the symbols to its own `CapBannedSymbols.txt`, where they are
+reported as `CAP0008` (see [analyzers.md](analyzers.md)):
+
+```
+M:System.Security.Cryptography.SymmetricAlgorithm.GenerateKey;Generate keys in the key service.
+M:System.Security.Cryptography.SymmetricAlgorithm.GenerateIV;Generate keys in the key service.
+M:System.Security.Cryptography.RSA.Create(System.Int32);Generate keys in the key service.
+M:System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve);Generate keys in the key service.
+M:System.Security.Cryptography.ECDiffieHellman.Create(System.Security.Cryptography.ECCurve);Generate keys in the key service.
+```
+
+A nonce for `AesGcm` or `ChaCha20Poly1305` is the caller's to supply, and can come from a
+`CapRandom`.
