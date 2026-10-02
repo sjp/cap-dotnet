@@ -56,6 +56,28 @@ public sealed class WindowsRulesTests
         Assert.Empty(fs.GetEntries());
     }
 
+    /// <summary>
+    /// The confined open models <c>openat2</c> under Windows rules too, so it refuses a path
+    /// of 4096 units before looking anything up, where the walk -- the only resolution a
+    /// Windows host runs -- looks for its first name and finds nothing.
+    /// </summary>
+    [Fact]
+    public void A_path_of_the_kernels_length_is_too_long_only_for_the_confined_open()
+    {
+        string path = string.Concat(Enumerable.Repeat(@"a\", 2047)) + "ab";
+        Assert.Equal(4096, path.Length);
+
+        using (Dir root = Windows(ResolutionBackend.ConfinedOpen).OpenRoot())
+        {
+            Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(Assert.Throws<PathTooLongException>(() => root.ReadAllBytes(path))));
+        }
+
+        using (Dir root = Windows(ResolutionBackend.PortableWalk).OpenRoot())
+        {
+            Assert.Equal(CapErrorKind.NotFound, CapIOException.KindOf(Assert.ThrowsAny<IOException>(() => root.ReadAllBytes(path))));
+        }
+    }
+
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public void A_link_with_a_windows_rooted_target_is_refused_as_an_escape(ResolutionBackend resolution)

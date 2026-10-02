@@ -83,9 +83,19 @@ public sealed class InMemoryFileSystemOptions
     /// kernel resolves one. Defaults to the walk.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The two reach the same answers, and are both offered so that the same test can run
-    /// down either path. The handles report <see cref="ResolutionBackend.InMemory"/> as their
-    /// backend whichever is chosen. Any other value is refused when the filesystem is created.
+    /// down either path, with one exception: <see cref="ResolutionBackend.ConfinedOpen"/>
+    /// models Linux's <c>openat2</c>, including its refusal of a path of 4096 or more units
+    /// as <see cref="CapErrorKind.NameTooLong"/>, and does so under either
+    /// <see cref="PathSyntax"/>, where the walk looks a path up one name at a time and has no
+    /// such limit. Windows hosts only ever run the walk, so a test bound for Windows that wants
+    /// the host's answers uses <see cref="ResolutionBackend.PortableWalk"/>.
+    /// </para>
+    /// <para>
+    /// The handles report <see cref="ResolutionBackend.InMemory"/> as their backend whichever
+    /// is chosen. Any other value is refused when the filesystem is created.
+    /// </para>
     /// </remarks>
     public ResolutionBackend Resolution { get; init; } = ResolutionBackend.PortableWalk;
 }

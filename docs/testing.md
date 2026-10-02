@@ -171,7 +171,7 @@ handle on it grants nothing outside it. Those roots therefore never appear in th
 | `PathSyntax` | The running platform's | `CapPathSyntax.Windows` makes the handles read paths as Windows does, on any machine: `\` separates components, and reserved and rooted names are refused. It also switches the recorded permissions from Unix mode bits to Windows attributes, enforces `FileShare`, and selects the other Windows answers listed above. |
 | `CaseSensitive` | Sensitive under Unix syntax, not under Windows syntax | When false, a name is found under any spelling, keeps the spelling it was created with, cannot be created a second time in another case, and can be renamed to change only its case. |
 | `TimeProvider` | A clock stopped at 2000-01-01T00:00:00Z | Where timestamps come from. Pass a `FakeTimeProvider` to let time pass under the test's control. |
-| `Resolution` | `ResolutionBackend.PortableWalk` | `ConfinedOpen` resolves a whole path in one call, as the Linux kernel does. The two reach the same answers, so the same test can run down both. |
+| `Resolution` | `ResolutionBackend.PortableWalk` | `ConfinedOpen` resolves a whole path in one call, as the Linux kernel does. The two reach the same answers, so the same test can run down both, except that `ConfinedOpen` models Linux's `openat2`, including its refusal of a path of 4096 or more units as `NameTooLong`, under either syntax. Windows hosts only ever run the walk, so a Windows-bound test that wants the host's answers should use `PortableWalk`. |
 
 Every handle reports `ResolutionBackend.InMemory` as its `Backend`. Its handles are not
 operating-system objects, so `UnsafeGetHandle` throws `NotSupportedException`, and `AsStream`
