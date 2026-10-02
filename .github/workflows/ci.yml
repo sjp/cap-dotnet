@@ -662,6 +662,17 @@ jobs:
         run: |
           test "$(jq -r .sdk.version global.json)" = "$(jq -r '.features["ghcr.io/devcontainers/features/dotnet:2"].version' .devcontainer/devcontainer.json)" \
             || { echo "::error::global.json and .devcontainer/devcontainer.json name different SDK versions"; exit 1; }
+      # The release publish job has no checkout, so it names the SDK itself instead of reading global.json.
+      - name: release publish SDK matches global.json
+        run: |
+          test "$(jq -r .sdk.version global.json)" = "$(grep -oP 'dotnet-version:\s*"\K[^"]+' .github/workflows/release.yml)" \
+            || { echo "::error::global.json and the publish job in .github/workflows/release.yml name different SDK versions"; exit 1; }
+      # Every SDK a workflow installs is an exact version, never "latest in a band".
+      - name: no wildcard SDK versions in workflows
+        run: |
+          if grep -rnE 'dotnet-version:\s*"?[0-9.]*\.?[xX*]' .github/workflows/; then
+            echo "::error::a workflow installs a wildcard SDK version; name an exact one or use global-json-file"; exit 1
+          fi
       # A published page must not carry a template token or a note to its author.
       - name: no placeholders in docs
         run: |
