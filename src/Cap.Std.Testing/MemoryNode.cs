@@ -25,6 +25,9 @@ namespace Cap.Std.Testing;
 /// </remarks>
 internal sealed class MemoryNode
 {
+    /// <summary>The smallest backing array a shrinking <see cref="SetLength"/> reallocates to.</summary>
+    private const int MinimumShrunkCapacity = 4096;
+
     private readonly object _contentLock = new();
     private byte[] _content = [];
     private long _length;
@@ -275,16 +278,34 @@ internal sealed class MemoryNode
         }
     }
 
-    /// <summary>Truncates the contents, or extends them with zeroes.</summary>
+    /// <summary>
+    /// Truncates the contents, or extends them with zeroes. Truncating to nothing drops the
+    /// backing array, and truncating a large array to under a quarter of it reallocates, so a
+    /// file rewritten from large to small does not hold its peak size for the life of the node.
+    /// </summary>
     public void SetLength(long length)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(length);
         lock (_contentLock)
         {
-            EnsureCapacity(length);
-            if (length < _length)
+            if (length == 0)
             {
-                _content.AsSpan((int)length, (int)(_length - length)).Clear();
+                _content = [];
+            }
+            else if (length < _content.Length / 4 && _content.Length > MinimumShrunkCapacity)
+            {
+                // Only the kept bytes are copied, so the rest of the new array is zero.
+                byte[] shrunk = new byte[Math.Max(length, MinimumShrunkCapacity)];
+                _content.AsSpan(0, (int)Math.Min(length, _length)).CopyTo(shrunk);
+                _content = shrunk;
+            }
+            else
+            {
+                EnsureCapacity(length);
+                if (length < _length)
+                {
+                    _content.AsSpan((int)length, (int)(_length - length)).Clear();
+                }
             }
 
             _length = length;
@@ -315,7 +336,8 @@ internal sealed class MemoryNode
 
     /// <summary>
     /// Grows the backing array to hold a length. Bytes past the current length are always
-    /// zero, so growing the length exposes zeroes, as a gap in a real file reads.
+    /// zero, so growing the length exposes zeroes, as a gap in a real file reads; every path
+    /// that shortens the length, including <see cref="SetLength"/>'s reallocation, keeps that so.
     /// </summary>
     private void EnsureCapacity(long length)
     {

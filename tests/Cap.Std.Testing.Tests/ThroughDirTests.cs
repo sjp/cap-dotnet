@@ -91,6 +91,45 @@ public sealed class ThroughDirTests
 
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_gap_written_after_truncating_a_large_file_to_nothing_reads_as_zeroes(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        using Dir root = fs.OpenRoot();
+        byte[] large = new byte[1024 * 1024];
+        Array.Fill(large, (byte)0xFF);
+
+        using CapFile file = root.OpenFile("large.bin", FileMode.CreateNew, FileAccess.ReadWrite);
+        file.Write(large, 0);
+        file.SetLength(0);
+        file.Write([1, 2, 3], 10);
+
+        byte[] buffer = new byte[13];
+        Assert.Equal(13, file.Read(buffer, 0));
+        Assert.Equal([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3], buffer);
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void Extending_a_large_file_shrunk_to_a_few_bytes_exposes_zeroes_past_them(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        using Dir root = fs.OpenRoot();
+        byte[] large = new byte[1024 * 1024];
+        Array.Fill(large, (byte)0xFF);
+
+        using CapFile file = root.OpenFile("large.bin", FileMode.CreateNew, FileAccess.ReadWrite);
+        file.Write(large, 0);
+        file.SetLength(3);
+        file.SetLength(8192);
+
+        byte[] buffer = new byte[8192];
+        Assert.Equal(8192, file.Read(buffer, 0));
+        Assert.Equal([0xFF, 0xFF, 0xFF], buffer[..3]);
+        Assert.All(buffer[3..], b => Assert.Equal(0, b));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public async Task A_file_handle_reads_and_writes_asynchronously(ResolutionBackend resolution)
     {
         InMemoryFileSystem fs = Resolutions.Create(resolution);
