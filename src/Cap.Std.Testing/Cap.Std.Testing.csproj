@@ -23,9 +23,18 @@
     <ProjectReference Include="../Cap.Primitives/Cap.Primitives.csproj" PrivateAssets="all" />
   </ItemGroup>
 
+  <!--
+    NuGet has no supported way to turn a ProjectReference into an exact-version dependency
+    (NuGet/Home#5556), so this hooks two private parts of NuGet.Build.Tasks.Pack.targets: the
+    target _GetProjectReferenceVersions and the item _ProjectReferencesWithVersions it outputs,
+    as of NuGet 7.9 (SDK 10.0.401). If an SDK update renames either, this target does nothing
+    and the dependency silently becomes a minimum; build/ci/pack.sh checks the packed nuspec
+    for "[version]" and fails the pack when that happens.
+  -->
   <Target Name="PinCapStdToThisVersion" AfterTargets="_GetProjectReferenceVersions">
     <ItemGroup>
       <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
+                                      Condition="'%(Filename)' == 'Cap.Std'"
                                       ProjectVersion="[%(_ProjectReferencesWithVersions.ProjectVersion)]" />
     </ItemGroup>
   </Target>

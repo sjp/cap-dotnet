@@ -33,7 +33,9 @@ that installs only `Cap.Time`, say, as well as one that installs `Cap.Std` direc
 `Cap.Std.Testing` is the one package whose dependency on `Cap.Std` is an exact version rather
 than a minimum. It implements a contract inside `Cap.Std` that is not public and can change in
 any release, so it is correct only beside the `Cap.Std` it was built with, and NuGet refuses a
-combination of the two that would compile and then fail at run time.
+combination of the two that would compile and then fail at run time. NuGet has no supported
+way to pin a project reference, so `Cap.Std.Testing.csproj` does it with a target that hooks
+NuGet's private pack targets, and `pack.sh` fails if the packed dependency is not exact.
 
 `Cap.IO.Abstractions` is the one package with a third-party runtime dependency. It implements
 the System.IO.Abstractions interfaces, whose maintainers add members in minor releases. Each
