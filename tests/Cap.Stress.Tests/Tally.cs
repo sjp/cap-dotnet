@@ -183,18 +183,32 @@ internal sealed class Tally
     /// </summary>
     /// <remarks>
     /// Whether the two sides interleave is up to the scheduler, and a race where they never did
-    /// has shown only that the operation works on a still tree. That is reported as a skip with
-    /// the reason, rather than passed as though the attack had been fought.
+    /// has shown only that the operation works on a still tree. That is reported through
+    /// <see cref="NotFought"/>, rather than passed as though the attack had been fought.
     /// </remarks>
     public void RequireContest(string context, params Outcome[] seenUnderAttack)
     {
         long underAttack = seenUnderAttack.Sum(outcome => this[outcome]);
         if (underAttack == 0)
         {
-            Assert.Skip(
+            NotFought(
                 $"{context}: in {Attempts} attempts the attacker's change was never seen " +
                 $"({string.Join(", ", seenUnderAttack)} all zero), so the race was not fought on this run. {this}");
         }
+    }
+
+    /// <summary>
+    /// Ends a race that was not fought: a skip with the reason on the per-change run, a failure
+    /// where <see cref="StressSettings.ContestRequired"/> says the run exists to fight it.
+    /// </summary>
+    public static void NotFought(string message)
+    {
+        if (StressSettings.ContestRequired)
+        {
+            Assert.Fail($"{message} {StressSettings.RequireContestVariable} is set, so a race not fought fails the run.");
+        }
+
+        Assert.Skip(message);
     }
 
     /// <inheritdoc/>

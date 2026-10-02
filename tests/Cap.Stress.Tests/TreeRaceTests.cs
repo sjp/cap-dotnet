@@ -314,7 +314,7 @@ public sealed class TreeRaceTests(ITestOutputHelper output)
 
         if (met == 0)
         {
-            Assert.Skip(
+            Tally.NotFought(
                 $"{context}: in {rounds} walks none met a directory and a link in each other's place, " +
                 $"so the race was not fought on this run. {tally}");
         }

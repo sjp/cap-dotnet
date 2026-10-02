@@ -82,6 +82,9 @@ jobs:
         shell: pwsh
         env:
           CAPDOTNET_STRESS_ITERATIONS: ${{ inputs.iterations || '1000000' }}
+          # A race the attacker never got into fails here rather than skipping: this run
+          # exists to fight them and measure what they come to.
+          CAPDOTNET_STRESS_REQUIRE_CONTEST: "1"
         run: |
           $env:CAPDOTNET_STRESS_REPORT = $env:GITHUB_STEP_SUMMARY
           dotnet test tests/Cap.Stress.Tests/Cap.Stress.Tests.csproj --configuration Release --no-build

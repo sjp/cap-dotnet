@@ -32,6 +32,12 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
     public static TheoryData<string> OnThisHost => new(Backends.OnThisHost);
 
     /// <summary>
+    /// The most redirections per million the Linux walk may come to on the nightly run: an
+    /// order of magnitude above the five per million docs/threat-model.md §6.1 publishes.
+    /// </summary>
+    private const int RedirectionsPerMillionBound = 50;
+
+    /// <summary>
     /// A directory swapped back and forth with a link pointing outside, in a tight loop, is
     /// never followed out — as the last component of a path or in the middle of one.
     /// </summary>
@@ -154,9 +160,33 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
             StressSettings.Iterations,
             beforeClassifying: counts => bothSeen = fresh.All(identity => counts.TimesReached(identity) > 0));
 
+        // The kernel resolves the whole path in one call, so there is no window to be steered
+        // through, at any number of attempts.
+        if (backend == Backends.ConfinedOpen)
+        {
+            Assert.True(
+                tally[Outcome.Redirected] == 0,
+                $"{tally[Outcome.Redirected]} resolutions through openat2 were steered to a file the path never named " +
+                $"at any single instant, which a kernel-atomic resolution cannot do. {tally}");
+        }
+
+        // docs/threat-model.md §6.1 publishes the walk's rate as a handful per million and asks
+        // the reader to carry away its order. Below the nightly size the count is too small to
+        // say anything about a rate, so the order is held only there, an order of magnitude
+        // above the published figure.
+        if (backend == Backends.LinuxWalk && StressSettings.Iterations >= 1_000_000)
+        {
+            double perMillion = tally[Outcome.Redirected] * 1_000_000.0 / tally.Attempts;
+            Assert.True(
+                perMillion <= RedirectionsPerMillionBound,
+                $"The walk was steered {perMillion:F1} times per million, more than the {RedirectionsPerMillionBound} " +
+                $"that is an order of magnitude above the handful docs/threat-model.md §6.1 publishes: the residual " +
+                $"window has grown, or the published figure needs remeasuring. {tally}");
+        }
+
         if (!bothSeen)
         {
-            Assert.Skip(
+            Tally.NotFought(
                 $"In {tally.Attempts} attempts only one of the two directories was ever reached through p, " +
                 $"so the renames never landed while the race was being run. {tally}");
         }
@@ -406,7 +436,7 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
 
         if (!bothSeen)
         {
-            Assert.Skip(
+            Tally.NotFought(
                 $"In {tally.Attempts} attempts only one of the two objects was ever reached, so the " +
                 $"swaps never landed while the race was being run. {tally}");
         }

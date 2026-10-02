@@ -33,6 +33,18 @@ internal static class StressSettings
     /// </remarks>
     public const string ReportVariable = "CAPDOTNET_STRESS_REPORT";
 
+    /// <summary>
+    /// The environment variable that, set to <c>1</c>, makes a race the attacker never got into
+    /// fail rather than skip.
+    /// </summary>
+    /// <remarks>
+    /// On the per-change run a race not fought is a skip with the reason: the scheduler decides
+    /// whether the two sides interleave, and ten thousand attempts on a busy machine may not be
+    /// enough. The nightly run exists to fight them and to measure what they come to, so there a
+    /// race not fought is a run that measured nothing, and it sets this to say so.
+    /// </remarks>
+    public const string RequireContestVariable = "CAPDOTNET_STRESS_REQUIRE_CONTEST";
+
     /// <summary>The number of attempts when nothing says otherwise.</summary>
     public const int DefaultIterations = 10_000;
 
@@ -53,6 +65,9 @@ internal static class StressSettings
     /// <summary>The file results are appended to, if one was named.</summary>
     public static string? ReportPath =>
         Environment.GetEnvironmentVariable(ReportVariable) is { Length: > 0 } path ? path : null;
+
+    /// <summary>Whether a race the attacker never got into is a failure rather than a skip.</summary>
+    public static bool ContestRequired => Environment.GetEnvironmentVariable(RequireContestVariable) == "1";
 
     /// <summary>
     /// The number of rounds for a race whose every round is worth <paramref name="attemptsPerRound"/>
