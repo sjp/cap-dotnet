@@ -145,6 +145,11 @@ rule reports at `info`, as a list for a reviewer rather than a build failure. Se
 `IDir` and `ICapFile` have no `UnsafeGetHandle`, so a raw handle is only ever taken through the
 concrete types, where this rule sees it.
 
+This rule and `CAP0005` apply only to members of this library, which they recognise by the
+`[assembly: CapabilityLibrary]` marker every cap-dotnet assembly carries rather than by name.
+A consumer's own assembly called `Cap.Something`, with its own `UnsafeGetHandle` or `path`
+parameter, is not reported.
+
 ## `CAP0005`: paths built by joining strings
 
 ```csharp

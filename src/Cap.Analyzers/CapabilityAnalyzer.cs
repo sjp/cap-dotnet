@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
@@ -31,6 +32,7 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
     private const string AmbientAuthorityName = "Cap.Primitives.AmbientAuthority";
     private const string CapabilityStrictName = "Cap.Primitives.CapabilityStrictAttribute";
     private const string CompositionRootName = "Cap.Primitives.CompositionRootAttribute";
+    private const string CapabilityLibraryName = "Cap.Primitives.CapabilityLibraryAttribute";
 
     private static readonly (string Resource, DiagnosticDescriptor Rule)[] BuiltInLists =
     [
@@ -121,6 +123,7 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
             bans,
             compilation.GetTypeByMetadataName(AmbientAuthorityName),
             compilation.GetTypeByMetadataName(CompositionRootName),
+            compilation.GetTypeByMetadataName(CapabilityLibraryName),
             compilation.GetTypeByMetadataName("System.IO.Path"),
             compilation.GetTypeByMetadataName("System.String"),
             context.Options.AnalyzerConfigOptionsProvider);
@@ -159,6 +162,7 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
         Dictionary<ISymbol, (DiagnosticDescriptor Rule, string Message)> bans,
         INamedTypeSymbol? ambientAuthority,
         INamedTypeSymbol? compositionRoot,
+        INamedTypeSymbol? capabilityLibrary,
         INamedTypeSymbol? path,
         INamedTypeSymbol? stringType,
         AnalyzerConfigOptionsProvider options)
@@ -168,6 +172,9 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
                 or OutputKind.WindowsRuntimeApplication
                 ? compilation.GetEntryPoint(CancellationToken.None)
                 : null);
+
+        private readonly ConcurrentDictionary<IAssemblySymbol, bool> _libraryAssemblies =
+            new(SymbolEqualityComparer.Default);
 
         public void AnalyzeInvocation(OperationAnalysisContext context)
         {
@@ -357,8 +364,19 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
             }
         }
 
-        private static bool IsThisLibrary(ISymbol symbol) =>
-            symbol.ContainingAssembly?.Name.StartsWith("Cap.", StringComparison.Ordinal) == true;
+        /// <summary>
+        /// Whether a member is declared in one of this library's assemblies, which are the ones
+        /// marked <c>[assembly: CapabilityLibrary]</c>.
+        /// </summary>
+        /// <remarks>
+        /// Not decided by name, since a consumer may name its own assemblies <c>Cap.*</c>.
+        /// Asked for every invocation, so the answer is kept per assembly.
+        /// </remarks>
+        private bool IsThisLibrary(ISymbol symbol) =>
+            capabilityLibrary is not null
+            && symbol.ContainingAssembly is { } assembly
+            && _libraryAssemblies.GetOrAdd(assembly, a => a.GetAttributes()
+                .Any(attribute => SymbolEqualityComparer.Default.Equals(attribute.AttributeClass, capabilityLibrary)));
 
         /// <summary>
         /// Reports a path argument to this library that was built by joining strings.

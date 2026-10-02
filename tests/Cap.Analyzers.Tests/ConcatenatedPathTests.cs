@@ -64,6 +64,23 @@ public sealed class ConcatenatedPathTests
         Assert.DoesNotContain(diagnostics, d => d.Id == "CAP0005");
     }
 
+    [Fact]
+    public async Task A_consumer_method_with_a_path_parameter_is_not_reported()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            """
+            public static class Mine
+            {
+                public static void Take(string path) { }
+
+                public static void Use(string prefix, string name) => Take(prefix + "/" + name);
+            }
+            """,
+            assemblyName: "Cap.Consumer");
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == "CAP0005");
+    }
+
     private static string Wrap(string call, string parameters = "Dir dir") => $$"""
         using System.IO;
         using Cap.Primitives;

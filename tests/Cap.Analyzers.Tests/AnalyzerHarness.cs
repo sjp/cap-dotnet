@@ -37,7 +37,8 @@ internal static class AnalyzerHarness
         IReadOnlyDictionary<string, ReportDiagnostic>? severities = null,
         IReadOnlyDictionary<string, string>? editorConfig = null,
         IReadOnlyList<(string Path, string Text)>? additionalFiles = null,
-        ImmutableArray<MetadataReference>? references = null)
+        ImmutableArray<MetadataReference>? references = null,
+        string assemblyName = "Consumer")
     {
         SyntaxTree tree = CSharpSyntaxTree.ParseText(
             source,
@@ -49,7 +50,7 @@ internal static class AnalyzerHarness
             nullableContextOptions: NullableContextOptions.Enable,
             specificDiagnosticOptions: severities);
 
-        CSharpCompilation compilation = CSharpCompilation.Create("Consumer", [tree], references ?? References, options);
+        CSharpCompilation compilation = CSharpCompilation.Create(assemblyName, [tree], references ?? References, options);
 
         ImmutableArray<Diagnostic> errors = [.. compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)];

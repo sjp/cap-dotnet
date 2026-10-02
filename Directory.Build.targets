@@ -21,6 +21,16 @@
   </ItemGroup>
 
   <!--
+    Tells the analyzer which assemblies are this library's own. CAP0004 and CAP0005 are about
+    members of this library, and an assembly name is no way to tell: a consumer may call its
+    own assemblies Cap.Something. Every product assembly but the analyzer references
+    Cap.Primitives, where the attribute is declared.
+  -->
+  <ItemGroup Condition="'$(CapIsProductCode)' == 'true' and '$(MSBuildProjectName)' != 'Cap.Analyzers'">
+    <AssemblyAttribute Include="Cap.Primitives.CapabilityLibraryAttribute" />
+  </ItemGroup>
+
+  <!--
     System.IO.Abstractions is a runtime dependency of Cap.IO.Abstractions and of nothing else
     that ships. Every other package depends on .NET alone, and a reference added to one of
     them by habit would quietly make that untrue for everyone who installs it.

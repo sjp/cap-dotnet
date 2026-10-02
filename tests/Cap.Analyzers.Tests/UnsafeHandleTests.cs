@@ -41,4 +41,20 @@ public sealed class UnsafeHandleTests
 
         Assert.Empty(diagnostics);
     }
+
+    [Fact]
+    public async Task A_consumer_assembly_named_like_the_library_is_not_this_library()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            """
+            public sealed class Mine
+            {
+                public int UnsafeGetHandle() => 0;
+                public int Use() => UnsafeGetHandle();
+            }
+            """,
+            assemblyName: "Cap.Consumer");
+
+        Assert.Empty(diagnostics);
+    }
 }
