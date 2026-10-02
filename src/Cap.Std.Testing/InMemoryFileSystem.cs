@@ -654,6 +654,8 @@ public sealed class InMemoryFileSystem
     /// <param name="path">The object, as a build path.</param>
     /// <param name="unreadable">True to refuse, false to stop refusing.</param>
     /// <remarks>
+    /// Opening, reading, writing and listing the object fail, and so does changing its times or
+    /// its permissions, whether by name or through a handle opened before the fault was set.
     /// Describing, renaming and removing the object's name still work, as they do on a real
     /// system, where they depend on the directory holding the name rather than on the object.
     /// </remarks>

@@ -186,7 +186,7 @@ garbage collector has reclaimed it, as a real one is closed by its finalizer.
 
 | Member | Effect |
 |---|---|
-| `SetUnreadable(path)` | Every operation on the object, and every lookup inside it if it is a directory, fails with `UnauthorizedAccessException`. Its name can still be described, renamed and removed. |
+| `SetUnreadable(path)` | Every operation on the object, and every lookup inside it if it is a directory, fails with `UnauthorizedAccessException`: opening, reading, writing, listing, and changing its times or permissions, by name or through a handle opened before the fault was set. Its name can still be described, renamed and removed. |
 | `SetUndeletable(path)` | Removing or replacing the name fails with `UnauthorizedAccessException`, and clearing the read-only attribute does not help. |
 | `FailNextWrites(count, kind)` | The next `count` writes, appends or length changes through any handle fail with the exception the framework throws for `kind`, so `CapIOException.KindOf` reports `kind`. `CapErrorKind.Other` is what a full disk reports. |
 | `Capacity` | Once the files with a name hold this many bytes between them, a write that would grow them fails as a full disk does. `UsedBytes` reports the current total. |

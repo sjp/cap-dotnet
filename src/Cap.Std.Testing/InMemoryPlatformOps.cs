@@ -1804,6 +1804,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.ReadOnlyFilesystem);
         }
 
+        if (node.Unreadable)
+        {
+            return CapError.FromCategory(CapErrorCategory.PermissionDenied);
+        }
+
         if (_fs.WindowsRules && (BeforeWindowsEpoch(lastAccess) || BeforeWindowsEpoch(lastWrite)))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);

@@ -23,6 +23,28 @@ public sealed class FaultTests
         Assert.Equal("x", root.ReadAllText("secret.txt"));
     }
 
+    [Fact]
+    public void An_unreadable_file_refuses_both_its_times_and_its_permissions()
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Unix });
+        fs.AddFile("secret.txt", "x");
+
+        using Dir root = fs.OpenRoot();
+        using CapFile file = root.OpenFile("secret.txt", FileMode.Open, FileAccess.ReadWrite);
+        CapMetadata before = file.GetMetadata();
+        fs.SetUnreadable("secret.txt");
+
+        Assert.Throws<UnauthorizedAccessException>(() => root.SetTimes("secret.txt", lastWrite: CapFileTime.Now));
+        Assert.Throws<UnauthorizedAccessException>(() => file.SetTimes(lastWrite: CapFileTime.Now));
+        Assert.Throws<UnauthorizedAccessException>(
+            () => file.SetPermissions(CapPermissions.FromUnixMode(UnixFileMode.UserRead)));
+
+        fs.SetUnreadable("secret.txt", unreadable: false);
+        CapMetadata after = root.GetMetadata("secret.txt");
+        Assert.Equal(before.LastWriteTime, after.LastWriteTime);
+        Assert.Equal(before.Permissions, after.Permissions);
+    }
+
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public void Nothing_inside_an_unreadable_directory_can_be_reached(ResolutionBackend resolution)
