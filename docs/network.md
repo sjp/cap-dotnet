@@ -142,7 +142,7 @@ Scope identifiers are dropped before comparison. They name an interface rather t
 they are absent from most written forms, and a grant that matched only when the caller had
 guessed the same interface index would be a grant that usually failed.
 
-## A range grant does not reach link-local addresses
+## A range grant does not reach link-local or instance-configuration addresses
 
 `169.254.0.0/16` and `fe80::/10` are never covered by `InsertIpNet`, however wide the range —
 `0.0.0.0/1` and `128.0.0.0/1` together do not reach them.
@@ -152,6 +152,24 @@ about itself, credentials included, and it is reachable from every process on th
 without any routing at all. A grant written to describe a network would otherwise hand that
 over as a side effect of describing something else, and nothing in the way such a grant was
 written would show it.
+
+A few such endpoints sit outside the link-local ranges, and range grants skip them too:
+
+| Address | What answers there |
+|---|---|
+| `fd00:ec2::254` | AWS instance metadata over IPv6 |
+| `64:ff9b::169.254.0.0/112` | IPv4 link-local, reached through a gateway on the well-known NAT64 prefix |
+| `100.100.100.200` | Alibaba Cloud instance metadata |
+
+The NAT64 entry is needed because a tunnelling address is not folded into the address it
+embeds (see above), so without it `::/0` would reach `169.254.169.254` through the gateway.
+Only Alibaba's single address is excluded, not the `100.64.0.0/10` shared address space
+around it, which many private networks route.
+
+That list is all of it. Another provider's configuration endpoint, the local-use NAT64
+prefix `64:ff9b:1::/48`, and anything else that happens to answer with credentials are
+covered by any range that contains them. If one of those is in reach, leave it out of the
+ranges you grant.
 
 Naming the endpoint outright with `InsertSocketAddress` still reaches it, and now says plainly
 that it was meant — which is the whole point: it becomes one line a review can find. A range

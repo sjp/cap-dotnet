@@ -120,11 +120,11 @@ public sealed class Pool
             }
         }
 
-        // A grant over a range stops here. The addresses an interface configures for itself
-        // are reachable only by being named outright, so that a range written to describe a
-        // network cannot also hand over the local configuration service that answers on one
-        // of them.
-        if (EndpointNormalization.IsLinkLocal(normalized))
+        // A grant over a range stops here. The addresses an interface configures for itself,
+        // and the few others hosted machines answer configuration questions on, are reachable
+        // only by being named outright, so that a range written to describe a network cannot
+        // also hand over the local configuration service.
+        if (EndpointNormalization.IsBeyondRangeGrants(normalized))
         {
             return false;
         }

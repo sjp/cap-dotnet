@@ -68,6 +68,39 @@ internal static class EndpointNormalization
     /// </summary>
     private const int LongLinkLocalPrefixLength = 10;
 
+    /// <summary>
+    /// The addresses outside the link-local ranges that hosted machines answer configuration
+    /// questions on, credentials included.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Each is here for the reason the link-local ranges are: it is reachable from the
+    /// instance without anybody having routed to it, so a range that happens to contain it
+    /// would hand it over as a side effect.
+    /// </para>
+    /// <list type="bullet">
+    /// <item>
+    /// <c>fd00:ec2::254</c>, the newer-family address of the AWS instance metadata service.
+    /// </item>
+    /// <item>
+    /// <c>64:ff9b::169.254.0.0/112</c>, the older family's link-local range behind the
+    /// well-known NAT64 prefix. A tunnelling address is not folded into the address it embeds
+    /// (see <see cref="EndpointNormalization"/>), so without this entry a gateway would carry
+    /// a range grant to the very endpoint the link-local rule keeps out.
+    /// </item>
+    /// <item>
+    /// <c>100.100.100.200</c>, the Alibaba Cloud metadata service. Only that address: the
+    /// shared address space around it is routed in many private deployments.
+    /// </item>
+    /// </list>
+    /// </remarks>
+    private static readonly IPNetwork[] ConfigurationEndpoints =
+    [
+        IPNetwork.Parse("fd00:ec2::254/128"),
+        IPNetwork.Parse("64:ff9b::169.254.0.0/112"),
+        IPNetwork.Parse("100.100.100.200/32"),
+    ];
+
     /// <summary>The single form <paramref name="address"/> is compared in.</summary>
     public static IPAddress Normalize(IPAddress address)
     {
@@ -181,6 +214,51 @@ internal static class EndpointNormalization
         SameAddress(address, IPAddress.Any) || SameAddress(address, IPAddress.IPv6Any);
 
     /// <summary>
+    /// Whether the normalized <paramref name="address"/> is one a grant over a range does not
+    /// reach: a link-local address, or one of the instance-configuration endpoints that sit
+    /// outside the link-local ranges.
+    /// </summary>
+    public static bool IsBeyondRangeGrants(IPAddress address)
+    {
+        if (IsLinkLocal(address))
+        {
+            return true;
+        }
+
+        foreach (IPNetwork endpoint in ConfigurationEndpoints)
+        {
+            if (endpoint.Contains(address))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether every address in the normalized <paramref name="network"/> is one a grant over
+    /// a range does not reach.
+    /// </summary>
+    public static bool IsWhollyBeyondRangeGrants(IPNetwork network)
+    {
+        if (IsWhollyLinkLocal(network))
+        {
+            return true;
+        }
+
+        foreach (IPNetwork endpoint in ConfigurationEndpoints)
+        {
+            if (network.PrefixLength >= endpoint.PrefixLength && endpoint.Contains(network.BaseAddress))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whether <paramref name="address"/> is one an interface configures for itself rather
     /// than one anybody routes to.
     /// </summary>
@@ -189,7 +267,7 @@ internal static class EndpointNormalization
     /// plugged into, and the well-known address that hosted services answer configuration
     /// questions on — credentials included — is one of them.
     /// </remarks>
-    public static bool IsLinkLocal(IPAddress address)
+    private static bool IsLinkLocal(IPAddress address)
     {
         if (address.AddressFamily == AddressFamily.InterNetworkV6)
         {
@@ -203,11 +281,8 @@ internal static class EndpointNormalization
             bytes[1] == 254;
     }
 
-    /// <summary>
-    /// Whether every address in <paramref name="network"/> is one a grant over a range does
-    /// not reach.
-    /// </summary>
-    public static bool IsWhollyLinkLocal(IPNetwork network) =>
+    /// <summary>Whether every address in <paramref name="network"/> is link-local.</summary>
+    private static bool IsWhollyLinkLocal(IPNetwork network) =>
         IsLinkLocal(network.BaseAddress) &&
         network.PrefixLength >= (network.BaseAddress.AddressFamily == AddressFamily.InterNetworkV6
             ? LongLinkLocalPrefixLength

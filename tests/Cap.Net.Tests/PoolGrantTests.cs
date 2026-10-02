@@ -265,6 +265,86 @@ public sealed class PoolGrantTests
             IPNetwork.Parse("fe80::/10"), PortRange.Every, AmbientAuthority.Acquire()));
     }
 
+    /// <summary>
+    /// A range grant does not reach the instance-configuration endpoints that sit outside the
+    /// link-local ranges either.
+    /// </summary>
+    /// <remarks>
+    /// The NAT64 address embeds the IPv4 link-local one without being folded into it, so it
+    /// needs its own entry; the same prefix with any other address behind it is an ordinary
+    /// address a range reaches.
+    /// </remarks>
+    [Fact]
+    public void A_range_grant_does_not_reach_the_ipv6_metadata_endpoints()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("::/0"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        Assert.False(pool.Allows(IPAddress.Parse("fd00:ec2::254"), 80));
+        Assert.False(pool.Allows(IPAddress.Parse("64:ff9b::169.254.169.254"), 80));
+        Assert.True(pool.Allows(IPAddress.Parse("64:ff9b::10.0.0.1"), 80));
+        Assert.True(pool.Allows(IPAddress.Parse("fd00:ec2::253"), 80));
+    }
+
+    /// <summary>
+    /// The one excluded configuration address in the shared address space is that address
+    /// alone, not the space around it.
+    /// </summary>
+    [Fact]
+    public void A_range_grant_does_not_reach_the_alibaba_metadata_endpoint()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("100.64.0.0/10"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        Assert.False(pool.Allows(IPAddress.Parse("100.100.100.200"), 80));
+        Assert.False(pool.Allows(IPAddress.Parse("::ffff:100.100.100.200"), 80));
+        Assert.True(pool.Allows(IPAddress.Parse("100.100.100.201"), 80));
+    }
+
+    /// <summary>Naming a configuration endpoint outright still reaches it.</summary>
+    [Fact]
+    public void An_endpoint_grant_reaches_a_metadata_endpoint()
+    {
+        Assert.True(Granting(IPAddress.Parse("fd00:ec2::254"), 80)
+            .Allows(IPAddress.Parse("fd00:ec2::254"), 80));
+        Assert.True(Granting(IPAddress.Parse("64:ff9b::169.254.169.254"), 80)
+            .Allows(IPAddress.Parse("64:ff9b::169.254.169.254"), 80));
+        Assert.True(Granting(IPAddress.Parse("100.100.100.200"), 80)
+            .Allows(IPAddress.Parse("100.100.100.200"), 80));
+    }
+
+    /// <summary>
+    /// A range that could only ever cover configuration endpoints is refused like a wholly
+    /// link-local one; a range that merely contains one is not.
+    /// </summary>
+    [Theory]
+    [InlineData("fd00:ec2::254/128")]
+    [InlineData("64:ff9b::169.254.0.0/112")]
+    [InlineData("64:ff9b::169.254.169.254/128")]
+    [InlineData("100.100.100.200/32")]
+    [InlineData("::ffff:100.100.100.200/128")]
+    public void A_range_wholly_inside_a_metadata_endpoint_is_refused(string network)
+    {
+        var builder = new PoolBuilder();
+
+        Assert.Throws<ArgumentException>(() => builder.InsertIpNet(
+            IPNetwork.Parse(network), PortRange.Every, AmbientAuthority.Acquire()));
+    }
+
+    /// <summary>The counterpart: ranges that contain an endpoint and more are accepted.</summary>
+    [Theory]
+    [InlineData("fd00:ec2::/32")]
+    [InlineData("64:ff9b::/96")]
+    [InlineData("100.100.100.200/31")]
+    public void A_range_containing_a_metadata_endpoint_and_more_is_accepted(string network)
+    {
+        var builder = new PoolBuilder();
+
+        builder.InsertIpNet(IPNetwork.Parse(network), PortRange.Every, AmbientAuthority.Acquire());
+    }
+
     /// <summary>The differently-named grant reaches everything, link-local included.</summary>
     /// <remarks>
     /// It is the one grant that says "no stated reach" rather than describing a reach, and a

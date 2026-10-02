@@ -30,6 +30,10 @@ namespace Cap.Net;
 /// would otherwise hand that over as a side effect of describing something else, and nothing
 /// in the way such a grant is written would show it. Naming such an endpoint outright with
 /// <see cref="InsertSocketAddress"/> still works, and now says plainly that it was meant.
+/// The same holds for the few instance-configuration endpoints outside those ranges:
+/// <c>fd00:ec2::254</c>, the IPv4 link-local range behind the NAT64 prefix
+/// (<c>64:ff9b::169.254.0.0/112</c>), and <c>100.100.100.200</c>. Any other provider's
+/// endpoint is covered by a range that contains it, so keep it out of the range.
 /// </para>
 /// <para>
 /// <strong>Thread safety.</strong> Instances are not safe for concurrent use. A builder
@@ -158,11 +162,11 @@ public sealed class PoolBuilder
 
         // Refused rather than accepted and then never matched. A grant that silently covers
         // nothing reads, to whoever writes it, exactly like a grant that works.
-        if (EndpointNormalization.IsWhollyLinkLocal(normalized))
+        if (EndpointNormalization.IsWhollyBeyondRangeGrants(normalized))
         {
             throw new ArgumentException(
-                "A range of addresses an interface configures for itself is never reached by " +
-                "a grant over a range, so this one would cover nothing. Name the endpoint " +
+                "A range of link-local or instance-configuration addresses is never reached " +
+                "by a grant over a range, so this one would cover nothing. Name the endpoint " +
                 $"outright with {nameof(InsertSocketAddress)} if reaching it is intended.",
                 nameof(network));
         }
