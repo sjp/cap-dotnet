@@ -66,8 +66,8 @@ guest's path passed through as it arrived:
 The adapter never builds a host path and never resolves a guest path itself. It looks inside a
 path in two cases only. A path made of nothing but `.` components names the directory it is
 resolved against, which the library refuses as naming nothing beneath the handle, so that
-path is answered from the descriptor's own `Dir`. And `path_symlink` joins the link's
-directory to its target to see what kind of link to make; see below.
+path is answered from the descriptor's own `Dir`. And `path_symlink` opens the target from
+the link's directory to see what kind of link to make; see below.
 
 `path_symlink` with a rooted target, such as `/`, answers `ENOTCAPABLE`: `Dir` refuses to
 store one, as WASI hosts do.
@@ -128,9 +128,12 @@ either could not reach alone. Those cases are listed too, with what they cost.
 - **A link's kind has to be guessed.** Windows records whether a link names a file or a
   directory, and won't traverse one made as the wrong kind. `Dir` asks the caller to choose
   between `CreateSymlink` and `CreateDirSymlink`. WASI doesn't say, so the adapter opens the
-  target as a directory from where the link will sit, beneath the same descriptor, and makes a
-  directory link if that works and a file link otherwise. A target made or replaced later
-  may be of the other kind. On other platforms the two kinds are the same link.
+  directory the link will sit in, beneath the same descriptor, opens the target as a
+  directory from that handle, and makes a directory link if that works and a file link
+  otherwise. The target is resolved from the link's directory handle, never by joining
+  strings, so a rooted target is refused by the probe as it is by `CreateSymlink`. A target
+  made or replaced later may be of the other kind. On other platforms the two kinds are the
+  same link.
 
 **Refused where WASI would act:**
 

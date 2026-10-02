@@ -485,22 +485,40 @@ public sealed partial class WasiPreview1
     /// currently lead to a directory beneath <paramref name="dir"/>.
     /// </summary>
     /// <remarks>
-    /// A relative target is read from the directory the link sits in, so it is looked up
-    /// after that directory's part of the link's path. Anything that cannot be opened as a
-    /// directory beneath the handle, a target that leaves it included, answers false.
+    /// A relative target is read from the directory the link sits in, so that directory is
+    /// opened first and the target is resolved from its handle; the two guest strings are
+    /// never joined. Anything that cannot be opened as a directory beneath the handle answers
+    /// false: a link directory that cannot be reached, a target that leaves it, and a rooted
+    /// target, which the library refuses to open as it refuses to store.
     /// </remarks>
     private static bool NamesDirectory(Dir dir, string linkPath, string target)
     {
         int slash = linkPath.TrimEnd('/').LastIndexOf('/');
-        string fromLink = slash < 0 ? target : $"{linkPath[..(slash + 1)]}{target}";
+        if (slash < 0)
+        {
+            return Reaches(dir, target);
+        }
 
-        if (!dir.TryOpenDir(fromLink, out Dir? reached))
+        if (!dir.TryOpenDir(linkPath[..slash], out Dir? parent))
         {
             return false;
         }
 
-        reached.Dispose();
-        return true;
+        using (parent)
+        {
+            return Reaches(parent, target);
+        }
+
+        static bool Reaches(Dir from, string target)
+        {
+            if (!from.TryOpenDir(target, out Dir? reached))
+            {
+                return false;
+            }
+
+            reached.Dispose();
+            return true;
+        }
     }
 
     /// <summary>Runs a call that needs one directory descriptor and one path, and nothing back.</summary>
