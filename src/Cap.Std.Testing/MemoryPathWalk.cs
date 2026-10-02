@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Runtime.CompilerServices;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
 
@@ -26,6 +28,14 @@ namespace Cap.Std.Testing;
 /// recursion that started a fresh walk at each link would lose how far above the starting
 /// point resolution already was, and would report a link such as <c>../sibling</c> — from a
 /// subdirectory, and entirely inside the subtree — as an escape.
+/// </para>
+/// <para>
+/// Nothing is allocated for the components a resolution passes through, only for the final
+/// name it reports. The components still to come are positions in the caller's path and in
+/// the targets of the links being followed, rather than strings cut from them, a name is
+/// looked up as a span, and the directories passed through are kept in an array borrowed from
+/// the pool, because the walk runs once for every path a test opens and a suite opens a great
+/// many.
 /// </para>
 /// </remarks>
 internal static class MemoryPathWalk
@@ -70,51 +80,70 @@ internal static class MemoryPathWalk
         CapPathSyntax syntax,
         ConfinedResolveOptions options,
         bool followFinalLink,
-        Func<MemoryNode, string, MemoryNode?> lookup,
+        Func<MemoryNode, ReadOnlySpan<char>, MemoryNode?> lookup,
+        out MemoryWalkResult result)
+    {
+        DirectoryStack stack = new(start);
+        try
+        {
+            return Walk(ref stack, path, syntax, options, followFinalLink, lookup, out result);
+        }
+        finally
+        {
+            stack.Dispose();
+        }
+    }
+
+    private static CapError Walk(
+        ref DirectoryStack stack,
+        ReadOnlySpan<char> path,
+        CapPathSyntax syntax,
+        ConfinedResolveOptions options,
+        bool followFinalLink,
+        Func<MemoryNode, ReadOnlySpan<char>, MemoryNode?> lookup,
         out MemoryWalkResult result)
     {
         result = default;
 
-        List<MemoryNode> stack = [start];
-        Stack<string> pending = new();
-        Push(pending, path, syntax);
+        PendingComponents pending = new(path, syntax);
         bool mustBeDirectory = EndsAsDirectory(path, syntax);
         int budget = LinkBudget;
 
+        // The last name looked up, and where; empty when the last step was `.` or `..`. The
+        // name stays a view of the string it came from until a result needs it.
         MemoryNode? parent = null;
-        string? finalName = null;
+        ReadOnlySpan<char> finalName = default;
 
-        while (pending.Count > 0)
+        while (pending.TryNext(out ReadOnlySpan<char> component))
         {
-            string component = pending.Pop();
-            bool isFinal = pending.Count == 0;
-            MemoryNode current = stack[^1];
+            bool isFinal = !pending.HasMore;
+            MemoryNode current = stack.Top;
 
             if (current.Type != CapNodeType.Directory)
             {
                 return CapError.FromCategory(CapErrorCategory.NotADirectory);
             }
 
-            if (component == "..")
+            if (component.SequenceEqual(".."))
             {
                 if (stack.Count == 1)
                 {
                     return CapError.FromCategory(CapErrorCategory.Escaped);
                 }
 
-                stack.RemoveAt(stack.Count - 1);
+                stack.Pop();
                 parent = null;
-                finalName = null;
+                finalName = default;
                 continue;
             }
 
             // A step that stays put, but a step all the same: the name before it is not the
             // last one, so a missing name there is missing on the way and not one that could
             // be created, as it is for the kernel.
-            if (component == ".")
+            if (component.SequenceEqual("."))
             {
                 parent = null;
-                finalName = null;
+                finalName = default;
                 continue;
             }
 
@@ -131,7 +160,7 @@ internal static class MemoryPathWalk
             MemoryNode? next = lookup(current, component);
             if (next is null)
             {
-                result = new MemoryWalkResult(null, current, isFinal ? component : null, mustBeDirectory);
+                result = new MemoryWalkResult(null, current, isFinal ? component.ToString() : null, mustBeDirectory);
                 return CapError.FromCategory(CapErrorCategory.NotFound);
             }
 
@@ -143,7 +172,7 @@ internal static class MemoryPathWalk
                     // refused for that before the link is looked at, as O_EXCL is by openat2.
                     if (isFinal && !mustBeDirectory)
                     {
-                        result = new MemoryWalkResult(next, current, component, mustBeDirectory);
+                        result = new MemoryWalkResult(next, current, component.ToString(), mustBeDirectory);
                     }
 
                     return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
@@ -151,7 +180,7 @@ internal static class MemoryPathWalk
 
                 if (isFinal && !followFinalLink && !mustBeDirectory)
                 {
-                    result = new MemoryWalkResult(next, current, component, mustBeDirectory);
+                    result = new MemoryWalkResult(next, current, component.ToString(), mustBeDirectory);
                     return CapError.FromCategory(CapErrorCategory.SymbolicLinkLoop);
                 }
 
@@ -192,9 +221,9 @@ internal static class MemoryPathWalk
                     mustBeDirectory |= EndsAsDirectory(target, syntax);
                 }
 
-                Push(pending, target, syntax);
+                pending.Push(target);
                 parent = null;
-                finalName = null;
+                finalName = default;
                 continue;
             }
 
@@ -214,40 +243,14 @@ internal static class MemoryPathWalk
 
             parent = current;
             finalName = component;
-            stack.Add(next);
+            stack.Push(next);
         }
 
-        MemoryNode found = stack[^1];
-        result = new MemoryWalkResult(found, parent, finalName, mustBeDirectory);
+        MemoryNode found = stack.Top;
+        result = new MemoryWalkResult(found, parent, parent is null ? null : finalName.ToString(), mustBeDirectory);
         return mustBeDirectory && found.Type != CapNodeType.Directory
             ? CapError.FromCategory(CapErrorCategory.NotADirectory)
             : CapError.Success;
-    }
-
-    /// <summary>Pushes a path's components so that the first is popped first.</summary>
-    private static void Push(Stack<string> pending, ReadOnlySpan<char> path, CapPathSyntax syntax)
-    {
-        List<string> components = [];
-        int start = 0;
-        for (int i = 0; i <= path.Length; i++)
-        {
-            if (i < path.Length && !CapPath.IsSeparator(path[i], syntax))
-            {
-                continue;
-            }
-
-            ReadOnlySpan<char> component = path[start..i];
-            start = i + 1;
-            if (!component.IsEmpty)
-            {
-                components.Add(component.ToString());
-            }
-        }
-
-        for (int i = components.Count - 1; i >= 0; i--)
-        {
-            pending.Push(components[i]);
-        }
     }
 
     /// <summary>
@@ -274,6 +277,164 @@ internal static class MemoryPathWalk
 
         ReadOnlySpan<char> last = path[start..];
         return last.SequenceEqual(".") || last.SequenceEqual("..");
+    }
+
+    /// <summary>
+    /// The components a resolution has still to look at, in the order it will meet them: what
+    /// is left of the caller's path, with the target of each link being followed in front of
+    /// whatever was left when the link was met.
+    /// </summary>
+    /// <remarks>
+    /// Each source is held with a position in it rather than cut into components, so taking a
+    /// component costs nothing. A <c>.</c> is returned like any other name, because the walk
+    /// treats it as a step.
+    /// </remarks>
+    private ref struct PendingComponents
+    {
+        private readonly ReadOnlySpan<char> _path;
+        private readonly CapPathSyntax _syntax;
+        private int _pathPosition;
+        private Targets _targets;
+        private int _targetCount;
+
+        public PendingComponents(ReadOnlySpan<char> path, CapPathSyntax syntax)
+        {
+            _path = path;
+            _syntax = syntax;
+        }
+
+        /// <summary>Whether any component remains after the one last taken.</summary>
+        public readonly bool HasMore
+        {
+            get
+            {
+                for (int i = _targetCount - 1; i >= 0; i--)
+                {
+                    if (StartsAt(_targets[i].Text, _targets[i].Position, _syntax) >= 0)
+                    {
+                        return true;
+                    }
+                }
+
+                return StartsAt(_path, _pathPosition, _syntax) >= 0;
+            }
+        }
+
+        /// <summary>Takes the next component, finishing with any link target that has run out.</summary>
+        public bool TryNext(out ReadOnlySpan<char> component)
+        {
+            while (_targetCount > 0)
+            {
+                ref Target top = ref _targets[_targetCount - 1];
+                if (Take(top.Text, ref top.Position, _syntax, out component))
+                {
+                    return true;
+                }
+
+                top = default;
+                _targetCount--;
+            }
+
+            return Take(_path, ref _pathPosition, _syntax, out component);
+        }
+
+        /// <summary>Puts a followed link's target in front of everything still pending.</summary>
+        /// <remarks>
+        /// Never more than <see cref="LinkBudget"/> at once, because the walk spends one of
+        /// its budget on every link before it gets here.
+        /// </remarks>
+        public void Push(string target) => _targets[_targetCount++] = new Target { Text = target };
+
+        private static bool Take(ReadOnlySpan<char> text, scoped ref int position, CapPathSyntax syntax, out ReadOnlySpan<char> component)
+        {
+            int start = StartsAt(text, position, syntax);
+            if (start < 0)
+            {
+                position = text.Length;
+                component = default;
+                return false;
+            }
+
+            int end = start;
+            while (end < text.Length && !CapPath.IsSeparator(text[end], syntax))
+            {
+                end++;
+            }
+
+            position = end;
+            component = text[start..end];
+            return true;
+        }
+
+        /// <summary>Where the next component begins, at or after a position, or -1 when none does.</summary>
+        private static int StartsAt(ReadOnlySpan<char> text, int position, CapPathSyntax syntax)
+        {
+            while (position < text.Length && CapPath.IsSeparator(text[position], syntax))
+            {
+                position++;
+            }
+
+            return position < text.Length ? position : -1;
+        }
+    }
+
+    /// <summary>A link target being followed, and how far into it the walk has got.</summary>
+    private struct Target
+    {
+        public string Text;
+        public int Position;
+    }
+
+    /// <summary>Room for every link target a resolution can be following at once.</summary>
+    [InlineArray(LinkBudget)]
+    private struct Targets
+    {
+        private Target _first;
+    }
+
+    /// <summary>
+    /// The directories a resolution has passed through and not come back out of, so that a
+    /// <c>..</c> can return to the one before, in an array borrowed from the pool.
+    /// </summary>
+    private ref struct DirectoryStack
+    {
+        private MemoryNode[] _nodes;
+
+        public DirectoryStack(MemoryNode start)
+        {
+            _nodes = ArrayPool<MemoryNode>.Shared.Rent(16);
+            _nodes[0] = start;
+            Count = 1;
+        }
+
+        public int Count { get; private set; }
+
+        public readonly MemoryNode Top => _nodes[Count - 1];
+
+        public void Push(MemoryNode node)
+        {
+            if (Count == _nodes.Length)
+            {
+                MemoryNode[] grown = ArrayPool<MemoryNode>.Shared.Rent(_nodes.Length * 2);
+                _nodes.AsSpan(0, Count).CopyTo(grown);
+                ArrayPool<MemoryNode>.Shared.Return(_nodes, clearArray: true);
+                _nodes = grown;
+            }
+
+            _nodes[Count++] = node;
+        }
+
+        public void Pop() => _nodes[--Count] = null!;
+
+        /// <summary>
+        /// Returns the array, cleared so that the pool does not keep the tree's nodes alive.
+        /// </summary>
+        public void Dispose()
+        {
+            ArrayPool<MemoryNode>.Shared.Return(_nodes, clearArray: true);
+            _nodes = [];
+            Count = 0;
+        }
     }
 }
 

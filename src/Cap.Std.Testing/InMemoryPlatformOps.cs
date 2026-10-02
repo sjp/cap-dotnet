@@ -80,7 +80,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     private readonly InMemoryFileSystem _fs;
     private readonly ConcurrentDictionary<nint, MemoryNode> _directories = new();
     private readonly ConditionalWeakTable<SafeFileHandle, OpenFile> _files = new();
-    private readonly Func<MemoryNode, string, MemoryNode?> _lookup;
+    private readonly Func<MemoryNode, ReadOnlySpan<char>, MemoryNode?> _lookup;
     private long _nextHandle = FirstHandleValue;
     private long _confinedOpenAttempts;
     private long _componentOpens;
@@ -793,12 +793,20 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The tree lock is held only to find the file. The copy is made under the file's own
+    /// lock, so reads of different files, and reads of one file from several threads, do not
+    /// wait for one another, and a write is still seen whole or not at all.
+    /// </remarks>
     public int ReadFile(SafeFileHandle handle, Span<byte> buffer, long fileOffset)
     {
+        MemoryNode node;
         lock (_fs.Gate)
         {
-            return Demand(handle, FileAccess.Read, out _).ReadAt(buffer, fileOffset);
+            node = Demand(handle, FileAccess.Read, out _);
         }
+
+        return node.ReadAt(buffer, fileOffset);
     }
 
     /// <inheritdoc/>
@@ -876,12 +884,16 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     }
 
     /// <inheritdoc/>
+    /// <remarks>Read under the file's own lock, as <see cref="ReadFile"/> reads its contents.</remarks>
     public long GetFileLength(SafeFileHandle handle)
     {
+        MemoryNode node;
         lock (_fs.Gate)
         {
-            return Demand(handle, 0, out _).Length;
+            node = Demand(handle, 0, out _);
         }
+
+        return node.Length;
     }
 
     /// <inheritdoc/>
@@ -1420,7 +1432,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.NameTooLong);
         }
 
-        node = directory.Entries.GetValueOrDefault(name.ToString());
+        node = directory.Entries.GetValueOrDefault(name);
         if (node is not null)
         {
             return CapError.Success;
@@ -1810,16 +1822,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             return node.Describe(1);
         }
 
-        long subdirectories = 0;
-        foreach (MemoryNode child in node.Entries.Values)
-        {
-            if (child.Type == CapNodeType.Directory)
-            {
-                subdirectories++;
-            }
-        }
-
-        return node.Describe((node.Detached ? 0 : 2) + subdirectories);
+        return node.Describe((node.Detached ? 0 : 2) + node.Entries.SubdirectoryCount);
     }
 
     /// <remarks>

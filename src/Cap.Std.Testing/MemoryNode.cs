@@ -39,11 +39,12 @@ internal sealed class MemoryNode
     /// <param name="names">
     /// How two names are decided to be the same one. A filesystem that ignores case gives every
     /// directory a comparer that does, so a lookup, a creation and a rename all agree on it.
+    /// It has to be able to compare a span with a string too, as the ordinal comparers can.
     /// </param>
     public MemoryNode(StringComparer names)
     {
         ArgumentNullException.ThrowIfNull(names);
-        Entries = new Dictionary<string, MemoryNode>(names);
+        Entries = new MemoryEntries(names);
     }
 
     /// <summary>What this object is.</summary>
@@ -225,7 +226,7 @@ internal sealed class MemoryNode
     public FileAttributes? WindowsAttributes { get; set; }
 
     /// <summary>Entries, when this is a directory.</summary>
-    public Dictionary<string, MemoryNode> Entries { get; }
+    public MemoryEntries Entries { get; }
 
     /// <summary>
     /// The handles issued on this file, whose opens say what they let other opens do, or null

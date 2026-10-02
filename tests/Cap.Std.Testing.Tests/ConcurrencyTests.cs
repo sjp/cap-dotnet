@@ -53,6 +53,59 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
+    public async Task Readers_of_one_file_see_each_write_whole_while_it_is_rewritten()
+    {
+        const int Size = 4096;
+        InMemoryFileSystem fs = new();
+        fs.AddFile("shared.bin", new byte[Size]);
+        using Dir root = fs.OpenRoot();
+        using CapFile writer = root.OpenFile("shared.bin", FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+        using CancellationTokenSource done = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+
+        // Every write fills the whole file with one value, so a read that sees two values has
+        // seen part of one write and part of another.
+        Task writing = Task.Run(
+            () =>
+            {
+                try
+                {
+                    byte[] block = new byte[Size];
+                    for (int round = 1; round <= 500; round++)
+                    {
+                        Array.Fill(block, (byte)round);
+                        writer.Write(block, 0);
+                    }
+                }
+                finally
+                {
+                    done.Cancel();
+                }
+            },
+            TestContext.Current.CancellationToken);
+
+        int reads = 0;
+        await Parallel.ForAsync(0, 8, TestContext.Current.CancellationToken, (_, _) =>
+        {
+            using CapFile reader = root.OpenFile("shared.bin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            byte[] seen = new byte[Size];
+            do
+            {
+                Assert.Equal(Size, reader.Read(seen, 0));
+                Assert.Equal(Size, reader.Length);
+                Assert.True(seen.AsSpan().IndexOfAnyExcept(seen[0]) < 0, "A read saw two writes at once.");
+                _ = Interlocked.Increment(ref reads);
+            }
+            while (!done.IsCancellationRequested);
+
+            return ValueTask.CompletedTask;
+        });
+
+        await writing;
+        Assert.True(reads >= 8);
+        Assert.Equal(Enumerable.Repeat((byte)(500 % 256), Size), fs.ReadAllBytes("shared.bin"));
+    }
+
+    [Fact]
     public async Task Separate_filesystems_do_not_see_each_other()
     {
         InMemoryFileSystem[] filesystems = [.. Enumerable.Range(0, 16).Select(_ => new InMemoryFileSystem())];

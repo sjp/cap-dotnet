@@ -315,7 +315,10 @@ run in parallel without any of them switching a global setting.
 
 Every member of `InMemoryFileSystem`, and every operation through one of its handles, may be
 called from any number of threads. One lock guards the whole tree, so operations do not run in
-parallel within one filesystem. Separate filesystems share nothing, so give each test its own:
+parallel within one filesystem, with one exception: reading a file, or asking its length,
+through a handle already open holds that lock only to find the file, so reads run in parallel
+with each other and with the rest of the tree's work. A read still sees a write to the same
+file whole or not at all. Separate filesystems share nothing, so give each test its own:
 build it in the test, as above, rather than sharing one through a fixture. A test that does
 share one sees what every other test wrote to it.
 

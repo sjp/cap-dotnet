@@ -104,9 +104,9 @@ internal static class MemoryResolutionTarget
         HashSet<MemoryNode> inside,
         string shown)
     {
-        MemoryNode? Lookup(MemoryNode directory, string name)
+        MemoryNode? Lookup(MemoryNode directory, ReadOnlySpan<char> name)
         {
-            Require(inside.Contains(directory), $"{shown} looked up {Show(name)} in a directory outside the sandbox.");
+            Require(inside.Contains(directory), $"{shown} looked up {Show(name.ToString())} in a directory outside the sandbox.");
             return directory.Entries.GetValueOrDefault(name);
         }
 

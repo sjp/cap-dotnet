@@ -1450,7 +1450,13 @@ internal sealed class FakePlatformOps : IPlatformOps
         }
 
         CapError error = MemoryPathWalk.Resolve(
-            start!, path, Capabilities.PathSyntax, options, followFinalLink, _fileSystem.Lookup, out MemoryWalkResult found);
+            start!,
+            path,
+            Capabilities.PathSyntax,
+            options,
+            followFinalLink,
+            (directory, name) => _fileSystem.Lookup(directory, name.ToString()),
+            out MemoryWalkResult found);
         node = found.Node;
         return error;
     }
