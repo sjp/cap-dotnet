@@ -29,8 +29,9 @@ application's configuration directory and nothing above it.
 
 ## Where the directories are
 
-The layout matches the Rust [`directories`](https://crates.io/crates/directories) crate, so
-an application finds the same directories whichever library it uses.
+The layout follows the Rust [`directories`](https://crates.io/crates/directories) crate. For
+names whose only whitespace is single spaces between words, an application finds the same
+directories whichever library it uses; the derivation below says where the two part.
 
 | Kind | Linux | macOS | Windows |
 |---|---|---|---|
@@ -40,12 +41,14 @@ an application finds the same directories whichever library it uses.
 | State | `$XDG_STATE_HOME/myapp`, else `~/.local/state/myapp` | none | none |
 | Runtime | `$XDG_RUNTIME_DIR/myapp`, if that directory is private | none | none |
 
-- **XDG.** The application's directory is its name, lowercased, with whitespace removed.
+- **XDG.** The application's directory is its name, lowercased with `ToLowerInvariant`,
+  with every Unicode whitespace character removed.
   As the XDG Base Directory specification requires, a variable that is unset, empty or not
   an absolute path is ignored and the default is used instead. A relative value would
   otherwise be resolved against whatever directory the process was started in.
 - **macOS.** The qualifier, organization and application are joined into a bundle
-  identifier. Whitespace inside each part becomes a hyphen, and empty parts are left out.
+  identifier with `.`. Each part is trimmed of Unicode whitespace, every run of whitespace
+  inside it becomes a single hyphen, and parts left empty are left out. Case is kept.
   Configuration and data share one directory, because that is where the platform keeps
   both.
 - **Windows.** The organization and application are used as given, under the roaming and
@@ -60,6 +63,51 @@ an application finds the same directories whichever library it uses.
 
 A name containing `/`, `\` or NUL is refused on every platform, so the application's
 directory cannot end up somewhere other than the one intended.
+
+### Where this differs from the crate
+
+The crate changes only the space character (U+0020), so these names land elsewhere there (`\t` stands for a tab):
+
+| Name | Here | `directories` crate |
+|---|---|---|
+| Application `My  App` on macOS | `….My-App` | `….My--App` (each space becomes a hyphen; runs are kept) |
+| Application `Tab\tApp` on Linux | `tabapp` | `tab\tapp` (only spaces are removed) |
+| Application `Tab\tApp` on macOS | `….Tab-App` | `….Tab\tApp` |
+| Qualifier `com x` on macOS | `com-x.…` | `com x.…` (the qualifier is used as given) |
+| Application ` App ` on macOS | `….App` | `….-App-` (nothing is trimmed) |
+
+Lowercasing also differs for the few characters with special Unicode casing, such as `İ`,
+which Rust's `to_lowercase` maps to two characters. An application name that is empty, or
+only whitespace, is refused here; the crate accepts it.
+
+## Moving from `Environment.GetFolderPath`
+
+A program written against `System.IO` usually keeps its files at
+`Path.Combine(Environment.GetFolderPath(SpecialFolder.ApplicationData), "Example Corp", "My App")`,
+which is not where `ProjectDirs.From` puts them. `ProjectDirs.OpenSpecialFolder` opens that
+same directory as a handle, so existing files are found where they are:
+
+```csharp
+using Dir settings = ProjectDirs.OpenSpecialFolder(
+    Environment.SpecialFolder.ApplicationData, "Example Corp", "My App", AmbientAuthority.Acquire());
+
+string json = settings.ReadAllText("settings.json");
+```
+
+- **The folder** is whatever `Environment.GetFolderPath` answers on the host. Only
+  `ApplicationData` and `LocalApplicationData` are accepted, because this is a way to an
+  application's own directory rather than to the account's documents or desktop; a program
+  that needs one of those can use `Dir.Open`, which makes the reach visible where it happens.
+- **The names** are used exactly as given: no case is changed and no whitespace removed. An
+  empty organization is left out. `/`, `\`, NUL, `.`, `..` and an empty application name are
+  refused.
+- **Creation** works as it does for `ProjectDirs.From`: the deepest existing part is opened
+  by path, following links; whatever is missing is created through that handle, one name at
+  a time, without following a link and with mode `0700` on Unix. The directory is created
+  by the call itself, as `Directory.CreateDirectory` would, and the caller owns the handle.
+
+A program with no existing files to find should prefer `ProjectDirs.From`, which follows each
+platform's own conventions and keeps configuration, data and cache apart.
 
 ## Permissions
 

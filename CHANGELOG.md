@@ -22,7 +22,9 @@ whose version has no section here, and the section becomes the release's notes o
 - `Cap.Fs.Ext`: atomic writes, tree walks and globs, and handle-to-handle copy and delete.
 - `Cap.Net`: sockets restricted to a pool of permitted endpoints.
 - `Cap.Time` and `Cap.Rand`: the system clock and OS entropy behind a token.
-- `Cap.Directories`: well-known project directories as `Dir` handles.
+- `Cap.Directories`: well-known project directories as `Dir` handles, and
+  `ProjectDirs.OpenSpecialFolder` for the directory a `System.IO` program keeps under
+  `ApplicationData` or `LocalApplicationData`.
 - `Cap.Std.Testing`: an in-memory filesystem that hands out real `Dir` handles, for tests.
 - `Cap.IO.Abstractions`: System.IO.Abstractions' `IFileSystem`, confined to a `Dir`.
 

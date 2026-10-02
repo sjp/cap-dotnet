@@ -19,9 +19,8 @@ namespace Cap.Directories;
 /// nothing after <see cref="From"/> resolves one.
 /// </para>
 /// <para>
-/// <strong>Where the directories are.</strong> The layout matches the Rust
-/// <c>directories</c> crate, so the same application finds the same directories whichever it
-/// is written against:
+/// <strong>Where the directories are.</strong> The layout follows the Rust
+/// <c>directories</c> crate:
 /// </para>
 /// <list type="table">
 /// <listheader><term>Kind</term><description>Linux and other Unixes · macOS · Windows</description></listheader>
@@ -47,7 +46,16 @@ namespace Cap.Directories;
 /// removed, and an XDG variable that is unset, empty or not an absolute path is ignored in
 /// favour of the default, as the specification requires. On macOS the qualifier,
 /// organization and application are joined into a bundle identifier, with whitespace inside
-/// each replaced by hyphens and empty parts left out.
+/// each replaced by hyphens and empty parts left out. Whitespace is any Unicode whitespace,
+/// trimmed, with a run of it counted once; the crate changes only the space character, so a
+/// name with a tab, a run of spaces or (on macOS) a space in the qualifier is placed
+/// differently there.
+/// </para>
+/// <para>
+/// <strong>Migrating from <c>System.IO</c>.</strong> A program that keeps its files where
+/// <c>Path.Combine(Environment.GetFolderPath(folder), organization, application)</c> puts
+/// them can reach that same directory through <see cref="OpenSpecialFolder"/>, which uses the
+/// names as given rather than by the layout above.
 /// </para>
 /// <para>
 /// <strong>Nothing is created until it is asked for.</strong> <see cref="From"/> opens, for
@@ -154,6 +162,100 @@ public sealed class ProjectDirs : IDisposable
         FromHost(qualifier, organization, application, authority, policy, HostEnvironment.Current);
 
     /// <summary>
+    /// Opens an application's directory where a program written against <c>System.IO</c>
+    /// keeps it: beneath one of the runtime's application-data special folders, under the
+    /// organization and application names as given. Creates it if it is not there.
+    /// </summary>
+    /// <param name="folder">
+    /// <see cref="Environment.SpecialFolder.ApplicationData"/> or
+    /// <see cref="Environment.SpecialFolder.LocalApplicationData"/>.
+    /// </param>
+    /// <param name="organization">The organization that makes the application. May be empty.</param>
+    /// <param name="application">The application's name. Must not be empty.</param>
+    /// <param name="authority">
+    /// Proof that taking authority from outside the capability graph is intended here. Must
+    /// come from <see cref="AmbientAuthority.Acquire"/>; a default value is refused.
+    /// </param>
+    /// <param name="policy">
+    /// What resolution beneath the returned handle does with a symbolic link it meets on the
+    /// way to the thing a path names.
+    /// </param>
+    /// <returns>A handle on the directory, which the caller owns and must dispose.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is the capability-shaped form of
+    /// <c>Directory.CreateDirectory(Path.Combine(Environment.GetFolderPath(folder), organization, application))</c>,
+    /// for a program moving to this library with files already in that place. The folder is
+    /// whatever <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> answers on
+    /// this host, and the names are used exactly as given: no case is changed and no
+    /// whitespace removed, unlike <see cref="From"/>. An empty organization is left out. A
+    /// program with no files yet to find should prefer <see cref="From"/>, which follows each
+    /// platform's own conventions.
+    /// </para>
+    /// <para>
+    /// The folder's deepest existing part is opened by path, following links as
+    /// <see cref="From"/> does. Whatever is missing beneath it is created one component at a
+    /// time through that handle, each opened without following a link, and on Unix with mode
+    /// <c>0700</c>. A directory that already exists is used as it is, whatever its mode.
+    /// </para>
+    /// <para>
+    /// Only the two per-user application-data folders are accepted. This is a way to an
+    /// application's own directory, not to the account's documents or desktop; a program that
+    /// really needs one of those can open it with
+    /// <see cref="Dir.Open(string, AmbientAuthority, SymlinkPolicy)"/>, which makes the reach
+    /// visible where it happens.
+    /// </para>
+    /// <para>
+    /// Safe to call from any thread.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A name is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// A name cannot be used as a directory name, the application name is empty, or
+    /// <paramref name="authority"/> was never acquired.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="folder"/> is not one of the two application-data folders, or
+    /// <paramref name="policy"/> is not a value the enumeration defines.
+    /// </exception>
+    /// <exception cref="DirectoryNotFoundException">
+    /// The account has no such folder, or neither it nor anything above it can be opened.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">The filesystem refused the creation or the open.</exception>
+    /// <exception cref="CapIOException">
+    /// Something that is not a directory, a symbolic link included, holds one of the names,
+    /// or the creation failed otherwise.
+    /// </exception>
+    public static Dir OpenSpecialFolder(
+        Environment.SpecialFolder folder,
+        string organization,
+        string application,
+        AmbientAuthority authority,
+        SymlinkPolicy policy = SymlinkPolicy.FollowWithinSandbox) =>
+        OpenSpecialFolderOnHost(folder, organization, application, authority, policy, HostEnvironment.Current);
+
+    /// <summary>
+    /// Opens an application's directory beneath a special folder of a described host, for
+    /// testing without changing the environment of the process under test.
+    /// </summary>
+    internal static Dir OpenSpecialFolderOnHost(
+        Environment.SpecialFolder folder,
+        string organization,
+        string application,
+        AmbientAuthority authority,
+        SymlinkPolicy policy,
+        HostEnvironment host)
+    {
+        authority.Demand(nameof(authority));
+        RequireDefined(policy);
+
+        ProjectLocation location = ProjectLayout.ResolveSpecialFolder(folder, organization, application, host);
+
+        using Slot slot = OpenNearest(location, authority, policy);
+        return slot.Open(owner: null);
+    }
+
+    /// <summary>
     /// Finds an application's directories on a described host, for testing the conventions
     /// without changing the environment of the process under test.
     /// </summary>
@@ -166,13 +268,7 @@ public sealed class ProjectDirs : IDisposable
         HostEnvironment host)
     {
         authority.Demand(nameof(authority));
-        if (!policy.IsDefinedValue())
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(policy),
-                policy,
-                "The symbolic-link policy is not one of the defined values.");
-        }
+        RequireDefined(policy);
 
         ProjectLayout layout = ProjectLayout.Resolve(qualifier, organization, application, host);
 
@@ -378,6 +474,17 @@ public sealed class ProjectDirs : IDisposable
             && (bits & PermissionBits) == OwnerOnly;
     }
 
+    private static void RequireDefined(SymlinkPolicy policy)
+    {
+        if (!policy.IsDefinedValue())
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(policy),
+                policy,
+                "The symbolic-link policy is not one of the defined values.");
+        }
+    }
+
     /// <summary>
     /// Opens the deepest part of a location that exists, and notes what is missing beneath
     /// it.
@@ -506,11 +613,11 @@ public sealed class ProjectDirs : IDisposable
         /// If a creation fails part-way, what was created stays, the anchor is kept, and the
         /// next call starts again from it — finding the part already made and carrying on.
         /// </remarks>
-        internal Dir Open(ProjectDirs owner)
+        internal Dir Open(ProjectDirs? owner)
         {
             lock (_gate)
             {
-                ObjectDisposedException.ThrowIf(_disposed, owner);
+                ObjectDisposedException.ThrowIf(_disposed, (object?)owner ?? this);
 
                 if (_directory is null)
                 {

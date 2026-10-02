@@ -125,7 +125,7 @@ which replaces the link. Opening an existing file with `FileMode.Open` still fol
 | `Path.GetTempPath()` | `CapTempDir.New(AmbientAuthority.Acquire())` | A private scratch directory beneath it, removed on disposal. |
 | `Path.GetTempFileName()` | `CapTempFile.New(dir)`, or `CapTempFile.NewAnonymous(dir)` for a file with no name at all | Created owner-only (`0600`) on Unix, as `GetTempFileName` does, whatever `dir` is; on Windows it takes the permissions `dir` hands down. |
 | `Path.GetFileName`, `GetExtension`, `GetFileNameWithoutExtension`, `ChangeExtension` | unchanged | String manipulation of a name is harmless. Deciding *containment* from strings is what is not. |
-| `Environment.GetFolderPath(SpecialFolder.ApplicationData)` and friends | `Cap.Directories.ProjectDirs` | Configuration, data, cache, state and runtime directories as `Dir` handles; see [directories.md](directories.md). |
+| `Environment.GetFolderPath(SpecialFolder.ApplicationData)` and friends | `Cap.Directories.ProjectDirs.OpenSpecialFolder(folder, organization, application, authority)` | The same directory `Path.Combine` on the folder and the names gives, as a `Dir` handle, for `ApplicationData` and `LocalApplicationData`. A new application can use `ProjectDirs.From` instead, for configuration, data, cache, state and runtime directories laid out by each platform's conventions, which are not the same places; see [directories.md](directories.md#moving-from-environmentgetfolderpath). |
 
 ## `FileSystemWatcher`, `DriveInfo`, `FileSystemInfo`
 

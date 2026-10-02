@@ -123,8 +123,14 @@ public sealed class ProjectLayoutTests
         Assert.Equal(["myapp"], config.Components);
     }
 
+    /// <summary>
+    /// Every Unicode whitespace character is removed, where the Rust crate removes only the
+    /// space: it would keep the tab in <c>tab\tapp</c>.
+    /// </summary>
     [Theory]
     [InlineData("My App", "myapp")]
+    [InlineData("My  App", "myapp")]
+    [InlineData("Tab\tApp", "tabapp")]
     [InlineData("  Tabs\tand  Spaces ", "tabsandspaces")]
     [InlineData("already-fine", "already-fine")]
     public void The_xdg_directory_is_the_application_lowercased_without_whitespace(string application, string expected)
@@ -160,6 +166,24 @@ public sealed class ProjectLayoutTests
 
         Assert.Equal(P("Users", "alice", "Library", "Application Support"), layout.Config.Base);
         Assert.Null(layout.Runtime);
+    }
+
+    /// <summary>
+    /// Any run of Unicode whitespace in any part, the qualifier included, becomes one hyphen,
+    /// and the ends are trimmed. The Rust crate replaces each space alone and leaves the
+    /// qualifier untouched, giving <c>My--App</c>, <c>Tab\tApp</c> and <c>com x</c> for these.
+    /// </summary>
+    [Theory]
+    [InlineData("com", "Example", "My  App", "com.Example.My-App")]
+    [InlineData("com", "Example", "Tab\tApp", "com.Example.Tab-App")]
+    [InlineData("com x", "Example", "App", "com-x.Example.App")]
+    [InlineData(" com ", " Example Corp ", " My App ", "com.Example-Corp.My-App")]
+    public void Apple_turns_each_run_of_whitespace_into_one_hyphen(
+        string qualifier, string organization, string application, string expected)
+    {
+        HostEnvironment host = new(DirectoryConvention.Apple, _ => null, () => P("Users", "alice"), _ => null);
+
+        Assert.Equal([expected], ProjectLayout.Resolve(qualifier, organization, application, host).Config.Components);
     }
 
     [Fact]
@@ -240,6 +264,102 @@ public sealed class ProjectLayoutTests
     {
         Assert.Throws<ArgumentNullException>("application", () => ProjectLayout.Resolve("", "", null!, Xdg([])));
     }
+
+    public static TheoryData<Environment.SpecialFolder> AppDataFolders =>
+    [
+        Environment.SpecialFolder.ApplicationData,
+        Environment.SpecialFolder.LocalApplicationData,
+    ];
+
+    /// <summary>
+    /// The base is the host's answer for the folder whatever the convention, and the names
+    /// are kept exactly as given, so the location is the one a <c>System.IO</c> program
+    /// using <c>Path.Combine</c> already has its files in.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(AppDataFolders))]
+    public void A_special_folder_location_uses_the_names_as_given(Environment.SpecialFolder folder)
+    {
+        foreach (DirectoryConvention convention in Enum.GetValues<DirectoryConvention>())
+        {
+            ProjectLocation location = ProjectLayout.ResolveSpecialFolder(
+                folder, "Example  Corp", "My\tApp ", SpecialFolderHost(convention));
+
+            Assert.Equal(SpecialFolderBase(folder), location.Base);
+            Assert.Equal(["Example  Corp", "My\tApp "], location.Components);
+        }
+    }
+
+    [Fact]
+    public void A_special_folder_location_leaves_out_an_empty_organization()
+    {
+        ProjectLocation location = ProjectLayout.ResolveSpecialFolder(
+            Environment.SpecialFolder.ApplicationData, "", "App", SpecialFolderHost(DirectoryConvention.Xdg));
+
+        Assert.Equal(["App"], location.Components);
+    }
+
+    /// <summary>
+    /// Only the per-user application-data folders are accepted, so the method is a way to an
+    /// application's own directory rather than to the account's documents or desktop.
+    /// </summary>
+    [Theory]
+    [InlineData(Environment.SpecialFolder.MyDocuments)]
+    [InlineData(Environment.SpecialFolder.Desktop)]
+    [InlineData(Environment.SpecialFolder.UserProfile)]
+    [InlineData(Environment.SpecialFolder.CommonApplicationData)]
+    [InlineData((Environment.SpecialFolder)12345)]
+    public void A_special_folder_other_than_application_data_is_refused(Environment.SpecialFolder folder)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            nameof(folder),
+            () => ProjectLayout.ResolveSpecialFolder(folder, "Org", "App", SpecialFolderHost(DirectoryConvention.Xdg)));
+    }
+
+    [Theory]
+    [InlineData("Org", "../escape", "application")]
+    [InlineData("Org", "a/b", "application")]
+    [InlineData("Org", "a\\b", "application")]
+    [InlineData("Org", "a\0b", "application")]
+    [InlineData("Org/Sub", "App", "organization")]
+    [InlineData("Org", "", "application")]
+    [InlineData("Org", ".", "application")]
+    [InlineData("Org", "..", "application")]
+    [InlineData("..", "App", "organization")]
+    public void A_special_folder_name_that_is_not_one_new_component_is_refused(
+        string organization, string application, string parameter)
+    {
+        Assert.Throws<ArgumentException>(
+            parameter,
+            () => ProjectLayout.ResolveSpecialFolder(
+                Environment.SpecialFolder.ApplicationData,
+                organization,
+                application,
+                SpecialFolderHost(DirectoryConvention.Xdg)));
+    }
+
+    [Fact]
+    public void A_special_folder_the_host_does_not_have_fails()
+    {
+        Assert.Throws<DirectoryNotFoundException>(
+            () => ProjectLayout.ResolveSpecialFolder(
+                Environment.SpecialFolder.ApplicationData, "Org", "App", Xdg([])));
+
+        HostEnvironment relative = new(DirectoryConvention.Xdg, _ => null, () => Home, _ => "relative/folder");
+        Assert.Throws<DirectoryNotFoundException>(
+            () => ProjectLayout.ResolveSpecialFolder(
+                Environment.SpecialFolder.ApplicationData, "Org", "App", relative));
+    }
+
+    private static string SpecialFolderBase(Environment.SpecialFolder folder) => folder switch
+    {
+        Environment.SpecialFolder.ApplicationData => P("roaming"),
+        Environment.SpecialFolder.LocalApplicationData => P("local"),
+        _ => throw new ArgumentOutOfRangeException(nameof(folder)),
+    };
+
+    private static HostEnvironment SpecialFolderHost(DirectoryConvention convention) =>
+        new(convention, _ => null, () => Home, SpecialFolderBase);
 
     private static HostEnvironment WindowsHost() =>
         new(

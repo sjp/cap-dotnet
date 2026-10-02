@@ -307,6 +307,156 @@ public sealed class ProjectDirsTests : IDisposable
         }
     }
 
+    private string RoamingPath => Path.Join(_root, "roaming");
+
+    private Dir OpenSpecial(string organization = "Example Corp", string application = "My App") =>
+        ProjectDirs.OpenSpecialFolderOnHost(
+            Environment.SpecialFolder.ApplicationData,
+            organization,
+            application,
+            AmbientAuthority.Acquire(),
+            SymlinkPolicy.FollowWithinSandbox,
+            new HostEnvironment(
+                DirectoryConvention.Xdg,
+                _ => null,
+                () => HomePath,
+                folder => folder == Environment.SpecialFolder.ApplicationData ? RoamingPath : null));
+
+    [Fact]
+    public void Opening_a_special_folder_requires_an_acquired_token()
+    {
+        Assert.Throws<ArgumentException>(
+            "authority",
+            () => ProjectDirs.OpenSpecialFolder(Environment.SpecialFolder.ApplicationData, "Example", "App", default));
+    }
+
+    [Fact]
+    public void Opening_a_special_folder_refuses_an_undefined_symlink_policy()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(
+            "policy",
+            () => ProjectDirs.OpenSpecialFolder(
+                Environment.SpecialFolder.ApplicationData,
+                "Example",
+                "App",
+                AmbientAuthority.Acquire(),
+                (SymlinkPolicy)99));
+    }
+
+    /// <summary>
+    /// The directory is the one <c>Path.Combine</c> on the folder and the names gives, with
+    /// the names exactly as written, so a program moving from <c>System.IO</c> finds its files.
+    /// </summary>
+    [Fact]
+    public void A_special_folder_directory_is_created_under_the_names_as_given()
+    {
+        using Dir dir = OpenSpecial();
+
+        string expected = Path.Join(RoamingPath, "Example Corp", "My App");
+        Assert.True(Directory.Exists(expected));
+
+        using Dir named = Dir.Open(expected, AmbientAuthority.Acquire());
+        Assert.True(dir.GetMetadata().IsSameFileAs(named.GetMetadata()));
+    }
+
+    [Fact]
+    public void A_special_folder_directory_that_exists_is_opened_with_its_contents()
+    {
+        string existing = Path.Join(RoamingPath, "Example Corp", "My App");
+        Directory.CreateDirectory(existing);
+        File.WriteAllText(Path.Join(existing, "settings.json"), "{}");
+
+        using Dir dir = OpenSpecial();
+
+        Assert.Equal("{}", dir.ReadAllText("settings.json"));
+    }
+
+    [Fact]
+    public void A_special_folder_directory_leaves_out_an_empty_organization()
+    {
+        using Dir dir = OpenSpecial(organization: "");
+
+        Assert.True(Directory.Exists(Path.Join(RoamingPath, "My App")));
+    }
+
+    [Fact]
+    public void Every_directory_created_beneath_a_special_folder_is_closed_to_other_accounts()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(NoModeBits);
+            return;
+        }
+
+        OpenSpecial().Dispose();
+
+        Assert.Equal(OwnerOnly, File.GetUnixFileMode(RoamingPath));
+        Assert.Equal(OwnerOnly, File.GetUnixFileMode(Path.Join(RoamingPath, "Example Corp")));
+        Assert.Equal(OwnerOnly, File.GetUnixFileMode(Path.Join(RoamingPath, "Example Corp", "My App")));
+    }
+
+    [Fact]
+    public void A_directory_that_already_exists_beneath_a_special_folder_keeps_its_permissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(NoModeBits);
+            return;
+        }
+
+        string organization = Path.Join(RoamingPath, "Example Corp");
+        string application = Path.Join(organization, "My App");
+        Directory.CreateDirectory(application);
+        File.SetUnixFileMode(organization, Open755);
+        File.SetUnixFileMode(application, Open755);
+
+        OpenSpecial().Dispose();
+
+        Assert.Equal(Open755, File.GetUnixFileMode(organization));
+        Assert.Equal(Open755, File.GetUnixFileMode(application));
+    }
+
+    [Fact]
+    public void A_special_folder_directory_handle_is_confined_to_the_directory()
+    {
+        using Dir dir = OpenSpecial();
+
+        Assert.Throws<SandboxEscapeException>(() => dir.OpenDir(".."));
+        Assert.Equal(SymlinkPolicy.FollowWithinSandbox, dir.SymlinkPolicy);
+    }
+
+    /// <summary>
+    /// The names beneath the folder are created and opened without following a link, as
+    /// they are for <see cref="ProjectDirs.From"/>, so a link at one cannot place the
+    /// directory somewhere else.
+    /// </summary>
+    [Fact]
+    public void A_link_at_a_name_beneath_a_special_folder_is_refused()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Making a symbolic link needs a privilege this test does not assume.");
+            return;
+        }
+
+        // A link to nothing cannot be opened, so the ambient step stops above it and the name
+        // is one that has to be created through the handle.
+        Directory.CreateDirectory(RoamingPath);
+        Directory.CreateSymbolicLink(Path.Join(RoamingPath, "Example Corp"), Path.Join(_root, "missing"));
+
+        Assert.Throws<CapIOException>(() => OpenSpecial());
+        Assert.False(Directory.Exists(Path.Join(_root, "missing")));
+    }
+
+    [Fact]
+    public void A_file_in_the_way_of_a_special_folder_directory_is_reported()
+    {
+        Directory.CreateDirectory(RoamingPath);
+        File.WriteAllText(Path.Join(RoamingPath, "Example Corp"), "not a directory");
+
+        Assert.Throws<CapIOException>(() => OpenSpecial());
+    }
+
     [Fact]
     public void There_is_no_runtime_directory_when_the_session_names_none()
     {

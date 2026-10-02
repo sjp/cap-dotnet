@@ -31,12 +31,15 @@ internal sealed record ProjectLocation(string Base, IReadOnlyList<string> Compon
 /// can be checked against a described host rather than the real one.
 /// </para>
 /// <para>
-/// The layout is the one the Rust <c>directories</c> crate uses, so an application written
-/// against either finds the same directories. On Linux and the other Unixes it follows the
-/// XDG Base Directory specification, naming the application's directory after the
-/// application alone, lowercased with its whitespace removed. On macOS the directories sit in
-/// the per-user <c>Library</c> folders under a reverse-domain bundle identifier built from
-/// all three names. On Windows they sit under the organization and application in the
+/// The layout is the one the Rust <c>directories</c> crate uses. On Linux and the other
+/// Unixes it follows the XDG Base Directory specification, naming the application's
+/// directory after the application alone, lowercased with its whitespace removed. On macOS
+/// the directories sit in the per-user <c>Library</c> folders under a reverse-domain bundle
+/// identifier built from all three names, with the whitespace in each turned into hyphens.
+/// Whitespace here is any Unicode whitespace, a run of it counts once, and it is trimmed
+/// from the ends. The crate changes only the space character, and on macOS neither trims nor
+/// collapses runs nor touches the qualifier, so a name with a tab, a run of spaces or a space
+/// in the qualifier gets a different directory there. On Windows they sit under the organization and application in the
 /// roaming and local application-data folders, with the kind of directory as a last
 /// component, because configuration and data share a parent there.
 /// </para>
@@ -110,6 +113,53 @@ internal sealed class ProjectLayout
             DirectoryConvention.Windows => ResolveWindows(organization, application, host),
             _ => throw new PlatformNotSupportedException(),
         };
+    }
+
+    /// <summary>
+    /// Works out where an application's directory sits beneath one of the runtime's
+    /// application-data special folders, where <c>Path.Combine</c> on the result of
+    /// <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/> would put it.
+    /// </summary>
+    /// <remarks>
+    /// The base is whatever the host answers for the folder, and the names are used as given,
+    /// with no case or whitespace changed, so that the location is the one a program written
+    /// against <c>System.IO</c> already uses. An empty organization is left out rather than
+    /// turned into an empty component.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A name is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="folder"/> is not <see cref="Environment.SpecialFolder.ApplicationData"/>
+    /// or <see cref="Environment.SpecialFolder.LocalApplicationData"/>.
+    /// </exception>
+    /// <exception cref="ArgumentException">A name cannot be used as a directory name.</exception>
+    /// <exception cref="DirectoryNotFoundException">The host has no such folder.</exception>
+    internal static ProjectLocation ResolveSpecialFolder(
+        Environment.SpecialFolder folder,
+        string organization,
+        string application,
+        HostEnvironment host)
+    {
+        ArgumentNullException.ThrowIfNull(organization);
+        ArgumentNullException.ThrowIfNull(application);
+        ArgumentNullException.ThrowIfNull(host);
+
+        if (folder is not (Environment.SpecialFolder.ApplicationData or Environment.SpecialFolder.LocalApplicationData))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(folder),
+                folder,
+                "Only the per-user application-data folders, ApplicationData and " +
+                "LocalApplicationData, hold an application's own directories.");
+        }
+
+        RefuseSeparators(organization, nameof(organization));
+        RefuseSeparators(application, nameof(application));
+
+        string[] project = organization.Length == 0
+            ? [Checked(application, nameof(application))]
+            : [Checked(organization, nameof(organization)), Checked(application, nameof(application))];
+
+        return new ProjectLocation(RequireKnownFolder(host, folder), project);
     }
 
     /// <summary>

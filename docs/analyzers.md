@@ -218,8 +218,8 @@ that parse and resolve paths also ban `System.IO.Path` outright, through
 places are allowed to reach the real thing, and each one suppresses the rule at that line and
 says why. `CapClock` and `CapRandom` are where the clock and entropy enter, behind a token.
 The socket calls in `Cap.Net` come after the address has been checked against a pool.
-`Cap.Directories` reads `Environment.GetFolderPath` only inside `ProjectDirs.From`, after its
-token has been demanded, and the Windows backend loads `ntdll.dll` by module name to probe
+`Cap.Directories` reads `Environment.GetFolderPath` only inside `ProjectDirs.From` and
+`ProjectDirs.OpenSpecialFolder`, after their token has been demanded, and the Windows backend loads `ntdll.dll` by module name to probe
 for an export.
 
 ## Why not BannedApiAnalyzers
