@@ -71,6 +71,110 @@ public sealed class UdpGrantTests
     }
 
     /// <summary>
+    /// A send that names no destination, on a socket pointed nowhere, fails as a socket error
+    /// rather than as a refusal.
+    /// </summary>
+    /// <remarks>
+    /// Nothing was named, so there was nothing for the pool to be asked about: the system has
+    /// no peer to send to, and says so.
+    /// </remarks>
+    [Fact]
+    public void A_send_on_a_socket_pointed_nowhere_fails_as_a_socket_error()
+    {
+        using CapUdpSocket sender = CapUdpSocket.Open(Pool.Empty, AddressFamily.InterNetwork);
+
+        Assert.IsType<SocketException>(Assert.ThrowsAny<Exception>(() => sender.Send("ping"u8)));
+    }
+
+    /// <summary>A datagram to a granted destination on the IPv6 loopback arrives.</summary>
+    [Fact]
+    public async Task An_ipv6_loopback_round_trip_works()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("::1/128"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+        using CapUdpSocket receiver = CapUdpSocket.Bind(pool, new IPEndPoint(IPAddress.IPv6Loopback, 0));
+        using CapUdpSocket sender = CapUdpSocket.Open(pool, AddressFamily.InterNetworkV6);
+
+        await sender.SendToAsync(
+            "ping"u8.ToArray(), receiver.LocalEndPoint!, TestContext.Current.CancellationToken);
+
+        byte[] buffer = new byte[16];
+        SocketReceiveFromResult result = await receiver.ReceiveFromAsync(
+            buffer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("ping"u8.ToArray(), buffer[..result.ReceivedBytes]);
+        Assert.Equal(IPAddress.IPv6Loopback, ((IPEndPoint)result.RemoteEndPoint).Address);
+    }
+
+    /// <summary>
+    /// A mapped address passes the pool as the IPv4 address it maps to, and then cannot be
+    /// sent to over the IPv4 socket, which takes no IPv6 address.
+    /// </summary>
+    /// <remarks>
+    /// The same split as for a connection: the grant is about the host, the socket is about
+    /// the family, and the address has to be written in the family that reaches it.
+    /// </remarks>
+    [Fact]
+    public void A_mapped_address_is_granted_but_not_sendable_over_ipv4()
+    {
+        using Socket receiver = LoopbackReceiver(AddressFamily.InterNetwork);
+        var mapped = new IPEndPoint(
+            IPAddress.Loopback.MapToIPv6(), ((IPEndPoint)receiver.LocalEndPoint!).Port);
+
+        Pool pool = Loopback;
+        using CapUdpSocket sender = CapUdpSocket.Open(pool, AddressFamily.InterNetwork);
+
+        Assert.True(pool.Allows(mapped));
+        Assert.Throws<SocketException>(() => sender.SendTo("ping"u8, mapped));
+
+        AssertNothingArrives(receiver);
+    }
+
+    /// <summary>
+    /// A second connect is checked like the first, and its refusal leaves the socket pointed
+    /// at the peer the first one granted.
+    /// </summary>
+    /// <remarks>
+    /// The pool is asked before the system is told anything, so a refused peer never replaces
+    /// the granted one.
+    /// </remarks>
+    [Fact]
+    public async Task A_second_connect_is_checked_again()
+    {
+        using Socket receiver = LoopbackReceiver(AddressFamily.InterNetwork);
+        var peer = (IPEndPoint)receiver.LocalEndPoint!;
+
+        Pool onlyPeer = new PoolBuilder()
+            .InsertSocketAddress(peer, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapUdpSocket sender = CapUdpSocket.Open(onlyPeer, AddressFamily.InterNetwork);
+        sender.Connect(peer);
+
+        Assert.Throws<EndpointNotGrantedException>(() =>
+            sender.Connect(new IPEndPoint(IPAddress.Loopback, 9)));
+
+        sender.Send("ping"u8);
+
+        byte[] buffer = new byte[16];
+        int received = await receiver.ReceiveAsync(buffer, TestContext.Current.CancellationToken);
+
+        Assert.Equal("ping"u8.ToArray(), buffer[..received]);
+    }
+
+    /// <summary>
+    /// Claiming every interface needs the unspecified address granted; a grant of loopback
+    /// is not enough.
+    /// </summary>
+    [Fact]
+    public void A_wildcard_bind_needs_the_wildcard_granted()
+    {
+        Assert.Throws<EndpointNotGrantedException>(() =>
+            CapUdpSocket.Bind(Loopback, new IPEndPoint(IPAddress.Any, 0)));
+    }
+
+    /// <summary>
     /// A socket pointed at a granted peer still has a send that names another destination
     /// checked against the pool.
     /// </summary>

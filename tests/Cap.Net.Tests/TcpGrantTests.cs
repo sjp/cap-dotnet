@@ -97,6 +97,17 @@ public sealed class TcpGrantTests
         Assert.Equal(IPAddress.Any, listener.LocalEndPoint.Address);
     }
 
+    /// <summary>
+    /// Listening on every interface needs the unspecified address granted; a grant of
+    /// loopback is not enough.
+    /// </summary>
+    [Fact]
+    public void A_wildcard_listener_needs_the_wildcard_granted()
+    {
+        Assert.Throws<EndpointNotGrantedException>(() =>
+            CapTcpListener.Bind(Loopback, new IPEndPoint(IPAddress.Any, 0)));
+    }
+
     /// <summary>The refusal is about authority and is not a network failure.</summary>
     /// <remarks>
     /// Worth asserting separately, because an application that wants to alert on grants being
