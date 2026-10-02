@@ -4,8 +4,8 @@ using System.Numerics;
 namespace Cap.Rand;
 
 /// <summary>
-/// Integers and byte arrays drawn from any <see cref="IRandomSource"/>, uniformly over the
-/// range asked for.
+/// Integers, fractions, byte arrays and permutations drawn from any
+/// <see cref="IRandomSource"/>, uniformly over the range asked for.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -31,6 +31,15 @@ namespace Cap.Rand;
 /// <c>2^k - 1</c> covers, where <c>2^k</c> is the smallest power of two not below <c>w</c>. The
 /// first attempt whose value is below <c>w</c> is used, and the result is the lower bound plus
 /// that value.
+/// </item>
+/// <item>
+/// <see cref="GetDouble"/> draws eight bytes, reads them as a little-endian unsigned integer,
+/// keeps its top 53 bits and divides them by <c>2^53</c>.
+/// </item>
+/// <item>
+/// <see cref="Shuffle{T}"/> is the classic Fisher–Yates shuffle: for each index <c>i</c> from
+/// the last down to 1, it draws <c>j</c> with <c>GetInt32(i + 1)</c> and swaps the elements at
+/// <c>i</c> and <c>j</c>.
 /// </item>
 /// </list>
 /// </remarks>
@@ -167,5 +176,75 @@ public static class RandomSourceExtensions
         while (value >= width);
 
         return unchecked((long)((ulong)fromInclusive + value));
+    }
+
+    /// <summary>
+    /// A fraction from zero up to, but not including, one.
+    /// </summary>
+    /// <param name="source">Where the bytes come from.</param>
+    /// <returns>
+    /// One of the <c>2^53</c> evenly spaced values <c>k / 2^53</c>, each equally likely. That
+    /// spacing is the precision of a <see cref="double"/> just below one, so every value the
+    /// result can take near one is reached; values close to zero are not as finely divided as
+    /// a <see cref="double"/> could divide them.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Draws exactly eight bytes, reads them as a little-endian unsigned integer, and divides
+    /// its top 53 bits by <c>2^53</c>. Nothing is ever redrawn.
+    /// </para>
+    /// <para>
+    /// Exactly as safe to call from several threads at once as <paramref name="source"/>'s
+    /// <see cref="IRandomSource.Fill"/> is: safe with <see cref="CapRandom"/>, not with a
+    /// shared <see cref="InsecureDeterministicRandom"/>.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
+    public static double GetDouble(this IRandomSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        Span<byte> draw = stackalloc byte[sizeof(ulong)];
+        source.Fill(draw);
+
+        ulong value = BinaryPrimitives.ReadUInt64LittleEndian(draw) >> 11;
+        return value * (1.0 / (1UL << 53));
+    }
+
+    /// <summary>
+    /// Puts <paramref name="values"/> into a random order, every order equally likely.
+    /// </summary>
+    /// <typeparam name="T">The element type.</typeparam>
+    /// <param name="source">Where the bytes come from.</param>
+    /// <param name="values">
+    /// The elements to reorder, in place. An array passes as it is; a <c>List&lt;T&gt;</c>
+    /// through <c>CollectionsMarshal.AsSpan</c>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The classic Fisher–Yates shuffle: for each index <c>i</c> from the last down to 1,
+    /// draw <c>j</c> with <see cref="GetInt32(IRandomSource, int)"/> over <c>i + 1</c> values
+    /// and swap the elements at <c>i</c> and <c>j</c>. The draws are therefore those of
+    /// <see cref="GetInt32(IRandomSource, int)"/>, so a seeded shuffle can be reproduced
+    /// outside .NET. It is not the same sequence of draws as <c>System.Random.Shuffle</c>.
+    /// Fewer than two elements draw nothing.
+    /// </para>
+    /// <para>
+    /// Exactly as safe to call from several threads at once as <paramref name="source"/>'s
+    /// <see cref="IRandomSource.Fill"/> is: safe with <see cref="CapRandom"/>, not with a
+    /// shared <see cref="InsecureDeterministicRandom"/>. The span itself must not be changed
+    /// by anyone else while it is being shuffled.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentNullException"><paramref name="source"/> is null.</exception>
+    public static void Shuffle<T>(this IRandomSource source, Span<T> values)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        for (int i = values.Length - 1; i > 0; i--)
+        {
+            int j = source.GetInt32(i + 1);
+            (values[i], values[j]) = (values[j], values[i]);
+        }
     }
 }

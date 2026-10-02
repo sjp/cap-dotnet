@@ -3,8 +3,8 @@ using Cap.Primitives;
 namespace Cap.Rand.Tests;
 
 /// <summary>
-/// The integer helpers: their bounds, their rejection of out-of-range draws, and how many
-/// bytes they consume doing it.
+/// The helpers: their bounds, their rejection of out-of-range draws, and how many bytes they
+/// consume doing it.
 /// </summary>
 /// <remarks>
 /// Most of these run against a scripted source that hands out exactly the bytes a test
@@ -116,6 +116,108 @@ public sealed class RandomSourceExtensionsTests
 
         Assert.Empty(random.GetBytes(0));
         Assert.Equal(33, random.GetBytes(33).Length);
+    }
+
+    [Fact]
+    public void GetDouble_uses_the_top_53_bits()
+    {
+        var zero = new ScriptedSource([0, 0, 0, 0, 0, 0, 0, 0]);
+        var ones = new ScriptedSource([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+
+        // The low eleven bits are dropped, so only the top bit of the last byte counts.
+        var lowBitsOnly = new ScriptedSource([0xFF, 0x07, 0, 0, 0, 0, 0, 0]);
+        var topBitOnly = new ScriptedSource([0, 0, 0, 0, 0, 0, 0, 0x80]);
+
+        Assert.Equal(0.0, zero.GetDouble());
+        Assert.Equal(1.0 - Math.Pow(2, -53), ones.GetDouble());
+        Assert.Equal(0.0, lowBitsOnly.GetDouble());
+        Assert.Equal(0.5, topBitOnly.GetDouble());
+        Assert.Equal(8, ones.Consumed);
+    }
+
+    [Fact]
+    public void GetDouble_stays_below_one()
+    {
+        var random = new InsecureDeterministicRandom(2024);
+
+        for (int i = 0; i < 10_000; i++)
+        {
+            Assert.InRange(random.GetDouble(), 0.0, Math.BitDecrement(1.0));
+        }
+    }
+
+    [Fact]
+    public void Shuffle_is_a_permutation()
+    {
+        int[] values = Enumerable.Range(1, 100).ToArray();
+
+        new InsecureDeterministicRandom(7).Shuffle(values.AsSpan());
+
+        Assert.NotEqual(Enumerable.Range(1, 100), values);
+        Assert.Equal(Enumerable.Range(1, 100), values.Order());
+    }
+
+    [Fact]
+    public void Shuffle_of_fewer_than_two_elements_draws_nothing()
+    {
+        var source = new ScriptedSource([]);
+
+        source.Shuffle(Span<int>.Empty);
+        source.Shuffle(new[] { 42 }.AsSpan());
+
+        Assert.Equal(0, source.Consumed);
+    }
+
+    /// <summary>
+    /// Index <c>i</c> is swapped with <c>GetInt32(i + 1)</c>, last index first. With three
+    /// elements that is a draw over three values, then a draw over two.
+    /// </summary>
+    [Fact]
+    public void Shuffle_swaps_each_index_from_the_last_with_a_draw_up_to_it()
+    {
+        var source = new ScriptedSource(
+        [
+            0, 0, 0, 0, // i = 2, j = 0: [c, b, a]
+            1, 0, 0, 0, // i = 1, j = 1: unchanged
+        ]);
+        char[] values = ['a', 'b', 'c'];
+
+        source.Shuffle(values.AsSpan());
+
+        Assert.Equal(['c', 'b', 'a'], values);
+        Assert.Equal(8, source.Consumed);
+    }
+
+    /// <summary>
+    /// Each of the six orders of three elements turns up about equally often. A shuffle that
+    /// draws over the whole length at every step, the usual mistake, makes some orders
+    /// noticeably more likely than others and fails this.
+    /// </summary>
+    [Fact]
+    public void Every_order_of_three_elements_is_reached_about_equally()
+    {
+        var random = new InsecureDeterministicRandom(2024);
+        var counts = new Dictionary<string, int>();
+
+        for (int i = 0; i < 60_000; i++)
+        {
+            char[] values = ['a', 'b', 'c'];
+            random.Shuffle(values.AsSpan());
+            string order = new(values);
+            counts[order] = counts.GetValueOrDefault(order) + 1;
+        }
+
+        Assert.Equal(6, counts.Count);
+        Assert.All(counts.Values, c => Assert.InRange(c, 9_000, 11_000));
+    }
+
+    [Fact]
+    public void A_null_source_is_refused()
+    {
+        IRandomSource source = null!;
+
+        Assert.Throws<ArgumentNullException>(() => source.GetDouble());
+        Assert.Throws<ArgumentNullException>(() => source.Shuffle(new[] { 1, 2 }.AsSpan()));
     }
 
     /// <summary>Hands out exactly the bytes it was given, and fails loudly past the end.</summary>

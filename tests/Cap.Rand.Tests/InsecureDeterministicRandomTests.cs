@@ -120,6 +120,29 @@ public sealed class InsecureDeterministicRandomTests
             drawn);
     }
 
+    [Fact]
+    public void Double_helper_gives_the_reference_values()
+    {
+        var random = new InsecureDeterministicRandom(42);
+
+        double[] drawn = Enumerable.Range(0, 4).Select(_ => random.GetDouble()).ToArray();
+
+        Assert.Equal(
+            [0.08386297105988216, 0.3789802506626686, 0.6800434110281394, 0.9246929453253876],
+            drawn);
+    }
+
+    [Fact]
+    public void Shuffle_helper_gives_the_reference_order()
+    {
+        var random = new InsecureDeterministicRandom(42);
+        int[] values = Enumerable.Range(0, 10).ToArray();
+
+        random.Shuffle(values.AsSpan());
+
+        Assert.Equal([8, 5, 0, 3, 4, 7, 2, 1, 9, 6], values);
+    }
+
     /// <summary>
     /// The reason for the interface: a component that does not need security takes an
     /// <see cref="IRandomSource"/>, and a test gets the same run every time by handing it a

@@ -68,6 +68,10 @@ exists at all.
 - `GetInt32(int toExclusive)` and `GetInt32(int fromInclusive, int toExclusive)` return an
   `int`.
 - `GetInt64(long fromInclusive, long toExclusive)` returns a `long`.
+- `GetDouble()` returns a `double` from 0 up to, but not including, 1.
+- `Shuffle<T>(Span<T> values)` puts the elements into a random order in place, every order
+  equally likely. An array passes as it is, and a `List<T>` through
+  `CollectionsMarshal.AsSpan`.
 
 There is no `System.Random`-shaped surface, and in particular no `Next(int)`. The usual
 misuse of that shape is to take a large random integer modulo `n`, which makes small values
@@ -95,6 +99,12 @@ stream is fully specified here, and can be reproduced outside .NET:
    the stream as a little-endian unsigned integer and masks it to its low `k` bits, where
    `2^k` is the smallest power of two not below `w`. The first attempt below `w` is used, and
    the result is the lower bound plus that value.
+5. **Fractions.** `GetDouble` reads eight bytes from the stream as a little-endian unsigned
+   integer, keeps its top 53 bits and divides them by `2^53`. Nothing is redrawn.
+6. **Shuffling.** `Shuffle` is the classic Fisher–Yates shuffle: for each index `i` from the
+   last down to 1, it draws `j` with `GetInt32(i + 1)` as in step 4 and swaps the elements at
+   `i` and `j`. Fewer than two elements draw nothing. This is not the order of draws that
+   `System.Random.Shuffle` uses, so the same seed does not give the same permutation there.
 
 The test suite pins reference outputs for this whole description, produced by a separate
 implementation, so a change to any of these steps fails the build.
