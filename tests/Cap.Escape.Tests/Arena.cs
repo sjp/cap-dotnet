@@ -245,31 +245,62 @@ internal sealed class Arena : IDisposable
 /// <summary>What a case needs from the host, found once per run.</summary>
 internal static class HostFeatures
 {
-    private static readonly Lazy<HostFeature> Probed = new(Probe);
+    private static readonly Lazy<(HostFeature Features, IReadOnlyDictionary<HostFeature, string> Refusals)> Probed =
+        new(Probe);
 
     /// <summary>The features of the host, and of the volume arenas are built on.</summary>
-    public static HostFeature Current => Probed.Value;
+    public static HostFeature Current => Probed.Value.Features;
+
+    /// <summary>
+    /// Why the host refused each feature the probe tried to make and could not, in the words of
+    /// whatever refused it: the shell's output for a junction, say. A feature the probe only
+    /// looks for, such as case insensitivity, has no entry.
+    /// </summary>
+    public static IReadOnlyDictionary<HostFeature, string> Refusals => Probed.Value.Refusals;
 
     /// <summary>
     /// Stands a case aside where the host lacks what it needs, or fails it where this run was
     /// set up to have that (see <see cref="ExpectedHostFeatures"/>).
     /// </summary>
     public static void Require(HostFeature needed, string reason) =>
-        ExpectedHostFeatures.Require(needed, Current, reason);
+        ExpectedHostFeatures.Require(needed, Current, reason + Explain(needed & ~Current, Refusals));
 
-    private static HostFeature Probe()
+    /// <summary>
+    /// The refusals behind the <paramref name="missing"/> features, as sentences to append to a
+    /// message, so that a run expecting one says what went wrong rather than only that it did.
+    /// </summary>
+    public static string Explain(HostFeature missing, IReadOnlyDictionary<HostFeature, string> refusals) =>
+        string.Concat(Enum.GetValues<HostFeature>()
+            .Where(feature => feature != HostFeature.None && (missing & feature) != 0)
+            .Select(feature => refusals.TryGetValue(feature, out string? refusal)
+                ? $" Making {feature} was refused: {refusal}"
+                : string.Empty));
+
+    private static (HostFeature, IReadOnlyDictionary<HostFeature, string>) Probe()
     {
         using ScratchTree scratch = new(Arena.Location);
         string root = scratch.HostPath;
         HostFeature features = HostFeature.None;
+        Dictionary<HostFeature, string> refusals = [];
 
-        if (Attempt(() => HostFile.CreateSymbolicLink(Path.Join(root, "link"), "target")))
+        bool Attempt(HostFeature feature, Action create)
+        {
+            if (HostLinks.TryCreate(create, out string? refusal))
+            {
+                return true;
+            }
+
+            refusals[feature] = refusal!;
+            return false;
+        }
+
+        if (Attempt(HostFeature.Symlinks, () => HostFile.CreateSymbolicLink(Path.Join(root, "link"), "target")))
         {
             features |= HostFeature.Symlinks;
         }
 
         HostFile.WriteAllText(Path.Join(root, "Probe-Case"), string.Empty);
-        if (Attempt(() => HostFile.CreateHardLink(Path.Join(root, "Probe-Case"), Path.Join(root, "hard"))))
+        if (Attempt(HostFeature.HardLinks, () => HostFile.CreateHardLink(Path.Join(root, "Probe-Case"), Path.Join(root, "hard"))))
         {
             features |= HostFeature.HardLinks;
         }
@@ -286,13 +317,13 @@ internal static class HostFeatures
         }
 
         if (!OperatingSystem.IsWindows() &&
-            Attempt(() => HostFile.WriteAllText(Path.Join(root, "a:b\\c*d?e<f>g|h\"i."), string.Empty)))
+            Attempt(HostFeature.PosixNames, () => HostFile.WriteAllText(Path.Join(root, "a:b\\c*d?e<f>g|h\"i."), string.Empty)))
         {
             features |= HostFeature.PosixNames;
         }
 
         if (OperatingSystem.IsWindows() &&
-            Attempt(() => HostDirectory.CreateJunction(Path.Join(root, "junction"), root)))
+            Attempt(HostFeature.Junctions, () => HostDirectory.CreateJunction(Path.Join(root, "junction"), root)))
         {
             features |= HostFeature.Junctions;
         }
@@ -304,24 +335,11 @@ internal static class HostFeatures
             features |= HostFeature.ProcessFilesystem;
         }
 
-        if (!OperatingSystem.IsWindows() && Attempt(() => HostFile.CreateFifo(Path.Join(root, "fifo"))))
+        if (!OperatingSystem.IsWindows() && Attempt(HostFeature.SpecialFiles, () => HostFile.CreateFifo(Path.Join(root, "fifo"))))
         {
             features |= HostFeature.SpecialFiles;
         }
 
-        return features;
-    }
-
-    private static bool Attempt(Action action)
-    {
-        try
-        {
-            action();
-            return true;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return false;
-        }
+        return (features, refusals);
     }
 }

@@ -22,7 +22,35 @@ public sealed class HostFeaturesTests
         Assert.True(
             missing == HostFeature.None,
             $"{ExpectedHostFeatures.Variable} says this run was set up with {ExpectedHostFeatures.Value}, " +
-            $"but the host or volume has only {HostFeatures.Current}, so it is missing {missing}.");
+            $"but the host or volume has only {HostFeatures.Current}, so it is missing {missing}." +
+            HostFeatures.Explain(missing, HostFeatures.Refusals));
+    }
+
+    /// <summary>
+    /// A feature the probe tried to make and could not carries the refusal into the message, so
+    /// a Windows run whose junction probe failed says what the shell said.
+    /// </summary>
+    [Fact]
+    public void A_missing_feature_is_explained_by_what_refused_it()
+    {
+        Dictionary<HostFeature, string> refusals = new()
+        {
+            [HostFeature.Junctions] = "The system cannot find the path specified.",
+            [HostFeature.Symlinks] = "A required privilege is not held by the client.",
+        };
+
+        string explained = HostFeatures.Explain(HostFeature.Junctions | HostFeature.CaseInsensitive, refusals);
+
+        Assert.Equal(" Making Junctions was refused: The system cannot find the path specified.", explained);
+    }
+
+    [Fact]
+    public void A_feature_present_or_only_looked_for_adds_nothing()
+    {
+        Dictionary<HostFeature, string> refusals = new() { [HostFeature.Junctions] = "Refused." };
+
+        Assert.Empty(HostFeatures.Explain(HostFeature.None, refusals));
+        Assert.Empty(HostFeatures.Explain(HostFeature.CaseInsensitive, refusals));
     }
 
     [Fact]
