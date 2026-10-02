@@ -104,7 +104,7 @@ internal static class Program
         }
         catch (SandboxEscapeException e)
         {
-            Console.WriteLine($"upload:   {what}: refused: {e.Message}");
+            Console.WriteLine($"upload:   {what}: refused: {WithoutReason(e.Message)}");
             return true;
         }
     }
@@ -114,4 +114,35 @@ internal static class Program
         attempt();
         return null;
     });
+
+    /// <summary>
+    /// The message without the bracketed reason that ends it, such as
+    /// <c>(Escaped (errno 18))</c>.
+    /// </summary>
+    /// <remarks>
+    /// The reason names the operating system's own error code, which differs from one system
+    /// to the next, and the documentation quotes this output as it reads on all of them.
+    /// </remarks>
+    private static string WithoutReason(string message)
+    {
+        if (!message.EndsWith(')'))
+        {
+            return message;
+        }
+
+        int depth = 0;
+        for (int i = message.Length - 1; i > 0; i--)
+        {
+            if (message[i] == ')')
+            {
+                depth++;
+            }
+            else if (message[i] == '(' && --depth == 0)
+            {
+                return message[i - 1] == ' ' ? message[..(i - 1)] : message;
+            }
+        }
+
+        return message;
+    }
 }

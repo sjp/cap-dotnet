@@ -22,8 +22,10 @@ string check: passed, and read "the contents of a file outside the sandbox"
 Dir:          refused: 'reports/secret.txt' resolved outside the directory the handle grants authority over.
 ```
 
-The README's copies of the two snippets are checked against this program's by a test, so the
-page cannot drift from what is run.
+The README's copies of the two snippets are checked against this program's by a test, and so
+is the output above against what it prints, so the page cannot drift from what is run. The
+refusal is printed without the bracketed reason the exception's message ends with, which names
+the operating system's error code and so differs from one system to the next.
 
 ## `StaticFileServer`
 
@@ -217,4 +219,5 @@ private directory: untouched
 ```
 
 The code blocks in both guides are regions of this sample, checked verbatim by a test, so
-the pages show only code that is built and run.
+the pages show only code that is built and run. The output above is checked against what the
+sample prints in the same way, with the refusals' platform-specific error codes left off.

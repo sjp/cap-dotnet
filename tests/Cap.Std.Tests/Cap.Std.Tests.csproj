@@ -39,6 +39,31 @@
   </ItemGroup>
 
   <!--
+    The samples whose printed output samples/README.md quotes, built first and laid out under
+    samples/<name>/ beside this assembly, so that a test can run each one and hold the page to
+    what it prints. Not referenced: nothing here calls into them.
+  -->
+  <ItemGroup>
+    <QuotedSample Include="../../samples/ContainmentCheck/ContainmentCheck.csproj" />
+    <QuotedSample Include="../../samples/TestableComponent/App/TestableComponent.csproj" />
+    <ProjectReference Include="@(QuotedSample)" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="CopyQuotedSamples" AfterTargets="Build">
+    <MSBuild Projects="@(QuotedSample)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_QuotedSampleAssembly" />
+    </MSBuild>
+    <ItemGroup>
+      <_QuotedSampleFile Include="%(_QuotedSampleAssembly.RootDir)%(_QuotedSampleAssembly.Directory)*.*">
+        <SampleName>%(_QuotedSampleAssembly.Filename)</SampleName>
+      </_QuotedSampleFile>
+    </ItemGroup>
+    <Copy SourceFiles="@(_QuotedSampleFile)"
+          DestinationFolder="$(OutDir)samples/%(_QuotedSampleFile.SampleName)"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+  <!--
     The Cap.Std sources, carried into this assembly so that a test can read them.
 
     One of the guarantees this library makes is not expressible as behaviour: that no
