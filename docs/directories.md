@@ -32,7 +32,7 @@ application's configuration directory and nothing above it.
 The layout matches the Rust [`directories`](https://crates.io/crates/directories) crate, so
 an application finds the same directories whichever library it uses.
 
-| Kind | Linux and other Unixes | macOS | Windows |
+| Kind | Linux | macOS | Windows |
 |---|---|---|---|
 | Config | `$XDG_CONFIG_HOME/myapp`, else `~/.config/myapp` | `~/Library/Application Support/com.Example-Corp.My-App` | `%APPDATA%\Example Corp\My App\config` |
 | Data | `$XDG_DATA_HOME/myapp`, else `~/.local/share/myapp` | `~/Library/Application Support/com.Example-Corp.My-App` | `%APPDATA%\Example Corp\My App\data` |
@@ -53,6 +53,10 @@ an application finds the same directories whichever library it uses.
 - **State and runtime** exist only where the convention defines them. On macOS and Windows
   `OpenState` and `OpenRuntime` return null. This library does not invent a location for
   them.
+- **Other operating systems.** The XDG column describes the convention every other Unix
+  follows, but cap-dotnet has filesystem backends only for Linux, macOS and Windows.
+  Elsewhere `ProjectDirs.From` fails, because there is no way to open a handle there; the
+  rest of the library fails the same way.
 
 A name containing `/`, `\` or NUL is refused on every platform, so the application's
 directory cannot end up somewhere other than the one intended.

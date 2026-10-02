@@ -429,7 +429,10 @@ public sealed class ProjectDirs : IDisposable
     /// </remarks>
     private static Slot? OpenRuntimeBase(ProjectLocation location, AmbientAuthority authority, SymlinkPolicy policy)
     {
-        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+        // Linux is the only host with both an XDG runtime location and a filesystem backend:
+        // macOS follows the Apple convention, which has no runtime location, and other Unixes
+        // never get this far, because From cannot open anything there.
+        if (!OperatingSystem.IsLinux())
         {
             return null;
         }
