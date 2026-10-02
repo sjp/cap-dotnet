@@ -176,7 +176,9 @@ test is skipped for it. The skips are:
 - a relative symbolic link target is taken against the current directory rather than the
   directory holding the link;
 - a path beginning with two separators, such as the `//b` that `Path.Join("/", "/b")`
-  spells, does not name `/b`.
+  spells, does not name `/b`;
+- the search pattern `.` matches nothing, and `*.*` only names that contain a dot.
+  `System.IO`, and `DirFileSystem`, match every name with both.
 
 A test that passes on `MockFileSystem` because of one of these can fail against
 `DirFileSystem`. Beyond these, `MockFileSystem` does not confine anything, and the

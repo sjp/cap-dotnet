@@ -504,6 +504,35 @@ internal sealed class VirtualPath
         return _drive is not null && path.Length >= 2 && IsSeparator(path[0]) && IsSeparator(path[1]);
     }
 
+    /// <summary>
+    /// A search pattern as <c>System.IO</c> reads one under <see cref="System.IO.MatchType.Win32"/>,
+    /// translated to the expression <see cref="System.IO.Enumeration.FileSystemName"/> matches.
+    /// </summary>
+    /// <remarks>
+    /// <c>""</c>, <c>.</c> and <c>*.*</c> match every name, as they always have. Where <c>\</c> is
+    /// not a separator, it and <c>"</c>, <c>&lt;</c> and <c>&gt;</c> are characters a name can hold,
+    /// so they are escaped to match only themselves rather than act as the escape and the DOS
+    /// wildcards they are in a Win32 expression.
+    /// </remarks>
+    public string Win32Pattern(string pattern)
+    {
+        if (pattern is "" or "." or "*.*")
+        {
+            return "*";
+        }
+
+        if (!_windows && pattern.AsSpan().IndexOfAny("\\\"<>") >= 0)
+        {
+            pattern = pattern
+                .Replace("\\", "\\\\", StringComparison.Ordinal)
+                .Replace("\"", "\\\"", StringComparison.Ordinal)
+                .Replace(">", "\\>", StringComparison.Ordinal)
+                .Replace("<", "\\<", StringComparison.Ordinal);
+        }
+
+        return System.IO.Enumeration.FileSystemName.TranslateWin32Expression(pattern);
+    }
+
     private char[] Separators() => _windows ? ['/', '\\'] : ['/'];
 }
 

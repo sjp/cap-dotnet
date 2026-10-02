@@ -92,7 +92,7 @@ internal static class Enumeration
             _ => DirFileSystem.IgnoresCase,
         };
         string expression = options.MatchType == MatchType.Win32
-            ? FileSystemName.TranslateWin32Expression(searchPattern)
+            ? fs.Paths.Win32Pattern(searchPattern)
             : searchPattern;
 
         Queue<(Dir Directory, string Relative, int Depth)> pending = new();

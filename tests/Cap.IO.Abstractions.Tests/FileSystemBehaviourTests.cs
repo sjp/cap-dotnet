@@ -469,6 +469,41 @@ public abstract class FileSystemBehaviourTests : IDisposable
         Assert.Equal(["a.txt", "b.log", "sub"], Names(Fs.Directory.GetFileSystemEntries(P("d"))));
     }
 
+    [Theory]
+    [InlineData("", ".hidden,a.txt,abc,b.log,noext,x.y.z", false)]
+    [InlineData(".", ".hidden,a.txt,abc,b.log,noext,x.y.z", false)]
+    [InlineData("*.*", ".hidden,a.txt,abc,b.log,noext,x.y.z", false)]
+    [InlineData("?bc", "abc", false)]
+    [InlineData("<abc", "", true)]
+    [InlineData("a\\b", "a\\b", true)]
+    public void Search_patterns_match_as_System_IO_matches(string pattern, string expected, bool unixOnly)
+    {
+        Assert.SkipWhen(unixOnly && OperatingSystem.IsWindows(), "\\ separates components on Windows, and \" < > cannot be in a name.");
+        if (pattern is "." or "*.*")
+        {
+            MockDiffers("the search patterns . and *.* do not match every name.");
+        }
+
+        Fs.Directory.CreateDirectory(P("d"));
+        foreach (string name in new[] { ".hidden", "a.txt", "abc", "b.log", "noext", "x.y.z" })
+        {
+            Fs.File.WriteAllText(P("d", name), string.Empty);
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            Fs.File.WriteAllText(P("d", "a\\b"), string.Empty);
+        }
+
+        string[] wanted = expected.Length == 0 ? [] : expected.Split(',');
+        if (!OperatingSystem.IsWindows() && wanted.Length > 1)
+        {
+            wanted = [.. wanted.Append("a\\b").Order(StringComparer.Ordinal)];
+        }
+
+        Assert.Equal(wanted, Names(Fs.Directory.GetFiles(P("d"), pattern)));
+    }
+
     [Fact]
     public void Enumerated_paths_lead_back_to_the_entries()
     {
