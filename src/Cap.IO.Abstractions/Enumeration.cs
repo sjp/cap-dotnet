@@ -46,10 +46,11 @@ internal static class Enumeration
     };
 
     /// <summary>
-    /// Finds entries beneath a directory. The directory is checked now, so a missing one is
-    /// reported by the call rather than by the first step of the enumeration; it is opened
-    /// again, and its entries read, as they are asked for, so an enumeration that is never
-    /// run holds nothing open.
+    /// Finds entries beneath a directory. The path is resolved and the directory checked now,
+    /// so a missing one is reported by the call rather than by the first step of the
+    /// enumeration, and a later change of the current directory does not change which
+    /// directory is walked; it is opened again, and its entries read, as they are asked for,
+    /// so an enumeration that is never run holds nothing open.
     /// </summary>
     public static IEnumerable<Found> Search(
         DirFileSystem fs, string path, string searchPattern, EnumerationOptions options, EntryKinds kinds)
@@ -63,14 +64,27 @@ internal static class Enumeration
                 nameof(searchPattern));
         }
 
-        fs.Run(path, Expected.Directory, request => fs.OpenDirectory(request).Dispose());
-        return Walk(fs, path, searchPattern, options, kinds);
+        Request request = fs.Resolve(path, nameof(path));
+        OpenTop(fs, request).Dispose();
+        return Walk(fs, request, searchPattern, options, kinds);
+    }
+
+    private static Dir OpenTop(DirFileSystem fs, Request request)
+    {
+        try
+        {
+            return fs.OpenDirectory(request);
+        }
+        catch (Exception e) when (fs.Translate(e, request, Expected.Directory) is { } translated)
+        {
+            throw translated;
+        }
     }
 
     private static IEnumerable<Found> Walk(
-        DirFileSystem fs, string path, string searchPattern, EnumerationOptions options, EntryKinds kinds)
+        DirFileSystem fs, Request request, string searchPattern, EnumerationOptions options, EntryKinds kinds)
     {
-        Dir top = fs.Run(path, Expected.Directory, request => fs.OpenDirectory(request));
+        Dir top = OpenTop(fs, request);
         bool ignoreCase = options.MatchCasing switch
         {
             MatchCasing.CaseSensitive => false,
@@ -97,7 +111,7 @@ internal static class Enumeration
                 {
                     continue;
                 }
-                catch (Exception e) when (Failures.Translate(e, path, Expected.Directory) is { } translated)
+                catch (Exception e) when (Failures.Translate(e, request.Virtual, Expected.Directory) is { } translated)
                 {
                     throw translated;
                 }

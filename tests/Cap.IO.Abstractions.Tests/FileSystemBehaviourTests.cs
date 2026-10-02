@@ -487,6 +487,21 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void A_deferred_enumeration_keeps_the_directory_it_was_asked_for()
+    {
+        Fs.Directory.CreateDirectory(P("e1", "rel"));
+        Fs.Directory.CreateDirectory(P("e2", "rel"));
+        Fs.File.WriteAllText(P("e1", "rel", "in-e1"), string.Empty);
+        Fs.File.WriteAllText(P("e2", "rel", "in-e2"), string.Empty);
+
+        Fs.Directory.SetCurrentDirectory(P("e1"));
+        IEnumerable<string> deferred = Fs.Directory.EnumerateFiles("rel");
+        Fs.Directory.SetCurrentDirectory(P("e2"));
+
+        Assert.Equal("in-e1", Fs.Path.GetFileName(Assert.Single(deferred)));
+    }
+
+    [Fact]
     public void A_relative_path_is_taken_against_the_current_directory()
     {
         Fs.Directory.CreateDirectory(P("d"));
