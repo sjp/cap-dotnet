@@ -161,6 +161,69 @@ public abstract class DifferenceTests : IDisposable
     }
 
     [Fact]
+    [Trait(Difference.Name, Difference.TempSubdirectory)]
+    public void A_taken_prefixed_name_is_drawn_again()
+    {
+        List<string> taken = [];
+
+        IDirectoryInfo made = ((DirectoryAdapter)Fs.Directory).CreateTempSubdirectory("job-", scratch => Collide(scratch, taken, 2));
+
+        Assert.True(made.Exists);
+        Assert.StartsWith("job-", made.Name, StringComparison.Ordinal);
+        Assert.Equal(2, taken.Count);
+        Assert.Equal([.. taken.Append(made.Name).Order(StringComparer.Ordinal)], TempEntries());
+    }
+
+    [Fact]
+    [Trait(Difference.Name, Difference.TempSubdirectory)]
+    public void A_prefixed_name_taken_every_time_fails_and_leaves_nothing_behind()
+    {
+        List<string> taken = [];
+
+        Assert.ThrowsAny<IOException>(
+            () => ((DirectoryAdapter)Fs.Directory).CreateTempSubdirectory("job-", scratch => Collide(scratch, taken, int.MaxValue)));
+
+        Assert.Equal(8, taken.Count);
+        Assert.Equal([.. taken.Order(StringComparer.Ordinal)], TempEntries());
+    }
+
+    /// <summary>
+    /// Draws a scratch directory and, for the first <paramref name="collisions"/> draws, takes
+    /// the prefixed name it will be moved to, as somebody else's directory would.
+    /// </summary>
+    private static CapTempDir Collide(Dir scratch, List<string> taken, int collisions)
+    {
+        CapTempDir drawn = CapTempDir.NewIn(scratch);
+        if (taken.Count < collisions)
+        {
+            string name = "job-" + drawn.Name;
+            scratch.CreateDir(name).Dispose();
+            taken.Add(name);
+        }
+
+        return drawn;
+    }
+
+    private string[] TempEntries() =>
+        [.. Fs.Directory.GetFileSystemEntries(Fs.Path.GetTempPath()).Select(path => Fs.Path.GetFileName(path)).Order(StringComparer.Ordinal)];
+
+    [Fact]
+    [Trait(Difference.Name, Difference.AppendStream)]
+    public void A_stream_opened_to_append_writes_at_the_end_wherever_its_position_is()
+    {
+        Fs.File.WriteAllBytes("a.bin", [1, 2]);
+
+        using (FileSystemStream stream = Fs.FileStream.New("a.bin", FileMode.Append))
+        {
+            stream.Write([3, 4]);
+            stream.Position = 2;
+            stream.Write([5]);
+        }
+
+        Assert.Equal([1, 2, 3, 4, 5], Fs.File.ReadAllBytes("a.bin"));
+    }
+
+    [Fact]
     [Trait(Difference.Name, Difference.SearchPatterns)]
     public void A_search_pattern_names_entries_in_one_directory()
     {
@@ -372,32 +435,40 @@ public abstract class DifferenceTests : IDisposable
     }
 
     [Fact]
+    [Trait(Difference.Name, Difference.Permissions)]
+    [Trait(Difference.Name, Difference.CreationMode)]
+    [Trait(Difference.Name, Difference.CreationTime)]
+    [Trait(Difference.Name, Difference.Handles)]
+    [Trait(Difference.Name, Difference.OpenHandle)]
     [Trait(Difference.Name, Difference.HostServices)]
     public void Members_with_no_capability_meaning_say_so()
     {
+        // Every member of every adapter, called with default arguments. The documented
+        // exceptions answer those without refusing: the IsReadOnly setter is given the value
+        // already there, and Wrap on the info factories is given null.
         Fs.File.WriteAllText("a.txt", "one");
         Fs.Directory.CreateDirectory("d");
-        IFileInfo file = Fs.FileInfo.New("a.txt");
-        IDirectoryInfo directory = Fs.DirectoryInfo.New("d");
 
-        Refused(() => Fs.DriveInfo.GetDrives());
-        Refused(() => Fs.DriveInfo.New("C"));
-        Refused(() => Fs.DriveInfo.Wrap(null));
-        Refused(() => Fs.FileSystemWatcher.New());
-        Refused(() => Fs.FileSystemWatcher.New("d"));
-        Refused(() => Fs.FileSystemWatcher.New("d", "*"));
-        Refused(() => Fs.FileSystemWatcher.Wrap(null));
-        Refused(() => Fs.FileVersionInfo.GetVersionInfo("a.txt"));
-        Refused(() => Fs.File.Encrypt("a.txt"));
-        Refused(() => Fs.File.Decrypt("a.txt"));
-        Refused(() => file.Encrypt());
-        Refused(() => file.Decrypt());
-        foreach (IFileSystemAclSupport acl in new[] { (IFileSystemAclSupport)file, (IFileSystemAclSupport)directory })
-        {
-            Refused(() => acl.GetAccessControl());
-            Refused(() => acl.GetAccessControl(IFileSystemAclSupport.AccessControlSections.All));
-            Refused(() => acl.SetAccessControl(new object()));
-        }
+        SortedDictionary<string, Exception?> outcomes = MemberSweep.Run(
+        [
+            (nameof(IFileSystem), Fs),
+            (nameof(IFile), Fs.File),
+            (nameof(IDirectory), Fs.Directory),
+            (nameof(IPath), Fs.Path),
+            (nameof(IFileInfoFactory), Fs.FileInfo),
+            (nameof(IDirectoryInfoFactory), Fs.DirectoryInfo),
+            (nameof(IFileStreamFactory), Fs.FileStream),
+            (nameof(IDriveInfoFactory), Fs.DriveInfo),
+            (nameof(IFileSystemWatcherFactory), Fs.FileSystemWatcher),
+            (nameof(IFileVersionInfoFactory), Fs.FileVersionInfo),
+            (nameof(IRandomAccess), Fs.RandomAccess),
+            (nameof(IFileInfo), Fs.FileInfo.New("a.txt")),
+            (nameof(IDirectoryInfo), Fs.DirectoryInfo.New("d")),
+        ]);
+        string[] refused = [.. outcomes.Where(outcome => outcome.Value is NotSupportedException).Select(outcome => outcome.Key)];
+
+        Assert.Equal(Unsupported, refused);
+        Assert.All(refused, key => Assert.Contains(nameof(DirFileSystem), outcomes[key]!.Message, StringComparison.Ordinal));
     }
 
 #pragma warning restore CA1416
@@ -419,6 +490,80 @@ public abstract class DifferenceTests : IDisposable
     }
 
     private static void Refused(Func<object?> call) => Refused(() => { _ = call(); });
+
+    /// <summary>
+    /// Every member that throws <see cref="NotSupportedException"/> when called with default
+    /// arguments, as <see cref="MemberSweep"/> names it. A member added to the interfaces, or
+    /// one that starts or stops being refused, changes this list on purpose or not at all.
+    /// </summary>
+    private static readonly string[] Unsupported =
+    [
+        "IDirectory IDirectory.CreateDirectory(String, UnixFileMode)",
+        "IDirectory IDirectory.SetCreationTime(String, DateTime)",
+        "IDirectory IDirectory.SetCreationTimeUtc(String, DateTime)",
+        "IDirectoryInfo IFileSystemAclSupport.GetAccessControl()",
+        "IDirectoryInfo IFileSystemAclSupport.GetAccessControl(AccessControlSections)",
+        "IDirectoryInfo IFileSystemAclSupport.SetAccessControl(Object)",
+        "IDirectoryInfo IFileSystemInfo.set_Attributes(FileAttributes)",
+        "IDirectoryInfo IFileSystemInfo.set_CreationTime(DateTime)",
+        "IDirectoryInfo IFileSystemInfo.set_CreationTimeUtc(DateTime)",
+        "IDirectoryInfo IFileSystemInfo.set_UnixFileMode(UnixFileMode)",
+        "IDriveInfoFactory IDriveInfoFactory.GetDrives()",
+        "IDriveInfoFactory IDriveInfoFactory.New(String)",
+        "IDriveInfoFactory IDriveInfoFactory.Wrap(DriveInfo)",
+        "IFile IFile.Decrypt(String)",
+        "IFile IFile.Encrypt(String)",
+        "IFile IFile.GetAttributes(SafeFileHandle)",
+        "IFile IFile.GetCreationTime(SafeFileHandle)",
+        "IFile IFile.GetCreationTimeUtc(SafeFileHandle)",
+        "IFile IFile.GetLastAccessTime(SafeFileHandle)",
+        "IFile IFile.GetLastAccessTimeUtc(SafeFileHandle)",
+        "IFile IFile.GetLastWriteTime(SafeFileHandle)",
+        "IFile IFile.GetLastWriteTimeUtc(SafeFileHandle)",
+        "IFile IFile.GetUnixFileMode(SafeFileHandle)",
+        "IFile IFile.OpenHandle(String, FileMode, FileAccess, FileShare, FileOptions, Int64)",
+        "IFile IFile.SetAttributes(SafeFileHandle, FileAttributes)",
+        "IFile IFile.SetAttributes(String, FileAttributes)",
+        "IFile IFile.SetCreationTime(SafeFileHandle, DateTime)",
+        "IFile IFile.SetCreationTime(String, DateTime)",
+        "IFile IFile.SetCreationTimeUtc(SafeFileHandle, DateTime)",
+        "IFile IFile.SetCreationTimeUtc(String, DateTime)",
+        "IFile IFile.SetLastAccessTime(SafeFileHandle, DateTime)",
+        "IFile IFile.SetLastAccessTimeUtc(SafeFileHandle, DateTime)",
+        "IFile IFile.SetLastWriteTime(SafeFileHandle, DateTime)",
+        "IFile IFile.SetLastWriteTimeUtc(SafeFileHandle, DateTime)",
+        "IFile IFile.SetUnixFileMode(SafeFileHandle, UnixFileMode)",
+        "IFile IFile.SetUnixFileMode(String, UnixFileMode)",
+        "IFileInfo IFileInfo.Decrypt()",
+        "IFileInfo IFileInfo.Encrypt()",
+        "IFileInfo IFileSystemAclSupport.GetAccessControl()",
+        "IFileInfo IFileSystemAclSupport.GetAccessControl(AccessControlSections)",
+        "IFileInfo IFileSystemAclSupport.SetAccessControl(Object)",
+        "IFileInfo IFileSystemInfo.set_Attributes(FileAttributes)",
+        "IFileInfo IFileSystemInfo.set_CreationTime(DateTime)",
+        "IFileInfo IFileSystemInfo.set_CreationTimeUtc(DateTime)",
+        "IFileInfo IFileSystemInfo.set_UnixFileMode(UnixFileMode)",
+        "IFileStreamFactory IFileStreamFactory.New(SafeFileHandle, FileAccess)",
+        "IFileStreamFactory IFileStreamFactory.New(SafeFileHandle, FileAccess, Int32)",
+        "IFileStreamFactory IFileStreamFactory.New(SafeFileHandle, FileAccess, Int32, Boolean)",
+        "IFileStreamFactory IFileStreamFactory.Wrap(FileStream)",
+        "IFileSystemWatcherFactory IFileSystemWatcherFactory.New()",
+        "IFileSystemWatcherFactory IFileSystemWatcherFactory.New(String)",
+        "IFileSystemWatcherFactory IFileSystemWatcherFactory.New(String, String)",
+        "IFileSystemWatcherFactory IFileSystemWatcherFactory.Wrap(FileSystemWatcher)",
+        "IFileVersionInfoFactory IFileVersionInfoFactory.GetVersionInfo(String)",
+        "IRandomAccess IRandomAccess.FlushToDisk(SafeFileHandle)",
+        "IRandomAccess IRandomAccess.GetLength(SafeFileHandle)",
+        "IRandomAccess IRandomAccess.Read(SafeFileHandle, IReadOnlyList<Memory<Byte>>, Int64)",
+        "IRandomAccess IRandomAccess.Read(SafeFileHandle, Span<Byte>, Int64)",
+        "IRandomAccess IRandomAccess.ReadAsync(SafeFileHandle, IReadOnlyList<Memory<Byte>>, Int64, CancellationToken)",
+        "IRandomAccess IRandomAccess.ReadAsync(SafeFileHandle, Memory<Byte>, Int64, CancellationToken)",
+        "IRandomAccess IRandomAccess.SetLength(SafeFileHandle, Int64)",
+        "IRandomAccess IRandomAccess.Write(SafeFileHandle, IReadOnlyList<ReadOnlyMemory<Byte>>, Int64)",
+        "IRandomAccess IRandomAccess.Write(SafeFileHandle, ReadOnlySpan<Byte>, Int64)",
+        "IRandomAccess IRandomAccess.WriteAsync(SafeFileHandle, IReadOnlyList<ReadOnlyMemory<Byte>>, Int64, CancellationToken)",
+        "IRandomAccess IRandomAccess.WriteAsync(SafeFileHandle, ReadOnlyMemory<Byte>, Int64, CancellationToken)",
+    ];
 }
 
 public sealed class OnDiskDifferenceTests() : DifferenceTests(new DiskFixture());

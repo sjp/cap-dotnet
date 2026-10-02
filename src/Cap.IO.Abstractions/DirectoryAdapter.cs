@@ -13,6 +13,12 @@ internal sealed class DirectoryAdapter(DirFileSystem fs) : IDirectory
 {
     private const string MatchAll = "*";
 
+    /// <summary>
+    /// How many drawn names <see cref="CreateTempSubdirectory(string?)"/> tries to prefix
+    /// before it gives up, as many as <see cref="CapTempDir"/> draws.
+    /// </summary>
+    private const int TempAttempts = 8;
+
     public IFileSystem FileSystem => fs;
 
     // --- Creating and removing --------------------------------------------------------------
@@ -43,9 +49,18 @@ internal sealed class DirectoryAdapter(DirFileSystem fs) : IDirectory
 
     /// <remarks>
     /// Made inside the virtual scratch directory, <c>.tmp</c> beneath the root, with a name
-    /// drawn by <see cref="CapTempDir"/> and <paramref name="prefix"/> put in front of it.
+    /// drawn by <see cref="CapTempDir"/> and <paramref name="prefix"/> put in front of it. The
+    /// prefixed name is claimed by moving the drawn directory to it, which never replaces what
+    /// is there; where the name is taken the drawn directory is removed and another drawn, as
+    /// <see cref="CapTempDir"/> itself does, so a failure leaves nothing behind.
     /// </remarks>
-    public IDirectoryInfo CreateTempSubdirectory(string? prefix = null)
+    public IDirectoryInfo CreateTempSubdirectory(string? prefix = null) => CreateTempSubdirectory(prefix, CapTempDir.NewIn);
+
+    /// <summary>
+    /// <see cref="CreateTempSubdirectory(string?)"/>, with each directory drawn by
+    /// <paramref name="draw"/>, so that a test can take the names it will be moved to.
+    /// </summary>
+    internal IDirectoryInfo CreateTempSubdirectory(string? prefix, Func<Dir, CapTempDir> draw)
     {
         if (prefix is not null && prefix.AsSpan().IndexOfAny(fs.Paths.Separator, fs.Paths.AltSeparator) >= 0)
         {
@@ -53,18 +68,32 @@ internal sealed class DirectoryAdapter(DirFileSystem fs) : IDirectory
         }
 
         using Dir scratch = fs.OpenTempDirectory();
-        using CapTempDir made = CapTempDir.NewIn(scratch);
-        made.Keep();
-
-        string name = made.Name;
-        if (!string.IsNullOrEmpty(prefix))
+        CapIOException? taken = null;
+        for (int attempt = 0; attempt < TempAttempts; attempt++)
         {
-            string prefixed = string.Concat(prefix, name);
-            scratch.Rename(name, scratch, prefixed);
-            name = prefixed;
+            using CapTempDir made = draw(scratch);
+            string name = made.Name;
+            if (!string.IsNullOrEmpty(prefix))
+            {
+                string prefixed = string.Concat(prefix, name);
+                try
+                {
+                    scratch.Rename(name, scratch, prefixed);
+                }
+                catch (CapIOException e) when (e.Kind == CapErrorKind.AlreadyExists)
+                {
+                    taken = e;
+                    continue;
+                }
+
+                name = prefixed;
+            }
+
+            made.Keep();
+            return new DirectoryInfoAdapter(fs, fs.Paths.Join(fs.Paths.TempPath, name));
         }
 
-        return new DirectoryInfoAdapter(fs, fs.Paths.Join(fs.Paths.TempPath, name));
+        throw taken!;
     }
 
     public void Delete(string path) => fs.DeleteDirectory(path, recursive: false);

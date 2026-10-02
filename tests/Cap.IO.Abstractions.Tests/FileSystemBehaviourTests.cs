@@ -845,6 +845,188 @@ public abstract class FileSystemBehaviourTests : IDisposable
         Assert.True(Fs.File.GetAttributes(P("d", "link.txt")).HasFlag(FileAttributes.ReparsePoint));
     }
 
+    [Fact]
+    public void A_stream_opened_to_append_starts_at_the_end_and_keeps_what_was_there()
+    {
+        MockDiffers("a stream opened to append without an access asks for read access as well, and is refused.");
+        Fs.File.WriteAllBytes(P("a.bin"), [1, 2]);
+
+        using (FileSystemStream stream = Fs.FileStream.New(P("a.bin"), FileMode.Append))
+        {
+            Assert.False(stream.CanRead);
+            Assert.True(stream.CanWrite);
+            Assert.True(stream.CanSeek);
+            Assert.Equal(2, stream.Position);
+            Assert.Equal(2, stream.Length);
+            stream.Write([3, 4]);
+
+            Assert.Throws<IOException>(() => stream.Seek(0, SeekOrigin.Begin));
+            Assert.Throws<IOException>(() => stream.Seek(-3, SeekOrigin.End));
+            Assert.Throws<IOException>(() => stream.Position = 1);
+            Assert.Throws<IOException>(() => stream.SetLength(1));
+            Assert.Equal(4, stream.Position);
+
+            stream.SetLength(2);
+            stream.Write([5]);
+        }
+
+        Assert.Equal([1, 2, 5], Fs.File.ReadAllBytes(P("a.bin")));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_stream_says_whether_it_was_opened_asynchronous(bool useAsync)
+    {
+        if (useAsync)
+        {
+            MockDiffers("a stream opened asynchronous says it is not.");
+        }
+
+        CancellationToken cancel = TestContext.Current.CancellationToken;
+        using (FileSystemStream stream = Fs.FileStream.New(P("a.bin"), FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync))
+        {
+            Assert.Equal(useAsync, stream.IsAsync);
+            await stream.WriteAsync(new byte[] { 1, 2 }, cancel);
+        }
+
+        FileStreamOptions options = new() { Options = useAsync ? FileOptions.Asynchronous : FileOptions.None };
+        using FileSystemStream reading = Fs.File.Open(P("a.bin"), options);
+        byte[] buffer = new byte[2];
+        await reading.ReadExactlyAsync(buffer, cancel);
+
+        Assert.Equal(useAsync, reading.IsAsync);
+        Assert.Equal([1, 2], buffer);
+    }
+
+    [Theory]
+    [InlineData(0, "a.txt")]
+    [InlineData(1, "a.txt,s1/b.txt")]
+    [InlineData(2, "a.txt,s1/b.txt,s1/s2/c.txt")]
+    public void A_recursive_enumeration_stops_at_the_maximum_depth(int depth, string expected)
+    {
+        if (depth < 2)
+        {
+            MockDiffers("EnumerationOptions.MaxRecursionDepth is ignored.");
+        }
+
+        Fs.Directory.CreateDirectory(P("d", "s1", "s2"));
+        Fs.File.WriteAllText(P("d", "a.txt"), string.Empty);
+        Fs.File.WriteAllText(P("d", "s1", "b.txt"), string.Empty);
+        Fs.File.WriteAllText(P("d", "s1", "s2", "c.txt"), string.Empty);
+        EnumerationOptions options = new() { RecurseSubdirectories = true, MaxRecursionDepth = depth };
+
+        string[] found = [.. Fs.Directory.GetFiles(P("d"), "*", options)
+            .Select(path => Fs.Path.GetRelativePath(P("d"), path).Replace(Fs.Path.DirectorySeparatorChar, '/'))
+            .Order(StringComparer.Ordinal)];
+
+        Assert.Equal(expected.Split(','), found);
+    }
+
+    [Fact]
+    public void Matching_takes_the_casing_asked_for()
+    {
+        MockDiffers("EnumerationOptions.MatchCasing throws NotSupportedException.");
+        Fs.Directory.CreateDirectory(P("d"));
+        Fs.File.WriteAllText(P("d", "a.txt"), string.Empty);
+        Fs.File.WriteAllText(P("d", "B.TXT"), string.Empty);
+
+        Assert.Equal(["a.txt"], Names(Fs.Directory.GetFiles(P("d"), "*.txt", new EnumerationOptions { MatchCasing = MatchCasing.CaseSensitive })));
+        Assert.Equal(["B.TXT", "a.txt"], Names(Fs.Directory.GetFiles(P("d"), "*.txt", new EnumerationOptions { MatchCasing = MatchCasing.CaseInsensitive })));
+    }
+
+    [Fact]
+    public void A_simple_match_gives_no_name_a_dot_it_lacks()
+    {
+        Fs.Directory.CreateDirectory(P("d"));
+        Fs.File.WriteAllText(P("d", "a.txt"), string.Empty);
+        Fs.File.WriteAllText(P("d", "noext"), string.Empty);
+
+        Assert.Equal(["a.txt"], Names(Fs.Directory.GetFiles(P("d"), "*.*", new EnumerationOptions { MatchType = MatchType.Simple })));
+    }
+
+    [Fact]
+    public void Entries_with_an_attribute_to_skip_are_left_out()
+    {
+        MockDiffers("EnumerationOptions.AttributesToSkip throws NotSupportedException.");
+        Fs.Directory.CreateDirectory(P("d", "sub"));
+        Fs.File.WriteAllText(P("d", "a.txt"), string.Empty);
+
+        Assert.Equal(["a.txt"], Names(Fs.Directory.GetFileSystemEntries(P("d"), "*", new EnumerationOptions { AttributesToSkip = FileAttributes.Directory })));
+    }
+
+    [Fact]
+    public void Lines_left_unread_do_not_keep_the_file_open()
+    {
+        Fs.File.WriteAllLines(P("a.txt"), ["x", "y", "z"]);
+
+        Assert.Equal("x", Fs.File.ReadLines(P("a.txt")).First());
+
+        using (Fs.File.Open(P("a.txt"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+        }
+
+        Fs.File.Delete(P("a.txt"));
+        Assert.False(Fs.File.Exists(P("a.txt")));
+    }
+
+    [Fact]
+    public void The_length_of_a_missing_file_or_a_directory_is_not_found()
+    {
+        Fs.Directory.CreateDirectory(P("d"));
+
+        Assert.Throws<FileNotFoundException>(() => Fs.FileInfo.New(P("missing.txt")).Length);
+        Assert.Throws<FileNotFoundException>(() => Fs.FileInfo.New(P("d")).Length);
+    }
+
+    [Fact]
+    public void The_root_has_no_parent()
+    {
+        Assert.Null(Fs.Directory.GetParent(Fs.Path.GetPathRoot(Root)!));
+    }
+
+    [Fact]
+    public void A_dangling_link_exists_as_a_file_and_not_as_a_directory()
+    {
+        TestLinks.Require(_fixture.SupportsLinks);
+        MockDiffers("a symbolic link to a target that does not exist cannot be created.");
+
+        Fs.File.CreateSymbolicLink(P("dangling"), "missing");
+
+        Assert.True(Fs.File.Exists(P("dangling")));
+        Assert.False(Fs.Directory.Exists(P("dangling")));
+    }
+
+    [Fact]
+    public void Changing_the_current_directory_while_others_use_it_gives_one_answer_or_the_other()
+    {
+        Fs.Directory.CreateDirectory(P("a"));
+        Fs.Directory.CreateDirectory(P("b"));
+        Fs.File.WriteAllText(P("a", "x"), "a");
+        Fs.File.WriteAllText(P("b", "x"), "b");
+        Fs.Directory.SetCurrentDirectory(P("a"));
+        string[] full = [P("a", "x"), P("b", "x")];
+
+        Parallel.For(0, 2000, new ParallelOptions { CancellationToken = TestContext.Current.CancellationToken }, i =>
+        {
+            switch (i % 4)
+            {
+                case 0:
+                    Fs.Directory.SetCurrentDirectory(i % 8 == 0 ? P("a") : P("b"));
+                    break;
+                case 1:
+                    Assert.Contains(Fs.File.ReadAllText("x"), new[] { "a", "b" });
+                    break;
+                case 2:
+                    Assert.Contains(Fs.Path.GetFullPath("x"), full);
+                    break;
+                default:
+                    Assert.True(Fs.File.Exists("x"));
+                    break;
+            }
+        });
+    }
+
     private static string[] Names(IEnumerable<string> paths) =>
         [.. paths.Select(path => Path.GetFileName(path)).Order(StringComparer.Ordinal)];
 }

@@ -431,9 +431,10 @@ public sealed class DirFileSystem : IFileSystem
                 // host is a FileStream, which can.
                 bool isAsync = (options & FileOptions.Asynchronous) != 0;
                 Stream stream = file.AsStream(leaveOpen: isAsync, bufferSize: bufferSize);
+                long appendStart = -1;
                 if (mode == FileMode.Append && stream.CanSeek)
                 {
-                    stream.Seek(0, SeekOrigin.End);
+                    appendStart = stream.Seek(0, SeekOrigin.End);
                 }
 
                 Action? sync = isAsync
@@ -445,7 +446,8 @@ public sealed class DirFileSystem : IFileSystem
                     request.Virtual,
                     isAsync,
                     sync,
-                    isAsync ? file : null);
+                    isAsync ? file : null,
+                    appendStart);
             }
             catch
             {

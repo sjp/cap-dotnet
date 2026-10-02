@@ -57,4 +57,20 @@ public sealed class EnumerationSkipTests
         Assert.Equal(["plain"], fs.Directory.EnumerateFiles(d, "*", new EnumerationOptions()).Select(fs.Path.GetFileName));
         Assert.Equal(3, fs.Directory.EnumerateFiles(d).Count());
     }
+
+    [Fact]
+    public void A_directory_that_cannot_be_read_is_skipped_only_when_asked()
+    {
+        InMemoryFileSystem memory = new();
+        memory.AddFile("d/locked/hidden.txt");
+        memory.AddFile("d/open/shown.txt");
+        memory.SetUnreadable("d/locked");
+        using Dir root = memory.OpenRoot();
+        DirFileSystem fs = new(root);
+        EnumerationOptions ignoring = new() { RecurseSubdirectories = true, IgnoreInaccessible = true };
+        EnumerationOptions failing = new() { RecurseSubdirectories = true, IgnoreInaccessible = false };
+
+        Assert.Equal(["shown.txt"], fs.Directory.EnumerateFiles("/d", "*", ignoring).Select(fs.Path.GetFileName));
+        Assert.Throws<UnauthorizedAccessException>(() => fs.Directory.EnumerateFiles("/d", "*", failing).ToList());
+    }
 }

@@ -24,6 +24,7 @@ internal static class Difference
     public const string TempPath = "Path.GetTempPath";
     public const string TempFileName = "Path.GetTempFileName";
     public const string TempSubdirectory = "Directory.CreateTempSubdirectory(prefix)";
+    public const string AppendStream = "A stream opened with FileMode.Append";
     public const string SearchPatterns = "Search patterns";
     public const string RecursiveEnumeration = "Recursive enumeration";
     public const string Copy = "File.Copy";

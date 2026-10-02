@@ -20,6 +20,12 @@ namespace Cap.IO.Abstractions;
 /// means there is no device beneath, as in memory. <paramref name="file"/>, when given, is
 /// the file the stream beneath borrows, closed after it.
 /// </para>
+/// <para>
+/// A stream opened to append is given <paramref name="appendStart"/>, the length the file had
+/// when it was opened. As on a <see cref="FileStream"/>, seeking before it or setting the
+/// length below it is refused with <see cref="IOException"/>, so what the file held is never
+/// overwritten or cut; <c>-1</c> means the stream was not opened to append.
+/// </para>
 /// </remarks>
 internal sealed class DirFileSystemStream(
     Stream stream,
@@ -27,7 +33,8 @@ internal sealed class DirFileSystemStream(
     string request,
     bool isAsync,
     Action? sync,
-    IDisposable? file = null)
+    IDisposable? file = null,
+    long appendStart = -1)
     : FileSystemStream(stream, request, isAsync)
 {
     private readonly string _request = request;
@@ -42,6 +49,46 @@ internal sealed class DirFileSystemStream(
 
     /// <summary>Whether <see cref="Flush(bool)"/> with <c>true</c> reaches a device.</summary>
     internal bool SyncsToDisk => sync is not null;
+
+    /// <inheritdoc/>
+    public override long Position
+    {
+        get => base.Position;
+        set => Seek(value, SeekOrigin.Begin);
+    }
+
+    /// <inheritdoc/>
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        if (appendStart >= 0)
+        {
+            long target = origin switch
+            {
+                SeekOrigin.Begin => offset,
+                SeekOrigin.Current => Position + offset,
+                SeekOrigin.End => Length + offset,
+                _ => throw new ArgumentException("Invalid seek origin.", nameof(origin)),
+            };
+
+            if (target >= 0 && target < appendStart)
+            {
+                throw new IOException("Unable to seek backward to overwrite data that previously existed in a file opened in Append mode.");
+            }
+        }
+
+        return base.Seek(offset, origin);
+    }
+
+    /// <inheritdoc/>
+    public override void SetLength(long value)
+    {
+        if (appendStart >= 0 && value >= 0 && value < appendStart)
+        {
+            throw new IOException("Unable to truncate data that previously existed in a file opened in Append mode.");
+        }
+
+        base.SetLength(value);
+    }
 
     /// <inheritdoc/>
     public override void Flush(bool flushToDisk)

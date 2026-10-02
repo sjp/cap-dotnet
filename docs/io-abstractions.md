@@ -134,7 +134,8 @@ test checks that every row has one and that no such test names a row missing fro
 | `Directory.GetLogicalDrives` | the host's drives | the virtual root |
 | `Path.GetTempPath` | the host's temporary directory | `/.tmp/`, created beneath the root when first asked for. What goes there is part of the tree, visible to whatever else can see it, and is not cleared away |
 | `Path.GetTempFileName` | a `tmp*.tmp` file in the host's temporary directory | an empty file in `/.tmp/`, with a name drawn by `CapTempFile` |
-| `Directory.CreateTempSubdirectory(prefix)` | in the host's temporary directory | in `/.tmp/`, named `prefix` followed by a name drawn by `CapTempDir` |
+| `Directory.CreateTempSubdirectory(prefix)` | in the host's temporary directory | in `/.tmp/`, named `prefix` followed by a name drawn by `CapTempDir`. Where that name is taken another is drawn, and a failure leaves nothing behind |
+| A stream opened with `FileMode.Append` | writes at its position, which may be moved back over what the stream itself wrote | writes at the end of the file wherever the position is, as the file is opened to append. Seeking before the length the file had when it was opened, or setting the length below it, is refused with `IOException` in both |
 | Search patterns | may include a directory part | name entries in one directory only. A pattern with a separator is an `ArgumentException`. `EnumerationOptions.ReturnSpecialDirectories` is ignored |
 | Recursive enumeration | does not descend into links | the same. A link that leads to a directory inside the tree is reported as a directory, and one that leads out as a file |
 | `File.Copy` | copies contents and, on Unix, permissions | copies contents only |
@@ -180,7 +181,14 @@ test is skipped for it. The skips are:
 - the search pattern `.` matches nothing, and `*.*` only names that contain a dot.
   `System.IO`, and `DirFileSystem`, match every name with both;
 - `FileInfo.Name` for a path ending in `..` is the folded name. `System.IO`, and
-  `DirFileSystem`, give `..`, the last segment as written.
+  `DirFileSystem`, give `..`, the last segment as written;
+- `File.Move` moves a symbolic link to a directory as a file. `System.IO`, and
+  `DirFileSystem`, throw `FileNotFoundException`;
+- a stream opened with `FileMode.Append` and no access asks for read access as well, and is
+  refused with `ArgumentException`. `System.IO`, and `DirFileSystem`, open it for writing;
+- a stream opened asynchronous says it is not: `IsAsync` is false;
+- `EnumerationOptions.MaxRecursionDepth` is ignored, and `MatchCasing` and
+  `AttributesToSkip` other than their defaults throw `NotSupportedException`.
 
 A test that passes on `MockFileSystem` because of one of these can fail against
 `DirFileSystem`. Beyond these, `MockFileSystem` does not confine anything, and the
