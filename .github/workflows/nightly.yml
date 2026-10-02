@@ -288,8 +288,18 @@ jobs:
               ${{ matrix.image }} \
               "./$project" \
               -method- "Cap.Std.Tests.DirFileOpenTests.A_file_longer_than_it_reports_is_read_to_its_end" \
-              || status=1
+              && code=0 || code=$?
             echo "::endgroup::"
+            # The test process is the container's first process, so nothing prints a message when
+            # it dies of a signal, and a crash after the summary is otherwise silent.
+            if [ "$code" -ne 0 ]; then
+              status=1
+              if [ "$code" -gt 128 ]; then
+                echo "::error title=$project (${{ matrix.libc }})::Exited with $code, killed by signal $((code - 128)) ($(kill -l $((code - 128)) 2>/dev/null || echo unknown))."
+              else
+                echo "::error title=$project (${{ matrix.libc }})::Exited with $code."
+              fi
+            fi
           done
           exit $status
 
