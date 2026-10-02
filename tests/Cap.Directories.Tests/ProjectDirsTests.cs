@@ -542,9 +542,9 @@ public sealed class ProjectDirsTests : IDisposable
     [Fact]
     public void A_private_runtime_directory_is_used()
     {
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsLinux())
         {
-            Assert.Skip(NoModeBits);
+            Assert.Skip("Only Linux has an XDG runtime directory.");
             return;
         }
 
