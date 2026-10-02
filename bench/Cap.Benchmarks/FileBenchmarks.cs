@@ -1,4 +1,6 @@
+using System.Text;
 using BenchmarkDotNet.Attributes;
+using Cap.Fs.Ext;
 using Cap.Std;
 using Microsoft.Win32.SafeHandles;
 
@@ -192,4 +194,117 @@ public class StatFile
 
     [Benchmark]
     public DateTimeOffset CapDotnet() => _fixture.Root.GetMetadata(Name).LastWriteTime;
+}
+
+/// <summary>Create an empty file five components beneath the handle and delete it again.</summary>
+/// <remarks>
+/// <para>
+/// The mutating counterpart of <see cref="OpenReadFiveComponents"/>: on the walk each of the
+/// two calls opens the four directories on the way before it touches the name, so this row is
+/// where a deep path's cost to a create or a delete shows.
+/// </para>
+/// <para>
+/// Both in one measured call, so that every call starts from the same empty directory. Setting
+/// the file up in an iteration setup instead would leave each iteration a single call of a few
+/// microseconds, below what the timer can resolve.
+/// </para>
+/// <para>
+/// The regression gate holds this class to its allocation only. Creating and deleting a name
+/// writes to the directory, and how long that takes on a hosted runner moves with the disk
+/// under it far more than with this library.
+/// </para>
+/// </remarks>
+[MemoryDiagnoser]
+[BenchmarkCategory(Categories.HotPath, Categories.AllocationOnly)]
+public class CreateDeleteFiveComponents
+{
+    private const string Name = "a/b/c/d/f";
+    private Fixture _fixture = null!;
+    private string _ambientPath = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _fixture = Fixture.Create();
+        _ambientPath = _fixture.Combine(Name);
+        Directory.CreateDirectory(Path.GetDirectoryName(_ambientPath)!);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _fixture.Dispose();
+
+    [Benchmark(Baseline = true)]
+    public void SystemIO()
+    {
+        File.OpenHandle(_ambientPath, FileMode.CreateNew, FileAccess.Write).Dispose();
+        File.Delete(_ambientPath);
+    }
+
+    [Benchmark]
+    public void CapDotnet()
+    {
+        _fixture.Root.CreateNewFile(Name).Dispose();
+        _fixture.Root.DeleteFile(Name);
+    }
+}
+
+/// <summary>Replace a 4 KB text file so that no reader sees it half-written.</summary>
+/// <remarks>
+/// <para>
+/// The baseline is what a program writes with <c>System.IO</c> for the same promise: the text
+/// into a scratch file beside the target, flushed to the disk, then moved over the name. The
+/// cap-dotnet side is <see cref="DirExtensions.WriteAllTextAtomic(IDir, string, string, AtomicWriteOptions)"/>
+/// set to do that much and no more: <see cref="Durability.File"/>, because <c>System.IO</c> has
+/// no way to flush the directory that the default <see cref="Durability.FileAndDirectory"/>
+/// also flushes, and without carrying the replaced file's permissions, which
+/// <see cref="File.Move(string, string, bool)"/> does not do either.
+/// </para>
+/// <para>
+/// The regression gate holds this class to its allocation only: each side's time is mostly the
+/// flush, which measures the runner's disk.
+/// </para>
+/// </remarks>
+[MemoryDiagnoser]
+[BenchmarkCategory(Categories.HotPath, Categories.AllocationOnly)]
+public class AtomicWrite
+{
+    private const string Name = "state.json";
+    private const string Scratch = "state.json.tmp";
+    private static readonly AtomicWriteOptions Options = new()
+    {
+        Durability = Durability.File,
+        PreservePermissions = false,
+    };
+
+    private readonly string _text = string.Concat(Enumerable.Repeat("{\"key\": \"välue\"}\n", 200));
+    private Fixture _fixture = null!;
+    private string _ambientPath = null!;
+    private string _ambientScratch = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _fixture = Fixture.Create();
+        _ambientPath = _fixture.Combine(Name);
+        _ambientScratch = _fixture.Combine(Scratch);
+        File.WriteAllText(_ambientPath, _text);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _fixture.Dispose();
+
+    [Benchmark(Baseline = true)]
+    public void SystemIO()
+    {
+        using (var stream = new FileStream(_ambientScratch, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            stream.Write(Encoding.UTF8.GetBytes(_text));
+            stream.Flush(flushToDisk: true);
+        }
+
+        File.Move(_ambientScratch, _ambientPath, overwrite: true);
+    }
+
+    [Benchmark]
+    public void CapDotnet() => _fixture.Root.WriteAllTextAtomic(Name, _text, Options);
 }

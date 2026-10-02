@@ -310,3 +310,49 @@ public class CreateDeleteFiles
         }
     }
 }
+
+/// <summary>
+/// Remove a tree of a thousand empty files in ten directories, reported per file.
+/// </summary>
+/// <remarks>
+/// The cap-dotnet side is <see cref="DirExtensions.DeleteTree(IDir, string, CancellationToken)"/>,
+/// which descends by opening each directory beneath its parent's handle and removes each name
+/// relative to it; the baseline is <see cref="Directory.Delete(string, bool)"/>, which composes a
+/// path for every entry. The tree is built again before every iteration, outside the
+/// measurement.
+/// </remarks>
+[MemoryDiagnoser]
+public class RemoveTree
+{
+    private const int Directories = 10;
+    private const int FilesPerDirectory = 100;
+    private const int Files = Directories * FilesPerDirectory;
+    private const string Tree = "tree";
+    private Fixture _fixture = null!;
+    private string _ambientTree = null!;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _fixture = Fixture.Create();
+        _ambientTree = _fixture.Combine(Tree);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _fixture.Dispose();
+
+    [IterationSetup]
+    public void Build()
+    {
+        for (int d = 0; d < Directories; d++)
+        {
+            _fixture.CreateEmptyFiles($"{Tree}/d{d:D2}", FilesPerDirectory);
+        }
+    }
+
+    [Benchmark(Baseline = true, OperationsPerInvoke = Files)]
+    public void SystemIO() => Directory.Delete(_ambientTree, recursive: true);
+
+    [Benchmark(OperationsPerInvoke = Files)]
+    public void CapDotnet() => _fixture.Root.DeleteTree(Tree);
+}

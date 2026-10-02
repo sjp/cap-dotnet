@@ -24,9 +24,9 @@ Anything after `--` other than `gate` is passed to BenchmarkDotNet, so its usual
 
 Every benchmark creates its own scratch tree under the system temporary directory and removes
 it afterwards, so the numbers are for whatever filesystem that is. The enumeration and tree
-benchmarks create a hundred and fifty thousand files between them per backend, and the tree copy
-another ten thousand that it copies once per iteration; expect the full suite to take the better
-part of an hour.
+benchmarks create a hundred and fifty thousand files between them per backend, the tree copy
+another ten thousand that it copies once per iteration, and the tree removal a thousand that it
+builds again before each iteration; expect the full suite to take the better part of an hour.
 
 The copy rows depend on the filesystem more than any other. Both sides move contents by
 whatever shortcut it offers — a reflink or `copy_file_range` on Linux, a clone on APFS, block
@@ -75,15 +75,19 @@ Ratio column the price in garbage.
 | `ReadTextSingleComponent` | Open and read a 4 KB UTF-8 text file named by one component | `File.ReadAllText` | ✓ |
 | `PositionalRead` | Read 4 KiB at an offset from an open file | `RandomAccess.Read` on a raw handle | ✓ |
 | `StatFile` | When a file last changed | `File.GetLastWriteTimeUtc` | ✓ |
+| `CreateDeleteFiveComponents` | Create an empty file five components down and delete it again | `File.OpenHandle` / `File.Delete` | ✓ |
+| `AtomicWrite` | Replace a 4 KB text file with `WriteAllTextAtomic` at `Durability.File` | Scratch `FileStream`, `Flush(flushToDisk: true)`, `File.Move(…, overwrite: true)` | ✓ |
 | `EnumerateDirectory` | List a directory of 100,000 entries | `Directory.EnumerateFiles`, and `FileSystemEnumerable` yielding bare names (`SystemIONames`) | |
 | `WalkTree` | Walk a tree of 50,000 files, 100 directories two levels deep | `Directory.EnumerateFiles(…, AllDirectories)` | |
 | `GlobTree` | Find the 25,000 `*.txt` files in the same tree with `**/*.txt` | `Directory.EnumerateFiles(…, "*.txt", AllDirectories)` | |
 | `CreateDeleteFiles` | Create an empty file and delete it, 10,000 times, reported per file | `File.OpenHandle` / `File.Delete` | |
+| `RemoveTree` | Remove a tree of 1,000 empty files in 10 directories, with `DeleteTree`, reported per file | `Directory.Delete(…, recursive: true)` | |
 | `CopyLargeFile` | Copy a 64 MiB file onto a name it replaces, with `CopyFile` | `File.Copy` | |
 | `CopyTree` | Copy 10,000 files of 4 KiB in 100 directories into an empty one, with `CopyTo`, reported per file | `Directory.CreateDirectory` and `File.Copy` per entry | |
 | `CapPathBenchmarks` | Parse and validate a path | none — see below | ✓ |
+| `InMemory` | Open and read at one and five components, stat, create and delete, and walk 1,000 files, on `InMemoryFileSystem` under each resolution it models | none — see below | ✓ |
 
-Three choices of baseline are worth explaining.
+Five choices of baseline are worth explaining.
 
 **Listing a directory has two `System.IO` rows.** `SystemIO`, the baseline, is
 `Directory.EnumerateFiles`, the call a caller would be replacing; it builds a full path string
@@ -97,6 +101,19 @@ per entry what a `DirEntry` does. Its Ratio against `CapDotnet` is the price of 
 handle with positional reads and writes. The `System.IO` object of that shape is a
 `SafeFileHandle`; `File.Create` wraps one in a `FileStream`, which would add an allocation to
 the baseline that the other side never makes and flatter the comparison.
+
+**An atomic write is compared at the durability `System.IO` can match.** The default,
+`Durability.FileAndDirectory`, also flushes the directory after the move, which `System.IO` has
+no call for, and carries the replaced file's permissions, which `File.Move` does not. The row
+uses `Durability.File` with `PreservePermissions` off, so both sides write a scratch file, flush
+it to the disk and move it over the name. Each side's time is mostly that flush, which is why the
+gate holds the row, like `CreateDeleteFiveComponents`, to its allocation only.
+
+**The in-memory filesystem has no `System.IO` baseline.** Two CI legs run the test suite on
+`InMemoryFileSystem` in place of the host, and its rows exist so that a slowdown there is
+found by the gate rather than noticed as slow CI. Nothing in `System.IO` does what it does,
+so its rows have no ratio; the gate holds them to their allocation, and their times can be
+read against the disk rows of the same name.
 
 **Path parsing has no `System.IO` baseline.** The obvious candidate, `Path.GetFullPath`, does a
 different job with a different answer: it consults the process's working directory and rewrites
