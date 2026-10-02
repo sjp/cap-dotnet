@@ -137,6 +137,7 @@ reviewed to know that — it was never given anything else.
 | [Getting started](docs/getting-started.md) | Acquiring authority once, passing `Dir` down, and the handful of types you will use. |
 | [Migrating from `System.IO`](docs/migration.md) | Every commonly used `File.*`, `Directory.*` and `Path.*` member, and what replaces it. |
 | [Why there is no `Dir.FullName`](docs/no-full-name.md) | The question everyone asks first. |
+| [Questions people ask](docs/faq.md) | `.` and `..`, which backend runs on macOS, why the tests refuse root, where `Cap.Primitives` went, and why `File.*` still compiles. |
 | [Platform differences](docs/platforms.md) | What differs on Windows, macOS and Linux, and why. |
 | [Resolution backends](docs/backends.md) | Which one you are on, how to find out at run time, and what each guarantees. |
 | [The convenience layer](docs/convenience-layer.md) | Atomic writes, walks, tree removal, handle-to-handle copy, patterns. |

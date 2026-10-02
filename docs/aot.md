@@ -85,9 +85,9 @@ destination, published as NativeAOT with the SDK's default settings:
 
 | Platform | ArchiveExtractor | Same program on `System.IO` alone | Difference |
 |---|---|---|---|
-| linux-arm64 | 2,441,208 bytes (2.33 MiB) | 1,979,240 bytes (1.89 MiB) | 461,968 bytes (451 KiB) |
+| linux-arm64 | 2,508,088 bytes (2.39 MiB) | 2,308,800 bytes (2.20 MiB) | 199,288 bytes (195 KiB) |
 
-Measured with SDK 10.0.400 (runtime 10.0.11). The size is the executable alone: on Linux the
+Measured with SDK 10.0.401 (runtime 10.0.12). The size is the executable alone: on Linux the
 default publish strips debug symbols into a separate `.dbg` file, which you don't ship.
 
 The comparison program is the naive version of the same tool. It joins each entry's name
@@ -97,5 +97,7 @@ roughly what the library itself adds: the path parser, the three resolution back
 handle types and the part of the convenience layer the sample uses.
 
 The `nativeaot` CI job publishes the sample on every platform it covers, runs it, and writes
-its size to the job summary. That summary is where to find the Windows and macOS figures,
-and where to check that the Linux one still holds.
+its size to the job summary, with the SDK and the runtime it was compiled against. That
+summary is where to find the Windows and macOS figures, and where to check that the Linux one
+still holds. CI's Linux leg is x64 rather than arm64, so its figure is not the table's, but a
+line from it is all a new row needs.

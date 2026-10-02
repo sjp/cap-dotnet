@@ -530,13 +530,20 @@ jobs:
         if: contains(matrix.parts, 'sample')
         run: '& "${{ runner.temp }}/sample/ArchiveExtractor"'
 
+      # The line carries the SDK and the runtime it compiled against, so docs/aot.md's table
+      # can be refreshed by copying it. The runtime is the SDK's bundled one, which is the
+      # version of the NativeAOT compiler and runtime pack the publish used.
       - name: Record the sample's size
         if: contains(matrix.parts, 'sample')
         run: |
           $binary = Get-ChildItem "${{ runner.temp }}/sample" |
             Where-Object { $_.BaseName -eq 'ArchiveExtractor' -and $_.Extension -in '', '.exe' }
+          $sdk = dotnet --version
+          $runtime = dotnet msbuild samples/ArchiveExtractor/ArchiveExtractor.csproj `
+            -getProperty:BundledNETCoreAppPackageVersion
+          if ($LASTEXITCODE -ne 0 -or -not $runtime) { throw "could not read the bundled runtime version" }
           $line = "ArchiveExtractor, NativeAOT, ${{ matrix.name }}: $($binary.Length) bytes " +
-            "($([math]::Round($binary.Length / 1MB, 2)) MiB)"
+            "($([math]::Round($binary.Length / 1MB, 2)) MiB), SDK $sdk (runtime $($runtime.Trim()))"
           $line
           $line >> $env:GITHUB_STEP_SUMMARY
 
