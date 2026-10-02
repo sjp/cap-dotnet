@@ -207,6 +207,9 @@ public sealed class ThroughDirTests
         Assert.Equal(10, file.Read(buffer, 0));
         Assert.Equal("still here", Encoding.UTF8.GetString(buffer));
         Assert.Equal(0, file.GetMetadata().LinkCount);
+        Assert.Equal(10, fs.UsedBytes);
+
+        file.Dispose();
         Assert.Equal(0, fs.UsedBytes);
     }
 

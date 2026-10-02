@@ -178,6 +178,51 @@ public sealed class FaultTests
     }
 
     [Fact]
+    public void An_anonymous_file_counts_against_the_capacity_until_it_is_closed()
+    {
+        InMemoryFileSystem fs = new() { Capacity = 8 };
+        using Dir root = fs.OpenRoot();
+
+        using (CapTempFile anonymous = CapTempFile.NewAnonymous(root))
+        {
+            anonymous.File.Write(new byte[8], 0);
+            Assert.Equal(8, fs.UsedBytes);
+
+            IOException full = Assert.Throws<IOException>(() => anonymous.File.Write([1], 8));
+            Assert.Equal(CapErrorKind.Other, CapIOException.KindOf(full));
+            Assert.Throws<IOException>(() => root.WriteAllBytes("named.bin", [1]));
+        }
+
+        Assert.Equal(0, fs.UsedBytes);
+        root.WriteAllBytes("named.bin", new byte[8]);
+        Assert.Equal(8, fs.UsedBytes);
+    }
+
+    [Fact]
+    public void A_file_removed_while_open_counts_against_the_capacity_until_its_last_handle_closes()
+    {
+        InMemoryFileSystem fs = new() { Capacity = 8 };
+        fs.AddFile("doomed.bin", new byte[6]);
+        using Dir root = fs.OpenRoot();
+        CapFile first = root.OpenFile("doomed.bin", FileMode.Open, FileAccess.ReadWrite);
+        CapFile second = root.OpenFile("doomed.bin", FileMode.Open, FileAccess.Read);
+        root.DeleteFile("doomed.bin");
+
+        Assert.Equal(6, fs.UsedBytes);
+        first.Write([1, 2], 6);
+        Assert.Equal(8, fs.UsedBytes);
+        Assert.Equal(CapErrorKind.Other, CapIOException.KindOf(Assert.Throws<IOException>(() => first.Write([3], 8))));
+        Assert.Throws<IOException>(() => root.WriteAllBytes("named.bin", [1]));
+
+        first.Dispose();
+        Assert.Equal(8, fs.UsedBytes);
+
+        second.Dispose();
+        root.WriteAllBytes("named.bin", new byte[8]);
+        Assert.Equal(8, fs.UsedBytes);
+    }
+
+    [Fact]
     public void A_capacity_cannot_be_negative()
     {
         InMemoryFileSystem fs = new();

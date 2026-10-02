@@ -323,7 +323,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             }
 
             _fs.Mutated();
-            return CapResult<SafeFileHandle>.Ok(IssueFile(created, access, FileShare.None));
+            SafeFileHandle handle = IssueFile(created, access, FileShare.None);
+            _fs.Held(created);
+            return CapResult<SafeFileHandle>.Ok(handle);
         }
     }
 
@@ -776,7 +778,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return CapError.FromCategory(CategoryOf(kind));
             }
 
-            if (!_fs.HasRoomFor(node, buffer.Length))
+            if (!_fs.HasRoomFor(buffer.Length))
             {
                 return CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, NoSpaceErrno);
             }
@@ -1523,7 +1525,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         }
 
         MemoryNode created = _fs.NewNode(CapNodeType.File);
-        if (!_fs.HasRoomFor(created, request.PreallocationSize) && request.PreallocationSize > 0)
+        if (!_fs.HasRoomFor(request.PreallocationSize) && request.PreallocationSize > 0)
         {
             return CapResult<SafeFileHandle>.Fail(CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, NoSpaceErrno));
         }
@@ -1603,7 +1605,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
             _fs.Mutated();
         }
 
-        if (request.Truncates && request.PreallocationSize > 0 && !_fs.HasRoomFor(node, request.PreallocationSize))
+        if (request.Truncates && request.PreallocationSize > 0 && !_fs.HasRoomFor(request.PreallocationSize))
         {
             return CapResult<SafeFileHandle>.Fail(CapError.Create(CapErrorCategory.Unknown, CapErrorSource.Errno, NoSpaceErrno));
         }
@@ -1616,17 +1618,14 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         Issue(node, access, appendOnly: false, new OpenFileDescription(AsShare(access), share & AllSharing));
 
     /// <summary>
-    /// Issues a handle on an open file and records what it was opened for, and under Windows
-    /// rules that it holds the file.
+    /// Issues a handle on an open file and records what it was opened for, and that it holds
+    /// the file.
     /// </summary>
     private SafeFileHandle Issue(MemoryNode node, FileAccess access, bool appendOnly, OpenFileDescription description)
     {
         SafeFileHandle handle = new(NextHandle(), ownsHandle: false);
         _files.Add(handle, new OpenFile(node, access, appendOnly, description));
-        if (_fs.WindowsRules)
-        {
-            (node.Opens ??= []).Add(new WeakReference<SafeFileHandle>(handle));
-        }
+        (node.Opens ??= []).Add(new WeakReference<SafeFileHandle>(handle));
 
         return handle;
     }
@@ -1875,7 +1874,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <summary>Throws as a full disk does when a file cannot grow by <paramref name="growth"/> bytes.</summary>
     private void ThrowIfNoRoom(MemoryNode node, long growth)
     {
-        if (!_fs.HasRoomFor(node, growth))
+        if (!_fs.HasRoomFor(growth))
         {
             throw new IOException(
                 "There is not enough space in the in-memory filesystem.",

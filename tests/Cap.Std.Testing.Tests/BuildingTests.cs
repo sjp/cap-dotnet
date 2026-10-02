@@ -183,8 +183,10 @@ public sealed class BuildingTests
 
         Assert.Equal(["b.txt"], fs.GetEntries());
         Assert.Equal(1, fs.GetMetadata("b.txt").LinkCount);
-        Assert.Equal(3, fs.UsedBytes);
+        Assert.Equal(5, fs.UsedBytes);
         Assert.Equal(0, open.GetMetadata().LinkCount);
+        open.Dispose();
+        Assert.Equal(3, fs.UsedBytes);
         Assert.Throws<IOException>(() => fs.RemoveFile("a.txt"));
 
         fs.AddDirectory("dir");

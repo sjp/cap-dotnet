@@ -1,6 +1,7 @@
 using System.Text;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Std.Testing;
 
@@ -101,6 +102,7 @@ public sealed class InMemoryFileSystem
     private CapErrorKind _failingWriteKind;
     private long _usedBytes;
     private long? _capacity;
+    private List<MemoryNode>? _held;
     private bool _readOnly;
     private long _mutations;
 
@@ -172,9 +174,11 @@ public sealed class InMemoryFileSystem
     /// removes nothing, and only stops further growth.
     /// </para>
     /// <para>
-    /// Counts the contents of files that have a name. A file whose last name has been removed
-    /// stops counting, even while a handle keeps it open, and so does a file created with no
-    /// name at all. Directories and links take no space.
+    /// Counts the contents of every file, as a disk counts its blocks: a file created with no
+    /// name at all counts while a handle keeps it open, and so does a file whose last name has
+    /// been removed. Such a file stops counting once its last handle is disposed, or, for a
+    /// handle nobody disposed, once the garbage collector has reclaimed it. Directories and
+    /// links take no space.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">The value is negative.</exception>
@@ -202,13 +206,17 @@ public sealed class InMemoryFileSystem
         }
     }
 
-    /// <summary>How many bytes the files with a name hold between them.</summary>
+    /// <summary>
+    /// How many bytes the files hold between them, those with no name that are still open
+    /// included, as <see cref="Capacity"/> counts them.
+    /// </summary>
     public long UsedBytes
     {
         get
         {
             lock (Gate)
             {
+                _ = Reclaim();
                 return _usedBytes;
             }
         }
@@ -1004,20 +1012,76 @@ public sealed class InMemoryFileSystem
         return true;
     }
 
-    /// <summary>
-    /// Whether <paramref name="growth"/> more bytes fit, for a file that counts against the
-    /// capacity.
-    /// </summary>
-    internal bool HasRoomFor(MemoryNode file, long growth) =>
-        file.Detached || growth <= 0 || _capacity is not { } capacity || _usedBytes + growth <= capacity;
+    /// <summary>Whether <paramref name="growth"/> more bytes fit.</summary>
+    /// <remarks>
+    /// Gives back what closed files with no name held only when the answer would otherwise be
+    /// no, so that a write that fits costs no look through them.
+    /// </remarks>
+    internal bool HasRoomFor(long growth) =>
+        growth <= 0 || _capacity is not { } capacity || _usedBytes + growth <= capacity ||
+        (Reclaim() && _usedBytes + growth <= capacity);
 
     /// <summary>Records a change in a file's length against the capacity.</summary>
-    internal void Account(MemoryNode file, long before)
+    internal void Account(MemoryNode file, long before) => _usedBytes += file.Length - before;
+
+    /// <summary>
+    /// Records that <paramref name="file"/>, which has no name, still holds its bytes until
+    /// its last handle closes.
+    /// </summary>
+    internal void Held(MemoryNode file) => (_held ??= []).Add(file);
+
+    /// <summary>
+    /// Gives back the bytes of files with no name whose last handle has closed, and says
+    /// whether there were any.
+    /// </summary>
+    /// <remarks>
+    /// There is no hook on a file handle's close (the runtime's handle type is sealed), so
+    /// closure is observed here instead, as <see cref="OpenHandleCount"/> observes it.
+    /// </remarks>
+    private bool Reclaim()
     {
-        if (!file.Detached)
+        if (_held is not { } held)
         {
-            _usedBytes += file.Length - before;
+            return false;
         }
+
+        bool reclaimed = false;
+        for (int i = held.Count - 1; i >= 0; i--)
+        {
+            MemoryNode file = held[i];
+            if (!IsOpen(file))
+            {
+                _usedBytes -= file.Length;
+                held.RemoveAt(i);
+                reclaimed = true;
+            }
+        }
+
+        return reclaimed;
+    }
+
+    /// <summary>
+    /// Whether some handle on <paramref name="file"/> is still open, dropping those found
+    /// closed or collected on the way.
+    /// </summary>
+    private static bool IsOpen(MemoryNode file)
+    {
+        if (file.Opens is not { } opens)
+        {
+            return false;
+        }
+
+        for (int i = opens.Count - 1; i >= 0; i--)
+        {
+            if (opens[i].TryGetTarget(out SafeFileHandle? handle) && !handle.IsClosed)
+            {
+                return true;
+            }
+
+            opens.RemoveAt(i);
+        }
+
+        return false;
     }
 
     /// <summary>Removes a name, and records that the object it named has one fewer.</summary>
@@ -1050,7 +1114,14 @@ public sealed class InMemoryFileSystem
             node.Detached = true;
             if (node.Type == CapNodeType.File)
             {
-                _usedBytes -= node.Length;
+                if (IsOpen(node))
+                {
+                    Held(node);
+                }
+                else
+                {
+                    _usedBytes -= node.Length;
+                }
             }
         }
     }

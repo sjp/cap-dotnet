@@ -217,13 +217,14 @@ internal sealed class MemoryNode
     public Dictionary<string, MemoryNode> Entries { get; }
 
     /// <summary>
-    /// The handles issued on this file whose opens say what they let other opens do, or null
+    /// The handles issued on this file, whose opens say what they let other opens do, or null
     /// while there have been none.
     /// </summary>
     /// <remarks>
-    /// Kept by a backend that imitates Windows sharing, under its own lock, and held weakly: a
-    /// handle that is closed, or that nobody closed and has been collected, no longer holds
-    /// the file, and is dropped from here when next looked at.
+    /// Kept by the backend under its own lock, and held weakly: a handle that is closed, or
+    /// that nobody closed and has been collected, no longer holds the file, and is dropped
+    /// from here when next looked at. The Windows sharing checks read it, and so does the
+    /// capacity, to know when a file with no name stops holding its bytes.
     /// </remarks>
     public List<WeakReference<SafeFileHandle>>? Opens { get; set; }
 
