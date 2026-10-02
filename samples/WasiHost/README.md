@@ -72,6 +72,12 @@ directory to its target to see what kind of link to make; see below.
 `path_symlink` with a rooted target, such as `/`, answers `ENOTCAPABLE`: `Dir` refuses to
 store one, as WASI hosts do.
 
+A descriptor's rights are kept as the spec describes them, and only ever narrow: `path_open`
+answers `ENOTCAPABLE` when the rights it is asked for, base or inheriting, are not among the
+directory's inheriting rights, as `fd_fdstat_set_rights` does for rights a descriptor does not
+hold. They are the guest's own bookkeeping, a sandbox it can build inside the one it was given.
+What a descriptor can reach is decided by its `Dir` or `CapFile`, whatever its rights say.
+
 `fd_filestat_set_times` on a file needs a descriptor opened for writing. `CapFile.SetTimes`
 refuses a handle that can only read, so a file opened only to read is not given that right,
 and the call answers `ENOTCAPABLE`.

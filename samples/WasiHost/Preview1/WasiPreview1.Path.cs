@@ -48,6 +48,13 @@ public sealed partial class WasiPreview1
             return error;
         }
 
+        // A descriptor opened beneath a directory may hold only what that directory lets its
+        // children hold, as fd_fdstat_set_rights may only narrow a descriptor's own rights.
+        if ((rightsBase & ~parent.RightsInheriting) != 0 || (rightsInheriting & ~parent.RightsInheriting) != 0)
+        {
+            return Errno.NotCapable;
+        }
+
         bool wantsDirectory = (oflags & OFlags.Directory) != 0;
         bool creates = (oflags & OFlags.Create) != 0;
         bool truncates = (oflags & OFlags.Truncate) != 0;
