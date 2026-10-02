@@ -113,15 +113,43 @@ internal static class EndpointNormalization
             return network;
         }
 
-        if (!network.BaseAddress.IsIPv4MappedToIPv6)
+        if (network.BaseAddress.IsIPv4MappedToIPv6)
+        {
+            return new IPNetwork(
+                network.BaseAddress.MapToIPv4(),
+                network.PrefixLength - EmbeddingPrefixLength);
+        }
+
+        Span<byte> bytes = stackalloc byte[LongAddressLength];
+        if (!network.BaseAddress.TryWriteBytes(bytes, out int written) ||
+            written != LongAddressLength ||
+            !IsCompatibleForm(bytes))
         {
             return network;
         }
 
         return new IPNetwork(
-            network.BaseAddress.MapToIPv4(),
+            new IPAddress(bytes[EmbeddedOffset..]),
             network.PrefixLength - EmbeddingPrefixLength);
     }
+
+    /// <summary>
+    /// Whether <paramref name="network"/> lies inside the compatible embedding's prefix and
+    /// also covers the two addresses there that are not embeddings.
+    /// </summary>
+    /// <remarks>
+    /// Such a range is neither a set of older-family addresses nor a plain range of the newer
+    /// family: read one way it would quietly drop the newer family's loopback, read the other
+    /// it would cover nothing but that loopback and the unspecified address. Only a range
+    /// based at the unspecified address can cover either of them, since every other range in
+    /// the prefix starts above both. The single address <c>::/128</c> is not such a range; it
+    /// is just itself.
+    /// </remarks>
+    public static bool StraddlesCompatibleForm(IPNetwork network) =>
+        network.BaseAddress.AddressFamily == AddressFamily.InterNetworkV6 &&
+        network.PrefixLength >= EmbeddingPrefixLength &&
+        network.PrefixLength < LongAddressLength * 8 &&
+        SameAddress(network.BaseAddress, IPAddress.IPv6Any);
 
     /// <summary>Whether two normalized addresses name the same host.</summary>
     public static bool SameAddress(IPAddress left, IPAddress right)

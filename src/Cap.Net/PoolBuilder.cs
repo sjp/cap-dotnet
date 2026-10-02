@@ -95,9 +95,12 @@ public sealed class PoolBuilder
     /// <returns>This builder, so that grants can be written one after another.</returns>
     /// <remarks>
     /// <para>
-    /// A range of addresses given to the newer family that lies wholly inside the prefix
-    /// which embeds the older one is read as a grant over the older family, so that it covers
-    /// those addresses however they are spelled.
+    /// A range of addresses given to the newer family that lies wholly inside a prefix which
+    /// embeds the older one — the mapped <c>::ffff:a.b.c.d</c> or the compatible
+    /// <c>::a.b.c.d</c> — is read as a grant over the older family, so that it covers those
+    /// addresses however they are spelled. A range based at <c>::</c> inside the compatible
+    /// prefix, from <c>::/96</c> to <c>::/127</c>, also covers <c>::</c> and <c>::1</c>,
+    /// which are not embeddings, and is refused rather than read either way.
     /// </para>
     /// <para>
     /// The value an <see cref="IPNetwork"/> nobody set holds is <c>0.0.0.0/0</c>, the whole of
@@ -114,7 +117,8 @@ public sealed class PoolBuilder
     /// <exception cref="ArgumentException">
     /// <paramref name="ports"/> is empty, <paramref name="network"/> is the default value
     /// (<c>0.0.0.0/0</c>), <paramref name="network"/> lies wholly inside the addresses a range
-    /// grant does not reach, or <paramref name="authority"/> was never acquired.
+    /// grant does not reach, <paramref name="network"/> is based at <c>::</c> with a prefix
+    /// from 96 to 127, or <paramref name="authority"/> was never acquired.
     /// </exception>
     public PoolBuilder InsertIpNet(IPNetwork network, PortRange ports, AmbientAuthority authority)
     {
@@ -136,6 +140,17 @@ public sealed class PoolBuilder
                 "A network nobody set is 0.0.0.0/0, the whole of IPv4, so it cannot be told " +
                 "apart from a grant over everything and is refused. If the whole of IPv4 is " +
                 "intended, grant its two halves, 0.0.0.0/1 and 128.0.0.0/1.",
+                nameof(network));
+        }
+
+        if (EndpointNormalization.StraddlesCompatibleForm(network))
+        {
+            throw new ArgumentException(
+                "This range lies inside the prefix that embeds IPv4 addresses in the " +
+                "compatible form, ::a.b.c.d, but also covers :: and ::1, which are not " +
+                "embeddings, so it is neither an IPv4 range nor an IPv6 one. Write the IPv4 " +
+                "range it embeds directly, such as 0.0.0.0/8, or in the mapped form, such as " +
+                "::ffff:0.0.0.0/104; grant ::1 on its own if the IPv6 loopback is meant.",
                 nameof(network));
         }
 

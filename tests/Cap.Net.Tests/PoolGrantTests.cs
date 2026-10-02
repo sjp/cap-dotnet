@@ -116,6 +116,61 @@ public sealed class PoolGrantTests
         Assert.True(pool.Allows(IPAddress.Parse("::ffff:10.0.0.7"), 443));
     }
 
+    /// <summary>A range given in the compatible form covers the older family's spellings too.</summary>
+    /// <remarks>
+    /// Addresses in the compatible form are already read as the address they embed, so a
+    /// range in that form left in the newer family would be compared against nothing but
+    /// older-family addresses and cover none of them.
+    /// </remarks>
+    [Fact]
+    public void A_compatible_form_range_covers_the_family_it_embeds()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("::10.0.0.0/104"), PortRange.Only(443), AmbientAuthority.Acquire())
+            .Build();
+
+        Assert.True(pool.Allows(IPAddress.Parse("10.0.0.7"), 443));
+        Assert.True(pool.Allows(IPAddress.Parse("::10.0.0.7"), 443));
+        Assert.True(pool.Allows(IPAddress.Parse("::ffff:10.0.0.7"), 443));
+        Assert.False(pool.Allows(IPAddress.Parse("11.0.0.1"), 443));
+        Assert.False(pool.Allows(IPAddress.Parse("10.0.0.7"), 80));
+    }
+
+    /// <summary>
+    /// A range in the compatible prefix that also covers the two addresses there which are
+    /// not embeddings is refused.
+    /// </summary>
+    /// <remarks>
+    /// Read as the older family it would drop the newer family's loopback; read as the newer
+    /// family it would cover only that loopback and the unspecified address. Either reading
+    /// surprises whoever wrote it, so neither is chosen for them. The two addresses on their
+    /// own are not ranges and stay grants over themselves.
+    /// </remarks>
+    [Theory]
+    [InlineData("::/96")]
+    [InlineData("::/104")]
+    [InlineData("::/127")]
+    public void A_compatible_form_range_covering_the_non_embeddings_is_refused(string network)
+    {
+        var builder = new PoolBuilder();
+
+        ArgumentException refused = Assert.Throws<ArgumentException>(() => builder.InsertIpNet(
+            IPNetwork.Parse(network), PortRange.Every, AmbientAuthority.Acquire()));
+        Assert.Equal("network", refused.ParamName);
+    }
+
+    /// <summary>The newer family's loopback granted as a one-address range is that address alone.</summary>
+    [Fact]
+    public void The_loopback_as_a_range_is_not_an_embedding()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("::1/128"), PortRange.Only(443), AmbientAuthority.Acquire())
+            .Build();
+
+        Assert.True(pool.Allows(IPAddress.IPv6Loopback, 443));
+        Assert.False(pool.Allows(IPAddress.Parse("0.0.0.1"), 443));
+    }
+
     /// <summary>A scope identifier does not make an address a different address.</summary>
     [Fact]
     public void A_scope_identifier_is_not_part_of_the_comparison()

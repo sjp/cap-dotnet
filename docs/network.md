@@ -116,9 +116,12 @@ first. Two spellings fold into the address they name:
   address parser, which is reason enough for it to turn up in a request somebody hoped would
   not be checked.
 
-A range given in the newer family that lies wholly inside the embedding prefix — `::ffff:10.0.0.0/104`
-— is read as the older family's range it describes, so it covers those addresses however they
-are spelled.
+A range given in the newer family that lies wholly inside either embedding prefix —
+`::ffff:10.0.0.0/104` or `::10.0.0.0/104` — is read as the older family's range it describes,
+so it covers those addresses however they are spelled. A range based at `::` inside the
+compatible prefix, `::/96` to `::/127`, would also cover `::` and `::1`, which are not
+embeddings; it is neither an IPv4 range nor an IPv6 one, so `InsertIpNet` refuses it and asks
+for the IPv4 or mapped spelling instead.
 
 Two things are deliberately *not* folded in. `::` and `::1` sit inside the embedding prefix
 without being embeddings, and stay themselves. Tunnelling addresses embed an IPv4 address
