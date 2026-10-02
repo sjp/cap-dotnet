@@ -716,6 +716,12 @@ public sealed class InMemoryFileSystem
     /// <see cref="CapErrorKind.NameTooLong"/>, and a plain <see cref="IOException"/> for
     /// <see cref="CapErrorKind.Other"/>. Any other kind is thrown as a
     /// <see cref="CapIOException"/> carrying it.
+    /// <para>
+    /// Emptying a file when it is opened with <see cref="FileMode.Create"/> or
+    /// <see cref="FileMode.Truncate"/> is not a write and always succeeds, as <c>O_TRUNC</c>
+    /// does; a following write that fails leaves the file empty, as a full disk does. Code that
+    /// must keep the old contents on failure writes to a scratch name and renames.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="count"/> is negative, or <paramref name="kind"/> is not a value the

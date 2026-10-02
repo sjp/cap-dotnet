@@ -156,6 +156,21 @@ public sealed class FaultTests
     }
 
     [Fact]
+    public void A_failed_write_over_an_existing_file_leaves_it_empty_as_a_full_disk_does()
+    {
+        InMemoryFileSystem fs = new();
+        fs.AddFile("t", "hello");
+        using Dir root = fs.OpenRoot();
+
+        fs.FailNextWrites(1);
+        IOException thrown = Assert.Throws<IOException>(() => root.WriteAllBytes("t", [9, 9]));
+
+        Assert.Equal(CapErrorKind.Other, CapIOException.KindOf(thrown));
+        Assert.Empty(fs.ReadAllBytes("t"));
+        Assert.Equal(0, fs.UsedBytes);
+    }
+
+    [Fact]
     public void A_write_past_the_capacity_fails_as_a_full_disk_does()
     {
         InMemoryFileSystem fs = new() { Capacity = 8 };
