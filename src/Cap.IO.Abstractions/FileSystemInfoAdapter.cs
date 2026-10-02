@@ -46,9 +46,10 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
 
     public string FullName { get; private set; }
 
-    public string Name => Fs.Paths.LastName(FullName);
+    /// <summary>The last name of the folded path, as <c>System.IO</c>'s <c>DirectoryInfo</c> gives it.</summary>
+    public virtual string Name => Fs.Paths.LastName(FullName);
 
-    public string Extension => System.IO.Path.GetExtension(Name);
+    public string Extension => System.IO.Path.GetExtension(Fs.Paths.LastName(FullName));
 
     public abstract bool Exists { get; }
 
@@ -229,6 +230,12 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
 internal sealed class FileInfoAdapter(DirFileSystem fs, string path) : FileSystemInfoAdapter(fs, path), IFileInfo
 {
     public override bool Exists => Present && Metadata.Type != CapFileType.Directory;
+
+    /// <summary>
+    /// The last segment of the path as the caller wrote it, as <c>System.IO</c>'s <c>FileInfo</c>
+    /// gives it: <c>..</c> for a path ending in <c>..</c>, and empty after a trailing separator.
+    /// </summary>
+    public override string Name => System.IO.Path.GetFileName(OriginalPath);
 
     public IDirectoryInfo? Directory => DirectoryName is { } parent ? new DirectoryInfoAdapter(Fs, Fs.Paths.ParentRequest(Request) ?? parent) : null;
 

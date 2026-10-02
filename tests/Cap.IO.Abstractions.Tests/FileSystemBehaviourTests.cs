@@ -632,6 +632,19 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void File_info_name_is_the_last_segment_as_written()
+    {
+        MockDiffers("FileInfo.Name for a path ending in .. is the folded name.");
+        Fs.Directory.CreateDirectory(P("d.txt", "e"));
+
+        Assert.Equal("..", Fs.FileInfo.New(P("d.txt", "e", "..")).Name);
+        Assert.Equal(".txt", Fs.FileInfo.New(P("d.txt", "e", "..")).Extension);
+        Assert.Equal(".", Fs.FileInfo.New(P("d.txt", ".")).Name);
+        Assert.Equal("d.txt", Fs.DirectoryInfo.New(P("d.txt", "e", "..")).Name);
+        Assert.Equal("d.txt", Fs.DirectoryInfo.New(P("d.txt", ".")).Name);
+    }
+
+    [Fact]
     public void Directory_info_lists_its_contents()
     {
         Fs.Directory.CreateDirectory(P("d", "sub"));

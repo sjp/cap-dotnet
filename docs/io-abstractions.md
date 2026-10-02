@@ -129,7 +129,7 @@ test checks that every row has one and that no such test names a row missing fro
 | `ResolveLinkTarget` on a link with a rooted target | returns the target | `SandboxEscapeException` |
 | `//x` | the same as `/x` on Unix | refused as absolute: only one root is removed |
 | `Path.Join` with a separator on both sides of a seam | writes both | writes one, so that `Join(root, "/x")` does not spell the refused `//x` |
-| Full names | host paths | virtual paths, folded lexically. See above. `Directory.GetParent`, `Directory.GetDirectoryRoot` and the name properties of an info work on the folded name and reach nothing, so a path that climbs above the root answers with a name beneath it |
+| Full names | host paths | virtual paths, folded lexically. See above. `Directory.GetParent`, `Directory.GetDirectoryRoot` and the name properties of an info (except `FileInfo.Name`, which is the last segment as written, as in `System.IO`) work on the folded name and reach nothing, so a path that climbs above the root answers with a name beneath it |
 | Current directory | process-wide | per `DirFileSystem` instance |
 | `Directory.GetLogicalDrives` | the host's drives | the virtual root |
 | `Path.GetTempPath` | the host's temporary directory | `/.tmp/`, created beneath the root when first asked for. What goes there is part of the tree, visible to whatever else can see it, and is not cleared away |
@@ -178,7 +178,9 @@ test is skipped for it. The skips are:
 - a path beginning with two separators, such as the `//b` that `Path.Join("/", "/b")`
   spells, does not name `/b`;
 - the search pattern `.` matches nothing, and `*.*` only names that contain a dot.
-  `System.IO`, and `DirFileSystem`, match every name with both.
+  `System.IO`, and `DirFileSystem`, match every name with both;
+- `FileInfo.Name` for a path ending in `..` is the folded name. `System.IO`, and
+  `DirFileSystem`, give `..`, the last segment as written.
 
 A test that passes on `MockFileSystem` because of one of these can fail against
 `DirFileSystem`. Beyond these, `MockFileSystem` does not confine anything, and the
