@@ -385,6 +385,34 @@ public sealed class AmbientApiTests
             list => Assert.All(list.List.Entries, entry => Assert.NotEqual(string.Empty, entry.Message)));
     }
 
+    [Fact]
+    public void Every_rule_has_a_help_link_to_its_own_section_of_the_docs()
+    {
+        const string Docs = "https://github.com/sjp/cap-dotnet/blob/main/docs/analyzers.md#";
+        string analyzersMd = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "docs", "analyzers.md"));
+
+        Assert.All(new CapabilityAnalyzer().SupportedDiagnostics, rule =>
+        {
+            string anchor = rule.Id.ToLowerInvariant();
+            Assert.Equal(Docs + anchor, rule.HelpLinkUri);
+            Assert.Equal(rule.HelpLinkUri, Rules.ToStrict(rule).HelpLinkUri);
+            Assert.Contains($"<a id=\"{anchor}\"></a>", analyzersMd, StringComparison.Ordinal);
+        });
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        for (DirectoryInfo? directory = new(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "CapDotnet.slnx")))
+            {
+                return directory.FullName;
+            }
+        }
+
+        throw new InvalidOperationException("The repository root was not found above the test assembly.");
+    }
+
     private static string Strict(string source) =>
         source.Replace("public static class", "[assembly: Cap.Primitives.CapabilityStrict]\n\npublic static class", StringComparison.Ordinal);
 

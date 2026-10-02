@@ -45,6 +45,49 @@ listed method, property or event also covers the members that override it. Inter
 not followed: an entry for an interface covers calls made through the interface, not the
 classes that implement it.
 
+Each rule's help link, shown in the IDE and the build log, points at its own section of this
+page. The four ambient rules have a short one each below.
+
+<a id="cap0001"></a>
+
+### `CAP0001`: the filesystem by path
+
+Reports each place the filesystem is reached by path rather than beneath a `Dir`. Open the
+directory once where the program is assembled and pass the `Dir` down; read and write through
+it. The list is [`Lists/Filesystem.txt`](../src/Cap.Analyzers/Lists/Filesystem.txt). The rule
+is off until a project turns it on (see [why](#why-the-ambient-rules-start-off) and
+[how](#turning-rules-on-up-and-off)). `IFileSystem` and its wrappers are covered below.
+
+<a id="cap0002"></a>
+
+### `CAP0002`: the network by address or name
+
+Reports each bind, connect, send or name lookup made without a `Cap.Net.Pool` checking the
+address against what was granted, and the construction of clients that resolve names
+themselves. Bind and connect through a pool instead; see [network.md](network.md). The list is
+[`Lists/Network.txt`](../src/Cap.Analyzers/Lists/Network.txt). The rule is off until a project
+turns it on. `HttpClient` and the other by-name clients are covered below.
+
+<a id="cap0006"></a>
+
+### `CAP0006`: the system clock
+
+Reports each read of, or wait on, the system clock that does not go through a `TimeProvider`
+the code was given. Take one from `Cap.Time.CapClock` where the program is assembled and pass
+it down; see [time.md](time.md). The list is
+[`Lists/Clock.txt`](../src/Cap.Analyzers/Lists/Clock.txt). The rule is off until a project turns
+it on.
+
+<a id="cap0007"></a>
+
+### `CAP0007`: entropy
+
+Reports each draw on the operating system's entropy, and each use of a generator standing in
+for it, such as `System.Random`. Take a `Cap.Rand.CapRandom` where the program is assembled and
+pass it down; see [randomness.md](randomness.md). The list is
+[`Lists/Entropy.txt`](../src/Cap.Analyzers/Lists/Entropy.txt). The rule is off until a project
+turns it on.
+
 ### `IFileSystem`
 
 System.IO.Abstractions' `FileSystem` and Testably's `RealFileSystem` pass every call straight
@@ -105,10 +148,14 @@ dotnet_diagnostic.CAP0004.severity = none    # stop reporting raw handles
 rest. `<NoWarn>` and `<WarningsAsErrors>` in the project file work as they do for any
 diagnostic.
 
+<a id="cap0000"></a>
+
 `CapabilityStrict` applies however the other rules are configured. The compiler does not run
 an analyzer whose every rule is off, so the analyzer carries `CAP0000`, a rule that is never
 reported and that `.editorconfig` cannot turn off; switching off `CAP0003`, `CAP0004`,
 `CAP0005` and `CAP0008` therefore leaves a strict assembly strict.
+
+<a id="cap0003"></a>
 
 ## `CAP0003`: where authority is taken
 
@@ -141,6 +188,8 @@ A class library has no entry point, so every acquisition in one is reported unti
 marked. That is intended. A library that takes its own authority is one whose reach cannot
 be read from its signatures, and each such place should be a decision someone made.
 
+<a id="cap0004"></a>
+
 ## `CAP0004`: raw handles
 
 The handle behind a `Dir` or `CapFile` carries the same authority as the capability it came
@@ -155,6 +204,8 @@ This rule and `CAP0005` apply only to members of this library, which they recogn
 `[assembly: CapabilityLibrary]` marker every cap-dotnet assembly carries rather than by name.
 A consumer's own assembly called `Cap.Something`, with its own `UnsafeGetHandle` or `path`
 parameter, is not reported.
+
+<a id="cap0005"></a>
 
 ## `CAP0005`: paths built by joining strings
 
@@ -186,6 +237,8 @@ between parts, and `string.Join` with a separator. It does not report:
 - the path given to a method that takes an `AmbientAuthority` token, such as `Dir.Open`,
   which is where a program names a place in full on purpose;
 - a symbolic link's target, which is stored, not resolved against the directory.
+
+<a id="cap0008"></a>
 
 ## `CAP0008`: a project's own list
 

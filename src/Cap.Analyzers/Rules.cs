@@ -23,6 +23,12 @@ internal static class Rules
 {
     private const string Category = "Capability";
 
+    /// <summary>
+    /// Where each rule's help link points: docs/analyzers.md, at an anchor named for the
+    /// rule's ID in lower case.
+    /// </summary>
+    private const string HelpBase = "https://github.com/sjp/cap-dotnet/blob/main/docs/analyzers.md#";
+
     public const string CompositionRootOption = "cap_composition_root";
 
     /// <summary>
@@ -44,6 +50,7 @@ internal static class Rules
         description:
             "Never reported. It keeps the analyzer running when every other rule is configured " +
             "off, so that [assembly: CapabilityStrict] still takes effect.",
+        helpLinkUri: HelpBase + "cap0000",
         customTags: WellKnownDiagnosticTags.NotConfigurable);
 
     public static readonly DiagnosticDescriptor AmbientFilesystem = new(
@@ -55,7 +62,8 @@ internal static class Rules
         isEnabledByDefault: false,
         description:
             "Reaches the filesystem by path, against everything the process can reach, rather than " +
-            "beneath a directory handle it was given.");
+            "beneath a directory handle it was given.",
+        helpLinkUri: HelpBase + "cap0001");
 
     public static readonly DiagnosticDescriptor AmbientNetwork = new(
         "CAP0002",
@@ -66,7 +74,8 @@ internal static class Rules
         isEnabledByDefault: false,
         description:
             "Binds, connects, sends or resolves a name without a pool of granted endpoints " +
-            "standing behind the address.");
+            "standing behind the address.",
+        helpLinkUri: HelpBase + "cap0002");
 
     public static readonly DiagnosticDescriptor AcquireOutsideCompositionRoot = new(
         "CAP0003",
@@ -80,7 +89,8 @@ internal static class Rules
         description:
             "Authority should enter a program in one place, so that everything else can be read " +
             "from what it was handed. The entry point, anything marked [CompositionRoot], and " +
-            "files for which .editorconfig sets cap_composition_root = true are composition roots.");
+            "files for which .editorconfig sets cap_composition_root = true are composition roots.",
+        helpLinkUri: HelpBase + "cap0003");
 
     public static readonly DiagnosticDescriptor UnsafeHandle = new(
         "CAP0004",
@@ -93,7 +103,8 @@ internal static class Rules
         description:
             "The raw handle carries the same authority as the capability it came from, and code " +
             "holding it can pass it anywhere or outlive the capability's disposal. Each use is " +
-            "worth a reviewer's look.");
+            "worth a reviewer's look.",
+        helpLinkUri: HelpBase + "cap0004");
 
     public static readonly DiagnosticDescriptor ConcatenatedPath = new(
         "CAP0005",
@@ -108,7 +119,8 @@ internal static class Rules
             "A directory handle confines a path to what is beneath it, and no further. Joining a " +
             "prefix to a component that arrived from elsewhere lets that component name any " +
             "sibling of the prefix; opening the prefix as its own handle first confines the " +
-            "component to it.");
+            "component to it.",
+        helpLinkUri: HelpBase + "cap0005");
 
     public static readonly DiagnosticDescriptor AmbientClock = new(
         "CAP0006",
@@ -117,7 +129,8 @@ internal static class Rules
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: false,
-        description: "Reads or waits on the system clock rather than on a TimeProvider that was passed in.");
+        description: "Reads or waits on the system clock rather than on a TimeProvider that was passed in.",
+        helpLinkUri: HelpBase + "cap0006");
 
     public static readonly DiagnosticDescriptor AmbientEntropy = new(
         "CAP0007",
@@ -128,7 +141,8 @@ internal static class Rules
         isEnabledByDefault: false,
         description:
             "Takes randomness from the operating system, or from a generator standing in for it, " +
-            "rather than from a source that was passed in.");
+            "rather than from a source that was passed in.",
+        helpLinkUri: HelpBase + "cap0007");
 
     public static readonly DiagnosticDescriptor ProjectBannedSymbol = new(
         "CAP0008",
@@ -137,7 +151,8 @@ internal static class Rules
         Category,
         DiagnosticSeverity.Warning,
         isEnabledByDefault: true,
-        description: "Named in a CapBannedSymbols.txt file supplied to this project as an AdditionalFile.");
+        description: "Named in a CapBannedSymbols.txt file supplied to this project as an AdditionalFile.",
+        helpLinkUri: HelpBase + "cap0008");
 
     public static readonly DiagnosticDescriptor[] All =
     [
