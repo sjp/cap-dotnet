@@ -190,7 +190,13 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
         Request destination = fs.Resolve(destFileName, nameof(destFileName));
         try
         {
-            if (source.IsRoot || fs.Dir.GetMetadata(source.Relative).Type == CapFileType.Directory)
+            // System.IO asks whether the source exists as a file through a final link, so a
+            // link to a directory is refused. A link that leads nowhere, or out of the root,
+            // is still a file to it, and is moved as the link.
+            if (source.IsRoot
+                || (fs.Dir.TryGetMetadata(source.Relative, followLink: true, out CapMetadata followed)
+                    ? followed.Type
+                    : fs.Dir.GetMetadata(source.Relative).Type) == CapFileType.Directory)
             {
                 throw Failures.FileNotFound(source.Virtual);
             }

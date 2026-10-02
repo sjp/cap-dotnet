@@ -264,6 +264,32 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void Moving_a_link_to_a_directory_as_a_file_is_refused()
+    {
+        TestLinks.Require(_fixture.SupportsLinks);
+        MockDiffers("a link to a directory is moved as a file.");
+        Fs.Directory.CreateDirectory(P("d"));
+        Fs.Directory.CreateSymbolicLink(P("dl"), "d");
+
+        Assert.Throws<FileNotFoundException>(() => Fs.File.Move(P("dl"), P("moved")));
+        Assert.True(Fs.Directory.Exists(P("dl")));
+        Assert.False(Fs.Directory.Exists(P("moved")));
+    }
+
+    [Fact]
+    public void Moving_a_dangling_link_moves_the_link()
+    {
+        TestLinks.Require(_fixture.SupportsLinks);
+        MockDiffers("a link to a missing target cannot be created.");
+        Fs.File.CreateSymbolicLink(P("link"), "missing");
+
+        Fs.File.Move(P("link"), P("moved"));
+
+        Assert.Null(Fs.FileInfo.New(P("link")).LinkTarget);
+        Assert.Equal("missing", Fs.FileInfo.New(P("moved")).LinkTarget);
+    }
+
+    [Fact]
     public void Replacing_keeps_a_backup()
     {
         Fs.File.WriteAllText(P("new.txt"), "new");
