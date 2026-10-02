@@ -117,6 +117,12 @@ A zip extractor that can't be made to write outside its destination. There's no 
 could be got wrong: each entry's name goes as-is to a `Dir` on the destination, and a name
 that resolves to somewhere else is refused by the resolution itself.
 
+A handle doesn't bound how much gets written, so the extractor sets its own limits: it refuses
+an archive with more than 100,000 entries, and an entry over 1 GiB decompressed, compressed
+more than 100 to one, or that would take the total past 4 GiB. The sizes it checks are the
+ones the archive declares, and `ZipArchiveEntry.Open` never yields more than that. A name
+the archive repeats is skipped, keeping the first entry, and doesn't fail the run.
+
 ```bash
 dotnet run --project samples/ArchiveExtractor                            # the demonstration
 dotnet run --project samples/ArchiveExtractor -- archive.zip destination  # a real archive
@@ -134,6 +140,8 @@ Extracting a hostile archive into /tmp/cap-archive-extractor-AJHBEz/out:
   refused  docs/../../escaped.txt  (outside the destination)
   refused  docs/guide/../../../escaped.txt  (outside the destination)
   refused  /escaped-absolute.txt  (outside the destination)
+  skipped  readme.txt  (already written)
+  refused  bomb.bin  (compressed 1033 bytes from 1048576, more than 100 to one)
 ```
 
 It is also the program whose NativeAOT size is recorded in [docs/aot.md](../docs/aot.md).

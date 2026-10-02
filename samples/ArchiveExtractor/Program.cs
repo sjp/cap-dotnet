@@ -26,6 +26,14 @@ namespace ArchiveExtractor;
 /// path for it to get wrong.
 /// </para>
 /// <para>
+/// What a handle does not bound is how much gets written: the library has no resource limits,
+/// so a zip bomb would fill the destination's filesystem as readily as any other. Those
+/// limits are the extractor's to set, and <see cref="Extract"/> refuses an archive with more
+/// than <see cref="MaxEntries"/> entries, and an entry larger than <see cref="MaxEntryBytes"/>,
+/// compressed more than <see cref="MaxRatio"/> to one, or that would take the total past
+/// <see cref="MaxTotalBytes"/>.
+/// </para>
+/// <para>
 /// Run with no arguments it makes a hostile archive of its own, extracts it into a scratch
 /// directory and shows what was refused. Run as <c>ArchiveExtractor archive.zip destination</c>
 /// it extracts a real one.
@@ -33,6 +41,18 @@ namespace ArchiveExtractor;
 /// </remarks>
 internal static class Program
 {
+    /// <summary>The most entries, directories included, an archive may have.</summary>
+    internal const int MaxEntries = 100_000;
+
+    /// <summary>The largest an entry may be once decompressed.</summary>
+    internal const long MaxEntryBytes = 1L << 30;
+
+    /// <summary>The most an extraction may write, all entries together.</summary>
+    internal const long MaxTotalBytes = 4L << 30;
+
+    /// <summary>The most an entry may have been compressed, decompressed size to compressed.</summary>
+    internal const long MaxRatio = 100;
+
     internal static int Main(string[] args)
     {
         switch (args)
@@ -62,13 +82,30 @@ internal static class Program
     /// Writes every entry of <paramref name="archive"/> beneath <paramref name="destination"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// An entry that cannot be written is reported and skipped rather than ending the
     /// extraction, so that one hostile name in an archive does not hide what the others were.
+    /// A name the archive repeats, which zip allows, keeps the first entry written under it.
+    /// </para>
+    /// <para>
+    /// The size limits are checked against <see cref="ZipArchiveEntry.Length"/>, which is
+    /// the archive's own claim, before anything is created. They hold even when the claim is
+    /// a lie: the stream <see cref="ZipArchiveEntry.Open"/> returns ends after that many
+    /// bytes however many the compressed data would inflate to.
+    /// </para>
     /// </remarks>
     internal static Summary Extract(ZipArchive archive, Dir destination)
     {
         Summary summary = default;
 
+        if (archive.Entries.Count > MaxEntries)
+        {
+            Console.WriteLine($"  refused  the archive  ({archive.Entries.Count} entries, more than {MaxEntries})");
+            summary.Failed++;
+            return summary;
+        }
+
+        long total = 0;
         foreach (ZipArchiveEntry entry in archive.Entries)
         {
             try
@@ -76,6 +113,13 @@ internal static class Program
                 if (entry.FullName.EndsWith('/'))
                 {
                     EnsureDirectory(destination, entry.FullName.TrimEnd('/'));
+                    continue;
+                }
+
+                if (TooLarge(entry, total) is string reason)
+                {
+                    Console.WriteLine($"  refused  {entry.FullName}  ({reason})");
+                    summary.Failed++;
                     continue;
                 }
 
@@ -88,6 +132,7 @@ internal static class Program
 
                 Console.WriteLine($"  wrote    {entry.FullName}");
                 summary.Written++;
+                total += entry.Length;
             }
             catch (SandboxEscapeException)
             {
@@ -99,6 +144,11 @@ internal static class Program
                 Console.WriteLine($"  refused  {entry.FullName}  (not a usable name)");
                 summary.Failed++;
             }
+            catch (IOException exception) when (CapIOException.KindOf(exception) == CapErrorKind.AlreadyExists)
+            {
+                Console.WriteLine($"  skipped  {entry.FullName}  (already written)");
+                summary.Skipped++;
+            }
             catch (IOException exception)
             {
                 Console.WriteLine($"  failed   {entry.FullName}  ({exception.Message})");
@@ -107,6 +157,32 @@ internal static class Program
         }
 
         return summary;
+    }
+
+    /// <summary>
+    /// Says why <paramref name="entry"/> may not be written after <paramref name="total"/>
+    /// bytes already have been, or returns <see langword="null"/> when it may.
+    /// </summary>
+    private static string? TooLarge(ZipArchiveEntry entry, long total)
+    {
+        if (entry.Length > MaxEntryBytes)
+        {
+            return $"{entry.Length} bytes, more than {MaxEntryBytes}";
+        }
+
+        // Multiplied rather than divided, so an entry claiming bytes from no compressed data
+        // at all is refused too.
+        if (entry.Length > MaxRatio * entry.CompressedLength)
+        {
+            return $"compressed {entry.CompressedLength} bytes from {entry.Length}, more than {MaxRatio} to one";
+        }
+
+        if (entry.Length > MaxTotalBytes - total)
+        {
+            return $"would take the total past {MaxTotalBytes} bytes";
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -190,9 +266,9 @@ internal static class Program
             }
 
             Console.WriteLine(
-                $"{summary.Written} entries written, {summary.Failed} refused, " +
+                $"{summary.Written} entries written, {summary.Failed} refused, {summary.Skipped} skipped, " +
                 "and nothing written outside the destination.");
-            return summary.Written == 3 ? 0 : 1;
+            return summary is { Written: 3, Failed: 5, Skipped: 1 } ? 0 : 1;
         }
         finally
         {
@@ -201,8 +277,8 @@ internal static class Program
     }
 
     /// <summary>
-    /// An archive with three honest entries and the classic ways out of an extraction
-    /// directory.
+    /// An archive with three honest entries, the classic ways out of an extraction
+    /// directory, a name given twice and a small zip bomb.
     /// </summary>
     private static MemoryStream HostileArchive()
     {
@@ -217,11 +293,17 @@ internal static class Program
                 "docs/../../escaped.txt",
                 "docs/guide/../../../escaped.txt",
                 "/escaped-absolute.txt",
+                "readme.txt",
             ])
             {
                 using StreamWriter writer = new(archive.CreateEntry(name).Open());
                 writer.Write($"This is {name}.");
             }
+
+            // A mebibyte of zeros deflates to about a kilobyte: well inside the size limits,
+            // refused for the ratio alone.
+            using Stream bomb = archive.CreateEntry("bomb.bin").Open();
+            bomb.Write(new byte[1 << 20]);
         }
 
         bytes.Position = 0;
@@ -233,5 +315,6 @@ internal static class Program
     {
         public int Written;
         public int Failed;
+        public int Skipped;
     }
 }
