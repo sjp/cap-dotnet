@@ -256,6 +256,23 @@ public sealed partial class Dir : IDir
         OpenRootCore(PlatformOps.Host, path, authority, Demand(policy), out dir).IsSuccess;
 
     /// <summary>
+    /// Opens a directory by an ordinary path as
+    /// <see cref="TryOpen(string, AmbientAuthority, out Dir?, SymlinkPolicy)"/> does, and
+    /// also reports why a failed open failed, for a caller that treats a missing directory
+    /// differently from one it was refused.
+    /// </summary>
+    internal static bool TryOpen(
+        string path,
+        AmbientAuthority authority,
+        [NotNullWhen(true)] out Dir? dir,
+        out CapError error,
+        SymlinkPolicy policy)
+    {
+        error = OpenRootCore(PlatformOps.Host, path, authority, Demand(policy), out dir);
+        return error.IsSuccess;
+    }
+
+    /// <summary>
     /// Makes a root handle from a directory handle the process already holds.
     /// </summary>
     /// <param name="handle">

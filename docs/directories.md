@@ -24,6 +24,15 @@ yet. The first `Open…` call for a kind creates whatever is missing, one compon
 through the handle `From` opened, and every call returns a new handle that the caller owns.
 An application that never asks for a cache never gets one.
 
+Only a location that is missing is left for later. One that exists but cannot be opened
+(permission denied, a loop of symbolic links) makes `From` throw, naming that location, so the
+error is not first reported by `Open…` as a failure to create. Until a kind is first asked for,
+`From` holds a handle on the nearest existing directory above that kind's location. On a fresh
+account that is the home directory, or `/` when an XDG variable names a path that does not
+exist at all. The handle is released once the directory has been created, and is held until
+disposal for a kind that is never asked for. Nothing outside the application's own directory
+is reachable through `ProjectDirs`.
+
 Pass the handles down, not the `ProjectDirs`. A component given `config` can reach the
 application's configuration directory and nothing above it.
 

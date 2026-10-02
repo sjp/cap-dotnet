@@ -285,6 +285,69 @@ public sealed class ProjectDirsTests : IDisposable
         Assert.Throws<CapIOException>(() => dirs.OpenCache());
     }
 
+    /// <summary>
+    /// A location that is there but refused is reported when the directories are found,
+    /// naming it, instead of being taken for missing and failing later as a creation.
+    /// </summary>
+    [Fact]
+    public void A_location_that_cannot_be_opened_fails_at_From()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip(NoModeBits);
+            return;
+        }
+
+        if (Environment.IsPrivilegedProcess)
+        {
+            Assert.Skip("A privileged process is not refused by mode bits.");
+            return;
+        }
+
+        string application = Path.Join(HomePath, ".config", "myapp");
+        Directory.CreateDirectory(application);
+        File.SetUnixFileMode(application, UnixFileMode.None);
+
+        UnauthorizedAccessException refused = Assert.Throws<UnauthorizedAccessException>(() => Find());
+        Assert.Contains("myapp", refused.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A loop of links where a location should be is reported when the directories are
+    /// found, rather than walked past to the directory above it.
+    /// </summary>
+    [Fact]
+    public void A_location_whose_links_loop_fails_at_From()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Making a symbolic link needs a privilege this test does not assume.");
+            return;
+        }
+
+        string config = Path.Join(HomePath, ".config");
+        Directory.CreateDirectory(config);
+        string application = Path.Join(config, "myapp");
+        File.CreateSymbolicLink(application, application);
+
+        CapIOException looped = Assert.Throws<CapIOException>(() => Find());
+        Assert.Contains("myapp", looped.Message, StringComparison.Ordinal);
+        Assert.Equal([application], Directory.EnumerateFileSystemEntries(config));
+    }
+
+    /// <summary>A missing location still leaves the creation for the first request.</summary>
+    [Fact]
+    public void A_missing_location_still_walks_up()
+    {
+        Directory.CreateDirectory(Path.Join(HomePath, ".config"));
+
+        using ProjectDirs dirs = Find();
+        Assert.False(Directory.Exists(Path.Join(HomePath, ".config", "myapp")));
+
+        dirs.OpenConfig().Dispose();
+        Assert.True(Directory.Exists(Path.Join(HomePath, ".config", "myapp")));
+    }
+
     [Fact]
     public void Concurrent_first_requests_all_succeed_on_one_directory()
     {

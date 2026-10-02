@@ -1,4 +1,5 @@
 using Cap.Primitives;
+using Cap.Primitives.Interop;
 using Cap.Primitives.Interop.Unix;
 using Cap.Std;
 
@@ -132,6 +133,19 @@ public sealed class ProjectDirs : IDisposable
     /// it opened.
     /// </para>
     /// <para>
+    /// A location that is missing is created later, beneath the part that exists. One that
+    /// is there but cannot be opened — the filesystem refused it, or its links loop — is
+    /// reported here, naming it, rather than when the directory is first asked for.
+    /// </para>
+    /// <para>
+    /// Until a kind is first asked for, the handle held for it is on the nearest directory
+    /// above its location that already exists. On an account that has none of them yet that
+    /// is the home directory, or the root when an XDG variable names a path that does not
+    /// exist at all. It is released once the directory is created beneath it, and kept until
+    /// disposal for a kind that is never asked for. Nothing beneath it is reachable through
+    /// this instance other than the application's own directory.
+    /// </para>
+    /// <para>
     /// The names become directory names, so a separator or a NUL in any of them is refused
     /// rather than letting the application's directory land somewhere else.
     /// </para>
@@ -152,6 +166,12 @@ public sealed class ProjectDirs : IDisposable
     /// <exception cref="DirectoryNotFoundException">
     /// There is no home directory, or known folder, to put the directories under, or a
     /// location names something that can neither be opened nor created.
+    /// </exception>
+    /// <exception cref="UnauthorizedAccessException">
+    /// The filesystem refused to open a location, or a directory on the way to it.
+    /// </exception>
+    /// <exception cref="CapIOException">
+    /// A location could not be opened for another reason, such as a loop of symbolic links.
     /// </exception>
     public static ProjectDirs From(
         string qualifier,
@@ -490,12 +510,22 @@ public sealed class ProjectDirs : IDisposable
     /// it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Each step up drops the last component of the path as written. That is lexical, which
     /// is wrong in general under symbolic links, but here it decides only where creation
     /// starts: each candidate is opened as the host resolves it, and whatever turns out to be
     /// missing beneath the one that opens is created through its handle. A component that is
     /// <c>.</c> or <c>..</c> cannot be created as a directory, so a location that would need
     /// one created is refused.
+    /// </para>
+    /// <para>
+    /// Only a candidate that is missing, or that runs through something other than a
+    /// directory, sends the walk a step up. Any other failure — a refused permission, a loop
+    /// of links — is reported here, naming the path, because creating beneath the parent
+    /// could only fail later with an error about the creation rather than about the
+    /// directory that was refused. A file in the way is left for the creation to find: it
+    /// reports that as precisely as an open here would.
+    /// </para>
     /// </remarks>
     private static Slot OpenNearest(ProjectLocation location, AmbientAuthority authority, SymlinkPolicy policy)
     {
@@ -505,9 +535,14 @@ public sealed class ProjectDirs : IDisposable
 
         while (true)
         {
-            if (Dir.TryOpen(candidate, authority, out Dir? found, policy))
+            if (Dir.TryOpen(candidate, authority, out Dir? found, out CapError error, policy))
             {
                 return new Slot(found, [.. missing]);
+            }
+
+            if (error.Category is not (CapErrorCategory.NotFound or CapErrorCategory.NotADirectory))
+            {
+                throw FailureTranslation.ToException(error, candidate);
             }
 
             string trimmed = Path.TrimEndingDirectorySeparator(candidate);
