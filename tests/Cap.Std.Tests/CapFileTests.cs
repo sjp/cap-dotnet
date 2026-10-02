@@ -377,6 +377,11 @@ public sealed class CapFileTests : IDisposable
 
         await using Stream first = file.AsStream();
         await using Stream second = file.AsStream();
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.IsType<CapFileStream>(first);
+        }
+
         Assert.Equal(8, await first.ReadAsync(buffer, TestContext.Current.CancellationToken));
         Assert.Equal(4, await second.ReadAsync(buffer.AsMemory(0, 4), TestContext.Current.CancellationToken));
         Assert.Equal(4, second.Position);
