@@ -477,8 +477,8 @@ Apple M1 (Virtual), 1 CPU, 3 logical and 3 physical cores
 
 `gate` runs the classes marked ✓ above and compares them with the figures committed in
 `bench/baselines/<os>.json`. CI runs it on every change on Linux, Windows and macOS; on each
-platform with a committed baseline it fails when any row has become more than 10% worse (on
-Windows and macOS, in allocation only; see below). A
+platform with a committed baseline it fails when any row has become more than 10% worse (in
+time, by more than the run's own noise; on Windows and macOS, in allocation only; see below). A
 platform with no committed file is run and reported with a warning annotation, but not gated.
 
 **Time is compared as a ratio, not as a duration.** A hosted CI runner's speed wanders from one
@@ -488,6 +488,35 @@ random. Every gated operation is measured in the same run, on the same machine, 
 moves when this library gets slower and mostly does not when the machine does. Medians
 are used rather than means, so that one iteration interrupted by the runner doing something else
 does not decide the verdict.
+
+**A time regression must stand clear of the run's own noise.** Each side of a ratio comes with
+the 99.9% confidence interval BenchmarkDotNet reports for it (the Error column in the tables
+above). The gate takes each side's margin relative to its mean and combines the two at their
+worst, the measured side at its fastest over the `System.IO` side at its slowest and the other way
+round, into an interval around the ratio. A row then gets one of three verdicts:
+
+- **ok** when its ratio is no more than 10% above the committed ratio;
+- **regressed**, failing the gate, when the whole interval is more than 10% above it;
+- **suspect** when the ratio is over that line but the interval still reaches below it. The
+  row is listed in the summary and raised as a warning annotation on the run, but the gate
+  passes: the run was too noisy to tell a regression from the runner.
+
+The interval leans towards passing: the margins are 99.9% ones, combined at their worst. On a
+quiet runner the intervals are a percent or two wide and a regression of 15% fails. On a noisy
+machine a regression only just over the tolerance can show as suspect instead. A suspect row is
+worth a second run before merging. The interval also covers only this run's noise, not the
+committed figure's, so a baseline taken on an unlucky run shifts the line for every later run.
+The intervals show in the summary's Ratio column.
+
+Each row also records its ratio's relative standard error (RSE), combined from both sides'
+standard errors, as `relativeStdErr` in the figures file. The summary shows this run's next to
+the committed one, so a row that has become noisier than when its baseline was measured is
+visible; a committed row measured before the gate recorded it shows "–" until the baseline is
+next moved. It does not enter the verdict.
+
+The gate does not yet read its own history: two regressions of 8% in successive changes each
+pass, though together they cross the line. The uploaded figures make it possible to compare
+earlier runs by hand.
 
 **Allocation is compared as bytes per operation**, which does not depend on the machine. A row
 whose committed allocation is zero fails on its first byte.

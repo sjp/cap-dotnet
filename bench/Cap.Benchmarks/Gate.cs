@@ -39,6 +39,16 @@ namespace Cap.Benchmarks;
 /// on its first byte: those are the rows whose whole point is that they allocate nothing.
 /// </para>
 /// <para>
+/// <strong>A time regression must stand clear of the run's own noise.</strong> Each ratio is
+/// the quotient of two medians, and each median comes with BenchmarkDotNet's 99.9% confidence
+/// interval of its side. The two relative margins are combined at their worst -- the slow side
+/// at its fastest over the yardstick at its slowest -- into an interval around the ratio. A row
+/// fails only when the whole interval lies above the tolerance line; a row whose ratio is over
+/// the line but whose interval still reaches below it is reported as suspect, with a warning
+/// annotation, and does not fail. The ratio's relative standard error is written alongside it,
+/// so the committed file records how noisy each row was when it was measured.
+/// </para>
+/// <para>
 /// Medians rather than means, so that one iteration interrupted by the runner doing something
 /// else does not decide the verdict. Baselines are kept per operating system rather than per
 /// architecture: the ratio between two ways of making the same syscalls moves with the kernel
@@ -124,8 +134,9 @@ internal static class Gate
         }
 
         string rule = GatesTime
-            ? $"A row fails when its time ratio to `System.IO` or its allocation grows more than {Tolerance:P0}; " +
-              $"a row marked allocation only is held to its allocation alone."
+            ? $"A row fails when its allocation, or the whole of its time ratio's confidence interval, grows more than " +
+              $"{Tolerance:P0}; a ratio over the line whose interval still reaches below it is suspect but passes. " +
+              $"A row marked allocation only is held to its allocation alone."
             : $"Time ratios are not gated on {Platform}, whose hosted runners move them by more than the tolerance; " +
               $"a row fails when its allocation grows more than {Tolerance:P0}.";
         report.AppendLine(CultureInfo.InvariantCulture,
@@ -141,6 +152,13 @@ internal static class Gate
                 $"{comparison.Ungated} row(s) have no committed baseline and were not gated. To start gating them, " +
                 $"commit this run's figures (`{Path.GetFileName(measuredPath)}`) as `bench/baselines/{Platform}.json`.");
             report.AppendLine();
+        }
+
+        foreach (string suspect in comparison.Suspects)
+        {
+            // An annotation, so a suspect row is seen on the run page without failing it.
+            Console.WriteLine($"::warning::{suspect}, but this run's noise could account for it");
+            report.AppendLine(CultureInfo.InvariantCulture, $"- suspect, not failed: {suspect}");
         }
 
         foreach (string failure in failures)
@@ -180,8 +198,9 @@ internal static class Gate
         IReadOnlyCollection<string> allowedMissingJobs, StringBuilder report)
     {
         List<string> failures = [];
-        report.AppendLine("| Benchmark | Ratio | Baseline ratio | Allocated | Baseline allocated | Verdict |");
-        report.AppendLine("|---|---:|---:|---:|---:|---|");
+        List<string> suspects = [];
+        report.AppendLine("| Benchmark | Ratio (interval) | Baseline ratio | Ratio RSE (baseline) | Allocated | Baseline allocated | Verdict |");
+        report.AppendLine("|---|---:|---:|---:|---:|---:|---|");
 
         int ungated = 0;
         foreach (Row row in rows)
@@ -190,15 +209,21 @@ internal static class Gate
             {
                 ungated++;
                 report.AppendLine(CultureInfo.InvariantCulture,
-                    $"| {row.Key} | {Format(row.Figures.Ratio)} | – | {row.Figures.AllocatedBytes} B | – | not gated: no baseline |");
+                    $"| {row.Key} | {FormatRatio(row)} | – | {Percent(row.Figures.RelativeStdErr)} | {row.Figures.AllocatedBytes} B | – | not gated: no baseline |");
                 continue;
             }
 
             List<string> problems = [];
-            if (row.TimeGated && row.Figures.Ratio is double ratio && expected.Ratio is double expectedRatio
-                && ratio > expectedRatio * (1 + Tolerance))
+            TimeVerdict time = row.TimeGated && row.Figures.Ratio is double ratio && expected.Ratio is double expectedRatio
+                ? JudgeTime(ratio, row.Interval, expectedRatio)
+                : TimeVerdict.Ok;
+            if (time == TimeVerdict.Regressed)
             {
-                problems.Add($"time ratio {ratio:F3} against {expectedRatio:F3}");
+                problems.Add($"time ratio {FormatRatio(row)} against {expected.Ratio:F3}");
+            }
+            else if (time == TimeVerdict.Suspect)
+            {
+                suspects.Add($"{row.Key}: time ratio {FormatRatio(row)} against {expected.Ratio:F3}");
             }
 
             long allowed = (long)Math.Floor(expected.AllocatedBytes * (1 + Tolerance));
@@ -212,10 +237,14 @@ internal static class Gate
                 failures.Add($"{row.Key}: {string.Join("; ", problems)}");
             }
 
+            string verdict = problems.Count > 0 ? "**regressed**"
+                : time == TimeVerdict.Suspect ? "suspect: interval crosses the line"
+                : row.TimeGated ? "ok"
+                : "ok (allocation only)";
             report.AppendLine(CultureInfo.InvariantCulture,
-                $"| {row.Key} | {Format(row.Figures.Ratio)} | {Format(expected.Ratio)} | " +
-                $"{row.Figures.AllocatedBytes} B | {expected.AllocatedBytes} B | " +
-                $"{(problems.Count > 0 ? "**regressed**" : row.TimeGated ? "ok" : "ok (allocation only)")} |");
+                $"| {row.Key} | {FormatRatio(row)} | {Format(expected.Ratio)} | " +
+                $"{Percent(row.Figures.RelativeStdErr)} ({Percent(expected.RelativeStdErr)}) | " +
+                $"{row.Figures.AllocatedBytes} B | {expected.AllocatedBytes} B | {verdict} |");
         }
 
         HashSet<string> measured = rows.Select(r => r.Key).ToHashSet(StringComparer.Ordinal);
@@ -238,7 +267,7 @@ internal static class Gate
             }
 
             report.AppendLine(CultureInfo.InvariantCulture,
-                $"| {key} | – | {Format(expected.Ratio)} | – | {expected.AllocatedBytes} B | " +
+                $"| {key} | – | {Format(expected.Ratio)} | – ({Percent(expected.RelativeStdErr)}) | – | {expected.AllocatedBytes} B | " +
                 $"{(allowed ? "missing (allowed)" : "**missing**")} |");
         }
 
@@ -251,7 +280,53 @@ internal static class Gate
             report.AppendLine();
         }
 
-        return new Comparison(failures, ungated);
+        return new Comparison(failures, ungated, suspects);
+    }
+
+    /// <summary>
+    /// Whether a time ratio has regressed past the tolerance, judged against the noise of the
+    /// run that measured it.
+    /// </summary>
+    /// <param name="ratio">This run's ratio of medians.</param>
+    /// <param name="interval">
+    /// The interval this run's noise puts around <paramref name="ratio"/>, or none when there is
+    /// nothing to say how noisy it was, in which case the ratio alone decides.
+    /// </param>
+    /// <param name="expectedRatio">The committed ratio.</param>
+    internal static TimeVerdict JudgeTime(double ratio, RatioInterval? interval, double expectedRatio)
+    {
+        double line = expectedRatio * (1 + Tolerance);
+        if (ratio <= line)
+        {
+            return TimeVerdict.Ok;
+        }
+
+        return interval is null || interval.Lower > line ? TimeVerdict.Regressed : TimeVerdict.Suspect;
+    }
+
+    /// <summary>
+    /// The interval around a ratio of medians that the two sides' confidence intervals allow,
+    /// and the ratio's relative standard error.
+    /// </summary>
+    /// <remarks>
+    /// Each side's margin is taken relative to its mean, and the two are combined at their
+    /// worst: the lower bound is the measured side at the bottom of its interval over the
+    /// yardstick at the top of its, and the other way round for the upper bound. A side whose
+    /// margin is as large as its mean says nothing about where its median lies, so the bound it
+    /// limits is open.
+    /// </remarks>
+    /// <param name="ratio">The ratio of medians.</param>
+    /// <param name="measured">The measured side's mean, standard error and confidence-interval margin.</param>
+    /// <param name="yardstick">The yardstick's mean, standard error and confidence-interval margin.</param>
+    internal static (RatioInterval Interval, double RelativeStdErr) Spread(double ratio, Noise measured, Noise yardstick)
+    {
+        double m = measured.Margin / measured.Mean;
+        double y = yardstick.Margin / yardstick.Mean;
+        double lower = m >= 1 ? 0 : ratio * (1 - m) / (1 + y);
+        double upper = y >= 1 ? double.PositiveInfinity : ratio * (1 + m) / (1 - y);
+        double rse = Math.Sqrt(Math.Pow(measured.StandardError / measured.Mean, 2)
+            + Math.Pow(yardstick.StandardError / yardstick.Mean, 2));
+        return (new RatioInterval(Math.Round(lower, 4), Math.Round(upper, 4)), Math.Round(rse, 4));
     }
 
     /// <summary>
@@ -306,6 +381,8 @@ internal static class Gate
             }
 
             double? ratio = null;
+            double? relativeStdErr = null;
+            RatioInterval? interval = null;
             bool timeGated = false;
             if (!benchmark.Descriptor.Baseline)
             {
@@ -318,6 +395,7 @@ internal static class Gate
                 if (yardstick?.ResultStatistics is { } baseline)
                 {
                     ratio = Math.Round(report.ResultStatistics.Median / baseline.Median, 4);
+                    (interval, relativeStdErr) = Spread(ratio.Value, NoiseOf(report.ResultStatistics), NoiseOf(baseline));
                     timeGated = GatesTime
                         && yardstick.BenchmarkCase.Descriptor.WorkloadMethod.Name == Categories.SystemIOMethod
                         && !benchmark.Descriptor.HasCategory(Categories.AllocationOnly);
@@ -325,9 +403,12 @@ internal static class Gate
             }
 
             long allocated = report.GcStats.GetBytesAllocatedPerOperation(benchmark) ?? 0;
-            rows.Add(new Row(key, new Figures(ratio, allocated), timeGated));
+            rows.Add(new Row(key, new Figures(ratio, allocated, relativeStdErr), timeGated, interval));
         }
     }
+
+    private static Noise NoiseOf(BenchmarkDotNet.Mathematics.Statistics statistics) =>
+        new(statistics.Mean, statistics.StandardError, statistics.ConfidenceInterval.Margin);
 
     private static string KeyOf(BenchmarkCase benchmark)
     {
@@ -351,22 +432,58 @@ internal static class Gate
     private static string Format(double? ratio) =>
         ratio is double value ? value.ToString("F3", CultureInfo.InvariantCulture) : "–";
 
+    private static string FormatRatio(Row row) =>
+        row.Interval is { } interval
+            ? $"{Format(row.Figures.Ratio)} ({Format(interval.Lower)}–" +
+              $"{(double.IsPositiveInfinity(interval.Upper) ? "∞" : Format(interval.Upper))})"
+            : Format(row.Figures.Ratio);
+
+    private static string Percent(double? fraction) =>
+        fraction is double value ? value.ToString("P1", CultureInfo.InvariantCulture) : "–";
+
     /// <param name="Key">The row's name in the baseline file.</param>
     /// <param name="Figures">What this run measured.</param>
     /// <param name="TimeGated">
     /// Whether the ratio is to a <c>System.IO</c> baseline in a class not marked allocation-only,
     /// and so held to the tolerance.
     /// </param>
-    internal sealed record Row(string Key, Figures Figures, bool TimeGated);
+    /// <param name="Interval">The interval this run's noise puts around the ratio, when it has one.</param>
+    internal sealed record Row(string Key, Figures Figures, bool TimeGated, RatioInterval? Interval = null);
 
     /// <param name="Failures">One line per row that regressed or went missing.</param>
     /// <param name="Ungated">How many measured rows had no committed figures to be held to.</param>
-    internal sealed record Comparison(IReadOnlyList<string> Failures, int Ungated);
+    /// <param name="Suspects">
+    /// One line per row whose ratio is over the line but whose interval still reaches below it.
+    /// </param>
+    internal sealed record Comparison(IReadOnlyList<string> Failures, int Ungated, IReadOnlyList<string> Suspects);
+
+    /// <summary>What a time ratio's comparison with its committed figure found.</summary>
+    internal enum TimeVerdict
+    {
+        /// <summary>The ratio is within the tolerance.</summary>
+        Ok,
+
+        /// <summary>The ratio is over the line, but the run's noise could account for it.</summary>
+        Suspect,
+
+        /// <summary>The ratio's whole interval is over the line.</summary>
+        Regressed,
+    }
+
+    /// <summary>Bounds on a ratio of medians allowed by the noise of the run that measured it.</summary>
+    internal sealed record RatioInterval(double Lower, double Upper);
+
+    /// <summary>One side of a ratio: its mean, the mean's standard error and its confidence-interval margin.</summary>
+    internal readonly record struct Noise(double Mean, double StandardError, double Margin);
 
     /// <summary>One row of a baseline file.</summary>
     /// <param name="Ratio">Median time over the class's baseline's median time, or none for a baseline row.</param>
     /// <param name="AllocatedBytes">Bytes allocated per operation.</param>
-    internal sealed record Figures(double? Ratio, long AllocatedBytes);
+    /// <param name="RelativeStdErr">
+    /// The ratio's relative standard error in the run that measured it, from both sides' standard
+    /// errors; a record of how noisy the row was, not part of the verdict.
+    /// </param>
+    internal sealed record Figures(double? Ratio, long AllocatedBytes, double? RelativeStdErr = null);
 
     /// <summary>The committed figures for one platform.</summary>
     internal sealed record BaselineFile

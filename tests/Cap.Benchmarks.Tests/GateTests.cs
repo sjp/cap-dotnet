@@ -18,7 +18,7 @@ public sealed class GateTests
         Comparison comparison = Compare(Baseline(A, B), [Measured(A)], None, [], report);
 
         Assert.Equal([$"{B}: in the baseline but not measured"], comparison.Failures);
-        Assert.Contains($"| {B} | – | 1.000 | – | 0 B | **missing** |", report.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"| {B} | – | 1.000 | – (–) | – | 0 B | **missing** |", report.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -28,7 +28,7 @@ public sealed class GateTests
         Comparison comparison = Compare(Baseline(A, C), [Measured(A)], None, ["openat2"], report);
 
         Assert.Empty(comparison.Failures);
-        Assert.Contains($"| {C} | – | 1.000 | – | 0 B | missing (allowed) |", report.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"| {C} | – | 1.000 | – (–) | – | 0 B | missing (allowed) |", report.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -98,6 +98,85 @@ public sealed class GateTests
         Dictionary<string, Figures> merged = Merge(Baseline(A), [new Row(A, new Figures(2.0, 8), true)], Set("walk"), None);
 
         Assert.Equal(new Figures(2.0, 8), merged[A]);
+    }
+
+    [Fact]
+    public void A_ratio_within_the_tolerance_is_ok_however_wide_its_interval() =>
+        Assert.Equal(TimeVerdict.Ok, JudgeTime(1.09, new RatioInterval(0.5, 2.0), 1.0));
+
+    [Fact]
+    public void A_ratio_whose_whole_interval_is_over_the_line_regresses() =>
+        Assert.Equal(TimeVerdict.Regressed, JudgeTime(1.15, new RatioInterval(1.12, 1.18), 1.0));
+
+    [Fact]
+    public void A_ratio_over_the_line_whose_interval_reaches_below_it_is_suspect() =>
+        Assert.Equal(TimeVerdict.Suspect, JudgeTime(1.15, new RatioInterval(1.05, 1.25), 1.0));
+
+    [Fact]
+    public void A_ratio_over_the_line_with_no_interval_regresses() =>
+        Assert.Equal(TimeVerdict.Regressed, JudgeTime(1.15, null, 1.0));
+
+    [Fact]
+    public void The_line_scales_with_the_committed_ratio()
+    {
+        Assert.Equal(TimeVerdict.Ok, JudgeTime(2.30, new RatioInterval(2.29, 2.31), 2.10));
+        Assert.Equal(TimeVerdict.Regressed, JudgeTime(2.35, new RatioInterval(2.33, 2.37), 2.10));
+    }
+
+    [Fact]
+    public void Spread_combines_the_two_margins_at_their_worst()
+    {
+        (RatioInterval interval, double rse) = Spread(2.0, new Noise(100, 3, 10), new Noise(50, 2, 2.5));
+
+        // 2 x (1 - 0.1) / (1 + 0.05) and 2 x (1 + 0.1) / (1 - 0.05).
+        Assert.Equal(1.7143, interval.Lower);
+        Assert.Equal(2.3158, interval.Upper);
+
+        // sqrt(0.03^2 + 0.04^2).
+        Assert.Equal(0.05, rse);
+    }
+
+    [Fact]
+    public void Spread_leaves_a_bound_open_when_a_margin_is_as_large_as_its_mean()
+    {
+        (RatioInterval interval, _) = Spread(1.0, new Noise(10, 5, 10), new Noise(10, 5, 10));
+
+        Assert.Equal(0, interval.Lower);
+        Assert.Equal(double.PositiveInfinity, interval.Upper);
+    }
+
+    [Fact]
+    public void A_clear_time_regression_fails_the_gate()
+    {
+        var report = new StringBuilder();
+        Row slow = new(A, new Figures(1.15, 0, 0.002), TimeGated: true, new RatioInterval(1.13, 1.17));
+        Comparison comparison = Compare(Baseline(A), [slow], None, [], report);
+
+        Assert.Equal([$"{A}: time ratio 1.150 (1.130–1.170) against 1.000"], comparison.Failures);
+        Assert.Empty(comparison.Suspects);
+        Assert.Contains("**regressed**", report.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_noisy_ratio_over_the_line_is_reported_suspect_and_passes()
+    {
+        var report = new StringBuilder();
+        Row noisy = new(A, new Figures(1.15, 0, 0.04), TimeGated: true, new RatioInterval(1.02, 1.30));
+        Comparison comparison = Compare(Baseline(A), [noisy], None, [], report);
+
+        Assert.Empty(comparison.Failures);
+        Assert.Equal([$"{A}: time ratio 1.150 (1.020–1.300) against 1.000"], comparison.Suspects);
+        Assert.Contains("suspect: interval crosses the line", report.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_ratio_that_is_not_time_gated_is_never_suspect()
+    {
+        Row noisy = new(A, new Figures(1.5, 0, 0.04), TimeGated: false, new RatioInterval(1.0, 2.0));
+        Comparison comparison = Compare(Baseline(A), [noisy], None, [], new StringBuilder());
+
+        Assert.Empty(comparison.Failures);
+        Assert.Empty(comparison.Suspects);
     }
 
     [Theory]
