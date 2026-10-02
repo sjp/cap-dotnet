@@ -90,6 +90,7 @@ internal static class AnalyzerHarness
             .. frameworkAssemblies.Select(p => MetadataReference.CreateFromFile(p)),
             MetadataReference.CreateFromFile(typeof(AmbientAuthority).Assembly.Location),
             MetadataReference.CreateFromFile(typeof(Dir).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Cap.Rand.CapRandom).Assembly.Location),
         ];
     }
 

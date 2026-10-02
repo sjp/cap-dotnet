@@ -109,6 +109,32 @@ seed.
 
 `CapRandom` can be used from any number of threads at once.
 
+Nothing stops a seeded instance from reaching production. Its constructor takes no token,
+since it takes nothing from outside the process, and anything that accepts an `IRandomSource`
+will take one, so `new InsecureDeterministicRandom(42)` in `Program.cs` compiles without a
+diagnostic, even in a `[CapabilityStrict]` assembly. A project that wants the type kept to its
+tests bans the constructor in its own `CapBannedSymbols.txt`, where it is reported as
+`CAP0008` (see [analyzers.md](analyzers.md)):
+
+```
+M:Cap.Rand.InsecureDeterministicRandom.#ctor;Seeded and predictable. Only test code should construct this; production takes CapRandom.System or an IRandomSource passed in.
+```
+
+Only construction is reported. Naming the type, or calling an instance that a test handed in,
+is not. To apply the ban to production projects and not to tests, put the line in its own
+file, such as `src/CapBannedSymbols.Seeded.txt`, and add it from a `Directory.Build.props` in
+the directory that holds the production projects.
+That file stops MSBuild's search for one further up, so it imports the parent explicitly:
+
+```xml
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  <ItemGroup>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)CapBannedSymbols.Seeded.txt" />
+  </ItemGroup>
+</Project>
+```
+
 ## What this gives up
 
 **It is an audit, not a lock.** The operating system's generator can be reached from anywhere

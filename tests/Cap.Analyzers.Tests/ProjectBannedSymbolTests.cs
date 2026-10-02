@@ -111,6 +111,30 @@ public sealed class ProjectBannedSymbolTests
         Assert.Equal(("CAP0008", "disposable.Dispose()"), (diagnostic.Id, diagnostic.Flagged()));
     }
 
+    [Fact]
+    public async Task A_project_can_ban_the_seeded_source()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            """
+            using Cap.Rand;
+
+            public static class Uses
+            {
+                public static IRandomSource Seeded() => new InsecureDeterministicRandom(1);
+                public static void Fill(InsecureDeterministicRandom random, byte[] buffer) => random.Fill(buffer);
+            }
+            """,
+            additionalFiles:
+            [
+                ("/project/CapBannedSymbols.txt", """
+                    M:Cap.Rand.InsecureDeterministicRandom.#ctor;Seeded and predictable. Only test code should construct this; production takes CapRandom.System or an IRandomSource passed in.
+                    """),
+            ]);
+
+        Diagnostic diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(("CAP0008", "new InsecureDeterministicRandom(1)"), (diagnostic.Id, diagnostic.Flagged()));
+    }
+
     [Theory]
     [InlineData("/project/CapBannedSymbols.txt", true)]
     [InlineData("/project/capbannedsymbols.txt", true)]

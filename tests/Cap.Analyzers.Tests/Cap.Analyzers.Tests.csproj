@@ -15,6 +15,7 @@
     <!-- Compiled against by the test sources, so that they use the library as a consumer does. -->
     <ProjectReference Include="../../src/Cap.Std/Cap.Std.csproj" />
     <ProjectReference Include="../../src/Cap.Primitives/Cap.Primitives.csproj" />
+    <ProjectReference Include="../../src/Cap.Rand/Cap.Rand.csproj" />
   </ItemGroup>
 
   <!--
