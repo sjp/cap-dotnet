@@ -8,23 +8,65 @@
 # rather than because the test is about something only the host has, is a fault in the
 # backend that has stopped being reported.
 #
-# Reads the built test assemblies without running them, so run it after a Release build.
+# Reads the built test assemblies without running them, so run it after a build of the given
+# configuration (Release unless -c says otherwise). The target framework is the only one built
+# unless -f names it. Fails when an assembly is missing, and when the runner lists a different
+# number of opt-outs than the project's source carries, so a listing that went wrong cannot
+# pass for a count of zero.
 #
-# Usage: list-in-memory-opt-outs.sh <test-project-name>...
+# Usage: list-in-memory-opt-outs.sh [-c <configuration>] [-f <framework>] <test-project-name>...
 set -euo pipefail
 
+usage="usage: list-in-memory-opt-outs.sh [-c <configuration>] [-f <framework>] <test-project-name>..."
+fail() { echo "list-in-memory-opt-outs.sh: $*" >&2; exit 1; }
+
+configuration=Release
+framework=""
+while getopts "c:f:" option; do
+  case "$option" in
+    c) configuration="$OPTARG" ;;
+    f) framework="$OPTARG" ;;
+    *) echo "$usage" >&2; exit 2 ;;
+  esac
+done
+shift $((OPTIND - 1))
+[ "$#" -gt 0 ] || { echo "$usage" >&2; exit 2; }
+
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
-[ "$#" -gt 0 ] || { echo "usage: list-in-memory-opt-outs.sh <test-project-name>..." >&2; exit 2; }
 
 total=0
 body=""
 for project in "$@"; do
-  assembly="$(ls "$repo"/tests/"$project"/bin/Release/*/"$project".dll | head -n 1)"
+  output="$repo/tests/$project/bin/$configuration"
+  if [ -n "$framework" ]; then
+    tfm="$framework"
+  else
+    built=()
+    for dir in "$output"/*/; do
+      [ -d "$dir" ] && built+=("$(basename "$dir")")
+    done
+    case "${#built[@]}" in
+      0) fail "$project has no $configuration build under $output" ;;
+      1) tfm="${built[0]}" ;;
+      *) fail "$project has a $configuration build for several frameworks (${built[*]}); name one with -f" ;;
+    esac
+  fi
+  assembly="$output/$tfm/$project.dll"
+  [ -f "$assembly" ] || fail "$project is not built: expected $assembly"
+
   # The runner prints its banner even when asked not to decorate a listing.
-  methods="$(dotnet "$assembly" -noLogo -noColor -filter "/[NotInMemory=*]" -list methods \
-    | tr -d '\r' | grep -v '^xUnit\.net' | grep . || true)"
+  listing="$(dotnet "$assembly" -noLogo -noColor -filter "/[NotInMemory=*]" -list methods)" \
+    || fail "$project: the test runner could not list $assembly"
+  methods="$(printf '%s\n' "$listing" | tr -d '\r' | grep -v '^xUnit\.net' | grep . || true)"
   count=0
   [ -z "$methods" ] || count="$(printf '%s\n' "$methods" | wc -l | tr -d ' ')"
+
+  # Each attribute marks one method, so the source and the runner should agree.
+  declared="$(grep -rho --include='*.cs' --exclude-dir=bin --exclude-dir=obj '\[NotInMemory(' \
+    "$repo/tests/$project" | wc -l | tr -d ' ')"
+  [ "$count" -eq "$declared" ] \
+    || fail "$project: the runner lists $count opt-outs but its source declares $declared"
+
   total=$((total + count))
   body+=$'\n'"**$project**: $count"$'\n'
   [ -z "$methods" ] || body+="$(printf '%s\n' "$methods" | sed 's/^/- `/; s/$/`/')"$'\n'
