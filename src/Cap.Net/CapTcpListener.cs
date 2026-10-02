@@ -25,6 +25,12 @@ namespace Cap.Net;
 /// and a result the pool does not grant is closed again before it is ever listened on.
 /// </para>
 /// <para>
+/// The socket is for the family of the endpoint and that family only. Bound to
+/// <c>[::]</c> it accepts IPv6 peers and no IPv4 peer in mapped form, since a grant for the
+/// IPv6 wildcard is not one for the IPv4 wildcard; a service reachable over both binds one
+/// listener for each.
+/// </para>
+/// <para>
 /// <strong>Thread safety.</strong> Instances are safe for concurrent use; several accepts may
 /// be outstanding at once.
 /// </para>

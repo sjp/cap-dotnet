@@ -111,7 +111,9 @@ Everything a grant holds and everything a grant is tested against is reduced to 
 first. Two spellings fold into the address they name:
 
 - the mapped form, `::ffff:a.b.c.d`, which is what a dual-stack socket reports for a peer that
-  arrived over IPv4;
+  arrived over IPv4 — not one of this library's, which are each opened for one family (see
+  below), but one a caller made, or an address read from a log, a header or a configuration
+  file that was written by one;
 - the compatible form, `::a.b.c.d`, deprecated for two decades and still accepted by every
   address parser, which is reason enough for it to turn up in a request somebody hoped would
   not be checked.
@@ -122,6 +124,14 @@ so it covers those addresses however they are spelled. A range based at `::` ins
 compatible prefix, `::/96` to `::/127`, would also cover `::` and `::1`, which are not
 embeddings; it is neither an IPv4 range nor an IPv6 one, so `InsertIpNet` refuses it and asks
 for the IPv4 or mapped spelling instead.
+
+Folding decides what a grant covers, not which socket carries the traffic. Every socket this
+library opens is for the family of the address it was given and that family only: an IPv6
+socket is never dual-stack. A grant for `127.0.0.1` therefore permits a connection to
+`::ffff:127.0.0.1`, but the IPv6 socket that connection would be made on cannot reach an IPv4
+peer and the attempt fails with a `SocketException`; write the address in its IPv4 form to
+reach it. Nor does folding go the other way: a grant for `::1` covers neither `127.0.0.1` nor
+`::ffff:127.0.0.1`, which are the other family's loopback and the services listening on it.
 
 Two things are deliberately *not* folded in. `::` and `::1` sit inside the embedding prefix
 without being embeddings, and stay themselves. Tunnelling addresses embed an IPv4 address
@@ -190,6 +200,12 @@ the caller, who can filter on it if they want to and should authenticate if they
 mean something. An accepted connection carries the listener's pool for whatever it does next,
 so a component handed one has the reach the listening component had, and no more; accepting is
 not a way to acquire authority nobody granted.
+
+A listener is for one family. Bound to `[::]` it accepts IPv6 peers only, never an IPv4 peer
+in mapped form, and a pool that grants `::` grants nothing on `0.0.0.0`: the two wildcards are
+different sets of interfaces, and turning on dual-stack would publish the second under a grant
+for the first. A service that should be reachable over both binds two listeners, each under a
+grant for its own wildcard. The same holds for `CapUdpSocket.Bind`.
 
 A UDP socket that only sends can be opened with `CapUdpSocket.Open`, which claims no endpoint
 and so needs none granted. `CapUdpSocket.Bind` is for a socket peers are told how to reach.

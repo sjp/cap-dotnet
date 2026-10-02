@@ -63,7 +63,8 @@ public sealed class PoolGrantTests
     /// <remarks>
     /// The mapped form is not an obscure corner: it is what a socket opened for both families
     /// reports for a peer that arrived over the older one, so a grant written the ordinary way
-    /// and checked against a value read off a socket meets exactly this case.
+    /// and checked against a value read off such a socket — one a caller made, since this
+    /// library's own are single-stack — meets exactly this case.
     /// </remarks>
     [Fact]
     public void A_mapped_address_is_the_address_it_maps_to()
@@ -73,6 +74,25 @@ public sealed class PoolGrantTests
 
         Pool mapped = Granting(IPAddress.Parse("::ffff:127.0.0.1"), 443);
         Assert.True(mapped.Allows(IPAddress.Parse("127.0.0.1"), 443));
+    }
+
+    /// <summary>
+    /// Neither family's loopback is granted by the other's, in either spelling.
+    /// </summary>
+    /// <remarks>
+    /// The two loopbacks are different interfaces with different services listening on them.
+    /// Folding the mapped form into the older family must not make a grant for one reach the
+    /// other.
+    /// </remarks>
+    [Fact]
+    public void A_loopback_grant_does_not_cover_the_other_familys_loopback()
+    {
+        Pool v6 = Granting(IPAddress.IPv6Loopback, 443);
+        Assert.False(v6.Allows(IPAddress.Parse("::ffff:127.0.0.1"), 443));
+        Assert.False(v6.Allows(IPAddress.Loopback, 443));
+
+        Pool v4 = Granting(IPAddress.Loopback, 443);
+        Assert.False(v4.Allows(IPAddress.IPv6Loopback, 443));
     }
 
     /// <summary>The deprecated embedding is read the same way as the current one.</summary>

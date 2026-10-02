@@ -48,8 +48,15 @@ public sealed class CapTcpStream : CapSocketStream
     /// <param name="pool">The authority the connection is made under.</param>
     /// <param name="endpoint">The address and port to connect to.</param>
     /// <remarks>
+    /// <para>
+    /// The connection is made on a socket for the endpoint's family only. A mapped address,
+    /// <c>::ffff:a.b.c.d</c>, is granted by the IPv4 address it maps to, but an IPv6 socket
+    /// cannot reach it and the attempt fails; give the address in its IPv4 form instead.
+    /// </para>
+    /// <para>
     /// Safe to call from any thread, and from several at once with the same pool: a pool
     /// never changes, so each attempt is checked against the same grants.
+    /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="EndpointNotGrantedException">

@@ -206,14 +206,9 @@ public sealed class TcpGrantTests
         Assert.Equal(outsider.LocalEndPoint, server.RemoteEndPoint);
     }
 
-    /// <summary>A connection made to a mapped address is granted by the address it maps to.</summary>
-    /// <remarks>
-    /// A dual-stack listener reports its peers in the mapped form, so a check that did not
-    /// reduce the two spellings to one would refuse a peer the pool plainly grants — and,
-    /// written the other way round, would permit one it plainly does not.
-    /// </remarks>
+    /// <summary>A grant for the IPv6 loopback reaches a listener on the IPv6 loopback.</summary>
     [Fact]
-    public async Task A_mapped_loopback_address_is_granted_by_the_plain_one()
+    public async Task An_ipv6_loopback_grant_reaches_the_ipv6_loopback()
     {
         Pool pool = new PoolBuilder()
             .InsertIpNet(IPNetwork.Parse("::1/128"), PortRange.Every, AmbientAuthority.Acquire())
@@ -229,5 +224,50 @@ public sealed class TcpGrantTests
         using CapTcpStream server = await accepting;
 
         Assert.Equal(listener.LocalEndPoint.Port, client.RemoteEndPoint.Port);
+    }
+
+    /// <summary>A listener on the IPv6 wildcard does not accept IPv4 peers.</summary>
+    /// <remarks>
+    /// A dual-stack socket bound to <c>[::]</c> would also listen on <c>0.0.0.0</c>, which is
+    /// a different set of interfaces from the one the grant names. The socket is single-stack,
+    /// so the IPv4 port stays unclaimed and a connection to it is refused.
+    /// </remarks>
+    [Fact]
+    public async Task A_listener_on_the_ipv6_wildcard_does_not_accept_ipv4_peers()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("::/128"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        using CapTcpListener listener = CapTcpListener.Bind(pool, new IPEndPoint(IPAddress.IPv6Any, 0));
+
+        using var outsider = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        SocketException refused = await Assert.ThrowsAsync<SocketException>(async () =>
+            await outsider.ConnectAsync(
+                new IPEndPoint(IPAddress.Loopback, listener.LocalEndPoint.Port),
+                TestContext.Current.CancellationToken));
+
+        Assert.Equal(SocketError.ConnectionRefused, refused.SocketErrorCode);
+    }
+
+    /// <summary>
+    /// A mapped address passes the pool as the IPv4 address it maps to, and then cannot be
+    /// reached over the single-stack IPv6 socket it would be connected on.
+    /// </summary>
+    /// <remarks>
+    /// What the documentation tells a caller to expect: the grant is about the host, the
+    /// socket is about the family, and the address has to be written in the family that
+    /// reaches it.
+    /// </remarks>
+    [Fact]
+    public async Task A_mapped_address_is_granted_but_not_reachable_over_ipv6()
+    {
+        Pool pool = Loopback;
+        using CapTcpListener listener = CapTcpListener.Bind(pool, new IPEndPoint(IPAddress.Loopback, 0));
+        var mapped = new IPEndPoint(IPAddress.Loopback.MapToIPv6(), listener.LocalEndPoint.Port);
+
+        Assert.True(pool.Allows(mapped));
+        await Assert.ThrowsAsync<SocketException>(async () =>
+            await CapTcpStream.ConnectAsync(pool, mapped, TestContext.Current.CancellationToken));
     }
 }
