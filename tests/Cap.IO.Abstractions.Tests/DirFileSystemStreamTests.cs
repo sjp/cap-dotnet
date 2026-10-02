@@ -9,12 +9,22 @@ namespace Cap.IO.Abstractions.Tests;
 /// </summary>
 public sealed class DirFileSystemStreamTests
 {
+    private static readonly VirtualPath Paths = new(drive: null, windows: false);
+
+    [Fact]
+    public void The_name_is_the_request_folded()
+    {
+        using DirFileSystemStream stream = new(new Recorder(), Paths, "/a/./b/../c.bin", isAsync: false, sync: null);
+
+        Assert.Equal("/a/c.bin", stream.Name);
+    }
+
     [Fact]
     public void Flushing_to_disk_stores_the_file()
     {
         Recorder inner = new();
         int syncs = 0;
-        using DirFileSystemStream stream = new(inner, "/a.bin", isAsync: false, () => syncs++);
+        using DirFileSystemStream stream = new(inner, Paths, "/a.bin", isAsync: false, () => syncs++);
 
         stream.Flush(flushToDisk: true);
 
@@ -27,7 +37,7 @@ public sealed class DirFileSystemStreamTests
     {
         Recorder inner = new();
         int syncs = 0;
-        using DirFileSystemStream stream = new(inner, "/a.bin", isAsync: false, () => syncs++);
+        using DirFileSystemStream stream = new(inner, Paths, "/a.bin", isAsync: false, () => syncs++);
 
         stream.Flush();
         stream.Flush(flushToDisk: false);
@@ -40,7 +50,7 @@ public sealed class DirFileSystemStreamTests
     public void Flushing_to_disk_with_no_device_beneath_only_empties_the_buffer()
     {
         Recorder inner = new();
-        using DirFileSystemStream stream = new(inner, "/a.bin", isAsync: false, sync: null);
+        using DirFileSystemStream stream = new(inner, Paths, "/a.bin", isAsync: false, sync: null);
 
         stream.Flush(flushToDisk: true);
 
@@ -68,7 +78,7 @@ public sealed class DirFileSystemStreamTests
         bool streamClosed = false;
         bool? streamClosedFirst = null;
         Recorder inner = new(() => streamClosed = true);
-        DirFileSystemStream stream = new(inner, "/a.bin", isAsync: true, sync: null, new Closer(() => streamClosedFirst = streamClosed));
+        DirFileSystemStream stream = new(inner, Paths, "/a.bin", isAsync: true, sync: null, new Closer(() => streamClosedFirst = streamClosed));
 
         stream.Dispose();
 
@@ -79,7 +89,7 @@ public sealed class DirFileSystemStreamTests
     public async Task Disposing_asynchronously_closes_the_borrowed_file()
     {
         bool closed = false;
-        DirFileSystemStream stream = new(new Recorder(), "/a.bin", isAsync: true, sync: null, new Closer(() => closed = true));
+        DirFileSystemStream stream = new(new Recorder(), Paths, "/a.bin", isAsync: true, sync: null, new Closer(() => closed = true));
 
         await stream.DisposeAsync();
 

@@ -46,11 +46,12 @@ internal static class Enumeration
     };
 
     /// <summary>
-    /// Finds entries beneath a directory. The path is resolved and the directory checked now,
+    /// Finds entries beneath a directory. The path is resolved and the directory opened now,
     /// so a missing one is reported by the call rather than by the first step of the
     /// enumeration, and a later change of the current directory does not change which
-    /// directory is walked; it is opened again, and its entries read, as they are asked for,
-    /// so an enumeration that is never run holds nothing open.
+    /// directory is walked. The handle opened by the call is the one the first enumeration
+    /// reads, as <c>System.IO</c> does; an enumeration that is never run holds it until it is
+    /// collected, and each later one opens the directory again.
     /// </summary>
     public static IEnumerable<Found> Search(
         DirFileSystem fs, string path, string searchPattern, EnumerationOptions options, EntryKinds kinds)
@@ -65,8 +66,7 @@ internal static class Enumeration
         }
 
         Request request = fs.Resolve(path, nameof(path));
-        OpenTop(fs, request).Dispose();
-        return Walk(fs, request, searchPattern, options, kinds);
+        return new PendingSearch(fs, request, OpenTop(fs, request), searchPattern, options, kinds);
     }
 
     private static Dir OpenTop(DirFileSystem fs, Request request)
@@ -82,9 +82,11 @@ internal static class Enumeration
     }
 
     private static IEnumerable<Found> Walk(
-        DirFileSystem fs, Request request, string searchPattern, EnumerationOptions options, EntryKinds kinds)
+        PendingSearch search, DirFileSystem fs, Request request, string searchPattern, EnumerationOptions options, EntryKinds kinds)
     {
-        Dir top = OpenTop(fs, request);
+        // Taken only once the enumeration starts, so an enumerator that is never moved leaves
+        // the handle with the search, for its next enumerator to read.
+        Dir top = search.TakeOpened() ?? OpenTop(fs, request);
         bool ignoreCase = options.MatchCasing switch
         {
             MatchCasing.CaseSensitive => false,
@@ -99,32 +101,41 @@ internal static class Enumeration
         pending.Enqueue((top, string.Empty, 0));
         try
         {
+            bool describesEach = options.AttributesToSkip != 0 && DescribesEach(top, options.AttributesToSkip);
             while (pending.TryDequeue(out (Dir Directory, string Relative, int Depth) level))
             {
                 using Dir directory = level.Directory;
-                List<DirEntry> entries;
-                try
+                using IEnumerator<DirEntry> entries = directory.EnumerateEntries().GetEnumerator();
+                while (true)
                 {
-                    entries = [.. directory.EnumerateEntries()];
-                }
-                catch (Exception e) when (level.Depth > 0 && options.IgnoreInaccessible && e is UnauthorizedAccessException)
-                {
-                    continue;
-                }
-                catch (Exception e) when (Failures.Translate(e, request.Virtual, Expected.Directory) is { } translated)
-                {
-                    throw translated;
-                }
+                    // Entries are read as they are asked for, so a caller that stops early has
+                    // not paid for the rest of the directory.
+                    DirEntry entry;
+                    try
+                    {
+                        if (!entries.MoveNext())
+                        {
+                            break;
+                        }
 
-                foreach (DirEntry entry in entries)
-                {
+                        entry = entries.Current;
+                    }
+                    catch (Exception e) when (level.Depth > 0 && options.IgnoreInaccessible && e is UnauthorizedAccessException)
+                    {
+                        break;
+                    }
+                    catch (Exception e) when (Failures.Translate(e, request.Virtual, Expected.Directory) is { } translated)
+                    {
+                        throw translated;
+                    }
+
                     string relative = level.Relative.Length == 0 ? entry.Name : fs.Paths.Join(level.Relative, entry.Name);
                     bool isDirectory = entry.Type == CapFileType.Directory
                         || (entry.Type == CapFileType.Symlink
                             && directory.TryGetMetadata(entry.Name, followLink: true, out CapMetadata target)
                             && target.Type == CapFileType.Directory);
 
-                    if (options.AttributesToSkip != 0 && Skips(directory, entry, isDirectory, options.AttributesToSkip))
+                    if (options.AttributesToSkip != 0 && Skips(directory, entry, isDirectory, options.AttributesToSkip, describesEach))
                     {
                         continue;
                     }
@@ -164,6 +175,25 @@ internal static class Enumeration
         }
     }
 
+    /// <summary>
+    /// A search whose directory has been checked, holding the handle the check opened until
+    /// the first enumeration takes it.
+    /// </summary>
+    private sealed class PendingSearch(
+        DirFileSystem fs, Request request, Dir opened, string searchPattern, EnumerationOptions options, EntryKinds kinds)
+        : IEnumerable<Found>
+    {
+        private Dir? _opened = opened;
+
+        /// <summary>The handle opened by the call, for the first enumeration that asks for it.</summary>
+        public Dir? TakeOpened() => Interlocked.Exchange(ref _opened, null);
+
+        public IEnumerator<Found> GetEnumerator() =>
+            Walk(this, fs, request, searchPattern, options, kinds).GetEnumerator();
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     private static bool TryDescend(Dir directory, string name, bool ignoreInaccessible, [NotNullWhen(true)] out Dir? child)
     {
         try
@@ -178,8 +208,39 @@ internal static class Enumeration
         }
     }
 
+    /// <summary>
+    /// Whether deciding which entries to skip needs each one described, rather than only its
+    /// type and name.
+    /// </summary>
+    /// <remarks>
+    /// Where the filesystem records Windows attributes any of them can be asked about, but
+    /// where it records a mode the only attribute read from one is read-only. The directory
+    /// itself says which kind its filesystem records, for the price of one description.
+    /// </remarks>
+    private static bool DescribesEach(Dir top, FileAttributes skip)
+    {
+        if ((skip & ~(FileAttributes.Directory | FileAttributes.ReparsePoint)) == 0)
+        {
+            return false;
+        }
+
+        if ((skip & FileAttributes.ReadOnly) != 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            return top.GetMetadata().Permissions.TryGetWindowsAttributes(out _);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>Whether an entry has one of the attributes the caller asked to skip.</summary>
-    private static bool Skips(Dir directory, DirEntry entry, bool isDirectory, FileAttributes skip)
+    private static bool Skips(Dir directory, DirEntry entry, bool isDirectory, FileAttributes skip, bool describe)
     {
         FileAttributes attributes = 0;
         if (isDirectory)
@@ -192,7 +253,7 @@ internal static class Enumeration
             attributes |= FileAttributes.ReparsePoint;
         }
 
-        if (directory.TryGetMetadata(entry.Name, followLink: false, out CapMetadata metadata))
+        if (describe && directory.TryGetMetadata(entry.Name, followLink: false, out CapMetadata metadata))
         {
             if (metadata.Permissions.TryGetWindowsAttributes(out FileAttributes recorded))
             {

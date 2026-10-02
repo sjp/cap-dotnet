@@ -224,6 +224,28 @@ internal sealed class VirtualPath
         }
     }
 
+    /// <summary>Whether a path has a <c>..</c> among its components.</summary>
+    public bool Climbs(string path)
+    {
+        int start = 0;
+        for (int i = 0; i <= path.Length; i++)
+        {
+            if (i < path.Length && !IsSeparator(path[i]))
+            {
+                continue;
+            }
+
+            if (path.AsSpan(start, i - start) is "..")
+            {
+                return true;
+            }
+
+            start = i + 1;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Whether a leading portion of a <see cref="Cap.Std.Dir"/>-relative path, as
     /// <see cref="CreatablePrefixes"/> gives it, ends in the path's last name: nothing but

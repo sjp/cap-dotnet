@@ -351,12 +351,42 @@ public sealed class DirFileSystem : IFileSystem
 
         try
         {
-            Request request = Paths.Resolve(path, CurrentDirectory);
-            return TryDescribe(request, followLink: true, out metadata)
-                || (TryDescribe(request, followLink: false, out metadata) && metadata.Type == CapFileType.Symlink);
+            return TryDescribeForExistence(Paths.Resolve(path, CurrentDirectory), out metadata, out _);
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Describes what a request names as <c>System.IO</c>'s existence checks see it, and the
+    /// entry itself, which differs only for a link. Never throws.
+    /// </summary>
+    /// <remarks>
+    /// The entry is described first, so a missing name or one that is not a link costs one
+    /// description; only a link is described again, through itself.
+    /// </remarks>
+    internal bool TryDescribeForExistence(in Request request, out CapMetadata metadata, out CapMetadata own)
+    {
+        metadata = default;
+        own = default;
+        try
+        {
+            if (!TryDescribe(request, followLink: false, out own))
+            {
+                return false;
+            }
+
+            metadata = own.Type == CapFileType.Symlink && TryDescribe(request, followLink: true, out CapMetadata target)
+                ? target
+                : own;
+            return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
+            metadata = default;
+            own = default;
             return false;
         }
     }
@@ -411,7 +441,8 @@ public sealed class DirFileSystem : IFileSystem
                     : stream is FileStream host ? () => host.Flush(flushToDisk: true) : null;
                 return new DirFileSystemStream(
                     stream,
-                    Paths.GetFullPath(request.Virtual, CurrentDirectory),
+                    Paths,
+                    request.Virtual,
                     isAsync,
                     sync,
                     isAsync ? file : null);
@@ -429,12 +460,21 @@ public sealed class DirFileSystem : IFileSystem
     /// root by the <see cref="Dir"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Each leading portion of the caller's path is opened if it is already a directory,
     /// following a link there as <c>System.IO</c> does, and created only if nothing is there.
     /// Any other reason it cannot be opened, a link that leads out of the tree among them, is
     /// reported as it is. The portions are
     /// slices of the caller's string, so a <c>..</c> in it is walked by the
     /// <see cref="Dir"/>, not folded here, and one that would climb out is refused as an escape.
+    /// </para>
+    /// <para>
+    /// A portion that opens as a directory was reached through every portion before it, so
+    /// those need not be opened again: the portions are tried from the longest down, and only
+    /// the ones beyond the longest that is there are created. A path that climbs is taken a
+    /// portion at a time from the first, since a portion before its <c>..</c> has to be there
+    /// even when the one after it already is.
+    /// </para>
     /// </remarks>
     internal void CreateDirectoryChain(in Request request)
     {
@@ -443,8 +483,32 @@ public sealed class DirFileSystem : IFileSystem
             return;
         }
 
-        foreach (string prefix in Paths.CreatablePrefixes(request.Relative))
+        string relative = request.Relative;
+        List<string> prefixes = [.. Paths.CreatablePrefixes(relative)];
+        int start = 0;
+        if (!Paths.Climbs(relative))
         {
+            for (start = prefixes.Count; start > 0; start--)
+            {
+                bool? there = TryOpenExisting(prefixes[start - 1]);
+                if (there == true)
+                {
+                    break;
+                }
+
+                if (there is null)
+                {
+                    // Something other than a missing name is in the way; it is reported by
+                    // the portion it belongs to, as the walk from the first finds it.
+                    start = 0;
+                    break;
+                }
+            }
+        }
+
+        for (int i = start; i < prefixes.Count; i++)
+        {
+            string prefix = prefixes[i];
             Dir directory;
             try
             {
@@ -459,7 +523,7 @@ public sealed class DirFileSystem : IFileSystem
             }
             catch (CapIOException e) when (
                 e.Kind is CapErrorKind.NotADirectory or CapErrorKind.SymbolicLink
-                && Paths.EndsInLastName(request.Relative, prefix))
+                && Paths.EndsInLastName(relative, prefix))
             {
                 // The name asked for holds something other than a directory: a file, or a link
                 // to one or to nothing. System.IO says it is taken; a missing part of the path
@@ -471,8 +535,32 @@ public sealed class DirFileSystem : IFileSystem
         }
 
         // A path ending in `..` or `.` creates nothing of its own; it still has to name a
-        // directory, as it does for System.IO.
-        OpenDirectory(request).Dispose();
+        // directory, as it does for System.IO. One ending in a name has just been opened.
+        if (prefixes.Count == 0 || !Paths.EndsInLastName(relative, prefixes[^1]))
+        {
+            OpenDirectory(request).Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Whether a leading portion of a path is a directory: true when it opens, false when
+    /// nothing is there, null for any other answer.
+    /// </summary>
+    private bool? TryOpenExisting(string prefix)
+    {
+        try
+        {
+            Dir.OpenDir(prefix).Dispose();
+            return true;
+        }
+        catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return false;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

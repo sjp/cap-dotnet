@@ -9,8 +9,9 @@ namespace Cap.IO.Abstractions;
 /// <remarks>
 /// <para>
 /// The stream beneath is a <see cref="Cap.Std.CapFile"/>'s, which owns the open file, so
-/// disposing this closes it. <see cref="FileSystemStream.Name"/> is the virtual full name,
-/// which means nothing outside the adapter.
+/// disposing this closes it. <see cref="Name"/> is the virtual full name, which means nothing
+/// outside the adapter; it is folded from <paramref name="request"/> the first time it is read,
+/// since most streams are never asked.
 /// </para>
 /// <para>
 /// <see cref="Flush(bool)"/> with <c>true</c> asks the system to store the file's writes on
@@ -22,12 +23,23 @@ namespace Cap.IO.Abstractions;
 /// </remarks>
 internal sealed class DirFileSystemStream(
     Stream stream,
-    string path,
+    VirtualPath paths,
+    string request,
     bool isAsync,
     Action? sync,
     IDisposable? file = null)
-    : FileSystemStream(stream, path, isAsync)
+    : FileSystemStream(stream, request, isAsync)
 {
+    private readonly string _request = request;
+    private string? _name;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The request is already absolute, so folding it later gives what folding it at the open
+    /// would have, whatever the current directory has become since.
+    /// </remarks>
+    public override string Name => _name ??= paths.GetFullPath(_request, paths.Root);
+
     /// <summary>Whether <see cref="Flush(bool)"/> with <c>true</c> reaches a device.</summary>
     internal bool SyncsToDisk => sync is not null;
 

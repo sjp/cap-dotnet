@@ -165,6 +165,29 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void A_chain_of_directories_is_completed_beneath_the_part_already_there()
+    {
+        Fs.Directory.CreateDirectory(P("a", "b"));
+        Fs.File.WriteAllText(P("a", "b", "f.txt"), "kept");
+
+        Fs.Directory.CreateDirectory(P("a", "b", "c", "d"));
+
+        Assert.True(Fs.Directory.Exists(P("a", "b", "c", "d")));
+        Assert.Equal("kept", Fs.File.ReadAllText(P("a", "b", "f.txt")));
+    }
+
+    [Fact]
+    public void Creating_a_chain_beneath_a_file_further_up_throws_directory_not_found()
+    {
+        MockDiffers("creating a directory beneath a file does not throw.");
+        Fs.Directory.CreateDirectory(P("a"));
+        Fs.File.WriteAllText(P("a", "f"), "file");
+
+        Assert.Throws<DirectoryNotFoundException>(() => Fs.Directory.CreateDirectory(P("a", "f", "b", "c")));
+        Assert.Equal("file", Fs.File.ReadAllText(P("a", "f")));
+    }
+
+    [Fact]
     public void Creating_a_directory_where_a_file_is_fails()
     {
         Fs.File.WriteAllText(P("a"), "file");
@@ -560,6 +583,36 @@ public abstract class FileSystemBehaviourTests : IDisposable
         Fs.Directory.SetCurrentDirectory(P("e2"));
 
         Assert.Equal("in-e1", Fs.Path.GetFileName(Assert.Single(deferred)));
+    }
+
+    [Fact]
+    public void A_deferred_enumeration_reads_the_directory_opened_by_the_call()
+    {
+        MockDiffers("the directory is read by path when the enumeration runs.");
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A directory held open cannot be renamed on Windows.");
+        Fs.Directory.CreateDirectory(P("d"));
+        Fs.File.WriteAllText(P("d", "a.txt"), string.Empty);
+
+        IEnumerable<string> deferred = Fs.Directory.EnumerateFiles(P("d"));
+        Fs.Directory.Move(P("d"), P("moved"));
+
+        // The first enumeration reads the handle the call opened, as System.IO does; a later
+        // one opens the path again, which is no longer there.
+        Assert.Equal("a.txt", Fs.Path.GetFileName(Assert.Single(deferred)));
+        Assert.Throws<DirectoryNotFoundException>(() => deferred.ToList());
+    }
+
+    [Fact]
+    public void Names_starting_with_a_dot_are_skipped_by_default_options_on_unix()
+    {
+        MockDiffers("a name starting with a dot is not hidden.");
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "A leading dot hides nothing on Windows.");
+        Fs.Directory.CreateDirectory(P("d", ".hidden-dir"));
+        Fs.File.WriteAllText(P("d", ".hidden"), string.Empty);
+        Fs.File.WriteAllText(P("d", "shown"), string.Empty);
+
+        Assert.Equal(["shown"], Fs.Directory.EnumerateFileSystemEntries(P("d"), "*", new EnumerationOptions()).Select(Fs.Path.GetFileName));
+        Assert.Equal(3, Fs.Directory.EnumerateFileSystemEntries(P("d")).Count());
     }
 
     [Fact]

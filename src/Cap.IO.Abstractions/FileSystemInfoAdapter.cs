@@ -31,15 +31,18 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
     private CapMetadata _metadata;
     private CapMetadata _own;
 
+    /// <summary>The request <see cref="Request"/> spells, resolved when it was set.</summary>
+    private Request _resolved;
+
     /// <summary>Creates an info over a caller's path, taken against the current directory now.</summary>
     protected FileSystemInfoAdapter(DirFileSystem fs, string path)
     {
         ArgumentException.ThrowIfNullOrEmpty(path);
         Fs = fs;
         OriginalPath = path;
-        Request request = fs.Resolve(path, nameof(path));
-        Request = request.Virtual;
-        FullName = fs.Paths.GetFullPath(request.Virtual, fs.CurrentDirectory);
+        _resolved = fs.Resolve(path, nameof(path));
+        Request = _resolved.Virtual;
+        FullName = fs.Paths.GetFullPath(_resolved.Virtual, fs.CurrentDirectory);
     }
 
     public IFileSystem FileSystem => Fs;
@@ -59,7 +62,7 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
         {
             Load();
             return _exists
-                ? Descriptions.AttributesOf(Fs, Resolved, _own)
+                ? Descriptions.AttributesOf(Fs, _resolved, _own)
                 : (FileAttributes)(-1);
         }
 
@@ -162,8 +165,6 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
         }
     }
 
-    private Request Resolved => Fs.Paths.Resolve(Request, Fs.CurrentDirectory);
-
     public abstract void Delete();
 
     public abstract void CreateAsSymbolicLink(string pathToTarget);
@@ -193,6 +194,7 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
     {
         Request request = Fs.Resolve(path, nameof(path));
         OriginalPath = path;
+        _resolved = request;
         Request = request.Virtual;
         FullName = Fs.Paths.GetFullPath(request.Virtual, Fs.CurrentDirectory);
         Refresh();
@@ -207,8 +209,7 @@ internal abstract class FileSystemInfoAdapter : IFileSystemInfo, IFileSystemAclS
                 return;
             }
 
-            _exists = Fs.TryDescribeForExistence(Request, out _metadata);
-            _own = _exists && Fs.TryDescribe(Resolved, followLink: false, out CapMetadata own) ? own : _metadata;
+            _exists = Fs.TryDescribeForExistence(_resolved, out _metadata, out _own);
             _loaded = true;
         }
     }
