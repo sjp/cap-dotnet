@@ -1,3 +1,4 @@
+using System.IO.Enumeration;
 using BenchmarkDotNet.Attributes;
 using Cap.Fs.Ext;
 using Cap.Primitives;
@@ -16,6 +17,13 @@ namespace Cap.Benchmarks;
 /// filesystem reports it, and hands back the bare name, so it builds no path string per entry.
 /// The baseline builds a full path for every entry it yields. This is the row where the handle
 /// is expected to be competitive or better, not merely close.
+/// </para>
+/// <para>
+/// <see cref="SystemIONames"/> is the like-for-like comparison: the same listing through
+/// <see cref="FileSystemEnumerable{TResult}"/>, yielding each file's bare name as
+/// <see cref="DirEntry.Name"/> does, so it allocates what the cap-dotnet side allocates and
+/// the gap between the two is the price of the handle. <see cref="SystemIO"/> stays the
+/// baseline because it is the call a caller would be replacing.
 /// </para>
 /// <para>
 /// Each side opens the directory inside the measured call, as a caller listing it once would.
@@ -45,6 +53,25 @@ public class EnumerateDirectory
     {
         int files = 0;
         foreach (string _ in Directory.EnumerateFiles(_ambientPath))
+        {
+            files++;
+        }
+
+        return Checked(files);
+    }
+
+    [Benchmark]
+    public int SystemIONames()
+    {
+        int files = 0;
+        var names = new FileSystemEnumerable<string>(
+            _ambientPath,
+            static (ref FileSystemEntry entry) => entry.FileName.ToString(),
+            new EnumerationOptions { AttributesToSkip = 0 })
+        {
+            ShouldIncludePredicate = static (ref FileSystemEntry entry) => !entry.IsDirectory,
+        };
+        foreach (string _ in names)
         {
             files++;
         }

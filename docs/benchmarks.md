@@ -75,7 +75,7 @@ Ratio column the price in garbage.
 | `ReadTextSingleComponent` | Open and read a 4 KB UTF-8 text file named by one component | `File.ReadAllText` | ✓ |
 | `PositionalRead` | Read 4 KiB at an offset from an open file | `RandomAccess.Read` on a raw handle | ✓ |
 | `StatFile` | When a file last changed | `File.GetLastWriteTimeUtc` | ✓ |
-| `EnumerateDirectory` | List a directory of 100,000 entries | `Directory.EnumerateFiles` | |
+| `EnumerateDirectory` | List a directory of 100,000 entries | `Directory.EnumerateFiles`, and `FileSystemEnumerable` yielding bare names (`SystemIONames`) | |
 | `WalkTree` | Walk a tree of 50,000 files, 100 directories two levels deep | `Directory.EnumerateFiles(…, AllDirectories)` | |
 | `GlobTree` | Find the 25,000 `*.txt` files in the same tree with `**/*.txt` | `Directory.EnumerateFiles(…, "*.txt", AllDirectories)` | |
 | `CreateDeleteFiles` | Create an empty file and delete it, 10,000 times, reported per file | `File.OpenHandle` / `File.Delete` | |
@@ -83,7 +83,15 @@ Ratio column the price in garbage.
 | `CopyTree` | Copy 10,000 files of 4 KiB in 100 directories into an empty one, with `CopyTo`, reported per file | `Directory.CreateDirectory` and `File.Copy` per entry | |
 | `CapPathBenchmarks` | Parse and validate a path | none — see below | ✓ |
 
-Two choices of baseline are worth explaining.
+Three choices of baseline are worth explaining.
+
+**Listing a directory has two `System.IO` rows.** `SystemIO`, the baseline, is
+`Directory.EnumerateFiles`, the call a caller would be replacing; it builds a full path string
+for every entry, which the cap-dotnet side, handing back bare names, never does. So that the
+gap is not mostly string building, `SystemIONames` lists the same directory through
+`FileSystemEnumerable<string>` with a transform that yields each file's bare name, allocating
+per entry what a `DirEntry` does. Its Ratio against `CapDotnet` is the price of the handle;
+`SystemIO`'s is what a caller switching over would see.
 
 **Creating files is compared against `File.OpenHandle`, not `File.Create`.** A `CapFile` is a
 handle with positional reads and writes. The `System.IO` object of that shape is a
@@ -105,7 +113,7 @@ uploaded them, with the `EnvironmentVariables` column dropped since the Job colu
 the backend. On Linux every filesystem class has one group of rows per job, `openat2` and `walk`;
 Windows and macOS each have a single job, so their tables have no Job column.
 `GlobTree`, `CopyLargeFile` and `CopyTree` were added after that run and have no table until
-they are next refreshed.
+they are next refreshed, and `EnumerateDirectory`'s `SystemIONames` row has none either.
 
 A Ratio is only comparable with another from the same run, and on Windows and macOS even that is
 loose: see [the regression gate](#the-regression-gate) for how far their runners move on unchanged
