@@ -51,7 +51,14 @@ of shared test helpers is neither, and opts out:
 ```
 
 The warning comes from MSBuild rather than the compiler, so `TreatWarningsAsErrors` leaves it
-a warning. List it in `WarningsAsErrors` to make it an error.
+a warning. List it in `WarningsAsErrors` to make it an error; `-warnaserror` on the command
+line and `MSBuildTreatWarningsAsErrors` make it one too, along with every other MSBuild
+warning.
+
+The warning reaches a project through the package's `buildTransitive` assets, so it follows
+the package wherever those flow. A library of shared test helpers that installs the package
+with `PrivateAssets="all"` keeps the warning to itself: a production project that references
+that library is not warned.
 
 ### What is real and what is simulated
 

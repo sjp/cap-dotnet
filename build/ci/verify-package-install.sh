@@ -14,7 +14,13 @@
 #   2. one that references only Cap.Time, which shows that the analyzer reaches a consumer
 #      through a dependency on Cap.Std and not only through a direct reference;
 #   3. one that references only Cap.Std.Testing, which shows that the package warns a project
-#      that is not a test project, and stops once the project says it is one.
+#      that is not a test project, and stops once the project says it is one;
+#   4. two real test projects, one on xunit.v3 and one on MSTest under Microsoft.NET.Test.Sdk,
+#      which show that the test SDKs themselves set the properties the warning looks for, so
+#      a test project is not warned without setting anything by hand.
+#
+# xunit.v3 is the version the repository's own tests use, read from Directory.Packages.props.
+# MSTest and Microsoft.NET.Test.Sdk are not used in the repository, so they are pinned here.
 #
 # The packages hold no platform-specific assets, so the same feed is installed on every
 # platform; that is what a release publishes.
@@ -30,8 +36,17 @@ version="${2:?usage: verify-package-install.sh <feed-dir> <version> [work-dir]}"
 work="${3:-$(mktemp -d)}"
 export NUGET_PACKAGES="$work/packages"
 
-rm -rf "$work/all" "$work/time-only" "$work/testing-only" "$NUGET_PACKAGES"
-mkdir -p "$work/all" "$work/time-only" "$work/testing-only"
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+xunit_version="$(sed -n 's|.*<PackageVersion Include="xunit.v3" Version="\([^"]*\)".*|\1|p' "$repo/Directory.Packages.props")"
+if [[ -z "$xunit_version" ]]; then
+  echo "FAILED: no xunit.v3 version in $repo/Directory.Packages.props" >&2
+  exit 1
+fi
+mstest_version=4.4.1
+test_sdk_version=18.10.1
+
+rm -rf "$work/all" "$work/time-only" "$work/testing-only" "$work/xunit" "$work/mstest" "$NUGET_PACKAGES"
+mkdir -p "$work/all" "$work/time-only" "$work/testing-only" "$work/xunit" "$work/mstest"
 
 # $1 = consumer directory
 write_nuget_config() {
@@ -236,5 +251,52 @@ for marker in IsTestProject IsTestingPlatformApplication CapAllowStdTestingOutsi
     exit 1
   fi
 done
+
+# $1 = consumer directory, $2 = test SDK name, $3 = its PackageReference items
+verify_test_project() {
+  write_nuget_config "$1"
+  write_project "$1" "    <PackageReference Include=\"Cap.Std.Testing\" Version=\"$version\" />"$'\n'"$3" true
+  output="$(dotnet build "$1" -nologo -v normal 2>&1)" || {
+    echo "FAILED: a $2 test project that references Cap.Std.Testing does not build" >&2
+    echo "$output" >&2
+    exit 1
+  }
+  if grep -q 'CAPTESTING001' <<<"$output"; then
+    echo "FAILED: Cap.Std.Testing warns a $2 test project" >&2
+    echo "$output" >&2
+    exit 1
+  fi
+}
+
+echo "== Cap.Std.Testing in an xunit.v3 test project"
+cat > "$work/xunit/Tests.cs" <<'EOF'
+using Cap.Std.Testing;
+using Xunit;
+
+public class Tests
+{
+    [Fact]
+    public void Creates() => Assert.NotNull(new InMemoryFileSystem());
+}
+EOF
+verify_test_project "$work/xunit" xunit.v3 \
+  "    <PackageReference Include=\"xunit.v3\" Version=\"$xunit_version\" />"
+
+echo "== Cap.Std.Testing in an MSTest test project"
+cat > "$work/mstest/Tests.cs" <<'EOF'
+using Cap.Std.Testing;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+
+[TestClass]
+public class Tests
+{
+    [TestMethod]
+    public void Creates() => Assert.IsNotNull(new InMemoryFileSystem());
+}
+EOF
+verify_test_project "$work/mstest" MSTest \
+  "    <PackageReference Include=\"Microsoft.NET.Test.Sdk\" Version=\"$test_sdk_version\" />
+    <PackageReference Include=\"MSTest.TestAdapter\" Version=\"$mstest_version\" />
+    <PackageReference Include=\"MSTest.TestFramework\" Version=\"$mstest_version\" />"
 
 echo "The packages install, build and run in fresh consumers."
