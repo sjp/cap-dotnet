@@ -112,6 +112,14 @@ Pre-1.0, only the latest release is supported ([SECURITY.md](../SECURITY.md#supp
    suffix, such as `v0.2.0-rc.1`, becomes a pre-release on GitHub and on nuget.org, with notes
    GitHub generates from the pull requests merged since the last release.
 
+   A release that stops partway through pushing can be re-run, and the packages nuget.org
+   already has are skipped. Before pushing anything,
+   [`build/ci/check-published.sh`](../build/ci/check-published.sh) downloads each version
+   nuget.org already holds and compares it, file by file, with the package this run built.
+   It ignores only the signature nuget.org adds and the zip's packaging metadata. If any
+   file differs, the release fails without pushing, because a version on nuget.org cannot be
+   replaced. To recover, unlist that version and release a new one.
+
 CI runs steps 3 and 4 up to publishing on every change: the same pack script, the same checks,
 and the same installs. So a release shouldn't fail in any way a pull request didn't, and the
 check in step 3 makes sure the tests a pull request runs have also passed on the tagged commit.

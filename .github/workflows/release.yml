@@ -193,11 +193,10 @@ jobs:
       contents: write
       id-token: write
     steps:
-      # This job has no checkout, so it cannot read global.json. The version must equal the
-      # one global.json names; the lint job in ci.yml checks that they match.
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: "10.0.401"
+          global-json-file: global.json
       - uses: actions/download-artifact@v8
         with:
           name: packages
@@ -207,6 +206,12 @@ jobs:
         with:
           name: release-notes
           path: ${{ runner.temp }}/notes
+
+      # --skip-duplicate below lets a release that stopped halfway be re-run, but it would also
+      # skip a version nuget.org already holds from some other build. So before pushing anything,
+      # check that every version already published has the same contents as this run's package.
+      - name: Check the packages against any already on nuget.org
+        run: build/ci/check-published.sh "$RUNNER_TEMP/feed" "$RUNNER_TEMP/published"
 
       - name: Exchange the OIDC token for a short-lived nuget.org key
         id: nuget
