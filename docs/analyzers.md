@@ -21,6 +21,7 @@ an operating-system sandbox; see §5.1 of [threat-model.md](threat-model.md).
 
 | ID | Reports | Default |
 |---|---|---|
+| `CAP0000` | Never reported. It keeps the analyzer running when every other rule is configured off, so that `CapabilityStrict` still applies, and it cannot be configured | hidden |
 | `CAP0001` | The filesystem reached by path: `File`, `Directory`, `FileInfo`, `DirectoryInfo`, `FileSystemWatcher`, `DriveInfo`, `ZipFile`, the path constructors of `FileStream`, `StreamReader` and `StreamWriter`, `Environment.CurrentDirectory`, `Path.GetFullPath(string)`, `Path.GetTempPath`, `Path.GetTempFileName`, `Environment.GetFolderPath`; archives extracted to or filled from a path (`TarFile`, `TarEntry.ExtractToFile`, `ZipFileExtensions.ExtractToDirectory`, `ExtractToFile`, `CreateEntryFromFile` and their async forms); programs and code run or loaded by path (every `Process.Start`, `Assembly.LoadFrom`/`LoadFile`/`UnsafeLoadFrom`, `AssemblyLoadContext.LoadFromAssemblyPath`/`LoadFromNativeImagePath`/`LoadUnmanagedDllFromPath`, `NativeLibrary.Load`/`TryLoad`); the path overloads of `XDocument`, `XElement` and `XStreamingElement` `Load`/`Save`, `XmlReader.Create`, `XmlWriter.Create`, `XmlDocument.Load`/`Save`, `XmlTextReader`, `XmlTextWriter`, `XPathDocument` and `XslCompiledTransform.Load`/`Transform`; the path overloads of `MemoryMappedFile.CreateFromFile`; the name-taking constructors of `NamedPipeClientStream` and `NamedPipeServerStream`, and `NamedPipeServerStreamAcl.Create`; `Socket.SendFile`, `SendFileAsync` and `BeginSendFile`; certificates read by path (`X509CertificateLoader.*FromFile`, the path constructors of `X509Certificate` and `X509Certificate2`, `CreateFromCertFile`, `CreateFromSignedFile`, `CreateFromPemFile`, `CreateFromEncryptedPemFile`, `GetCertContentType(string)`, and the path overloads of `X509Certificate2Collection.Import` and `ImportFromPemFile`); and the constructors of the ambient `IFileSystem` implementations: System.IO.Abstractions' `FileSystem`, `FileWrapper`, `DirectoryWrapper`, `FileInfoWrapper`, `DirectoryInfoWrapper`, `DriveInfoWrapper`, `PathWrapper`, `FileSystemWatcherWrapper` and `FileSystemWatcherFactory`, and Testably's `RealFileSystem` | off |
 | `CAP0002` | The network reached by address or by name: `Socket.Bind`, `Connect`, `ConnectAsync`, `SendTo`, `SendToAsync`, `TcpListener`, `TcpClient`, `UdpClient`, and `Dns`; and the construction of the clients that resolve a name or URL themselves: `new HttpClient()`, `SocketsHttpHandler`, `HttpClientHandler`, `ClientWebSocket`, `SmtpClient`, `Ping`, `HttpListener`, `WebClient`, `WebRequest.Create`/`CreateHttp`/`CreateDefault`, `QuicConnection.ConnectAsync` and `QuicListener.ListenAsync` | off |
 | `CAP0003` | `AmbientAuthority.Acquire()` called outside a composition root | warning |
@@ -103,6 +104,11 @@ dotnet_diagnostic.CAP0004.severity = none    # stop reporting raw handles
 `CapabilityStrict`, which is how a strict assembly stands down one rule without giving up the
 rest. `<NoWarn>` and `<WarningsAsErrors>` in the project file work as they do for any
 diagnostic.
+
+`CapabilityStrict` applies however the other rules are configured. The compiler does not run
+an analyzer whose every rule is off, so the analyzer carries `CAP0000`, a rule that is never
+reported and that `.editorconfig` cannot turn off; switching off `CAP0003`, `CAP0004`,
+`CAP0005` and `CAP0008` therefore leaves a strict assembly strict.
 
 ## `CAP0003`: where authority is taken
 

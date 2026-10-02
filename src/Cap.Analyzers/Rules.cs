@@ -25,6 +25,27 @@ internal static class Rules
 
     public const string CompositionRootOption = "cap_composition_root";
 
+    /// <summary>
+    /// A rule that is never reported, and exists so that the analyzer always runs.
+    /// </summary>
+    /// <remarks>
+    /// The compiler skips an analyzer whose every rule is off, and an assembly may switch off
+    /// all the rules that are on by default while relying on <c>[assembly: CapabilityStrict]</c>
+    /// for the ones that are not. Nothing can switch this rule off, because it is marked not
+    /// configurable, so the analyzer is still there to see the attribute.
+    /// </remarks>
+    public static readonly DiagnosticDescriptor Active = new(
+        "CAP0000",
+        "Capability analyzer is active",
+        "The capability analyzer is active",
+        Category,
+        DiagnosticSeverity.Hidden,
+        isEnabledByDefault: true,
+        description:
+            "Never reported. It keeps the analyzer running when every other rule is configured " +
+            "off, so that [assembly: CapabilityStrict] still takes effect.",
+        customTags: WellKnownDiagnosticTags.NotConfigurable);
+
     public static readonly DiagnosticDescriptor AmbientFilesystem = new(
         "CAP0001",
         "Ambient filesystem access",

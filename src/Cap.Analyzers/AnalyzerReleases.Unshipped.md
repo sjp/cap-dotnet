@@ -5,6 +5,7 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
+CAP0000 | Capability | Hidden | Capability analyzer is active
 CAP0001 | Capability | Disabled | Ambient filesystem access
 CAP0002 | Capability | Disabled | Ambient network access
 CAP0003 | Capability | Warning | Ambient authority taken outside a composition root

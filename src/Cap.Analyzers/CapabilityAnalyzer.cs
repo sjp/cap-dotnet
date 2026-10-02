@@ -18,7 +18,8 @@ namespace Cap.Analyzers;
 /// whose every rule is off; an assembly marked <c>[assembly: CapabilityStrict]</c> turns
 /// those rules on from inside the compilation, where no configuration can see it, and that
 /// only works if the analyzer carrying them is already running on the strength of the rules
-/// that are on.
+/// that are on. A consumer can switch those off too, so the analyzer also carries
+/// <c>CAP0000</c>, which is never reported and cannot be switched off.
 /// </para>
 /// <para>
 /// None of this is a security boundary. A compiler diagnostic stops only code that is
@@ -46,7 +47,7 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
         new(LoadBuiltInLists);
 
     /// <inheritdoc/>
-    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [.. Rules.All];
+    public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = [Rules.Active, .. Rules.All];
 
     /// <inheritdoc/>
     public override void Initialize(AnalysisContext context)

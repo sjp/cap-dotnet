@@ -72,6 +72,41 @@ public sealed class AmbientApiTests
     }
 
     [Fact]
+    public async Task A_strict_assembly_still_reports_when_every_default_on_rule_is_off()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            Strict("""
+                using System.IO;
+
+                public static class Uses
+                {
+                    public static string Filesystem() => File.ReadAllText("x");
+                }
+                """),
+            severities: new Dictionary<string, ReportDiagnostic>
+            {
+                ["CAP0000"] = ReportDiagnostic.Suppress,
+                ["CAP0003"] = ReportDiagnostic.Suppress,
+                ["CAP0004"] = ReportDiagnostic.Suppress,
+                ["CAP0005"] = ReportDiagnostic.Suppress,
+                ["CAP0008"] = ReportDiagnostic.Suppress,
+            });
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(("CAP0001", DiagnosticSeverity.Error), (diagnostic.Id, diagnostic.Severity));
+    }
+
+    [Fact]
+    public async Task The_rule_that_keeps_the_analyzer_running_is_never_reported()
+    {
+        var diagnostics = await AnalyzerHarness.AnalyzeAsync(
+            Strict(EveryAmbientRoute),
+            severities: new Dictionary<string, ReportDiagnostic> { ["CAP0000"] = ReportDiagnostic.Error });
+
+        Assert.DoesNotContain(diagnostics, d => d.Id == "CAP0000");
+    }
+
+    [Fact]
     public async Task The_message_names_the_member_and_says_what_to_use_instead()
     {
         var diagnostics = await AnalyzerHarness.AnalyzeAsync(EveryAmbientRoute, severities: AllAmbientRulesOn);
