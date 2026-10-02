@@ -298,6 +298,45 @@ public sealed class ThroughDirTests
         Assert.Equal(created, afterWrite.CreationTime);
     }
 
+    /// <summary>
+    /// Linux's <c>utimensat</c> with both times omitted returns before touching anything, so
+    /// the change time stays put (checked on Linux arm64 with a probe that set neither time on
+    /// a file a second after creating it). Setting either time is a change and stamps it.
+    /// </summary>
+    [Fact]
+    public void Setting_times_that_leaves_both_as_they_are_changes_no_time()
+    {
+        FakeTimeProvider clock = new(new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { TimeProvider = clock });
+        fs.AddFile("dir/f.txt", "x");
+        DateTimeOffset created = clock.GetUtcNow();
+
+        using Dir root = fs.OpenRoot();
+        using Dir dir = root.OpenDir("dir");
+        clock.Advance(TimeSpan.FromMinutes(1));
+
+        root.SetTimes("dir/f.txt");
+        dir.SetTimes();
+        using (CapFile file = dir.OpenFile("f.txt", FileMode.Open, FileAccess.Write))
+        {
+            file.SetTimes();
+        }
+
+        foreach (CapMetadata untouched in new[] { root.GetMetadata("dir/f.txt"), root.GetMetadata("dir") })
+        {
+            Assert.Equal(created, untouched.LastAccessTime);
+            Assert.Equal(created, untouched.LastWriteTime);
+            Assert.Equal(created, untouched.ChangeTime);
+        }
+
+        root.SetTimes("dir/f.txt", lastWrite: CapFileTime.Now);
+        CapMetadata set = root.GetMetadata("dir/f.txt");
+
+        Assert.Equal(created, set.LastAccessTime);
+        Assert.Equal(clock.GetUtcNow(), set.LastWriteTime);
+        Assert.Equal(clock.GetUtcNow(), set.ChangeTime);
+    }
+
     [Fact]
     public void Without_a_clock_every_time_is_the_same_instant()
     {

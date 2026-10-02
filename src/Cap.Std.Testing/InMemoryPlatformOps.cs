@@ -1796,6 +1796,8 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// Under Windows rules an instant before the start of 1601 is refused, as Windows refuses
     /// it: its file times count from then and cannot express anything earlier. The refusal
     /// comes before either time is changed, so a request that cannot be stored changes nothing.
+    /// A request that leaves both times as they are changes nothing either, the change time
+    /// included, as <c>utimensat</c> with both times omitted does not.
     /// </remarks>
     private CapError ApplyTimes(MemoryNode node, CapFileTime lastAccess, CapFileTime lastWrite)
     {
@@ -1812,6 +1814,11 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         if (_fs.WindowsRules && (BeforeWindowsEpoch(lastAccess) || BeforeWindowsEpoch(lastWrite)))
         {
             return CapError.FromCategory(CapErrorCategory.InvalidArgument);
+        }
+
+        if (lastAccess.IsUnchanged && lastWrite.IsUnchanged)
+        {
+            return CapError.Success;
         }
 
         DateTimeOffset now = _fs.Now();

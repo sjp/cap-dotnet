@@ -106,7 +106,8 @@ link made as a link to a directory, and a write that fills the disk carries Wind
 
 Reading never changes a file's access time, as on a filesystem mounted with `noatime`.
 Creating something stamps all four of its times. A write stamps the write and change times, and
-any other change stamps the change time. Adding, removing or renaming an entry stamps the
+any other change stamps the change time; setting times that leaves both as they are is no
+change and stamps nothing, as on Linux. Adding, removing or renaming an entry stamps the
 directory that holds it.
 
 ### Building and inspecting a tree
