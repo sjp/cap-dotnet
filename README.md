@@ -1,5 +1,8 @@
 # cap-dotnet
 
+[![CI](https://github.com/sjp/cap-dotnet/actions/workflows/ci.yml/badge.svg)](https://github.com/sjp/cap-dotnet/actions/workflows/ci.yml)
+[![Nightly](https://github.com/sjp/cap-dotnet/actions/workflows/nightly.yml/badge.svg)](https://github.com/sjp/cap-dotnet/actions/workflows/nightly.yml)
+
 A capability-based filesystem API for .NET — a native port of
 [cap-std](https://github.com/bytecodealliance/cap-std).
 

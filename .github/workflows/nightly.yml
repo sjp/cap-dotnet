@@ -267,3 +267,48 @@ jobs:
         env:
           CAPDOTNET_PROPERTY_ITERATIONS: "1000000"
         run: dotnet test tests/Cap.Fuzz.Tests/Cap.Fuzz.Tests.csproj --configuration Release
+
+  # -------------------------------------------------------------------------------------
+  # A failed night is reported as an issue labelled `nightly`, since GitHub's own email goes
+  # to whoever last touched this file, which after a dependabot bump is the bot. While one
+  # such issue is open, each later failure comments on it rather than opening another, so a
+  # red streak is one issue with a run link per night. Nothing closes it: a green night does
+  # not mean the failure, or an input the fuzzer saved, has been looked at. The release
+  # checklist asks for no open `nightly` issue.
+  #
+  # Only runs on main report: the scheduled run, and one started by hand on main, which is
+  # how to try this job out. A run started by hand on a branch is watched by whoever started
+  # it.
+  # -------------------------------------------------------------------------------------
+  report:
+    name: report failure
+    needs: [stress, fuzz, linux-arm, properties]
+    if: failure() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    timeout-minutes: 10
+
+    steps:
+      - name: Open or comment on the nightly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NEEDS: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          failed=$(jq -r '[to_entries[] | select(.value.result != "success") | "`\(.key)` (\(.value.result))"] | join(", ")' <<< "$NEEDS")
+          body=$(printf '%s\n\n- Run: %s\n- Commit: %s\n- Trigger: %s\n- Jobs not green: %s\n' \
+            "Nightly failed on $(date -u +%F)." "$RUN_URL" "$GITHUB_SHA" "$EVENT" "$failed")
+
+          gh label create nightly --color B60205 \
+            --description "A nightly stress, fuzz or property run failed" --force
+
+          number=$(gh issue list --label nightly --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            note="Later failures comment here while this issue is open. Close it once every failure it records has been triaged; a green night does not close it."
+            gh issue create --title "Nightly failed" --label nightly --body "$body"$'\n\n'"$note"
+          fi

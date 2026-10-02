@@ -22,6 +22,8 @@ See [docs/releasing.md](../../docs/releasing.md) for the process and the version
       platform. Link the run:
 - [ ] **Nightly fuzzing** has passed on this commit or a later one, and every input it saved
       since the last release has been triaged. Link the run:
+- [ ] **No open `nightly` issue.** A failed nightly opens one, and later failures comment on
+      it; close it only once every failure it records has been triaged.
 - [ ] **Benchmarks** show no regression past the gate against the committed baseline on
       every platform, and no gate job carries a "No baseline committed" warning. Link the run:
 

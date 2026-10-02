@@ -151,6 +151,10 @@ A run that finds a failing input fails. It uploads the input as an artifact laid
 a checkout. The artifact is kept for a week. Nothing is committed automatically, and the job's
 token is read-only.
 
+A failed night also opens an issue labelled `nightly`, or comments on the one already open,
+with a link to the run and the jobs that failed. It carries no input, only the run link, and
+no green night closes it: close it once its failures have been triaged.
+
 **A finding that reaches outside the sandbox is a vulnerability.** Report it as
 [SECURITY.md](../SECURITY.md) describes, and fix it before its input goes into a public pull
 request. The input is the exploit.
