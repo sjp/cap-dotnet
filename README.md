@@ -96,7 +96,8 @@ attacks that are defended, and names the test that covers each one.
 
 [`samples/StaticFileServer`](samples/StaticFileServer) serves one content root both ways —
 through a `Dir`, and through `UseStaticFiles` over `PhysicalFileProvider` — and shows the
-second handing out a file from outside it through a link.
+second handing out a file from outside it through a link (ASP.NET Core 10 at the time of
+writing; the sample warns if that ever stops being so).
 
 The other three are good at what they are for. None of them is for this, and treating one as
 if it were is how the check at the top of this page ends up in production.

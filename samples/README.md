@@ -50,6 +50,11 @@ For comparison, the same content root served by UseStaticFiles over PhysicalFile
   200  GET /assets/secret.txt   <-- served "outside the content root"
 ```
 
+The comparison is what ASP.NET Core 10 does at the time of writing. It is not part of the exit
+status, since it is another library's behaviour; if `PhysicalFileProvider` stops serving the
+file, the sample prints a warning (a warning annotation under GitHub Actions) so that this page
+and the README can be corrected.
+
 Every refusal is a 404, whatever the reason, so a client learns nothing about what lies
 outside.
 

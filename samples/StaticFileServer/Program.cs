@@ -163,7 +163,16 @@ internal static class Program
             Console.WriteLine();
             Console.WriteLine(failed ? "A request was not answered as expected." : "Nothing outside the content root was served.");
 
-            await CompareWithPhysicalFileProviderAsync(root);
+            if (!await CompareWithPhysicalFileProviderAsync(root))
+            {
+                // Not a failure of this sample, but README states the opposite as fact.
+                const string Warning = "PhysicalFileProvider no longer serves through the link; update README's comparison table";
+                Console.WriteLine(
+                    Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true"
+                        ? $"::warning::{Warning}"
+                        : $"Warning: {Warning}");
+            }
+
             return failed ? 1 : 0;
         }
         finally
@@ -176,11 +185,12 @@ internal static class Program
     /// Serves the same content root the way ASP.NET Core does by default, and makes the one
     /// request that matters.
     /// </summary>
+    /// <returns>Whether the file outside the content root was served.</returns>
     /// <remarks>
     /// For comparison only, and not part of the exit status: what this shows is a property of
-    /// another library, which is free to change.
+    /// another library, which is free to change. The caller warns when it has.
     /// </remarks>
-    private static async Task CompareWithPhysicalFileProviderAsync(string root)
+    private static async Task<bool> CompareWithPhysicalFileProviderAsync(string root)
     {
         int port = FreeLoopbackPort();
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder();
@@ -195,11 +205,11 @@ internal static class Program
         (int status, string body) = await RawGetAsync(port, "/assets/secret.txt");
         await app.StopAsync();
 
+        bool served = body.Contains(Secret, StringComparison.Ordinal);
         Console.WriteLine();
         Console.WriteLine("For comparison, the same content root served by UseStaticFiles over PhysicalFileProvider:");
-        Console.WriteLine(
-            $"  {status}  GET /assets/secret.txt" +
-            (body.Contains(Secret, StringComparison.Ordinal) ? $"   <-- served \"{Secret}\"" : string.Empty));
+        Console.WriteLine($"  {status}  GET /assets/secret.txt" + (served ? $"   <-- served \"{Secret}\"" : string.Empty));
+        return served;
     }
 
     /// <summary>
