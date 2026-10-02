@@ -100,13 +100,21 @@ public sealed class PoolBuilder
     /// those addresses however they are spelled.
     /// </para>
     /// <para>
+    /// The value an <see cref="IPNetwork"/> nobody set holds is <c>0.0.0.0/0</c>, the whole of
+    /// the older family, so that value is refused: a configuration field left unset would
+    /// otherwise become the widest grant a range can make. Written out on purpose it is the
+    /// same value and is refused the same way; spell the whole of the older family as its two
+    /// halves, <c>0.0.0.0/1</c> and <c>128.0.0.0/1</c>. The whole of the newer family,
+    /// <c>::/0</c>, is nobody's default and is accepted.
+    /// </para>
+    /// <para>
     /// Not safe to call at the same time as any other member of the same builder.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentException">
-    /// <paramref name="ports"/> is empty, <paramref name="network"/> lies wholly inside the
-    /// addresses a range grant does not reach, or <paramref name="authority"/> was never
-    /// acquired.
+    /// <paramref name="ports"/> is empty, <paramref name="network"/> is the default value
+    /// (<c>0.0.0.0/0</c>), <paramref name="network"/> lies wholly inside the addresses a range
+    /// grant does not reach, or <paramref name="authority"/> was never acquired.
     /// </exception>
     public PoolBuilder InsertIpNet(IPNetwork network, PortRange ports, AmbientAuthority authority)
     {
@@ -118,6 +126,17 @@ public sealed class PoolBuilder
                 "A grant with no ports in it reaches nothing, so it is more likely a mistake " +
                 "than an intention. Name the ports the service is reached at.",
                 nameof(ports));
+        }
+
+        // Checked before normalization, because the hazard is the value an unset field
+        // holds, and nothing normalizes to it by accident.
+        if (network.Equals(default(IPNetwork)))
+        {
+            throw new ArgumentException(
+                "A network nobody set is 0.0.0.0/0, the whole of IPv4, so it cannot be told " +
+                "apart from a grant over everything and is refused. If the whole of IPv4 is " +
+                "intended, grant its two halves, 0.0.0.0/1 and 128.0.0.0/1.",
+                nameof(network));
         }
 
         IPNetwork normalized = EndpointNormalization.Normalize(network);

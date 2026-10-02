@@ -139,7 +139,8 @@ public sealed class PoolGrantTests
     public void A_range_grant_does_not_reach_a_link_local_address()
     {
         Pool pool = new PoolBuilder()
-            .InsertIpNet(IPNetwork.Parse("0.0.0.0/0"), PortRange.Every, AmbientAuthority.Acquire())
+            .InsertIpNet(IPNetwork.Parse("0.0.0.0/1"), PortRange.Every, AmbientAuthority.Acquire())
+            .InsertIpNet(IPNetwork.Parse("128.0.0.0/1"), PortRange.Every, AmbientAuthority.Acquire())
             .Build();
 
         Assert.True(pool.Allows(IPAddress.Parse("93.184.216.34"), 80));
@@ -202,6 +203,45 @@ public sealed class PoolGrantTests
         Assert.True(pool.GrantsEveryEndpoint);
         Assert.True(pool.Allows(IPAddress.Parse("169.254.169.254"), 80));
         Assert.True(pool.Allows(IPAddress.Parse("fe80::1"), 1));
+    }
+
+    /// <summary>The network nobody set is refused rather than read as all of IPv4.</summary>
+    /// <remarks>
+    /// The default <see cref="IPNetwork"/> is <c>0.0.0.0/0</c>, so a configuration record
+    /// with its network left unset would otherwise grant every address of the older family.
+    /// Written out it is the same value, so it is refused too, and the whole family is
+    /// granted as its two halves instead.
+    /// </remarks>
+    [Fact]
+    public void The_default_network_is_refused()
+    {
+        var builder = new PoolBuilder();
+
+        ArgumentException unset = Assert.Throws<ArgumentException>(() => builder.InsertIpNet(
+            default, PortRange.Every, AmbientAuthority.Acquire()));
+        Assert.Equal("network", unset.ParamName);
+
+        ArgumentException written = Assert.Throws<ArgumentException>(() => builder.InsertIpNet(
+            IPNetwork.Parse("0.0.0.0/0"), PortRange.Every, AmbientAuthority.Acquire()));
+        Assert.Equal("network", written.ParamName);
+
+        Pool halves = builder
+            .InsertIpNet(IPNetwork.Parse("0.0.0.0/1"), PortRange.Every, AmbientAuthority.Acquire())
+            .InsertIpNet(IPNetwork.Parse("128.0.0.0/1"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+        Assert.True(halves.Allows(IPAddress.Parse("8.8.8.8"), 53));
+        Assert.True(halves.Allows(IPAddress.Parse("203.0.113.1"), 53));
+    }
+
+    /// <summary>The whole of the newer family is nobody's default, so it is accepted.</summary>
+    [Fact]
+    public void The_whole_of_the_newer_family_is_accepted()
+    {
+        Pool pool = new PoolBuilder()
+            .InsertIpNet(IPNetwork.Parse("::/0"), PortRange.Every, AmbientAuthority.Acquire())
+            .Build();
+
+        Assert.True(pool.Allows(IPAddress.Parse("2001:db8::1"), 443));
     }
 
     /// <summary>Port zero cannot be granted, because it is a request for a port.</summary>

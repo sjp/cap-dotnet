@@ -59,11 +59,18 @@ produces, alongside the places the process opens its first directory. See
 | Grant | Reaches |
 |---|---|
 | `InsertSocketAddress(endpoint, authority)` | That one address and port, whatever kind of address it is. |
-| `InsertIpNet(network, ports, authority)` | Those addresses at those ports, **except** the ones an interface configures for itself. |
+| `InsertIpNet(network, ports, authority)` | Those addresses at those ports, **except** the ones an interface configures for itself. The default network is refused (see below). |
 | `InsertEveryEndpoint(authority)` | Everything. |
 
 `InsertEveryEndpoint` is named so that it cannot be arrived at by accident and so that it is
 findable. There is no address or port that produces it from any other member.
+
+`InsertIpNet` refuses the default `IPNetwork`. That value is `0.0.0.0/0`, the whole of IPv4, so
+a configuration record whose network field was never set would otherwise become the widest
+grant a range can make. An explicit `0.0.0.0/0` is the same value at run time and cannot be told
+apart, so it is refused too: if the whole of IPv4 is intended, grant its two halves,
+`0.0.0.0/1` and `128.0.0.0/1`. `::/0` is nobody's default and is accepted. This mirrors
+`PortRange`, whose default grants no ports at all.
 
 ## No name is ever resolved
 
@@ -125,7 +132,7 @@ guessed the same interface index would be a grant that usually failed.
 ## A range grant does not reach link-local addresses
 
 `169.254.0.0/16` and `fe80::/10` are never covered by `InsertIpNet`, however wide the range —
-`0.0.0.0/0` does not reach them.
+`0.0.0.0/1` and `128.0.0.0/1` together do not reach them.
 
 On a hosted machine, `169.254.169.254` is where the instance answers configuration questions
 about itself, credentials included, and it is reachable from every process on the machine
@@ -141,7 +148,7 @@ like a grant that works.
 
 `InsertEveryEndpoint` reaches them, as it reaches everything.
 
-Note what this rule does **not** cover: loopback is not special-cased. A grant of `0.0.0.0/0`
+Note what this rule does **not** cover: loopback is not special-cased. A grant of `0.0.0.0/1`
 includes `127.0.0.1` and every service listening on it.
 
 ## The endpoint checked is the endpoint reached
