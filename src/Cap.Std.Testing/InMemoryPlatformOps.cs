@@ -815,8 +815,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
 
             bool append = file.AppendOnly || file.Description.Appending;
             long before = node.Length;
-            long end = append ? before + buffer.Length : fileOffset + buffer.Length;
-            ThrowIfNoRoom(node, end - before);
+            long start = append ? before : fileOffset;
+            MemoryNode.ThrowIfCannotHold(start, buffer.Length);
+            ThrowIfNoRoom(node, start + buffer.Length - before);
 
             if (append)
             {

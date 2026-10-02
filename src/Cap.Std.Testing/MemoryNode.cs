@@ -278,8 +278,22 @@ internal sealed class MemoryNode
         }
     }
 
+    /// <summary>
+    /// Refuses a write of a number of bytes at a position whose end a file held in memory cannot
+    /// reach, before anything adds the two, so an end past <see cref="long.MaxValue"/> is refused
+    /// rather than wrapped.
+    /// </summary>
+    public static void ThrowIfCannotHold(long offset, int count)
+    {
+        if (offset > Array.MaxLength - count)
+        {
+            throw TooLarge();
+        }
+    }
+
     private void WriteLocked(ReadOnlySpan<byte> buffer, long offset)
     {
+        ThrowIfCannotHold(offset, buffer.Length);
         long end = offset + buffer.Length;
         EnsureCapacity(end);
         buffer.CopyTo(_content.AsSpan((int)offset));
@@ -294,7 +308,7 @@ internal sealed class MemoryNode
     {
         if (length > Array.MaxLength)
         {
-            throw new IOException("A file held in memory cannot hold that much.");
+            throw TooLarge();
         }
 
         if (length > _content.Length)
@@ -302,6 +316,8 @@ internal sealed class MemoryNode
             Array.Resize(ref _content, (int)Math.Max(length, Math.Min(Array.MaxLength, (long)_content.Length * 2)));
         }
     }
+
+    private static IOException TooLarge() => new("A file held in memory cannot hold that much.");
 
     /// <summary>Its description, as the platform layer would report it.</summary>
     public CapNodeInfo Info => new(Type, VolumeId, NodeId, ReparseTag);

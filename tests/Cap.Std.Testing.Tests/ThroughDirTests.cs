@@ -171,6 +171,29 @@ public sealed class ThroughDirTests
 
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_write_whose_end_is_past_the_largest_offset_is_refused_as_too_large(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("big.bin", [1, 2]);
+
+        using Dir root = fs.OpenRoot();
+        using CapFile file = root.OpenFile("big.bin", FileMode.Open, FileAccess.ReadWrite);
+
+        Assert.Equal(CapErrorKind.Other, CapIOException.KindOf(Assert.ThrowsAny<IOException>(() => file.Write([1, 2, 3, 4], long.MaxValue - 2))));
+
+        using (Stream stream = file.AsStream())
+        {
+            stream.Position = long.MaxValue - 2;
+            Assert.Equal(CapErrorKind.Other, CapIOException.KindOf(Assert.ThrowsAny<IOException>(() => stream.Write([1, 2, 3, 4]))));
+        }
+
+        Assert.Equal(2, file.Length);
+        Assert.Equal(2, fs.UsedBytes);
+        Assert.Equal([1, 2], fs.ReadAllBytes("big.bin"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public void A_removed_file_stays_usable_through_an_open_handle(ResolutionBackend resolution)
     {
         InMemoryFileSystem fs = Resolutions.Create(resolution);

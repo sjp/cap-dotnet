@@ -69,6 +69,10 @@ Windows attributes; renames with and without replacing the destination; the refu
 a directory that is not empty; and files that stay readable through an open handle after their
 name is removed. Where two answers are possible, it gives the one Linux gives.
 
+A file's contents are held in one array, so a file cannot grow past about 2 GiB. A write or a
+length change that would take it further fails with an `IOException`, for which
+`CapIOException.KindOf` reports `CapErrorKind.Other`, where Linux would make a sparse file.
+
 It is held to the disk's behaviour by the library's own tests. The suites for `Cap.Std`,
 `Cap.Fs.Ext` and the escape corpus, written against the disk, also run in continuous
 integration with this filesystem standing in for it, under Linux and Windows path rules, and
