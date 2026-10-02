@@ -23,6 +23,25 @@ public sealed class CapFileStreamTests
         return fs.OpenRoot();
     }
 
+    /// <summary>
+    /// Reads the whole file back through the handle under test. The file system follows the
+    /// host's rules, so on Windows a second open for reading would be refused while the
+    /// handle writes.
+    /// </summary>
+    private static string Contents(CapFile file)
+    {
+        byte[] buffer = new byte[file.Length];
+        int filled = 0;
+        while (filled < buffer.Length)
+        {
+            int read = file.Read(buffer.AsSpan(filled), filled);
+            Assert.NotEqual(0, read);
+            filled += read;
+        }
+
+        return Encoding.UTF8.GetString(buffer);
+    }
+
     [Fact]
     public void Reading_advances_the_position_and_stops_at_the_end()
     {
@@ -114,7 +133,7 @@ public sealed class CapFileStreamTests
         Assert.Equal(2, stream.Position);
 
         stream.Write("ab"u8);
-        Assert.Equal("01ab\0\0", Encoding.UTF8.GetString(root.ReadAllBytes("data")));
+        Assert.Equal("01ab\0\0", Contents(file));
     }
 
     [Fact]
@@ -136,18 +155,21 @@ public sealed class CapFileStreamTests
         stream.Write("A"u8);
         stream.Flush();
 
-        Assert.Equal("A1234567yz!!", Encoding.UTF8.GetString(root.ReadAllBytes("data")));
+        Assert.Equal("A1234567yz!!", Contents(file));
     }
 
     [Fact]
     public void Writes_to_an_appending_file_go_to_the_end()
     {
         using Dir root = Root();
-        using CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Write, append: true);
-        using CapFileStream stream = new(file, ownsFile: false);
+        using (CapFile file = root.OpenFile("data", FileMode.Open, FileAccess.Write, append: true))
+        using (CapFileStream stream = new(file, ownsFile: false))
+        {
+            stream.Write("ab"u8);
+            stream.Write("cd"u8);
+        }
 
-        stream.Write("ab"u8);
-        stream.Write("cd"u8);
+        // The handle cannot read, and on Windows a reader is refused while it is open.
 
         Assert.Equal("0123456789abcd", Encoding.UTF8.GetString(root.ReadAllBytes("data")));
     }
@@ -229,7 +251,7 @@ public sealed class CapFileStreamTests
         Assert.Equal(12, stream.Position);
         await stream.FlushAsync(token);
 
-        Assert.Equal("0123yz!!!!!!", Encoding.UTF8.GetString(root.ReadAllBytes("data")));
+        Assert.Equal("0123yz!!!!!!", Contents(file));
 
         stream.Position = 4;
         byte[] sync = new byte[8];
@@ -255,7 +277,7 @@ public sealed class CapFileStreamTests
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => stream.WriteAsync(new byte[4], 3, 2, TestContext.Current.CancellationToken));
 
         Assert.Equal(0, stream.Position);
-        Assert.Equal("0123456789", Encoding.UTF8.GetString(root.ReadAllBytes("data")));
+        Assert.Equal("0123456789", Contents(file));
     }
 
     [Fact]

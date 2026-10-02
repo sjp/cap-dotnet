@@ -492,10 +492,19 @@ public sealed class GlobTests : IDisposable
     /// The search yields fewer entries than the walk, so it is held to at most what the walk
     /// cost plus a little for the pattern's own one-time work.
     /// </para>
+    /// <para>
+    /// Each is measured several times, alternating, and its cheapest run is the one compared.
+    /// The runtime does work of its own on the test's thread now and then — on a slow macOS
+    /// runner one run of the search was charged 8 KB more than the walk where Linux finds
+    /// under a hundred bytes — and that lands in one run, while a cost per name is in all of
+    /// them: the smallest allocation is 24 bytes, so one per match would be 12 KB in every run.
+    /// </para>
     /// </remarks>
     [Fact]
     public void A_search_under_a_crossing_piece_allocates_nothing_per_name()
     {
+        const int Runs = 5;
+
         for (int d = 0; d < 10; d++)
         {
             for (int f = 0; f < 100; f++)
@@ -512,18 +521,27 @@ public sealed class GlobTests : IDisposable
         Assert.Equal(500, Drain(many.Glob(pattern)));
         Assert.Equal(1010, Drain(many.Walk()));
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        _ = Drain(many.Walk());
-        long walked = GC.GetAllocatedBytesForCurrentThread() - before;
+        long[] walks = new long[Runs];
+        long[] searches = new long[Runs];
+        for (int run = 0; run < Runs; run++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            _ = Drain(many.Walk());
+            walks[run] = GC.GetAllocatedBytesForCurrentThread() - before;
 
-        before = GC.GetAllocatedBytesForCurrentThread();
-        _ = Drain(many.Glob(pattern));
-        long searched = GC.GetAllocatedBytesForCurrentThread() - before;
+            before = GC.GetAllocatedBytesForCurrentThread();
+            _ = Drain(many.Glob(pattern));
+            searches[run] = GC.GetAllocatedBytesForCurrentThread() - before;
+        }
+
+        long walked = walks.Min();
+        long searched = searches.Min();
 
         Assert.True(
             searched <= walked + 4096,
-            $"Searching 1010 names for '**/*.txt' allocated {searched} bytes, and walking the " +
-            $"same tree {walked}. The search is supposed to add nothing per name.");
+            $"Searching 1010 names for '**/*.txt' allocated at least {searched} bytes, and walking " +
+            $"the same tree at least {walked}. The search is supposed to add nothing per name. " +
+            $"Searches: {string.Join(", ", searches)}; walks: {string.Join(", ", walks)}.");
     }
 
     /// <summary>
