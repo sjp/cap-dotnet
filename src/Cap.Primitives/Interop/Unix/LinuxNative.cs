@@ -19,7 +19,8 @@ namespace Cap.Primitives.Interop.Unix;
 /// the C library exposes no wrapper for them that can be relied on — <c>openat2</c> has none
 /// at all, and glibc only gained <c>statx</c> and <c>renameat2</c> in 2.28 and
 /// <c>getdents64</c> in 2.30. Calling by number sidesteps the question of which C library,
-/// and which version of it, the process was linked against.
+/// and which version of it, the process was linked against. <c>pwrite</c> goes by number
+/// too, because musl's wrapper does not do what the kernel does on a file that appends.
 /// </para>
 /// <para>
 /// On 32-bit ARM the C library's default interfaces take a 32-bit file offset and a 32-bit
@@ -225,17 +226,24 @@ internal static unsafe partial class LinuxNative
     /// that appends, the kernel writes at the end of the file instead.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// By syscall number on every target, because the end of the file is the kernel's answer
+    /// and not every C library's: musl's <c>pwrite</c>, since 1.2.5, writes at the offset on
+    /// a descriptor that appends, or refuses where the kernel cannot be asked to.
+    /// </para>
+    /// <para>
     /// On 32-bit ARM the offset is a register pair that has to start on an even register, so
     /// the argument before it is a slot of padding.
+    /// </para>
     /// </remarks>
     internal static nint PWrite(int fd, byte* buffer, nuint count, long offset) =>
         LinuxConstants.HasNarrowCTypes
             ? ArmSyscall(
-                LinuxConstants.SYS_arm_pwrite64, fd, (nint)buffer, (nint)count, 0, Low(offset), High(offset))
-            : PWriteImport(fd, buffer, count, offset);
+                LinuxConstants.SYS_pwrite64, fd, (nint)buffer, (nint)count, 0, Low(offset), High(offset))
+            : PWriteImport(LinuxConstants.SYS_pwrite64, fd, buffer, count, offset);
 
-    [LibraryImport("libc", EntryPoint = "pwrite", SetLastError = true)]
-    private static partial nint PWriteImport(int fd, byte* buffer, nuint count, long offset);
+    [LibraryImport("libc", EntryPoint = "syscall", SetLastError = true)]
+    private static partial nint PWriteImport(nint number, int fd, byte* buffer, nuint count, long offset);
 
     /// <summary>Creates a directory relative to a directory descriptor.</summary>
     [LibraryImport("libc", EntryPoint = "mkdirat", SetLastError = true)]
@@ -362,7 +370,7 @@ internal static unsafe partial class LinuxNative
     internal static partial uint GetEffectiveUserId();
 
     /// <summary>
-    /// A syscall by number with six word-sized arguments, for the 32-bit ARM routes above.
+    /// A syscall by number with six word-sized arguments, for the 32-bit ARM routes above and below.
     /// </summary>
     /// <remarks>
     /// Every argument is a machine word so that each lands in exactly one register, which is

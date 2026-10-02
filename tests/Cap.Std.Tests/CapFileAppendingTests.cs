@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using Cap.Primitives;
 
@@ -314,13 +315,14 @@ public sealed class CapFileAppendingTests : IDisposable
 
     /// <summary>
     /// A stream taken while appending is on appends, wherever it thinks it is, except on
-    /// macOS, where it writes at its own position.
+    /// macOS and under musl, where it writes at its own position or not at all.
     /// </summary>
     /// <remarks>
-    /// Promised on Linux and Windows. A stream writes through the system's positioned write,
-    /// which macOS does not document for a file that appends; it was observed writing at the
-    /// offset it is given, as POSIX says, on APFS under macOS 27.0.1 on 2026-10-01. This
-    /// handle's own writes still go to the end there.
+    /// Promised on Windows and under glibc. A stream writes through the system's positioned
+    /// write, which macOS does not document for a file that appends; it was observed writing
+    /// at the offset it is given, as POSIX says, on APFS under macOS 27.0.1 on 2026-10-01.
+    /// musl goes the same way, or refuses, as <see cref="TryWriteThroughStream"/> describes.
+    /// This handle's own writes still go to the end on both.
     /// </remarks>
     [Theory]
     [InlineData(true)]
@@ -331,12 +333,13 @@ public sealed class CapFileAppendingTests : IDisposable
 
         using Dir root = OpenRoot();
         CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite, append: true);
+        bool written;
         using (file)
         {
             using (Stream stream = file.AsStream(leaveOpen, bufferSize: 0))
             {
                 stream.Position = 0;
-                stream.Write(Encoding.ASCII.GetBytes(" second"));
+                written = TryWriteThroughStream(stream, " second");
             }
 
             if (leaveOpen)
@@ -349,7 +352,7 @@ public sealed class CapFileAppendingTests : IDisposable
             }
         }
 
-        string streamed = OperatingSystem.IsMacOS() ? " second" : "first second";
+        string streamed = !written ? "first" : PositionedWriteIgnoresAppending ? " second" : "first second";
         string expected = leaveOpen ? streamed + " third" : streamed;
         Assert.Equal(expected, HostFile.ReadAllText(Host("log")));
     }
@@ -360,9 +363,9 @@ public sealed class CapFileAppendingTests : IDisposable
     /// </summary>
     /// <remarks>
     /// Documented as platform behaviour, since Windows keeps no such flag, and tested where
-    /// it is promised so that the documentation stays true. macOS keeps the flag but puts the
-    /// stream's positioned write at its offset, as observed in
-    /// <see cref="A_stream_taken_while_appending_appends"/>.
+    /// it is promised so that the documentation stays true. macOS and musl keep the flag but
+    /// put the stream's positioned write at its offset, or under musl may refuse it, as
+    /// observed in <see cref="A_stream_taken_while_appending_appends"/>.
     /// </remarks>
     [Fact]
     public void Turning_appending_on_reaches_a_borrowed_stream_where_the_system_keeps_the_flag()
@@ -372,15 +375,50 @@ public sealed class CapFileAppendingTests : IDisposable
         HostFile.WriteAllText(Host("log"), "first");
 
         using Dir root = OpenRoot();
+        bool written;
         using (CapFile file = root.OpenFile("log", FileMode.Open, FileAccess.ReadWrite))
         using (Stream stream = file.AsStream(bufferSize: 0))
         {
             file.IsAppending = true;
             stream.Position = 0;
-            stream.Write(Encoding.ASCII.GetBytes(" second"));
+            written = TryWriteThroughStream(stream, " second");
         }
 
-        string expected = OperatingSystem.IsMacOS() ? " second" : "first second";
+        string expected = !written ? "first" : PositionedWriteIgnoresAppending ? " second" : "first second";
         Assert.Equal(expected, HostFile.ReadAllText(Host("log")));
+    }
+
+    /// <summary>The C library is musl, as on Alpine.</summary>
+    private static bool IsMusl =>
+        RuntimeInformation.RuntimeIdentifier.Contains("-musl-", StringComparison.Ordinal);
+
+    /// <summary>
+    /// A positioned write to a file that appends lands at its offset, as POSIX says, rather
+    /// than at the end, where the Linux kernel puts it.
+    /// </summary>
+    private static bool PositionedWriteIgnoresAppending => OperatingSystem.IsMacOS() || IsMusl;
+
+    /// <summary>
+    /// Writes through a stream, and reports false where musl refused the write.
+    /// </summary>
+    /// <remarks>
+    /// musl's <c>pwrite</c>, since 1.2.5, asks the kernel not to append, so that the bytes
+    /// land at the offset as POSIX says. A kernel that cannot be asked, before Linux 6.9 or
+    /// under an emulator that does not pass the request on, leaves it nothing that writes at
+    /// the offset, and it refuses with <c>EOPNOTSUPP</c> rather than append. The 32-bit ARM
+    /// nightly leg, run under QEMU, sees the refusal.
+    /// </remarks>
+    private static bool TryWriteThroughStream(Stream stream, string text)
+    {
+        const int Eopnotsupp = 95;
+        try
+        {
+            stream.Write(Encoding.ASCII.GetBytes(text));
+            return true;
+        }
+        catch (IOException e) when (IsMusl && e.HResult == Eopnotsupp)
+        {
+            return false;
+        }
     }
 }

@@ -230,6 +230,10 @@ jobs:
   # - QEMU answers some of /proc/self itself. A file under it opened by absolute path is the
   #   emulator's version and the same file opened beneath a directory handle is the kernel's,
   #   so the one test comparing the two is excluded here.
+  # - The samples whose output samples/README.md quotes are framework-dependent and started
+  #   through a dotnet host, and the runtime-deps image has neither a host nor a shared
+  #   runtime to give them. The class that runs them is excluded here; every native leg
+  #   of ci.yml runs it.
   # - The seccomp-driven demotion tests skip themselves: a filter installed under the
   #   emulator would filter the emulator's own syscalls, not the emulated program's.
   #
@@ -288,6 +292,7 @@ jobs:
               ${{ matrix.image }} \
               "./$project" \
               -method- "Cap.Std.Tests.DirFileOpenTests.A_file_longer_than_it_reports_is_read_to_its_end" \
+              -class- "Cap.Std.Tests.SampleOutputTests" \
               && code=0 || code=$?
             echo "::endgroup::"
             # The test process is the container's first process, so nothing prints a message when

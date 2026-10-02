@@ -243,6 +243,7 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(LinuxConstants.Renameat2Number(expected), LinuxConstants.SYS_renameat2);
         Assert.Equal(LinuxConstants.Getdents64Number(expected), LinuxConstants.SYS_getdents64);
         Assert.Equal(LinuxConstants.CopyFileRangeNumber(expected), LinuxConstants.SYS_copy_file_range);
+        Assert.Equal(LinuxConstants.Pwrite64Number(expected), LinuxConstants.SYS_pwrite64);
         Assert.Equal(expected == LinuxAbi.Arm, LinuxConstants.HasNarrowCTypes);
 
         // Unlike the ones above, these are the same everywhere.
@@ -304,11 +305,11 @@ public sealed class InteropStructLayoutTests
     /// fails every call, or a different call entirely.
     /// </remarks>
     [Theory]
-    [InlineData(nameof(LinuxAbi.X64), 332, 316, 217, 326)]
-    [InlineData(nameof(LinuxAbi.Arm64), 291, 276, 61, 285)]
-    [InlineData(nameof(LinuxAbi.Arm), 397, 382, 217, 391)]
+    [InlineData(nameof(LinuxAbi.X64), 332, 316, 217, 326, 18)]
+    [InlineData(nameof(LinuxAbi.Arm64), 291, 276, 61, 285, 68)]
+    [InlineData(nameof(LinuxAbi.Arm), 397, 382, 217, 391, 181)]
     public void Linux_syscall_numbers_match_each_architecture(
-        string abiName, int statx, int renameat2, int getdents64, int copyFileRange)
+        string abiName, int statx, int renameat2, int getdents64, int copyFileRange, int pwrite64)
     {
         LinuxAbi abi = Enum.Parse<LinuxAbi>(abiName);
 
@@ -316,6 +317,7 @@ public sealed class InteropStructLayoutTests
         Assert.Equal(renameat2, LinuxConstants.Renameat2Number(abi));
         Assert.Equal(getdents64, LinuxConstants.Getdents64Number(abi));
         Assert.Equal(copyFileRange, LinuxConstants.CopyFileRangeNumber(abi));
+        Assert.Equal(pwrite64, LinuxConstants.Pwrite64Number(abi));
     }
 
     /// <summary>
@@ -325,7 +327,6 @@ public sealed class InteropStructLayoutTests
     [Fact]
     public void Linux_arm_only_syscall_numbers_match_the_arm_table()
     {
-        Assert.Equal(181, LinuxConstants.SYS_arm_pwrite64);
         Assert.Equal(352, LinuxConstants.SYS_arm_fallocate);
         Assert.Equal(267, LinuxConstants.SYS_arm_fstatfs64);
         Assert.Equal(412, LinuxConstants.SYS_arm_utimensat_time64);
@@ -399,6 +400,7 @@ public sealed class InteropStructLayoutTests
         Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Renameat2Number(LinuxAbi.Unsupported));
         Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Getdents64Number(LinuxAbi.Unsupported));
         Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.CopyFileRangeNumber(LinuxAbi.Unsupported));
+        Assert.Throws<PlatformNotSupportedException>(() => LinuxConstants.Pwrite64Number(LinuxAbi.Unsupported));
     }
 
     /// <summary>

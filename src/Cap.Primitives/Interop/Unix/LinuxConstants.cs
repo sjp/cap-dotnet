@@ -526,6 +526,24 @@ internal static class LinuxConstants
     /// </remarks>
     public static nint SYS_copy_file_range => CopyFileRangeNumber(s_abi);
 
+    /// <summary><c>pwrite64</c>: 18 on x86-64, 68 on AArch64, 181 on 32-bit ARM.</summary>
+    /// <remarks>
+    /// By number because the C library's <c>pwrite</c> is not the kernel's on a descriptor
+    /// that appends. The kernel writes at the end, which is what appending relies on; musl,
+    /// since 1.2.5, asks the kernel to write at the offset instead, and refuses the write
+    /// where it cannot ask.
+    /// </remarks>
+    public static nint SYS_pwrite64 => Pwrite64Number(s_abi);
+
+    /// <summary><see cref="SYS_pwrite64"/> in a given table.</summary>
+    internal static nint Pwrite64Number(LinuxAbi abi) => abi switch
+    {
+        LinuxAbi.X64 => 18,
+        LinuxAbi.Arm64 => 68,
+        LinuxAbi.Arm => 181,
+        _ => throw Unsupported(),
+    };
+
     /// <summary><see cref="SYS_copy_file_range"/> in a given table.</summary>
     internal static nint CopyFileRangeNumber(LinuxAbi abi) => abi switch
     {
@@ -564,13 +582,10 @@ internal static class LinuxConstants
 
     // --- 32-bit ARM only -------------------------------------------------------------------
     //
-    // The C library's plain pwrite, fallocate, fstatfs, utimensat and futimens take a 32-bit
+    // The C library's plain fallocate, fstatfs, utimensat and futimens take a 32-bit
     // offset or time there, and the names of the 64-bit versions differ between glibc and
     // musl. The kernel's own calls are the same under both, so on that target these go to it
     // by number, as openat2 and statx already do everywhere.
-
-    /// <summary><c>pwrite64</c> on 32-bit ARM. The offset is a register pair, aligned.</summary>
-    public const nint SYS_arm_pwrite64 = 181;
 
     /// <summary><c>fallocate</c> on 32-bit ARM. Both 64-bit arguments are register pairs.</summary>
     public const nint SYS_arm_fallocate = 352;

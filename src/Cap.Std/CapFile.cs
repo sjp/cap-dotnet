@@ -129,8 +129,8 @@ public sealed partial class CapFile : ICapFile
     /// <para>
     /// <strong>Streams and the raw handle.</strong> On Linux and macOS appending is a flag
     /// on the open file, shared with every stream taken from this handle, so a change here
-    /// reaches them too, although on macOS a stream writes at its own position regardless
-    /// (see <see cref="AsStream"/>). On Windows the system keeps no such flag: appending is applied to
+    /// reaches them too, although on macOS, and on Linux under musl, a stream writes at its
+    /// own position regardless (see <see cref="AsStream"/>). On Windows the system keeps no such flag: appending is applied to
     /// each write this object makes, and a stream taken while appending is on is given a
     /// handle that can only append, which stays that way whatever is set here afterwards. A
     /// stream taken while it is off does not start appending when it is turned on. The
@@ -771,12 +771,15 @@ public sealed partial class CapFile : ICapFile
     /// <para>
     /// <strong>Appending.</strong> A stream writes at its own position, through the system's
     /// positioned write, so while <see cref="IsAppending"/> is on it appends wherever the
-    /// system puts such a write on a file that appends. Linux puts it at the end. On Windows
+    /// system puts such a write on a file that appends. Linux under glibc puts it at the end.
+    /// Under musl, since 1.2.5, it goes to the stream's position where the kernel allows that
+    /// (Linux 6.9 and later), and is otherwise refused with an <see cref="IOException"/>, so a
+    /// stream there does not append either. On Windows
     /// the stream is given a copy of the handle that can only append, which the system also
     /// puts at the end; handing over ownership gives it such a copy too and closes this
     /// handle, since this one can also write at an offset. macOS puts it at the stream's
-    /// position, as POSIX says, so a stream there does not append and a caller who needs
-    /// every write at the end writes through this handle. See <see cref="IsAppending"/> for how a later change reaches a stream on
+    /// position, as POSIX says, so a stream there does not append. A caller who needs every
+    /// write at the end, on every platform, writes through this handle. See <see cref="IsAppending"/> for how a later change reaches a stream on
     /// each platform.
     /// </para>
     /// <para>
@@ -884,7 +887,8 @@ public sealed partial class CapFile : ICapFile
     /// <para>
     /// A write made through it directly follows the system's rules, not
     /// <see cref="IsAppending"/>. On Linux and macOS appending is a flag the system applies to
-    /// the handle, so the two agree, except that macOS puts a positioned write at its offset.
+    /// the handle, so the two agree, except that macOS, and musl where the kernel allows it,
+    /// put a positioned write at its offset.
     /// On Windows the handle writes at whatever offset it is
     /// given, because appending there is applied by this object to its own writes.
     /// </para>
