@@ -24,15 +24,17 @@
     A project that sets CapXunitAot is built against xunit's ahead-of-time packages, which
     discover tests through a source generator instead of reflection, so the same test sources
     can be published with NativeAOT and trimming. The few places a test source has to differ
-    between the two builds test for CAP_XUNIT_AOT, which such a project defines. The coverage
-    collector instruments IL at run time and has nothing to instrument in a native binary, so
-    it is left out.
+    between the two builds test for CAP_XUNIT_AOT, which such a project defines. Such a project
+    does not run on Microsoft.Testing.Platform, so its extensions are left out: the coverage
+    collector, which instruments IL at run time and has nothing to instrument in a native
+    binary, and the TRX reporter.
   -->
   <ItemGroup>
     <PackageReference Include="xunit.v3" Condition="'$(CapXunitAot)' != 'true'" />
     <PackageReference Include="xunit.v3.aot.mtp-off" Condition="'$(CapXunitAot)' == 'true'" />
-    <!-- Self-registers into the MTP host; it must stay a normal compile-time reference. -->
+    <!-- Both self-register into the MTP host; they must stay normal compile-time references. -->
     <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Condition="'$(CapXunitAot)' != 'true'" />
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Condition="'$(CapXunitAot)' != 'true'" />
   </ItemGroup>
 
   <ItemGroup>

@@ -206,6 +206,12 @@ process outranks the permission system. On Unix that means not running as root. 
 an administrator token is fine, and in fact necessary to create the symlinks the suite
 attacks; what must not be enabled is a backup, restore or take-ownership privilege.
 
+Options after `--` go to Microsoft.Testing.Platform. One it does not know, misspelled or from
+an extension that is not referenced, makes every assembly report *Zero tests ran* with exit
+code 5 and no other message. `--coverage` and `--report-trx` are wired up. See
+[Running the suite](docs/testing.md#running-the-suite) for those options and the environment
+variables that select the other CI legs.
+
 ```bash
 dotnet run -c Release --project bench/Cap.Benchmarks -- --filter '*'
 ```

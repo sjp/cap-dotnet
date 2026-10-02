@@ -348,6 +348,45 @@ such as `Cap.Fs.Ext.Tests`, roots are opened from every class at once and the ru
 trivially. Two replacements that overlap anyway are refused when the first one is undone
 out of order, rather than leaving a stale host installed.
 
+## Running the suite
+
+This section is for contributors to the library itself, not for testing code that uses it.
+
+```bash
+dotnet build CapDotnet.slnx -c Release
+dotnet test  CapDotnet.slnx -c Release --no-build
+dotnet test  tests/Cap.Time.Tests/Cap.Time.Tests.csproj -c Release --no-build -- --filter-class '*ClockTests*'
+```
+
+The test assemblies run on Microsoft.Testing.Platform, and everything after `--` goes to it.
+Every assembly accepts these options:
+
+| Option | Effect |
+|---|---|
+| `--filter-class '<pattern>'`, `--filter-method '<pattern>'` | Run only matching tests. |
+| `--coverage --coverage-output-format cobertura` | Collect coverage, as continuous integration does. |
+| `--report-trx` | Write one TRX file per assembly under `TestResults/`. |
+
+An option the platform does not know makes every assembly report *Zero tests ran* with exit
+code 5. That covers a misspelling and an option from an extension that is not referenced, and
+`dotnet test` does not say which option was refused. To see the reason, run one assembly
+directly, `tests/<Project>/bin/Release/net10.0/<Project> <options>`, which prints
+`error: unknown option`. `Cap.Escape.Aot.Tests` is built on xunit's ahead-of-time runner
+instead of the platform, so it takes neither `--coverage` nor `--report-trx`. Run its published
+executable with xunit's own options, such as `-xml results.xml`.
+
+These environment variables select the other legs continuous integration runs. Each is read
+once, before the first test, and applies to the whole run.
+
+| Variable | Values | Effect |
+|---|---|---|
+| `CAPDOTNET_TEST_BACKEND` | `in-memory-walk`, `in-memory-confined` | Put an in-memory filesystem in place of the host for every test, resolved by the portable walk or by the simulated confined open. Tests about the host itself stand aside. |
+| `CAPDOTNET_DISABLE_OPENAT2` | `1` | Linux: make the library take the portable walk instead of `openat2`. This is the library's own switch (see [backends.md](backends.md)). |
+| `CAPDOTNET_TEST_DENY_OPENAT2` | `EPERM`, `ENOSYS` | Linux: install a seccomp filter that refuses `openat2` with that error, so the library's probe has to find out for itself that the syscall is unavailable. |
+
+The variables that tell a run which host features it was set up with are described under
+[Host features the suite expects](#host-features-the-suite-expects).
+
 ## Coverage of this library
 
 This section is for contributors to the library itself, not for testing code that uses it.
