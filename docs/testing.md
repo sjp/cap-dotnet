@@ -63,7 +63,9 @@ one name beneath this directory" into a system call. That is the difference from
 Here code under test that climbs out of its directory, or follows a link that leaves it, is
 refused with the same `SandboxEscapeException`, for the same reason, as it would be on disk.
 
-The filesystem models files, directories and symbolic links; hard links and link counts; a
+The filesystem models files, directories and symbolic links; FIFOs, sockets and device nodes
+under Unix rules, and junctions and other reparse points under Windows rules, as far as code
+that skips or refuses them needs; hard links and link counts; a
 stable `CapFileId` for each object; access, write, change and creation times; Unix mode bits or
 Windows attributes; renames with and without replacing the destination; the refusal to remove
 a directory that is not empty; and files that stay readable through an open handle after their
@@ -113,7 +115,10 @@ directory that holds it.
 ### Building and inspecting a tree
 
 `AddFile`, `AddDirectory`, `AddSymbolicLink` and `AddHardLink` build the tree before the test
-runs. `SetTimes`, `SetUnixMode` and `SetAttributes` adjust it. `WriteAllBytes` and
+runs. `SetTimes`, `SetUnixMode` and `SetAttributes` adjust it.
+`AddSpecialFile`, `AddJunction`, `AddReparsePoint` and `SetDirectoryHidesEntryKinds` plant the
+kinds of entry that code walking, copying or deleting a tree has to skip or refuse, and are
+described below. `WriteAllBytes` and
 `WriteAllText` create a file or rewrite one in place, so its other names and any handle open on
 it see the new contents. `RemoveFile` and `RemoveDirectory(path, recursive)` take names away,
 for a second arrange step in the middle of a test. `Exists`, `ReadAllBytes`, `ReadAllText`,
@@ -157,6 +162,15 @@ either path syntax. Missing directories are created on the way. A symbolic link 
 not followed. `.` and `..` are refused. Each name is still checked against the filesystem's
 path rules, so a tree cannot hold a name its own handles would refuse. `AddSymbolicLink` does
 accept a rooted target, so that a test can plant the link an attacker would.
+
+The other kinds of entry are planted like this:
+
+| Member | Rules | What it plants |
+|---|---|---|
+| `AddSpecialFile(path, type)` | Unix | A FIFO, socket, character device or block device, as `type` says. A directory read and `GetMetadata` report it as that kind. It is described, renamed, removed and given a second name as itself, and nothing can be looked up through it. A FIFO opens for reading and reads as empty, as one with nobody writing does. Opening it to write is refused with `CapErrorKind.NotSupported`, as Linux refuses it with nobody reading. A socket is refused the same way whichever way it is opened. A device is refused too, where Linux would open it, because no driver is behind it. |
+| `AddJunction(path, target)` | Windows | A junction storing `target`, which must be rooted. As on Windows, it is a link made as a link to a directory: reported as `CapFileType.Symlink`, removed and replaced as a link, and refused as an escape when followed beneath a handle, even when it points back inside. |
+| `AddReparsePoint(path, tag, isDirectory)` | Windows | A reparse point carrying a tag that is not a link's. A tag that stands for another object, such as a container link or a DFS link, is reported as `CapFileType.ReparsePoint` and refused as an escape by every open and every lookup through it. A tag that only names the filter serving the object, such as a compressed file or a cloud placeholder, leaves an empty file or directory that behaves as one. |
+| `SetDirectoryHidesEntryKinds(path, hides)` | Either | Makes reads of the directory leave out what each entry is, as some filesystems do, for every entry it holds, later ones included. The library then looks each name up as it lists it, so kinds are still reported. The exception is an entry removed between the read and the lookup, which comes back as `CapFileType.Unknown`, the case a walker on such a filesystem must handle. |
 
 `OpenRoot()` opens the top of the tree. `OpenRoot("tenants/a")` opens a directory inside it,
 and the handle reaches nothing above that directory. Any number of roots may be open at once.

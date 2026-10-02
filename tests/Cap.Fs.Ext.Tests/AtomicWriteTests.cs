@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Cap.Std;
 using Cap.Tests;
@@ -459,7 +458,6 @@ public sealed class AtomicWriteTests : IDisposable
 
     /// <summary>On Windows, the same for a junction.</summary>
     [Fact]
-    [NotInMemory("A junction is a Windows reparse point that only the host's filesystem holds.")]
     public void On_windows_a_junction_at_the_name_is_replaced()
     {
         if (!OperatingSystem.IsWindows())
@@ -467,7 +465,7 @@ public sealed class AtomicWriteTests : IDisposable
             Assert.Skip("Junctions exist only on Windows.");
         }
 
-        AssertADirectoryLinkIsReplaced(link => CreateJunction(link, Path.Combine(_tree.HostPath, "elsewhere")));
+        AssertADirectoryLinkIsReplaced(link => HostDirectory.CreateJunction(link, Path.Combine(_tree.HostPath, "elsewhere")));
     }
 
     private void AssertADirectoryLinkIsReplaced(Action<string> makeLink)
@@ -777,32 +775,6 @@ public sealed class AtomicWriteTests : IDisposable
 
         directory.WriteAllTextAtomic(path, contents);
         return Task.CompletedTask;
-    }
-
-    /// <summary>How long one of the system's own tools is given before it is killed.</summary>
-    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(30);
-
-    /// <summary>Creates a junction, which unlike a symbolic link needs no privilege.</summary>
-    /// <remarks>
-    /// Through the shell because the framework has no API for one. The paths are quoted rather
-    /// than passed as separate arguments: the shell re-parses its own command line, and a
-    /// temporary directory can contain a space.
-    /// </remarks>
-    private static void CreateJunction(string link, string target)
-    {
-        using Process? process = Process.Start(new ProcessStartInfo("cmd.exe")
-        {
-            Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        });
-
-        Assert.NotNull(process);
-
-        (string output, string errors) = ChildProcessWait.Finish(process, "mklink", ToolTimeout);
-
-        Assert.True(HostDirectory.Exists(link), $"Could not create a junction at '{link}': {errors}{output}");
     }
 
     /// <summary>Everything currently in the scratch tree, by name.</summary>

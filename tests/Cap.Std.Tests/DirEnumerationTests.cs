@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using Cap.Primitives;
 
 namespace Cap.Std.Tests;
@@ -28,7 +27,7 @@ namespace Cap.Std.Tests;
 /// </para>
 /// </remarks>
 [Collection(DirTestGroup.Name)]
-public sealed partial class DirEnumerationTests : IDisposable
+public sealed class DirEnumerationTests : IDisposable
 {
     private readonly ScratchTree _tree = new();
 
@@ -202,7 +201,6 @@ public sealed partial class DirEnumerationTests : IDisposable
     /// ordinary file would block a thread for ever the first time it opened one.
     /// </remarks>
     [Fact]
-    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void A_pipe_is_reported_as_a_pipe()
     {
         if (OperatingSystem.IsWindows())
@@ -210,10 +208,7 @@ public sealed partial class DirEnumerationTests : IDisposable
             Assert.Skip("A named pipe is not an entry of a directory on this platform.");
         }
 
-        if (MakeFifo(Host("pipe"), 0b110_100_100) != 0)
-        {
-            Assert.Skip($"A named pipe could not be created here: {Marshal.GetLastPInvokeError()}.");
-        }
+        HostFile.CreateFifo(Host("pipe"));
 
         using Dir root = OpenRoot();
 
@@ -671,10 +666,6 @@ public sealed partial class DirEnumerationTests : IDisposable
             Assert.Skip(thrown.Message);
         }
     }
-
-    [System.Runtime.InteropServices.LibraryImport("libc", EntryPoint = "mkfifo", SetLastError = true)]
-    private static partial int MakeFifo(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path, uint mode);
 
     /// <summary>
     /// An entry opens with a creating mode, which does what the same mode does to the name

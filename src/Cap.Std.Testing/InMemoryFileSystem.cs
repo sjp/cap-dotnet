@@ -1,6 +1,7 @@
 using System.Text;
 using Cap.Primitives;
 using Cap.Primitives.Interop;
+using Cap.Primitives.Interop.Windows;
 using Microsoft.Win32.SafeHandles;
 
 namespace Cap.Std.Testing;
@@ -61,6 +62,13 @@ namespace Cap.Std.Testing;
 /// filesystem mounted with <c>noatime</c>, so a read cannot make an assertion about times
 /// depend on whether it happened. The time comes from
 /// <see cref="InMemoryFileSystemOptions.TimeProvider"/>.
+/// </para>
+/// <para>
+/// <strong>Other kinds.</strong> <see cref="AddSpecialFile"/> plants a FIFO, a socket or a
+/// device node under Unix rules, and <see cref="AddJunction"/> and
+/// <see cref="AddReparsePoint"/> plant a junction or another reparse point under Windows
+/// rules, for code that has to skip or refuse them. <see cref="SetDirectoryHidesEntryKinds"/>
+/// makes a directory read report every entry's kind as unknown, as some filesystems do.
 /// </para>
 /// <para>
 /// <strong>Faults.</strong> <see cref="SetUnreadable"/>, <see cref="SetUndeletable"/>,
@@ -449,6 +457,184 @@ public sealed class InMemoryFileSystem
             Attach(parent, name, existing);
             existing.LinkCount++;
             existing.ChangeTime = Now();
+        }
+    }
+
+    /// <summary>
+    /// Creates a Windows junction storing <paramref name="target"/>, and any missing
+    /// directories above it.
+    /// </summary>
+    /// <param name="path">Where, as a build path; see the remarks on this type.</param>
+    /// <param name="target">
+    /// The target, which must be rooted, since a junction always stores a path from a volume's
+    /// root. It is stored as given, and the drive or volume it names is not checked.
+    /// </param>
+    /// <remarks>
+    /// A junction is a filesystem link, as the Windows backend reads one: it is reported as a
+    /// <see cref="CapFileType.Symlink"/> made as a link to a directory, and removed and
+    /// replaced as a link is. Its target is rooted, so following it beneath a handle is refused
+    /// as an escape, even when it points back inside, as on Windows.
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is not a usable build path, or <paramref name="target"/> is
+    /// empty, holds a NUL, or is not rooted.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">This filesystem follows Unix rules, which have no junctions.</exception>
+    /// <exception cref="IOException">The name is taken, or something other than a directory is above it.</exception>
+    public void AddJunction(string path, string target)
+    {
+        if (!WindowsRules)
+        {
+            throw new InvalidOperationException("This filesystem follows Unix rules, which have no junctions.");
+        }
+
+        ArgumentException.ThrowIfNullOrEmpty(target);
+        if (target.Contains('\0') || !CapPath.IsRooted(target, CapPathSyntax.Windows))
+        {
+            throw new ArgumentException("A junction's target must be a rooted path without a NUL.", nameof(target));
+        }
+
+        lock (Gate)
+        {
+            (MemoryNode parent, string name) = PlaceNew(path);
+            Attach(parent, name, NewJunction(target));
+        }
+    }
+
+    /// <summary>
+    /// Creates a Windows reparse point carrying <paramref name="tag"/> that is not a
+    /// filesystem link, and any missing directories above it.
+    /// </summary>
+    /// <param name="path">Where, as a build path; see the remarks on this type.</param>
+    /// <param name="tag">The reparse tag, as Windows defines it.</param>
+    /// <param name="isDirectory">
+    /// Whether the object is a directory, when the tag does not stand for another object.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Modelled as the Windows backend reads a tag. A tag that stands for another object — one
+    /// that sets the name-surrogate bit, such as a container link, or a distributed file system
+    /// link — is reported as a <see cref="CapFileType.ReparsePoint"/>, and every open, every
+    /// lookup through it and every attempt to follow it is refused. It is never read as a path.
+    /// It can still be described, renamed and removed.
+    /// </para>
+    /// <para>
+    /// A tag that only names the filter serving the object — a compressed file, a cloud
+    /// placeholder, an application execution alias — leaves it the empty file or directory
+    /// <paramref name="isDirectory"/> says it is, which opens, lists and reads as one.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="path"/> is not a usable build path, or <paramref name="tag"/> is the tag
+    /// of a symbolic link or a junction, which <see cref="AddSymbolicLink"/> and
+    /// <see cref="AddJunction"/> create.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">This filesystem follows Unix rules, which have no reparse points.</exception>
+    /// <exception cref="IOException">The name is taken, or something other than a directory is above it.</exception>
+    public void AddReparsePoint(string path, uint tag, bool isDirectory = false)
+    {
+        if (!WindowsRules)
+        {
+            throw new InvalidOperationException("This filesystem follows Unix rules, which have no reparse points.");
+        }
+
+        if (ReparseTags.IsFilesystemLink(tag))
+        {
+            throw new ArgumentException(
+                "The tag is a symbolic link's or a junction's; AddSymbolicLink and AddJunction create those.", nameof(tag));
+        }
+
+        lock (Gate)
+        {
+            (MemoryNode parent, string name) = PlaceNew(path);
+            MemoryNode node = NewNode(
+                ReparseTags.Redirects(tag) ? CapNodeType.UnknownReparsePoint
+                : isDirectory ? CapNodeType.Directory
+                : CapNodeType.File);
+            node.ReparseTag = tag;
+            node.WindowsAttributes = (isDirectory ? FileAttributes.Directory : FileAttributes.Archive) | FileAttributes.ReparsePoint;
+            Attach(parent, name, node);
+        }
+    }
+
+    /// <summary>
+    /// Creates a named pipe, a socket or a device node, and any missing directories above it.
+    /// </summary>
+    /// <param name="path">Where, as a build path; see the remarks on this type.</param>
+    /// <param name="type">
+    /// What it is: <see cref="CapFileType.Fifo"/>, <see cref="CapFileType.Socket"/>,
+    /// <see cref="CapFileType.CharDevice"/> or <see cref="CapFileType.BlockDevice"/>.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// Reported as <paramref name="type"/> by a directory read and by a description, and
+    /// described, timed, renamed, removed and given a second name as itself. Nothing can be
+    /// looked up through it.
+    /// </para>
+    /// <para>
+    /// Opened as Linux answers an open that cannot wait, which is how the library issues every
+    /// open. A FIFO opens for reading and reads as empty, as one with nobody writing does, and
+    /// opening it to write is refused, since nothing here ever reads it. A socket is refused
+    /// whichever way it is opened. Both refusals are reported as
+    /// <see cref="CapErrorKind.NotSupported"/>. A device is refused the same way, where Linux
+    /// would open it, because there is no driver behind it to read or write.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable build path.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="type"/> is not one of the four kinds listed.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// This filesystem follows Windows rules, under which none of these is an entry of a directory.
+    /// </exception>
+    /// <exception cref="IOException">The name is taken, or something other than a directory is above it.</exception>
+    public void AddSpecialFile(string path, CapFileType type)
+    {
+        if (type is not (CapFileType.Fifo or CapFileType.Socket or CapFileType.CharDevice or CapFileType.BlockDevice))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(type), type, "Only a FIFO, a socket, a character device or a block device can be created this way.");
+        }
+
+        if (WindowsRules)
+        {
+            throw new InvalidOperationException(
+                "This filesystem follows Windows rules, under which pipes, sockets and devices are not entries of a directory.");
+        }
+
+        lock (Gate)
+        {
+            (MemoryNode parent, string name) = PlaceNew(path);
+            Attach(parent, name, NewSpecial(type));
+        }
+    }
+
+    /// <summary>
+    /// Makes reads of the directory at <paramref name="path"/> decline, or stop declining, to
+    /// say what each entry is.
+    /// </summary>
+    /// <param name="path">The directory, as a build path. An empty path or <c>/</c> is the top of the tree.</param>
+    /// <param name="hides">True to decline, false to report kinds again.</param>
+    /// <remarks>
+    /// Several real filesystems answer a directory read this way, for every entry they hold.
+    /// The library then looks each name up as it lists it, as it does on such a filesystem, so
+    /// an enumeration still reports what each entry is, except one removed between the read
+    /// and the lookup, which is reported as <see cref="CapFileType.Unknown"/>. That is the
+    /// case a walker or a copier has to cope with there, and this is how a test produces it.
+    /// It applies to every entry of the directory, those added afterwards included, and not to
+    /// the directories beneath it.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is not a usable build path.</exception>
+    /// <exception cref="IOException">Nothing is at <paramref name="path"/>, or it is not a directory.</exception>
+    public void SetDirectoryHidesEntryKinds(string path, bool hides = true)
+    {
+        lock (Gate)
+        {
+            MemoryNode directory = Find(path);
+            if (directory.Type != CapNodeType.Directory)
+            {
+                throw new IOException($"'{path}' is not a directory.");
+            }
+
+            directory.HidesEntryKinds = hides;
         }
     }
 
@@ -972,6 +1158,25 @@ public sealed class InMemoryFileSystem
             };
         }
 
+        return node;
+    }
+
+    /// <summary>Makes a junction storing <paramref name="target"/>, which the caller has checked.</summary>
+    internal MemoryNode NewJunction(string target)
+    {
+        MemoryNode junction = NewNode(CapNodeType.SymbolicLink);
+        junction.LinkTarget = target;
+        junction.LinkIsDirectory = true;
+        junction.ReparseTag = ReparseTags.MountPoint;
+        junction.WindowsAttributes = FileAttributes.Directory | FileAttributes.ReparsePoint;
+        return junction;
+    }
+
+    /// <summary>Makes a FIFO, a socket or a device node, as <paramref name="type"/> says.</summary>
+    internal MemoryNode NewSpecial(CapFileType type)
+    {
+        MemoryNode node = NewNode(CapNodeType.Other);
+        node.EntryType = type;
         return node;
     }
 

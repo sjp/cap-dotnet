@@ -500,7 +500,7 @@ public sealed class CapFileTests : IDisposable
     /// seeking, which describe neither what the caller asked for nor what to do instead.
     /// </remarks>
     [Fact]
-    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
+    [NotInMemory("Moves data through a named pipe, which a FIFO held in memory never carries.")]
     public async Task A_pipe_is_refused_positional_access_and_carried_by_a_stream()
     {
         SkipWithoutPipes();
@@ -540,7 +540,6 @@ public sealed class CapFileTests : IDisposable
     /// refusal would send a caller looking for a directory that is there.
     /// </remarks>
     [Fact]
-    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void A_pipe_nobody_is_reading_is_refused_for_writing_rather_than_reported_missing()
     {
         SkipWithoutPipes();

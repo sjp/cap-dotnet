@@ -94,7 +94,7 @@ internal sealed class Arena : IDisposable
                     break;
 
                 case SetupKind.Junction:
-                    HostFilesystem.CreateJunction(full, Expand(step.Target!));
+                    HostDirectory.CreateJunction(full, Expand(step.Target!));
                     break;
 
                 case SetupKind.Fifo:
@@ -291,14 +291,14 @@ internal static class HostFeatures
             features |= HostFeature.PosixNames;
         }
 
-        // Junctions and the process filesystem belong to the host, and a filesystem held in
-        // memory in its place has neither.
-        if (OperatingSystem.IsWindows() && !HostTree.InMemory &&
-            Attempt(() => HostFilesystem.CreateJunction(Path.Join(root, "junction"), root)))
+        if (OperatingSystem.IsWindows() &&
+            Attempt(() => HostDirectory.CreateJunction(Path.Join(root, "junction"), root)))
         {
             features |= HostFeature.Junctions;
         }
 
+        // The process filesystem belongs to the host, and a filesystem held in memory in its
+        // place has none.
         if (OperatingSystem.IsLinux() && !HostTree.InMemory && Directory.Exists("/proc/self/fd"))
         {
             features |= HostFeature.ProcessFilesystem;

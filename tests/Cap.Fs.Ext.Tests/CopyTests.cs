@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Cap.Primitives;
 using Cap.Primitives.Interop.Unix;
 using Cap.Std;
@@ -137,7 +136,6 @@ public sealed class CopyTests : IDisposable
     /// no explanation. Refused by default, left out on request, and never turned into a file.
     /// </remarks>
     [Fact]
-    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void A_named_pipe_stops_the_copy_and_can_be_skipped()
     {
         if (OperatingSystem.IsWindows())
@@ -148,7 +146,7 @@ public sealed class CopyTests : IDisposable
 
         Make("source", "kept.txt");
         HostDirectory.CreateDirectory(Path.Combine(_tree.HostPath, "destination"));
-        MakeFifo(Path.Combine(_tree.HostPath, "source", "pipe"));
+        HostFile.CreateFifo(Path.Combine(_tree.HostPath, "source", "pipe"));
 
         Assert.Throws<CapIOException>(() => Copy());
 
@@ -1165,36 +1163,8 @@ public sealed class CopyTests : IDisposable
         return (long)described.Blocks * 512;
     }
 
-    /// <summary>Creates a named pipe, which the framework has no call for.</summary>
-    private static void MakeFifo(string path) => Run("mkfifo", path);
-
     /// <summary>Creates a second name for an existing file.</summary>
     private static void MakeHardLink(string existing, string added) => HostFile.CreateHardLink(existing, added);
-
-    /// <summary>Runs one of the system's own tools, and insists that it worked.</summary>
-    private static void Run(string program, params string[] arguments)
-    {
-        ProcessStartInfo start = new()
-        {
-            FileName = program,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-        foreach (string argument in arguments)
-        {
-            start.ArgumentList.Add(argument);
-        }
-
-        using Process process = Process.Start(start) ??
-            throw new InvalidOperationException($"'{program}' did not start.");
-
-        (_, string errors) = ChildProcessWait.Finish(process, $"'{program}'", TimeSpan.FromSeconds(30));
-        if (process.ExitCode != 0)
-        {
-            throw new InvalidOperationException($"'{program}' failed with {process.ExitCode}: {errors}");
-        }
-    }
 
     /// <summary>
     /// Progress that is handed each report at once, on the copying thread, rather than posted

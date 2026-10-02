@@ -121,6 +121,17 @@ internal sealed class MemoryNode
     public bool HidesKindFromDirectoryRead { get; set; }
 
     /// <summary>
+    /// True when a read of this directory declines to say what any of its entries is, those
+    /// added later included.
+    /// </summary>
+    /// <remarks>
+    /// The filesystem-wide form of <see cref="HidesKindFromDirectoryRead"/>: a filesystem that
+    /// does not record kinds in its directories does not record them for any entry, whenever
+    /// it was made.
+    /// </remarks>
+    public bool HidesEntryKinds { get; set; }
+
+    /// <summary>
     /// What a caller reading the directory is told this is, overriding what
     /// <see cref="Type"/> implies.
     /// </summary>

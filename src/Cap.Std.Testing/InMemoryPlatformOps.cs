@@ -1570,6 +1570,8 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                 return Fail<SafeFileHandle>(CapErrorCategory.Reparse);
             case CapNodeType.SymbolicLink:
                 return Fail<SafeFileHandle>(CapErrorCategory.SymbolicLink);
+            case CapNodeType.Other:
+                return OpenSpecial(node, in request);
         }
 
         // As Linux checks: the filesystem refuses a write before the object's permissions do.
@@ -1611,6 +1613,35 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
         }
 
         return CapResult<SafeFileHandle>.Ok(IssueFile(node, request.Access, request.Share));
+    }
+
+    /// <summary>Opens a FIFO, a socket or a device, as far as one held in memory can be opened.</summary>
+    /// <remarks>
+    /// <para>
+    /// As Linux answers an open issued so that it cannot wait, which is how the library issues
+    /// every open. A FIFO opens for reading and reads as empty, as one with nobody writing does,
+    /// and is not emptied by the open, since there is nothing in it to discard. Opened to write,
+    /// with nobody reading, it is refused, as Linux refuses it with <c>ENXIO</c>; nothing here
+    /// ever reads one. A socket is refused whichever way it is opened, as Linux refuses it.
+    /// </para>
+    /// <para>
+    /// A device is refused too, where Linux would open it: a filesystem held in memory has no
+    /// driver behind the node to read from or write to. Permissions are checked first, as the
+    /// kernel checks them before it looks at what the node is, and a read-only filesystem does
+    /// not refuse the open, as Linux does not for any of these.
+    /// </para>
+    /// </remarks>
+    private CapResult<SafeFileHandle> OpenSpecial(MemoryNode node, in FileOpenRequest request)
+    {
+        if (node.Unreadable)
+        {
+            return Fail<SafeFileHandle>(CapErrorCategory.PermissionDenied);
+        }
+
+        bool writes = (request.Access & FileAccess.Write) != 0;
+        return node.FileType == CapFileType.Fifo && !writes
+            ? CapResult<SafeFileHandle>.Ok(IssueFile(node, request.Access, request.Share))
+            : Fail<SafeFileHandle>(CapErrorCategory.NotSupported);
     }
 
     /// <summary>Opens a file anew and issues the first handle on it.</summary>

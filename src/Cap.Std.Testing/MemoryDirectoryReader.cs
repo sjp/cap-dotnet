@@ -68,7 +68,8 @@ internal sealed class MemoryDirectoryReader : DirectoryReader
         (string name, MemoryNode node) = _entries[_index++];
         _name = name;
 
-        SetCurrent(name, node.HidesKindFromDirectoryRead ? CapFileType.Unknown : node.FileType, node.NodeId);
+        bool hidden = node.HidesKindFromDirectoryRead || _directory.HidesEntryKinds;
+        SetCurrent(name, hidden ? CapFileType.Unknown : node.FileType, node.NodeId);
         advanced = true;
         return CapError.Success;
     }

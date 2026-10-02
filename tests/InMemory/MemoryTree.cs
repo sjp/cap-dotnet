@@ -48,7 +48,9 @@ internal sealed class MemoryTree(InMemoryFileSystem fs) : IHostTree
         {
             try
             {
-                return Kind(Resolve(path, followLast: true).Node);
+                // As File.Exists, which says a FIFO or a socket is a file.
+                HostEntryKind kind = Kind(Resolve(path, followLast: true).Node);
+                return kind == HostEntryKind.Special ? HostEntryKind.File : kind;
             }
             catch (IOException)
             {
@@ -292,11 +294,41 @@ internal sealed class MemoryTree(InMemoryFileSystem fs) : IHostTree
     }
 
     /// <remarks>
-    /// The filesystem held in memory models files, directories and links, and nothing that
-    /// waits for another party, so a case needing one stands aside here.
+    /// Opens to read as one with nobody writing does, and refuses to open to write, as one
+    /// with nobody reading does. Nothing in the filesystem held in memory ever moves data
+    /// through it.
     /// </remarks>
-    public void CreateFifo(string path) =>
-        throw new PlatformNotSupportedException("The filesystem held in memory has no FIFOs.");
+    public void CreateFifo(string path) => CreateSpecial(path, CapFileType.Fifo);
+
+    public void CreateSocket(string path) => CreateSpecial(path, CapFileType.Socket);
+
+    public void CreateJunction(string link, string target)
+    {
+        if (fs.PathSyntax != CapPathSyntax.Windows)
+        {
+            throw new PlatformNotSupportedException("Junctions exist only under Windows rules.");
+        }
+
+        lock (fs.Gate)
+        {
+            Found found = RequireAbsent(link);
+            fs.Attach(found.Parent!, found.Name, fs.NewJunction(target));
+        }
+    }
+
+    private void CreateSpecial(string path, CapFileType type)
+    {
+        if (fs.PathSyntax == CapPathSyntax.Windows)
+        {
+            throw new PlatformNotSupportedException("Pipes and sockets are not entries of a directory under Windows rules.");
+        }
+
+        lock (fs.Gate)
+        {
+            Found found = RequireAbsent(path);
+            fs.Attach(found.Parent!, found.Name, fs.NewSpecial(type));
+        }
+    }
 
     /// <remarks>
     /// Held as the library holds such a name, each byte that is not text escaped to a lone
@@ -328,6 +360,7 @@ internal sealed class MemoryTree(InMemoryFileSystem fs) : IHostTree
         CapNodeType.File => HostEntryKind.File,
         CapNodeType.Directory => HostEntryKind.Directory,
         CapNodeType.SymbolicLink => HostEntryKind.SymbolicLink,
+        CapNodeType.Other => HostEntryKind.Special,
         _ => HostEntryKind.File,
     };
 

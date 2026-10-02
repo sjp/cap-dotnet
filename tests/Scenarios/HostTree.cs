@@ -1,5 +1,9 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
+using Cap.Tests;
 
 namespace Cap.Testing;
 
@@ -57,6 +61,12 @@ internal interface IHostTree
 
     /// <summary>Creates a FIFO. Unix only.</summary>
     void CreateFifo(string path);
+
+    /// <summary>Creates a name for a Unix-domain socket, with nothing listening on it. Unix only.</summary>
+    void CreateSocket(string path);
+
+    /// <summary>Creates a junction storing an absolute target. Windows only.</summary>
+    void CreateJunction(string link, string target);
 
     /// <summary>The names in a directory, in no particular order.</summary>
     IReadOnlyList<string> Names(string path);
@@ -148,6 +158,12 @@ internal static class HostFile
     /// <summary>Creates a FIFO, as <c>mkfifo</c> does. The framework has no API for one.</summary>
     public static void CreateFifo(string path) => Tree.CreateFifo(path);
 
+    /// <summary>
+    /// Creates the name a Unix-domain socket is reached by, as binding one does, and leaves
+    /// nothing listening on it.
+    /// </summary>
+    public static void CreateSocket(string path) => Tree.CreateSocket(path);
+
     public static void Delete(string path) => Tree.DeleteFile(path);
 
     public static void Move(string source, string destination) => Tree.Move(source, destination);
@@ -184,6 +200,9 @@ internal static class HostDirectory
 
     public static void CreateSymbolicLink(string path, string target) =>
         Tree.CreateSymbolicLink(path, target, directory: true);
+
+    /// <summary>Creates a junction, as <c>mklink /J</c> does. The framework has no API for one.</summary>
+    public static void CreateJunction(string link, string target) => Tree.CreateJunction(link, target);
 
     public static void Delete(string path, bool recursive = false) => Tree.DeleteDirectory(path, recursive);
 
@@ -226,6 +245,12 @@ internal static class HostEntry
 /// <summary>The disk, through the framework's path-based API.</summary>
 internal sealed partial class DiskTree : IHostTree
 {
+    /// <summary>How long one of the system's own tools is given before it is killed.</summary>
+    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>The sockets <see cref="CreateSocket"/> bound, held so that their names stay.</summary>
+    private static readonly ConcurrentBag<Socket> BoundSockets = [];
+
     public bool InMemory => false;
 
     public string TemporaryLocation => Path.GetTempPath();
@@ -290,6 +315,61 @@ internal sealed partial class DiskTree : IHostTree
         if (MakeFifo(path, 0b110_000_000) != 0)
         {
             throw new IOException($"Could not create a FIFO at '{path}': errno {Marshal.GetLastPInvokeError()}.");
+        }
+    }
+
+    /// <remarks>
+    /// The socket is kept open for the rest of the run, because the framework removes the name
+    /// when the socket that bound it is disposed. Nothing accepts on it, and an open of the
+    /// name never connects to it, so it changes nothing a test can see.
+    /// </remarks>
+    public void CreateSocket(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("A Unix-domain socket is a reparse point on Windows, not a kind of its own.");
+        }
+
+        Socket socket = new(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            socket.Bind(new UnixDomainSocketEndPoint(path));
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+
+        BoundSockets.Add(socket);
+    }
+
+    /// <summary>Creates a junction, which unlike a symbolic link needs no privilege.</summary>
+    /// <remarks>
+    /// Through the shell because the framework has no API for one. The paths are quoted rather
+    /// than passed as separate arguments: the shell re-parses its own command line, and a
+    /// temporary directory can contain a space.
+    /// </remarks>
+    public void CreateJunction(string link, string target)
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException("Junctions exist only on Windows.");
+        }
+
+        using Process process = Process.Start(new ProcessStartInfo("cmd.exe")
+        {
+            Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        }) ?? throw new IOException("Could not start the shell to create a junction.");
+
+        (string output, string errors) = ChildProcessWait.Finish(process, "mklink", ToolTimeout);
+
+        if (!Directory.Exists(link))
+        {
+            throw new IOException($"Could not create a junction at '{link}': {errors}{output}");
         }
     }
 

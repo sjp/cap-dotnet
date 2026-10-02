@@ -113,8 +113,9 @@ jobs:
           foreach ($leg in '${{ join(matrix.in_memory, ' ') }}' -split ' ') {
             # Read by tests/InMemory before the first test.
             $env:CAPDOTNET_TEST_BACKEND = $leg
-            # The in-memory filesystem has links and hard links, and nothing the host alone has.
-            $env:CAPDOTNET_EXPECT_HOST_FEATURES = 'Symlinks,HardLinks'
+            # The in-memory filesystem has links and hard links, FIFOs under Unix rules and
+            # junctions under Windows rules, and nothing the host alone has.
+            $env:CAPDOTNET_EXPECT_HOST_FEATURES = if ($IsWindows) { 'Symlinks,HardLinks,Junctions' } else { 'Symlinks,HardLinks,SpecialFiles' }
             foreach ($project in 'Cap.Std.Tests', 'Cap.Fs.Ext.Tests', 'Cap.Escape.Tests') {
               "::group::$project ($leg)"
               dotnet test "tests/$project/$project.csproj" --configuration Release --no-build

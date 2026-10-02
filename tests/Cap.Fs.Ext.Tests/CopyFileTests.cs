@@ -44,7 +44,6 @@ public sealed class CopyFileTests : IDisposable
     /// a file.
     /// </remarks>
     [Fact]
-    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void A_named_pipe_is_refused_as_a_source()
     {
         if (OperatingSystem.IsWindows())
@@ -373,7 +372,6 @@ public sealed class CopyFileTests : IDisposable
 
     /// <summary>With options, a named pipe is dealt with as <see cref="CopyOptions.OtherKinds"/> says.</summary>
     [Fact]
-    [NotInMemory("Needs a named pipe, which only the host's filesystem can hold.")]
     public void With_options_a_named_pipe_is_refused_or_skipped()
     {
         if (OperatingSystem.IsWindows())

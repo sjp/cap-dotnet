@@ -1,3 +1,4 @@
+using Cap.Fs.Ext;
 using Cap.Primitives;
 using Microsoft.Extensions.Time.Testing;
 
@@ -346,4 +347,262 @@ public sealed class BuildingTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new InMemoryFileSystem(new InMemoryFileSystemOptions { PathSyntax = (CapPathSyntax)42 }));
     }
+
+    // --- kinds other than files, directories and links -------------------------------------------
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_special_file_is_reported_as_its_kind_and_described_as_itself(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddSpecialFile("dev/pipe", CapFileType.Fifo);
+        fs.AddSpecialFile("dev/sock", CapFileType.Socket);
+        fs.AddSpecialFile("dev/tty", CapFileType.CharDevice);
+        fs.AddSpecialFile("dev/disk", CapFileType.BlockDevice);
+
+        using Dir root = fs.OpenRoot();
+        using Dir dev = root.OpenDir("dev");
+
+        Dictionary<string, CapFileType> listed = dev.EnumerateEntries().ToDictionary(entry => entry.Name, entry => entry.Type);
+        Assert.Equal(CapFileType.Fifo, listed["pipe"]);
+        Assert.Equal(CapFileType.Socket, listed["sock"]);
+        Assert.Equal(CapFileType.CharDevice, listed["tty"]);
+        Assert.Equal(CapFileType.BlockDevice, listed["disk"]);
+        Assert.Equal(CapFileType.Fifo, dev.GetMetadata("pipe").Type);
+        Assert.Equal(CapFileType.Socket, fs.GetMetadata("dev/sock").Type);
+        Assert.Equal(CapFileType.Fifo, fs.Snapshot()["dev/pipe"].Type);
+
+        // A name like any other: renamed and removed as itself, and nothing beneath it.
+        root.Rename("dev/pipe", root, "dev/renamed");
+        Assert.Equal(CapFileType.Fifo, dev.GetMetadata("renamed").Type);
+        Assert.Throws<CapIOException>(() => root.OpenFile("dev/renamed/x"));
+        root.DeleteFile("dev/renamed");
+        Assert.False(fs.Exists("dev/renamed"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_fifo_reads_as_empty_and_refuses_a_writer_and_the_rest_refuse_every_open(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddSpecialFile("pipe", CapFileType.Fifo);
+        fs.AddSpecialFile("sock", CapFileType.Socket);
+        fs.AddSpecialFile("tty", CapFileType.CharDevice);
+        fs.ReadOnly = true;
+
+        using Dir root = fs.OpenRoot();
+
+        Assert.Equal(string.Empty, root.ReadAllText("pipe"));
+        Assert.Equal(
+            CapErrorKind.NotSupported,
+            Assert.Throws<CapIOException>(() => root.OpenFile("pipe", FileMode.Open, FileAccess.Write)).Kind);
+        foreach (string name in new[] { "sock", "tty" })
+        {
+            Assert.Equal(CapErrorKind.NotSupported, Assert.Throws<CapIOException>(() => root.OpenFile(name)).Kind);
+            Assert.Equal(CapErrorKind.NotSupported, Assert.Throws<CapIOException>(() => root.OpenAny(name)).Kind);
+        }
+
+        fs.ReadOnly = false;
+        fs.SetUnreadable("pipe");
+        Assert.Throws<UnauthorizedAccessException>(() => root.ReadAllText("pipe"));
+    }
+
+    [Fact]
+    public void A_walk_lists_a_pipe_and_a_copy_refuses_or_skips_it()
+    {
+        InMemoryFileSystem fs = Resolutions.Create(ResolutionBackend.PortableWalk);
+        fs.AddFile("source/kept.txt", "kept");
+        fs.AddSpecialFile("source/pipe", CapFileType.Fifo);
+        fs.AddDirectory("destination");
+
+        using Dir source = fs.OpenRoot("source");
+        using Dir destination = fs.OpenRoot("destination");
+
+        Assert.Equal(
+            [("kept.txt", CapFileType.File), ("pipe", CapFileType.Fifo)],
+            source.Walk().Select(entry => (entry.Name, entry.Type)).Order());
+        Assert.Throws<CapIOException>(
+            () => source.CopyTo(destination, cancellationToken: TestContext.Current.CancellationToken));
+
+        CopyReport report = source.CopyTo(
+            destination,
+            new CopyOptions { OtherKinds = CopyAction.Skip, Overwrite = true },
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, report.Skipped);
+        Assert.Equal(["kept.txt"], fs.GetEntries("destination"));
+    }
+
+    [Fact]
+    public void Only_the_four_special_kinds_can_be_planted_and_only_under_unix_rules()
+    {
+        InMemoryFileSystem unix = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Unix });
+        foreach (CapFileType type in new[] { CapFileType.Unknown, CapFileType.File, CapFileType.Directory, CapFileType.Symlink, CapFileType.ReparsePoint, (CapFileType)99 })
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => unix.AddSpecialFile("x", type));
+        }
+
+        unix.AddSpecialFile("x", CapFileType.Fifo);
+        Assert.Throws<IOException>(() => unix.AddSpecialFile("x", CapFileType.Socket));
+
+        InMemoryFileSystem windows = new(new InMemoryFileSystemOptions { PathSyntax = CapPathSyntax.Windows });
+        Assert.Throws<InvalidOperationException>(() => windows.AddSpecialFile("x", CapFileType.Fifo));
+        Assert.Throws<InvalidOperationException>(() => unix.AddJunction("j", @"C:\elsewhere"));
+        Assert.Throws<InvalidOperationException>(() => unix.AddReparsePoint("r", WciLinkTag));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_junction_is_a_directory_link_that_is_never_followed_beneath_a_handle(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddFile("inside/file.txt", "x");
+        fs.AddJunction("jn", @"C:\inside");
+
+        using Dir root = fs.OpenRoot();
+
+        CapMetadata metadata = root.GetMetadata("jn");
+        Assert.Equal(CapFileType.Symlink, metadata.Type);
+        Assert.Equal(FileAttributes.Directory | FileAttributes.ReparsePoint, AttributesOf(metadata) & (FileAttributes.Directory | FileAttributes.ReparsePoint));
+        Assert.Equal(@"C:\inside", fs.GetSymbolicLinkTarget("jn"));
+        Assert.Equal(@"C:\inside", root.ReadLink("jn"));
+
+        // Rooted, so refused as an escape even though it names a directory inside.
+        Assert.Throws<SandboxEscapeException>(() => root.ReadAllText(@"jn\file.txt"));
+        Assert.Throws<SandboxEscapeException>(() => root.OpenDir("jn"));
+
+        // Removed and replaced as the link it is, leaving what it named alone.
+        root.WriteAllTextAtomic("jn", "published");
+        Assert.Equal("published", fs.ReadAllText("jn"));
+        Assert.Equal("x", fs.ReadAllText("inside/file.txt"));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("relative")]
+    [InlineData("a\0b")]
+    public void A_junction_target_that_is_not_rooted_is_refused(string target)
+    {
+        InMemoryFileSystem fs = Windows(ResolutionBackend.PortableWalk);
+        Assert.Throws<ArgumentException>(() => fs.AddJunction("jn", target.Replace("\\0", "\0", StringComparison.Ordinal)));
+        Assert.False(fs.Exists("jn"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_redirecting_reparse_point_is_refused_as_an_escape_and_named_as_itself(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddReparsePoint("container", WciLinkTag);
+        fs.AddReparsePoint("share", DfsTag, isDirectory: true);
+
+        using Dir root = fs.OpenRoot();
+
+        Assert.Equal(CapFileType.ReparsePoint, root.GetMetadata("container").Type);
+        Assert.Equal(CapFileType.ReparsePoint, root.EnumerateEntries().Single(entry => entry.Name == "share").Type);
+        Assert.Throws<SandboxEscapeException>(() => root.ReadAllText("container"));
+        Assert.Throws<SandboxEscapeException>(() => root.OpenAny("container"));
+        Assert.Throws<SandboxEscapeException>(() => root.OpenDir("share"));
+        Assert.Throws<SandboxEscapeException>(() => root.ReadAllText(@"share\x"));
+
+        root.Rename("container", root, "moved");
+        root.DeleteFile("moved");
+        Assert.Equal(["share"], fs.GetEntries());
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_reparse_point_that_only_names_its_filter_is_the_file_or_directory_it_is(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Windows(resolution);
+        fs.AddReparsePoint("compressed.exe", WofTag);
+        fs.AddReparsePoint("placeholder", CloudTag, isDirectory: true);
+        fs.AddFile("placeholder/inner.txt", "inner");
+
+        using Dir root = fs.OpenRoot();
+
+        Assert.Equal(CapFileType.File, root.GetMetadata("compressed.exe").Type);
+        Assert.Equal(string.Empty, root.ReadAllText("compressed.exe"));
+        Assert.Equal(CapFileType.Directory, root.GetMetadata("placeholder").Type);
+        Assert.Equal("inner", root.ReadAllText(@"placeholder\inner.txt"));
+        Assert.True((AttributesOf(root.GetMetadata("placeholder")) & FileAttributes.ReparsePoint) != 0);
+    }
+
+    [Fact]
+    public void A_link_tag_is_refused_as_a_reparse_point()
+    {
+        InMemoryFileSystem fs = Windows(ResolutionBackend.PortableWalk);
+        Assert.Throws<ArgumentException>(() => fs.AddReparsePoint("j", 0xA0000003));
+        Assert.Throws<ArgumentException>(() => fs.AddReparsePoint("l", 0xA000000C));
+        Assert.Empty(fs.GetEntries());
+    }
+
+    [Theory]
+    [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
+    public void A_directory_that_hides_kinds_is_listed_by_looking_each_name_up(ResolutionBackend resolution)
+    {
+        InMemoryFileSystem fs = Resolutions.Create(resolution);
+        fs.AddFile("data/a.txt", "a");
+        fs.AddDirectory("data/b");
+        fs.SetDirectoryHidesEntryKinds("data");
+        fs.AddSymbolicLink("data/c", "a.txt");
+
+        using Dir data = fs.OpenRoot("data");
+
+        // Each name is looked up as it is listed, an entry added after the setting included.
+        Assert.Equal(
+            [("a.txt", CapFileType.File), ("b", CapFileType.Directory), ("c", CapFileType.Symlink)],
+            data.EnumerateEntries().Select(entry => (entry.Name, entry.Type)).Order());
+
+        // One removed between the read and the lookup is reported as of no known kind.
+        List<(string, CapFileType)> seen = [];
+        foreach (DirEntry entry in data.EnumerateEntries())
+        {
+            seen.Add((entry.Name, entry.Type));
+            foreach (string name in new[] { "a.txt", "b", "c" }.Where(name => name != entry.Name && fs.Exists("data/" + name)))
+            {
+                if (seen.Count == 1)
+                {
+                    if (name == "b")
+                    {
+                        fs.RemoveDirectory("data/b");
+                    }
+                    else
+                    {
+                        fs.RemoveFile("data/" + name);
+                    }
+                }
+            }
+        }
+
+        Assert.Equal(3, seen.Count);
+        Assert.Equal(2, seen.Count(pair => pair.Item2 == CapFileType.Unknown));
+
+        fs.SetDirectoryHidesEntryKinds("data", hides: false);
+        Assert.Throws<IOException>(() => fs.SetDirectoryHidesEntryKinds("missing"));
+        fs.AddFile("data/file", "x");
+        Assert.Throws<IOException>(() => fs.SetDirectoryHidesEntryKinds("data/file"));
+        fs.SetDirectoryHidesEntryKinds("/");
+    }
+
+    /// <summary>A Windows Container Isolation link, which stands for another object.</summary>
+    private const uint WciLinkTag = 0xA0000027;
+
+    /// <summary>A distributed file system link, which redirects without the name-surrogate bit.</summary>
+    private const uint DfsTag = 0x8000000A;
+
+    /// <summary>A file compressed with <c>compact /exe</c>, served by its filter.</summary>
+    private const uint WofTag = 0x80000017;
+
+    /// <summary>A cloud files placeholder, served by its filter.</summary>
+    private const uint CloudTag = 0x9000001A;
+
+    private static FileAttributes AttributesOf(CapMetadata metadata)
+    {
+        Assert.True(metadata.Permissions.TryGetWindowsAttributes(out FileAttributes attributes));
+        return attributes;
+    }
+
+    private static InMemoryFileSystem Windows(ResolutionBackend resolution) =>
+        new(new InMemoryFileSystemOptions { Resolution = resolution, PathSyntax = CapPathSyntax.Windows });
 }
