@@ -16,12 +16,15 @@
 # were taken but not which.
 #
 # The figures are printed, and also appended to $GITHUB_STEP_SUMMARY when it is set.
+#
+# Needs python3 (standard library only) on the PATH.
 set -euo pipefail
 
 if [[ $# -lt 5 ]]; then
   echo "usage: $0 <report-dir> <package> <min-line-rate> <min-branch-rate> <leg>..." >&2
   exit 2
 fi
+command -v python3 >/dev/null || { echo "check-coverage.sh: needs python3 on the PATH" >&2; exit 2; }
 
 python3 - "$@" <<'PY'
 import glob, os, re, sys
