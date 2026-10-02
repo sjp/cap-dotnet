@@ -427,12 +427,16 @@ public sealed class DirFileSystem : IFileSystem
             {
                 // A stream over a file the system completes work on only borrows the file,
                 // which costs nothing, so the file stays here to be stored through: the stream
-                // beneath cannot be asked to. Any other stream takes the handle, and on the
-                // host is a FileStream, which can.
+                // beneath cannot be asked to. A stream that appends borrows it too, since on
+                // Windows it is given a handle that can only append, which may not change the
+                // length, so its length is changed through the file. Any other stream takes
+                // the handle, and on the host is a FileStream, which can be stored through.
                 bool isAsync = (options & FileOptions.Asynchronous) != 0;
-                Stream stream = file.AsStream(leaveOpen: isAsync, bufferSize: bufferSize);
+                bool appends = mode == FileMode.Append;
+                bool borrows = isAsync || appends;
+                Stream stream = file.AsStream(leaveOpen: borrows, bufferSize: bufferSize);
                 long appendStart = -1;
-                if (mode == FileMode.Append && stream.CanSeek)
+                if (appends && stream.CanSeek)
                 {
                     appendStart = stream.Seek(0, SeekOrigin.End);
                 }
@@ -446,7 +450,7 @@ public sealed class DirFileSystem : IFileSystem
                     request.Virtual,
                     isAsync,
                     sync,
-                    isAsync ? file : null,
+                    borrows ? file : null,
                     appendStart);
             }
             catch

@@ -219,8 +219,8 @@ public sealed class FaultTests
         InMemoryFileSystem fs = new() { Capacity = 8 };
         fs.AddFile("doomed.bin", new byte[6]);
         using Dir root = fs.OpenRoot();
-        CapFile first = root.OpenFile("doomed.bin", FileMode.Open, FileAccess.ReadWrite);
-        CapFile second = root.OpenFile("doomed.bin", FileMode.Open, FileAccess.Read);
+        CapFile first = root.OpenFile("doomed.bin", FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete);
+        CapFile second = root.OpenFile("doomed.bin", FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         root.DeleteFile("doomed.bin");
 
         Assert.Equal(6, fs.UsedBytes);
