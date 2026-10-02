@@ -187,6 +187,38 @@ public sealed class ThroughDirTests
         Assert.Equal(CapErrorKind.InvalidArgument, beneathItself.Kind);
     }
 
+    /// <summary>
+    /// Linux refuses a rename that may not replace onto a name that is there, even when it names
+    /// the object being moved; Windows treats the move as done. Allowed to replace, both do nothing.
+    /// </summary>
+    [Theory]
+    [InlineData(CapPathSyntax.Unix, "plain")]
+    [InlineData(CapPathSyntax.Unix, "twin")]
+    [InlineData(CapPathSyntax.Windows, "plain")]
+    public void A_rename_onto_the_same_object_is_refused_only_under_Unix_rules_and_only_without_replacing(
+        CapPathSyntax syntax, string to)
+    {
+        InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { PathSyntax = syntax });
+        fs.AddFile("plain", "p");
+        fs.AddHardLink("twin", "plain");
+
+        using Dir root = fs.OpenRoot();
+        if (syntax == CapPathSyntax.Unix)
+        {
+            CapIOException taken = Assert.ThrowsAny<CapIOException>(() => root.Rename("plain", root, to));
+            Assert.Equal(CapErrorKind.AlreadyExists, taken.Kind);
+        }
+        else
+        {
+            root.Rename("plain", root, to);
+        }
+
+        root.Rename("plain", root, to, replaceExisting: true);
+
+        Assert.Equal(["plain", "twin"], fs.GetEntries().Order(StringComparer.Ordinal));
+        Assert.Equal("p", fs.ReadAllText(to));
+    }
+
     [Theory]
     [MemberData(nameof(Resolutions.Both), MemberType = typeof(Resolutions))]
     public void A_directory_that_is_not_empty_is_not_removed(ResolutionBackend resolution)

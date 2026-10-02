@@ -1128,7 +1128,9 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// <inheritdoc/>
     /// <remarks>
     /// Follows <c>rename(2)</c>: replacing a name that refers to the same object does nothing,
-    /// a directory replaces only an empty directory, a file replaces only a non-directory, and a
+    /// and under Unix rules a rename that may not replace is refused there as Linux refuses it,
+    /// unless it changes only the spelling of a name on a filesystem that ignores case; a
+    /// directory replaces only an empty directory, a file replaces only a non-directory, and a
     /// directory cannot be moved beneath itself. Windows answers the same way to the replacing
     /// rename the host backend asks for. Under Windows rules a name the read-only attribute
     /// protects is not replaced, and neither what is moved nor what it replaces may be held
@@ -1204,9 +1206,16 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
                         _fs.Attach(destination, to, node);
                         node.ChangeTime = _fs.Now();
                         _fs.Mutated();
+                        return CapError.Success;
                     }
 
-                    return CapError.Success;
+                    // Linux's renameat2 with RENAME_NOREPLACE refuses a name that is there before
+                    // it asks whether it is the object being moved, whether that is the same entry
+                    // or another hard link to it. Windows, and macOS's renamex_np with RENAME_EXCL,
+                    // treat a move onto the same name as done.
+                    return !replaceExisting && !_fs.WindowsRules
+                        ? CapError.FromCategory(CapErrorCategory.AlreadyExists)
+                        : CapError.Success;
                 }
 
                 if (!replaceExisting)

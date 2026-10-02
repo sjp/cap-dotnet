@@ -61,6 +61,9 @@ public sealed class DiskParityTests : IDisposable
     private static readonly Operation[] TwoPathOperations =
         [Operation.Rename, Operation.RenameReplacing, Operation.CreateHardLink, Operation.CreateHardLinkFollowingLink];
 
+    /// <summary>A second name for <c>plain</c>, given only in the cases that name it.</summary>
+    private const string Twin = "twin";
+
     /// <summary>A name longer than the 255 bytes Linux stores, though not in characters.</summary>
     private static readonly string OverlongName = new('é', 200);
 
@@ -129,6 +132,7 @@ public sealed class DiskParityTests : IDisposable
         ("missing", "fresh"),
         ("out/secret.txt", "stolen"),
         ("plain", OverlongName),
+        ("plain", Twin),
     ];
 
     /// <summary>Pairs that give a directory a second name where a name is already taken.</summary>
@@ -148,19 +152,14 @@ public sealed class DiskParityTests : IDisposable
         {
             foreach (SymlinkPolicy policy in (SymlinkPolicy[])[SymlinkPolicy.FollowWithinSandbox, SymlinkPolicy.Deny])
             {
-                if (OperatingSystem.IsLinux())
-                {
-                    // macOS's renamex_np with RENAME_EXCL treats a move onto the same name as done,
-                    // as memory does.
-                    differences.Add(
-                        CaseName(resolution, policy, Operation.Rename, "plain", "plain"),
-                        "issue 242: renameat2 with RENAME_NOREPLACE refuses a name that exists before " +
-                        "noticing it is the name being moved; the in-memory rename treats a move onto the " +
-                        "same object as done whether or not replacing was allowed");
-                }
-
                 if (OperatingSystem.IsMacOS())
                 {
+                    differences.Add(
+                        CaseName(resolution, policy, Operation.Rename, "plain", "plain"),
+                        "macOS's renamex_np with RENAME_EXCL treats a move onto the same name as done, as " +
+                        "Windows does, where Linux, which the in-memory Unix rules follow, refuses the name " +
+                        "as taken before it notices it is the one being moved");
+
                     foreach ((string from, string to) in DirectoryOntoTakenName)
                     {
                         foreach (Operation operation in (Operation[])[Operation.CreateHardLink, Operation.CreateHardLinkFollowingLink])
@@ -259,6 +258,14 @@ public sealed class DiskParityTests : IDisposable
             Assert.Skip("Only Linux, which the in-memory Unix rules follow, counts a name in UTF-8 bytes.");
         }
 
+        bool twinned = path == Twin || second == Twin;
+        if (twinned && !OperatingSystem.IsLinux())
+        {
+            // Not yet run on these hosts, so what they answer for a second hard link to the
+            // object being moved or linked is not known.
+            Assert.Skip("A move or link onto another hard link to the same file has been compared only on Linux.");
+        }
+
         InMemoryFileSystem fs = new(new InMemoryFileSystemOptions { Resolution = resolution });
         fs.AddFile("sandbox/plain", "p");
         fs.AddFile("sandbox/inner/marker", "m");
@@ -271,6 +278,13 @@ public sealed class DiskParityTests : IDisposable
         fs.AddSymbolicLink("sandbox/loop", "loop");
         fs.AddSymbolicLink("sandbox/out", Spell(fs, "../outside"), targetIsDirectory: true);
         fs.AddSymbolicLink("sandbox/inner/up", Spell(fs, "../../outside/secret.txt"));
+
+        if (twinned)
+        {
+            fs.AddHardLink("sandbox/" + Twin, "sandbox/plain");
+            using Dir sandbox = Dir.Open(Path.Combine(_disk.FullName, "sandbox"), AmbientAuthority.Acquire());
+            sandbox.CreateHardLink("plain", sandbox, Twin);
+        }
 
         (string? onDiskAnswer, Exception? onDisk) = Run(
             () => Dir.Open(Path.Combine(_disk.FullName, "sandbox"), AmbientAuthority.Acquire(), policy), operation, path, second);
