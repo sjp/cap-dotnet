@@ -47,7 +47,11 @@ This runs on every platform, because it depends on bytes alone.
 **The walk** (`resolution`). The component-at-a-time resolver runs over a simulated tree the
 input builds: directories, files, symbolic links whose targets the input writes, mount points,
 and reparse points that redirect without being links. The sandbox sits beside a directory that stands for
-everything outside it. Whatever the tree and whatever the path, the walk must:
+everything outside it. The input also chooses the syntax, POSIX or Windows, that the path is
+parsed by and the link targets are read by. Under Windows syntax, it chooses whether words are
+joined with `\` or `/`. Windows falls back to this walk, so it is fuzzed under Windows rules as
+well. A name the input spells out can be as long as the parser's 255-character limit, in any
+characters. Whatever the tree and whatever the path, the walk must:
 
 - never look up a name in a directory outside the sandbox;
 - hand back only an object that is inside the sandbox;
@@ -68,7 +72,9 @@ resolver, `MemoryPathWalk`, which resolves a whole path in one call as `openat2`
 refusals of links and mount crossings. The `in-memory-confined` CI legs use it in place of the
 kernel, and it ships to consumers in the `Cap.Std.Testing` package. If it were more permissive
 than the kernel, those legs would pass while hiding an escape. This target builds the same
-trees as `resolution`, copied into an `InMemoryFileSystem` that resolves by the confined open.
+trees as `resolution`, under the same syntax, copied into an `InMemoryFileSystem` that resolves
+by the confined open. Its names are case-sensitive under both syntaxes, because the simulation
+the walk runs over is.
 It runs each operation through the library's own choice of resolver, which is the path those
 legs take, and holds the result to every check listed for the walk. That path gives no way to
 watch each lookup, so the target also runs `MemoryPathWalk` directly with a lookup that
@@ -88,7 +94,8 @@ The fuzzer starts from the escape corpus. `tests/Cap.Fuzz.Tests/EscapeCorpusSeed
 each case into inputs for the four targets:
 
 - its path goes to the parser, under both syntaxes;
-- its tree goes to the walk and to the confined open in memory, through each operation;
+- its tree goes to the walk and to the confined open in memory, through each operation and
+  under both syntaxes;
 - its link targets go to the reparse reader, written out as the structure that would store
   them.
 

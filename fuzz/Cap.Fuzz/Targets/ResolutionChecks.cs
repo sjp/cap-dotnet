@@ -83,7 +83,7 @@ internal static class ResolutionChecks
                     // be exactly one name: anything that could be read as a step elsewhere would
                     // move the operation out of the directory that was checked.
                     Require(
-                        parent.Name.Length > 0 && parent.Name is not "." and not ".." && !parent.Name.Contains('/', StringComparison.Ordinal),
+                        ResolutionScenario.IsEntryName(parent.Name, scenario.Syntax),
                         $"{shown} handed back {Show(parent.Name)} as the name to act on.");
                     ResolutionOutcome outcome = Reached(sandbox, info.VolumeId, info.NodeId, shown);
                     return outcome with { Reached = $"{outcome.Reached} + {parent.Name}" };

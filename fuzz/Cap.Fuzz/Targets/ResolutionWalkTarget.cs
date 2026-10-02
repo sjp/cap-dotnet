@@ -52,13 +52,13 @@ internal static class ResolutionWalkTarget
     /// </returns>
     public static ResolutionOutcome? Check(ResolutionScenario scenario)
     {
-        if (!CapPath.TryParse(scenario.Path, CapPathSyntax.Unix, ParentLinkPolicy.Preserve, out CapPath path, out _))
+        if (!CapPath.TryParse(scenario.Path, scenario.Syntax, ParentLinkPolicy.Preserve, out CapPath path, out _))
         {
             return null;
         }
 
-        (FakeFileSystem fs, MemoryNode sandbox, MemoryNode outside) = Build(scenario.Entries);
-        string shown = $"{Show(scenario.Path)} ({scenario.Operation}, {scenario.Options})";
+        (FakeFileSystem fs, MemoryNode sandbox, MemoryNode outside) = Build(scenario.Entries, scenario.Syntax);
+        string shown = $"{Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}, {scenario.Syntax})";
 
         FakePlatformOps ops = new(fs);
         Require(!ops.Capabilities.SupportsConfinedOpen, "The simulation offers a confined open, so the walk would not run.");
@@ -93,11 +93,14 @@ internal static class ResolutionWalkTarget
 
     /// <summary>
     /// Builds the simulated filesystem: a root holding the sandbox and the directory beside
-    /// it, each with a little in it, and then the entries.
+    /// it, each with a little in it, and then the entries. Link targets are read by
+    /// <paramref name="syntax"/>'s rules.
     /// </summary>
-    internal static (FakeFileSystem Fs, MemoryNode Sandbox, MemoryNode Outside) Build(IReadOnlyList<TopologyEntry> entries)
+    internal static (FakeFileSystem Fs, MemoryNode Sandbox, MemoryNode Outside) Build(
+        IReadOnlyList<TopologyEntry> entries,
+        CapPathSyntax syntax)
     {
-        FakeFileSystem fs = new() { PathSyntax = CapPathSyntax.Unix };
+        FakeFileSystem fs = new() { PathSyntax = syntax };
         MemoryNode sandbox = fs.AddDirectory(ResolutionScenario.SandboxName);
         MemoryNode outside = fs.AddDirectory(ResolutionScenario.OutsideName);
         _ = fs.AddFile($"{ResolutionScenario.OutsideName}/{ResolutionScenario.OutsideFileName}");
@@ -110,7 +113,7 @@ internal static class ResolutionWalkTarget
 
         foreach (TopologyEntry entry in entries)
         {
-            if (!ResolutionScenario.IsEntryName(entry.Name))
+            if (!ResolutionScenario.IsEntryName(entry.Name, syntax))
             {
                 continue;
             }

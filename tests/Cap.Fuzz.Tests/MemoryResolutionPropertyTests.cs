@@ -33,6 +33,8 @@ public sealed class MemoryResolutionPropertyTests
         (4, RelativeText),
         (1, RelativeText.Select(text => "/" + text)));
 
+    private static readonly Gen<CapPathSyntax> Syntax = Gen.Enum<CapPathSyntax>();
+
     /// <summary>
     /// Any path the parser accepts, over any tree of directories, files, links, mount points
     /// and reparse points, resolves inside the sandbox or fails, touches nothing outside, and
@@ -49,8 +51,11 @@ public sealed class MemoryResolutionPropertyTests
             entry.List[0, 12],
             RelativeText,
             Gen.Enum<ResolutionOperation>(),
-            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options))
-            .Select((entries, path, operation, options) => new ResolutionScenario(entries, path, operation, options))
+            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options),
+            Syntax,
+            Gen.Bool)
+            .Select((entries, path, operation, options, syntax, backslash) =>
+                ResolutionPropertyTests.WithSeparator(new ResolutionScenario(entries, path, operation, options, syntax), backslash))
             .Sample(
                 scenario => { _ = MemoryResolutionTarget.Check(scenario); },
                 iter: PropertySettings.Iterations,
@@ -78,8 +83,11 @@ public sealed class MemoryResolutionPropertyTests
             entry.List[0, 12],
             RelativeText,
             Gen.Enum<ResolutionOperation>(),
-            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options))
-            .Select((entries, path, operation, options) => new ResolutionScenario(entries, path, operation, options))
+            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options),
+            Syntax,
+            Gen.Bool)
+            .Select((entries, path, operation, options, syntax, backslash) =>
+                ResolutionPropertyTests.WithSeparator(new ResolutionScenario(entries, path, operation, options, syntax), backslash))
             .Sample(
                 scenario => { _ = MemoryResolutionTarget.Check(scenario); },
                 iter: PropertySettings.Iterations,
@@ -107,15 +115,16 @@ public sealed class MemoryResolutionPropertyTests
                 Word)
             .Select((kind, parent, name) => new TopologyEntry(kind, parent, name));
 
-        Gen.Select(entry.List[0, 12], RelativeText).Sample(
-            (entries, text) =>
+        Gen.Select(entry.List[0, 12], RelativeText, Syntax, Gen.Bool).Sample(
+            (entries, text, syntax, backslash) =>
             {
-                if (!CapPath.TryParse(text, CapPathSyntax.Unix, ParentLinkPolicy.Preserve, out CapPath path, out _))
+                text = syntax == CapPathSyntax.Windows && backslash ? text.Replace('/', '\\') : text;
+                if (!CapPath.TryParse(text, syntax, ParentLinkPolicy.Preserve, out CapPath path, out _))
                 {
                     return;
                 }
 
-                (InMemoryFileSystem fs, MemoryNode sandbox, _) = MemoryResolutionTarget.Build(entries);
+                (InMemoryFileSystem fs, MemoryNode sandbox, _) = MemoryResolutionTarget.Build(entries, syntax);
                 MemoryNode? expected = ResolutionPropertyTests.ReadAsText(sandbox, path);
 
                 InMemoryPlatformOps ops = fs.Backend;
@@ -134,7 +143,7 @@ public sealed class MemoryResolutionPropertyTests
             },
             iter: PropertySettings.Iterations,
             threads: 1,
-            print: input => $"{input.Item2} in a tree of [{string.Join(", ", input.Item1)}]");
+            print: input => $"{input.Item2} ({input.Item3}, backslash {input.Item4}) in a tree of [{string.Join(", ", input.Item1)}]");
     }
 
     /// <summary>
@@ -197,5 +206,5 @@ public sealed class MemoryResolutionPropertyTests
     }
 
     private static string Show(ResolutionScenario scenario) =>
-        $"{InvariantViolation.Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}) in a tree of [{string.Join(", ", scenario.Entries)}]";
+        $"{InvariantViolation.Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}, {scenario.Syntax}) in a tree of [{string.Join(", ", scenario.Entries)}]";
 }

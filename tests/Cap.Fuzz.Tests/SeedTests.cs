@@ -1,5 +1,7 @@
 using Cap.Escape.Tests;
 using Cap.Fuzz.Targets;
+using Cap.Primitives;
+using Cap.Primitives.Interop;
 
 namespace Cap.Fuzz.Tests;
 
@@ -49,6 +51,33 @@ public sealed class SeedTests
         Assert.Equal(EscapeCorpus.OutsideSubdirectory, ResolutionScenario.OutsideSubdirectoryName);
         Assert.Equal(EscapeCorpus.PlainDirectory, ResolutionScenario.PlainDirectoryName);
         Assert.Equal(EscapeCorpus.PlainFile, ResolutionScenario.PlainFileName);
+    }
+
+    /// <summary>
+    /// A Windows-syntax scenario spelled with <c>\</c>, holding a name of the parser's longest
+    /// component in characters that take three UTF-8 bytes each, reads back as itself.
+    /// </summary>
+    [Fact]
+    public void A_windows_scenario_with_a_longest_multibyte_name_round_trips()
+    {
+        string longest = new('語', CapPath.MaxComponentLength);
+        ResolutionScenario scenario = new(
+            [
+                new TopologyEntry(EntryKind.Directory, 0, longest),
+                new TopologyEntry(EntryKind.SymbolicLink, 4, "a", $@"..\{longest}\b"),
+            ],
+            $@"{longest}\a\..\{ResolutionScenario.PlainDirectoryName}",
+            ResolutionOperation.ResolveParent,
+            ConfinedResolveOptions.None,
+            CapPathSyntax.Windows);
+
+        byte[]? data = scenario.Encode();
+        Assert.NotNull(data);
+        ResolutionScenario decoded = ResolutionScenario.Decode(data);
+
+        Assert.Equal(scenario.Entries, decoded.Entries);
+        Assert.Equal(scenario with { Entries = decoded.Entries }, decoded);
+        Assert.NotNull(ResolutionWalkTarget.Check(decoded));
     }
 
     /// <summary>

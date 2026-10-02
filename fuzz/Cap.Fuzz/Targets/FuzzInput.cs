@@ -40,6 +40,9 @@ internal ref struct FuzzInput
         return value;
     }
 
+    /// <summary>The next two bytes in little-endian order, with zero for any past the end.</summary>
+    public ushort NextUInt16() => (ushort)(NextByte() | (NextByte() << 8));
+
     /// <summary>A choice among <paramref name="count"/> alternatives.</summary>
     public int NextChoice(int count) => NextByte() % count;
 

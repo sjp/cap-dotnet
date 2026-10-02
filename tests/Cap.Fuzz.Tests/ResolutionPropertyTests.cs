@@ -33,6 +33,8 @@ public sealed class ResolutionPropertyTests
         (4, RelativeText),
         (1, RelativeText.Select(text => "/" + text)));
 
+    private static readonly Gen<CapPathSyntax> Syntax = Gen.Enum<CapPathSyntax>();
+
     /// <summary>
     /// Any path the parser accepts, over any tree of directories, files, links, mount points
     /// and reparse points, resolves to something inside the sandbox or fails — and in failing
@@ -50,8 +52,11 @@ public sealed class ResolutionPropertyTests
             entry.List[0, 12],
             RelativeText,
             Gen.Enum<ResolutionOperation>(),
-            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options))
-            .Select((entries, path, operation, options) => new ResolutionScenario(entries, path, operation, options))
+            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options),
+            Syntax,
+            Gen.Bool)
+            .Select((entries, path, operation, options, syntax, backslash) =>
+                WithSeparator(new ResolutionScenario(entries, path, operation, options, syntax), backslash))
             .Sample(
                 scenario => { _ = ResolutionWalkTarget.Check(scenario); },
                 iter: PropertySettings.Iterations,
@@ -86,15 +91,16 @@ public sealed class ResolutionPropertyTests
                 Word)
             .Select((kind, parent, name) => new TopologyEntry(kind, parent, name));
 
-        Gen.Select(entry.List[0, 12], RelativeText).Sample(
-            (entries, text) =>
+        Gen.Select(entry.List[0, 12], RelativeText, Syntax, Gen.Bool).Sample(
+            (entries, text, syntax, backslash) =>
             {
-                if (!CapPath.TryParse(text, CapPathSyntax.Unix, ParentLinkPolicy.Preserve, out CapPath path, out _))
+                text = WithSeparator(text, syntax, backslash);
+                if (!CapPath.TryParse(text, syntax, ParentLinkPolicy.Preserve, out CapPath path, out _))
                 {
                     return;
                 }
 
-                (FakeFileSystem fs, MemoryNode sandbox, _) = ResolutionWalkTarget.Build(entries);
+                (FakeFileSystem fs, MemoryNode sandbox, _) = ResolutionWalkTarget.Build(entries, syntax);
                 MemoryNode? expected = ReadAsText(sandbox, path);
 
                 FakePlatformOps ops = new(fs);
@@ -113,8 +119,60 @@ public sealed class ResolutionPropertyTests
             },
             iter: PropertySettings.Iterations,
             threads: 1,
-            print: input => $"{input.Item2} in a tree of [{string.Join(", ", input.Item1)}]");
+            print: input => $"{WithSeparator(input.Item2, input.Item3, input.Item4)} ({input.Item3}) in a tree of [{string.Join(", ", input.Item1)}]");
     }
+
+    /// <summary>
+    /// Under Windows syntax <c>\</c> and <c>/</c> are the same separator, so in a tree with
+    /// nothing to redirect a walk, a path spelled with one ends exactly as it does spelled
+    /// with the other.
+    /// </summary>
+    [Fact]
+    public void Under_Windows_syntax_a_backslash_walks_as_a_slash_does()
+    {
+        Gen<TopologyEntry> entry = Gen.Select(
+                Gen.OneOfConst(EntryKind.Directory, EntryKind.Directory, EntryKind.File, EntryKind.MountPoint),
+                Gen.Int[0, 15],
+                Word)
+            .Select((kind, parent, name) => new TopologyEntry(kind, parent, name));
+
+        Gen.Select(
+            entry.List[0, 12],
+            RelativeText,
+            Gen.Enum<ResolutionOperation>(),
+            Gen.Int[0, 3].Select(options => (ConfinedResolveOptions)options))
+            .Select((entries, path, operation, options) =>
+                new ResolutionScenario(entries, path, operation, options, CapPathSyntax.Windows))
+            .Sample(
+                scenario =>
+                {
+                    ResolutionOutcome? slash = ResolutionWalkTarget.Check(scenario);
+                    ResolutionOutcome? backslash = ResolutionWalkTarget.Check(WithSeparator(scenario, backslash: true));
+                    Assert.True(slash == backslash, $"{slash} with '/' but {backslash} with '\\'.");
+                },
+                iter: PropertySettings.Iterations,
+                threads: 1,
+                print: Show);
+    }
+
+    /// <summary>
+    /// The scenario with every <c>/</c> in its path and link targets turned into <c>\</c>,
+    /// when it is under Windows syntax and <paramref name="backslash"/> asks for that.
+    /// </summary>
+    internal static ResolutionScenario WithSeparator(ResolutionScenario scenario, bool backslash) =>
+        scenario with
+        {
+            Path = WithSeparator(scenario.Path, scenario.Syntax, backslash),
+            Entries =
+            [
+                .. scenario.Entries.Select(entry => entry.Target is null
+                    ? entry
+                    : entry with { Target = WithSeparator(entry.Target, scenario.Syntax, backslash) }),
+            ],
+        };
+
+    private static string WithSeparator(string text, CapPathSyntax syntax, bool backslash) =>
+        syntax == CapPathSyntax.Windows && backslash ? text.Replace('/', '\\') : text;
 
     /// <summary>
     /// Follows the path's components through the tree's entries, stepping up by returning to
@@ -151,5 +209,5 @@ public sealed class ResolutionPropertyTests
     }
 
     private static string Show(ResolutionScenario scenario) =>
-        $"{InvariantViolation.Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}) in a tree of [{string.Join(", ", scenario.Entries)}]";
+        $"{InvariantViolation.Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}, {scenario.Syntax}) in a tree of [{string.Join(", ", scenario.Entries)}]";
 }

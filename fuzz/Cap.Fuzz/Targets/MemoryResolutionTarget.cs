@@ -57,14 +57,14 @@ internal static class MemoryResolutionTarget
     /// </returns>
     public static ResolutionOutcome? Check(ResolutionScenario scenario)
     {
-        if (!CapPath.TryParse(scenario.Path, CapPathSyntax.Unix, ParentLinkPolicy.Preserve, out CapPath path, out _))
+        if (!CapPath.TryParse(scenario.Path, scenario.Syntax, ParentLinkPolicy.Preserve, out CapPath path, out _))
         {
             return null;
         }
 
-        string shown = $"{Show(scenario.Path)} ({scenario.Operation}, {scenario.Options})";
+        string shown = $"{Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}, {scenario.Syntax})";
 
-        (InMemoryFileSystem fs, MemoryNode sandbox, MemoryNode outside) = Build(scenario.Entries);
+        (InMemoryFileSystem fs, MemoryNode sandbox, MemoryNode outside) = Build(scenario.Entries, scenario.Syntax);
         HashSet<MemoryNode> inside = ResolutionChecks.Beneath(sandbox);
         string outsideBefore = ResolutionChecks.Describe(outside);
 
@@ -113,7 +113,7 @@ internal static class MemoryResolutionTarget
         CapError error = MemoryPathWalk.Resolve(
             sandbox,
             path.Raw,
-            CapPathSyntax.Unix,
+            scenario.Syntax,
             scenario.Options,
             followFinalLink: ResolutionChecks.Request(scenario.Operation).FollowsFinalLink,
             Lookup,
@@ -133,12 +133,20 @@ internal static class MemoryResolutionTarget
     /// by the confined open: the same names, kinds, link targets and volumes, in the same
     /// places.
     /// </summary>
-    internal static (InMemoryFileSystem Fs, MemoryNode Sandbox, MemoryNode Outside) Build(IReadOnlyList<TopologyEntry> entries)
+    internal static (InMemoryFileSystem Fs, MemoryNode Sandbox, MemoryNode Outside) Build(
+        IReadOnlyList<TopologyEntry> entries,
+        CapPathSyntax syntax)
     {
-        (FakeFileSystem simulated, _, _) = ResolutionWalkTarget.Build(entries);
+        (FakeFileSystem simulated, _, _) = ResolutionWalkTarget.Build(entries, syntax);
         InMemoryFileSystem fs = new(new InMemoryFileSystemOptions
         {
-            PathSyntax = CapPathSyntax.Unix,
+            PathSyntax = syntax,
+
+            // The simulation the walk runs over compares names exactly under either syntax, so
+            // this copy does too, as an NTFS directory marked case-sensitive does. Otherwise the
+            // two would disagree over a name spelled in another case, which is a difference
+            // between the trees and not between the resolvers.
+            CaseSensitive = true,
             Resolution = ResolutionBackend.ConfinedOpen,
         });
 

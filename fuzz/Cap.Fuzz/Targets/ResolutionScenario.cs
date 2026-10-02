@@ -1,4 +1,5 @@
 using System.Text;
+using Cap.Primitives;
 using Cap.Primitives.Interop;
 
 namespace Cap.Fuzz.Targets;
@@ -59,12 +60,18 @@ internal sealed record TopologyEntry(EntryKind Kind, int Parent, string Name, st
 /// refusal of a missing name. Any other text can still be spelled out in full, which is how
 /// the escape corpus's own trees are carried over as starting inputs.
 /// </para>
+/// <para>
+/// The syntax is the rule set the path is parsed by and the simulated filesystem reads link
+/// targets by. The walk is what Windows falls back to, so it is fuzzed under Windows rules as
+/// well as POSIX ones.
+/// </para>
 /// </remarks>
 internal sealed record ResolutionScenario(
     IReadOnlyList<TopologyEntry> Entries,
     string Path,
     ResolutionOperation Operation,
-    ConfinedResolveOptions Options)
+    ConfinedResolveOptions Options,
+    CapPathSyntax Syntax = CapPathSyntax.Unix)
 {
     /// <summary>The directory that stands for the sandbox root.</summary>
     public const string SandboxName = "sandbox";
@@ -106,23 +113,44 @@ internal sealed record ResolutionScenario(
     public const int InitialDirectories = 4;
 
     /// <summary>
-    /// Whether <paramref name="name"/> can be an entry in a directory. Empty, <c>.</c>,
-    /// <c>..</c> and anything holding a separator cannot, and an entry with such a name is
-    /// left out of the tree rather than stored under a name no lookup could ask for.
+    /// Most UTF-8 bytes a spelled-out word can hold: enough for a name of the parser's longest
+    /// component made entirely of characters that take three bytes each.
     /// </summary>
-    public static bool IsEntryName(string name) =>
-        name is not ("" or "." or "..") && !name.Contains('/', StringComparison.Ordinal);
+    public const int MaxSpelledBytes = CapPath.MaxComponentLength * 3;
+
+    /// <summary>
+    /// Whether <paramref name="name"/> can be an entry in a directory under
+    /// <paramref name="syntax"/>. Empty, <c>.</c>, <c>..</c> and anything holding a separator
+    /// cannot, and an entry with such a name is left out of the tree rather than stored under
+    /// a name no lookup could ask for.
+    /// </summary>
+    public static bool IsEntryName(string name, CapPathSyntax syntax) =>
+        name is not ("" or "." or "..") &&
+        !name.Contains('/', StringComparison.Ordinal) &&
+        (syntax != CapPathSyntax.Windows || !name.Contains('\\', StringComparison.Ordinal));
 
     /// <summary>A byte that introduces a word spelled out rather than drawn from the list.</summary>
     private const byte SpelledOut = 0xFF;
 
+    /// <summary>The bit of the settings byte that chooses Windows syntax.</summary>
+    private const byte WindowsSyntaxBit = 1 << 4;
+
+    /// <summary>
+    /// The bit of the settings byte that, under Windows syntax, joins words with <c>\</c>
+    /// rather than <c>/</c>.
+    /// </summary>
+    private const byte BackslashBit = 1 << 5;
+
     /// <summary>Reads a scenario from a fuzzer's bytes. Every input reads as one.</summary>
     /// <remarks>
-    /// One byte chooses the operation in its low two bits and the resolution options in the
-    /// next two. One byte gives the number of entries, and each entry is a byte for its kind,
-    /// one for its directory, its name, and for a link its target. Last comes the path. A name
-    /// is one word; a path or a target is a byte saying whether it starts at a root, a byte
-    /// counting its words, and the words, which are joined with <c>/</c>.
+    /// One byte chooses the operation in its low two bits, the resolution options in the
+    /// next two, Windows syntax in the next, and in the one after that whether, under Windows
+    /// syntax, words are joined with <c>\</c>. One byte gives the number of entries, and each
+    /// entry is a byte for its kind, one for its directory, its name, and for a link its
+    /// target. Last comes the path. A name is one word: a byte choosing it from the list, or
+    /// <c>0xFF</c> followed by a two-byte length and that many bytes of UTF-8. A path or a
+    /// target is a byte saying whether it starts at a root, a byte counting its words, and the
+    /// words, joined with the separator.
     /// </remarks>
     public static ResolutionScenario Decode(ReadOnlySpan<byte> data)
     {
@@ -130,6 +158,8 @@ internal sealed record ResolutionScenario(
         byte settings = input.NextByte();
         ResolutionOperation operation = (ResolutionOperation)(settings & 3);
         ConfinedResolveOptions options = (ConfinedResolveOptions)((settings >> 2) & 3);
+        CapPathSyntax syntax = (settings & WindowsSyntaxBit) != 0 ? CapPathSyntax.Windows : CapPathSyntax.Unix;
+        char separator = syntax == CapPathSyntax.Windows && (settings & BackslashBit) != 0 ? '\\' : '/';
 
         int count = input.NextChoice(MaxEntries + 1);
         List<TopologyEntry> entries = new(count);
@@ -138,11 +168,11 @@ internal sealed record ResolutionScenario(
             EntryKind kind = (EntryKind)input.NextChoice(5);
             int parent = input.NextByte();
             string name = NextWord(ref input);
-            string? target = kind == EntryKind.SymbolicLink ? NextText(ref input) : null;
+            string? target = kind == EntryKind.SymbolicLink ? NextText(ref input, separator) : null;
             entries.Add(new TopologyEntry(kind, parent, name, target));
         }
 
-        return new ResolutionScenario(entries, NextText(ref input), operation, options);
+        return new ResolutionScenario(entries, NextText(ref input, separator), operation, options, syntax);
     }
 
     /// <summary>
@@ -156,7 +186,11 @@ internal sealed record ResolutionScenario(
             return null;
         }
 
-        List<byte> data = [(byte)((byte)Operation | ((int)Options << 2)), (byte)Entries.Count];
+        char separator = Separator();
+        int settings = (byte)Operation | ((int)Options << 2) |
+            (Syntax == CapPathSyntax.Windows ? WindowsSyntaxBit : 0) |
+            (separator == '\\' ? BackslashBit : 0);
+        List<byte> data = [(byte)settings, (byte)Entries.Count];
         foreach (TopologyEntry entry in Entries)
         {
             if (entry.Parent > byte.MaxValue)
@@ -167,31 +201,57 @@ internal sealed record ResolutionScenario(
             data.Add((byte)entry.Kind);
             data.Add((byte)entry.Parent);
             if (!TryWriteWord(data, entry.Name) ||
-                (entry.Kind == EntryKind.SymbolicLink && !TryWriteText(data, entry.Target ?? string.Empty)))
+                (entry.Kind == EntryKind.SymbolicLink && !TryWriteText(data, entry.Target ?? string.Empty, separator)))
             {
                 return null;
             }
         }
 
-        return TryWriteText(data, Path) ? [.. data] : null;
+        return TryWriteText(data, Path, separator) ? [.. data] : null;
+    }
+
+    /// <summary>
+    /// The separator to join words with when writing: <c>\</c> when the texts are Windows
+    /// ones spelled with it alone, and <c>/</c> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// Either reads back as the same text, since a word holding the other separator is
+    /// spelled out. This choice only keeps the texts' words to the list where it can.
+    /// </remarks>
+    private char Separator()
+    {
+        IEnumerable<string> texts = Entries
+            .Where(entry => entry.Kind == EntryKind.SymbolicLink)
+            .Select(entry => entry.Target ?? string.Empty)
+            .Append(Path);
+        return Syntax == CapPathSyntax.Windows &&
+            texts.Any(text => text.Contains('\\', StringComparison.Ordinal)) &&
+            !texts.Any(text => text.Contains('/', StringComparison.Ordinal))
+                ? '\\'
+                : '/';
     }
 
     private static string NextWord(ref FuzzInput input)
     {
         byte choice = input.NextByte();
         return choice == SpelledOut
-            ? input.NextUtf8(input.NextByte())
+            ? input.NextUtf8(input.NextUInt16() % (MaxSpelledBytes + 1))
             : s_words[choice % s_words.Length];
     }
 
-    private static string NextText(ref FuzzInput input)
+    private static string NextText(ref FuzzInput input, char separator)
     {
         bool rooted = (input.NextByte() & 1) != 0;
         int count = input.NextByte();
-        StringBuilder text = new(rooted ? "/" : string.Empty);
+        StringBuilder text = new(rooted ? separator.ToString() : string.Empty);
         for (int i = 0; i < count; i++)
         {
-            _ = text.Append(i == 0 ? string.Empty : "/").Append(NextWord(ref input));
+            if (i > 0)
+            {
+                _ = text.Append(separator);
+            }
+
+            _ = text.Append(NextWord(ref input));
         }
 
         return text.ToString();
@@ -207,25 +267,26 @@ internal sealed record ResolutionScenario(
         }
 
         byte[] spelled = Encoding.UTF8.GetBytes(word);
-        if (spelled.Length > byte.MaxValue || Encoding.UTF8.GetString(spelled) != word)
+        if (spelled.Length > MaxSpelledBytes || Encoding.UTF8.GetString(spelled) != word)
         {
             return false;
         }
 
         data.Add(SpelledOut);
         data.Add((byte)spelled.Length);
+        data.Add((byte)(spelled.Length >> 8));
         data.AddRange(spelled);
         return true;
     }
 
-    private static bool TryWriteText(List<byte> data, string text)
+    private static bool TryWriteText(List<byte> data, string text, char separator)
     {
-        bool rooted = text.StartsWith('/');
+        bool rooted = text.StartsWith(separator);
         string body = rooted ? text[1..] : text;
 
         // No words at all is written as none rather than as one empty word. Both read back as
         // the same text, and the first leaves the count free for real ones.
-        string[] words = body.Length == 0 ? [] : body.Split('/');
+        string[] words = body.Length == 0 ? [] : body.Split(separator);
         if (words.Length > MaxWords)
         {
             return false;

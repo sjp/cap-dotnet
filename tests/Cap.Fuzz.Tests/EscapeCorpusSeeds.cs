@@ -26,8 +26,8 @@ internal sealed record Seed(string Target, string Name, byte[] Data);
 /// <para>
 /// The paths go to the parser under both syntaxes. The trees go to the walk, over the
 /// simulated filesystem, and to the confined open in memory, through each of their
-/// operations. The link targets go to the reparse reader, written out as the structure that
-/// would store them.
+/// operations and under both syntaxes. The link targets go to the reparse reader, written
+/// out as the structure that would store them.
 /// </para>
 /// </remarks>
 internal static class EscapeCorpusSeeds
@@ -59,16 +59,22 @@ internal static class EscapeCorpusSeeds
             }
         }
 
-        if (Topology(entry) is { } entries)
+        foreach (CapPathSyntax syntax in new[] { CapPathSyntax.Unix, CapPathSyntax.Windows })
         {
+            if (Topology(entry, syntax) is not { } entries)
+            {
+                continue;
+            }
+
             foreach (ResolutionOperation operation in Enum.GetValues<ResolutionOperation>())
             {
                 ResolutionScenario scenario = new(
-                    entries, WithOutside(entry.Path, CapPathSyntax.Unix), operation, ConfinedResolveOptions.None);
+                    entries, WithOutside(entry.Path, syntax), operation, ConfinedResolveOptions.None, syntax);
                 if (scenario.Encode() is { } data)
                 {
-                    yield return new Seed(ResolutionWalkTarget.Name, $"{entry.Name}-{operation}", data);
-                    yield return new Seed(MemoryResolutionTarget.Name, $"{entry.Name}-{operation}", data);
+                    string name = $"{entry.Name}-{operation}-{syntax.ToString().ToLowerInvariant()}";
+                    yield return new Seed(ResolutionWalkTarget.Name, name, data);
+                    yield return new Seed(MemoryResolutionTarget.Name, name, data);
                 }
             }
         }
@@ -89,15 +95,15 @@ internal static class EscapeCorpusSeeds
             StringComparison.Ordinal);
 
     /// <summary>
-    /// The case's tree as entries for the simulated one, or nothing when it holds something
-    /// the simulation does not model.
+    /// The case's tree as entries for the simulated one under <paramref name="syntax"/>, or
+    /// nothing when it holds something the simulation does not model.
     /// </summary>
     /// <remarks>
     /// Directories on the way to each entry are planted first, the way the corpus's own
     /// arena creates them. A junction has no counterpart in the simulation, which models the
     /// portable walk, so a case that needs one is left to the parser and reparse seeds.
     /// </remarks>
-    private static List<TopologyEntry>? Topology(EscapeCase entry)
+    private static List<TopologyEntry>? Topology(EscapeCase entry, CapPathSyntax syntax)
     {
         Dictionary<string, int> directories = new(StringComparer.Ordinal)
         {
@@ -117,7 +123,7 @@ internal static class EscapeCorpusSeeds
                 if (!directories.ContainsKey(next))
                 {
                     entries.Add(new TopologyEntry(EntryKind.Directory, directories[parent], part));
-                    directories[next] = ResolutionScenario.IsEntryName(part) ? nextDirectory++ : directories[parent];
+                    directories[next] = ResolutionScenario.IsEntryName(part, syntax) ? nextDirectory++ : directories[parent];
                 }
 
                 parent = next;
@@ -139,7 +145,7 @@ internal static class EscapeCorpusSeeds
             {
                 case SetupKind.Directory:
                     entries.Add(new TopologyEntry(EntryKind.Directory, parent, name));
-                    if (ResolutionScenario.IsEntryName(name))
+                    if (ResolutionScenario.IsEntryName(name, syntax))
                     {
                         directories[step.Path] = nextDirectory++;
                     }
@@ -152,7 +158,7 @@ internal static class EscapeCorpusSeeds
 
                 default:
                     entries.Add(new TopologyEntry(
-                        EntryKind.SymbolicLink, parent, name, WithOutside(step.Target ?? string.Empty, CapPathSyntax.Unix)));
+                        EntryKind.SymbolicLink, parent, name, WithOutside(step.Target ?? string.Empty, syntax)));
                     break;
             }
         }
