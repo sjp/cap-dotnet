@@ -142,7 +142,8 @@ A component is additionally refused under Windows rules when it:
   hidden body of the same file, and `CON::$DATA` reaches the device through one;
 - contains `* ? < > " |`, which the native open call interprets as patterns, so a single
   name could match something other than itself;
-- contains a character below `U+0020`.
+- contains a character below `U+0020`. `U+007F` is not refused (see "Characters and
+  encoding").
 
 A blocklist of OS behaviour ages badly — the reserved set has grown before and can grow
 again — so this is the first of two defences rather than the only one. A handle opened on
@@ -166,6 +167,14 @@ checked.
 which has already been consumed as a separator. Newlines, backslashes, leading dashes and
 every name Windows reserves are ordinary filenames, and refusing them would make real files
 unreachable for no gain.
+
+**`U+007F` and unpaired surrogates are accepted under both rules.** DEL is not one of the
+control characters below `U+0020` that Windows rules refuse: NTFS and the Win32 API take it in
+a name, so refusing it would strand real files. A lone surrogate is not well-formed text, but
+NTFS stores UTF-16 code units without checking them, and under POSIX rules a lone surrogate in
+`U+DC80`–`U+DCFF` is how an undecodable byte is spelled (see below). Parsing does not judge
+them. Under POSIX rules a lone surrogate outside that range is refused when the path is
+encoded for the kernel, because it has no byte sequence it could stand for.
 
 **Unicode is never normalised.** The composed and decomposed spellings of an accented letter
 are different names to a Linux kernel, and folding them here would let a check be passed in

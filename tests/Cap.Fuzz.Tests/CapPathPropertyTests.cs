@@ -22,7 +22,7 @@ public sealed class CapPathPropertyTests
     /// </summary>
     private static readonly Gen<char> PathCharacter = Gen.Frequency(
         (8, Gen.Char["/\\.: aCcOoNnLlPpTtUuXxRr1239$"]),
-        (2, Gen.Char["<>\"|?*\0\t\u001f¹²³ıİ "]),
+        (2, Gen.Char["<>\"|?*\0\t\u001f\u007f\ud800\udc80\udfff¹²³ıİ "]),
         (1, Gen.Char));
 
     /// <summary>Fragments that mean something to one set of rules or the other.</summary>
@@ -122,6 +122,41 @@ public sealed class CapPathPropertyTests
                 CapPathTarget.Check(raw, syntax, ParentLinkPolicy.Reject);
             },
             iter: PropertySettings.Iterations);
+    }
+
+    /// <summary>
+    /// A name containing <c>U+007F</c> is accepted under both rules, by the parser and the
+    /// oracle alike, as docs/paths.md states.
+    /// </summary>
+    [Fact]
+    public void A_name_containing_DEL_is_accepted() =>
+        AssertAcceptedEverywhere("\u007F", "a\u007F", "\u007Fb", "a\u007Fb.txt", "dir/a\u007Fb");
+
+    /// <summary>
+    /// A name containing an unpaired surrogate is accepted under both rules, by the parser and
+    /// the oracle alike, as docs/paths.md states. That covers a high surrogate with nothing
+    /// after it, a low surrogate outside the byte-escape range, one inside it, and a pair in
+    /// the wrong order.
+    /// </summary>
+    [Fact]
+    public void A_name_containing_a_lone_surrogate_is_accepted() =>
+        AssertAcceptedEverywhere("\uD800", "a\uD800", "\uD800b", "a\uDFFFb", "a\uDC80", "\uDC00\uD800", "dir/a\uD800b");
+
+    private static void AssertAcceptedEverywhere(params string[] paths)
+    {
+        foreach (CapPathSyntax syntax in Enum.GetValues<CapPathSyntax>())
+        {
+            foreach (string raw in paths)
+            {
+                Assert.True(
+                    CapPath.TryParse(raw, syntax, ParentLinkPolicy.Reject, out _, out CapPathError error),
+                    $"{InvariantViolation.Show(raw)} refused under {syntax} rules: {error}");
+                Assert.True(
+                    PathOracle.Classify(raw, syntax, ParentLinkPolicy.Reject).Accepted,
+                    $"{InvariantViolation.Show(raw)} refused by the oracle under {syntax} rules");
+                CapPathTarget.Check(raw, syntax, ParentLinkPolicy.Reject);
+            }
+        }
     }
 
     private static string Show((string Raw, CapPathSyntax Syntax, ParentLinkPolicy ParentLinks) input) =>

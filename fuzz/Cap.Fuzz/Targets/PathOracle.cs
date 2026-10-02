@@ -45,6 +45,23 @@ internal static class PathOracle
     /// </summary>
     private const string WindowsForbidden = "<>:\"|?*";
 
+    /// <summary>The longest path accepted, in characters, as docs/paths.md "Length" states it.</summary>
+    /// <remarks>
+    /// Written out rather than read from <see cref="CapPath"/>, so a wrong constant there is a
+    /// disagreement here. The number is the widest path Windows takes through its
+    /// extended-length form, which the library chose over Linux's 4096-byte <c>PATH_MAX</c>
+    /// because it bounds work rather than predicting what the kernel will take.
+    /// </remarks>
+    private const int MaxPathLength = 32767;
+
+    /// <summary>The longest component accepted, in characters, as docs/paths.md "Length" states it.</summary>
+    /// <remarks>
+    /// Written out for the same reason as <see cref="MaxPathLength"/>. It is the
+    /// filename limit of NTFS (255 UTF-16 units) and of ext4 (255 bytes, which no name of
+    /// more than 255 characters fits in).
+    /// </remarks>
+    private const int MaxComponentLength = 255;
+
     /// <summary>
     /// Every spelling of a device name, in upper case. Windows reserves these as the part of
     /// a name before its first dot, and matches them without regard to ASCII case.
@@ -54,7 +71,7 @@ internal static class PathOracle
     /// <summary>Classifies <paramref name="raw"/> as the parser should.</summary>
     public static Verdict Classify(string raw, CapPathSyntax syntax, ParentLinkPolicy parentLinks)
     {
-        if (raw.Length is 0 or > CapPath.MaxLength)
+        if (raw.Length is 0 or > MaxPathLength)
         {
             return Refused;
         }
@@ -85,7 +102,7 @@ internal static class PathOracle
                 continue;
             }
 
-            if (segment.Length > CapPath.MaxComponentLength || !IsAcceptableName(segment, syntax))
+            if (segment.Length > MaxComponentLength || !IsAcceptableName(segment, syntax))
             {
                 return Refused;
             }
@@ -120,6 +137,13 @@ internal static class PathOracle
             raw.Length >= 2 && raw[1] == ':' && char.IsAsciiLetter(raw[0]);
     }
 
+    /// <remarks>
+    /// <c>U+007F</c> and unpaired surrogates are acceptable under both rules, as
+    /// docs/paths.md "Characters and encoding" states. NTFS stores both as given, and under
+    /// Unix rules a lone surrogate is either the escape for an undecodable byte or refused
+    /// later by the encoder, never by parsing. They are named here so that a parser which
+    /// starts refusing either is caught, not agreed with by omission.
+    /// </remarks>
     private static bool IsAcceptableName(string name, CapPathSyntax syntax)
     {
         if (syntax == CapPathSyntax.Unix)
@@ -129,6 +153,11 @@ internal static class PathOracle
 
         foreach (char c in name)
         {
+            if (c == '\u007F' || char.IsSurrogate(c))
+            {
+                continue;
+            }
+
             if (c < ' ' || WindowsForbidden.Contains(c, StringComparison.Ordinal))
             {
                 return false;
