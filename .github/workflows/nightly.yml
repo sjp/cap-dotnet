@@ -221,6 +221,12 @@ jobs:
   # - The runtime's write-xor-execute double mapping of generated code is not something QEMU
   #   emulates faithfully; with it on, the process dies at random with an illegal
   #   instruction or an access violation. It is turned off.
+  # - To suspend a thread for a collection, the runtime signals it and points the interrupted
+  #   context at its own code, writing the address with the Thumb bit set as it keeps it.
+  #   The hardware ignores that bit on the return from the signal; QEMU restores the address
+  #   as it is and aborts translating it ("Assertion failed: (dc->base.pc_next & 1) == 0").
+  #   The escape corpus, long enough to collect mid-case, did so on every run. Injection is
+  #   turned off, leaving the runtime to suspend threads at its polling points.
   # - QEMU answers some of /proc/self itself. A file under it opened by absolute path is the
   #   emulator's version and the same file opened beneath a directory handle is the kernel's,
   #   so the one test comparing the two is excluded here.
@@ -276,6 +282,7 @@ jobs:
               --env HOME=/tmp \
               --env DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
               --env DOTNET_EnableWriteXorExecute=0 \
+              --env DOTNET_INTERNAL_ThreadSuspendInjection=0 \
               --volume "$PWD:$PWD" \
               --workdir "$PWD/artifacts/arm/$project" \
               ${{ matrix.image }} \
