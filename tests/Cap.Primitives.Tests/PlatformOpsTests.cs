@@ -55,6 +55,41 @@ public sealed partial class PlatformOpsTests : IDisposable
     }
 
     /// <summary>
+    /// A substitution undone while a later one is still in force is refused, and leaves the
+    /// later one in place.
+    /// </summary>
+    /// <remarks>
+    /// Two overlapping substitutions mean two tests replaced the host at once. Putting the
+    /// first one's predecessor back would pull the host out from under the second, and the
+    /// second's own undo would then reinstall the first's replacement for the rest of the
+    /// process. Refusing makes the overlap fail where it happened. Undone innermost first,
+    /// the same pair puts the real host back.
+    /// </remarks>
+    [Fact]
+    public void A_substitution_undone_out_of_order_is_refused()
+    {
+        IPlatformOps real = PlatformOps.Host;
+        FakePlatformOps first = new(new FakeFileSystem());
+        FakePlatformOps second = new(new FakeFileSystem());
+
+        PlatformOps.SubstitutionScope outer = PlatformOps.Substitute(first);
+        PlatformOps.SubstitutionScope inner = PlatformOps.Substitute(second);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(outer.Dispose);
+            Assert.Same(second, PlatformOps.Host);
+        }
+        finally
+        {
+            inner.Dispose();
+            Assert.Same(first, PlatformOps.Host);
+            outer.Dispose();
+        }
+
+        Assert.Same(real, PlatformOps.Host);
+    }
+
+    /// <summary>
     /// A handle keeps working through the backend that issued it while the host is replaced.
     /// </summary>
     /// <remarks>

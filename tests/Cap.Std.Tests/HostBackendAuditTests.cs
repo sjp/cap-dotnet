@@ -1,6 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using System.Reflection.Emit;
 using Cap.Directories;
 using Cap.Fs.Ext;
 using Cap.IO.Abstractions;
@@ -8,6 +6,7 @@ using Cap.Net;
 using Cap.Primitives.Interop;
 using Cap.Rand;
 using Cap.Std.Testing;
+using Cap.Testing;
 using Cap.Time;
 
 namespace Cap.Std.Tests;
@@ -74,11 +73,6 @@ public sealed class HostBackendAuditTests
     private static readonly MethodInfo HostAccessor =
         typeof(PlatformOps).GetProperty(nameof(PlatformOps.Host))!.GetMethod!;
 
-    private static readonly Dictionary<short, OpCode> OpCodesByValue = typeof(OpCodes)
-        .GetFields(BindingFlags.Public | BindingFlags.Static)
-        .Select(field => (OpCode)field.GetValue(null)!)
-        .ToDictionary(code => code.Value);
-
     /// <summary>
     /// The audit finds the accessor where it is known to be read, so an empty result means
     /// something.
@@ -131,7 +125,7 @@ public sealed class HostBackendAuditTests
 
         string[] strays =
         [
-            .. Callers(assembly, IsDirectFileAccess)
+            .. IlCalls.Callers(assembly, IsDirectFileAccess)
                 .Where(caller => caller.Type != typeof(HostFileContent))
                 .Select(caller => $"{caller.Type.FullName}.{caller.Method.Name}"),
         ];
@@ -148,7 +142,7 @@ public sealed class HostBackendAuditTests
     public void The_content_audit_finds_the_host_implementation()
     {
         Assert.Contains(
-            Callers(typeof(HostFileContent).Assembly, IsDirectFileAccess),
+            IlCalls.Callers(typeof(HostFileContent).Assembly, IsDirectFileAccess),
             caller => caller.Type == typeof(HostFileContent));
     }
 
@@ -159,7 +153,7 @@ public sealed class HostBackendAuditTests
     /// <summary>Every method in the assembly that reads the host's accessor.</summary>
     private static IEnumerable<string> Readers(Assembly assembly, bool excludeEntryPoints = false)
     {
-        foreach ((Type type, MethodBase method) in Callers(assembly, IsHostAccessor))
+        foreach ((Type type, MethodBase method) in IlCalls.Callers(assembly, IsHostAccessor))
         {
             if (excludeEntryPoints && IsEntryPoint(type, method))
             {
@@ -172,55 +166,6 @@ public sealed class HostBackendAuditTests
 
     private static bool IsHostAccessor(MethodBase called) =>
         called.DeclaringType == HostAccessor.DeclaringType && called.Name == HostAccessor.Name;
-
-    /// <summary>Every method in the assembly whose body calls something matching <paramref name="target"/>.</summary>
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2026:RequiresUnreferencedCode",
-        Justification = "The subject is every method body in an assembly, which cannot be named " +
-                        "statically, and the suite is not trimmed.")]
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2075:UnrecognizedReflectionPattern",
-        Justification = "The types reflected over are whatever the assembly defines. The suite is not trimmed.")]
-    private static IEnumerable<(Type Type, MethodBase Method)> Callers(Assembly assembly, Func<MethodBase, bool> target)
-    {
-        const BindingFlags Everything =
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance |
-            BindingFlags.Static | BindingFlags.DeclaredOnly;
-
-        foreach (Type type in assembly.GetTypes())
-        {
-            if (IsAddedByTooling(type))
-            {
-                continue;
-            }
-
-            IEnumerable<MethodBase> methods = [.. type.GetMethods(Everything), .. type.GetConstructors(Everything)];
-            foreach (MethodBase method in methods)
-            {
-                if (Calls(method, target))
-                {
-                    yield return (type, method);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Whether a type was put into the assembly after it was compiled, rather than written
-    /// here.
-    /// </summary>
-    /// <remarks>
-    /// Measuring which instructions run means rewriting each assembly measured, and what the
-    /// rewriting adds is a counter table and the code that flushes it to a file of its own.
-    /// That code is nobody's here: it does not ship, it holds no handle this library issued,
-    /// and the file it writes is its own. Leaving it out by name keeps the audit narrow — an
-    /// assembly nothing has rewritten is still read whole, and a name that stops matching
-    /// fails the audit rather than quietly passing it.
-    /// </remarks>
-    private static bool IsAddedByTooling(Type type) =>
-        type.FullName?.StartsWith("Microsoft.CodeCoverage.", StringComparison.Ordinal) == true;
 
     /// <summary>
     /// Whether a method is one of the entry points, or code the compiler generated on its
@@ -242,80 +187,4 @@ public sealed class HostBackendAuditTests
         return EntryPoints.Any(entry =>
             entry.Type == outermost && (entry.Method is null || (entry.Type == type && entry.Method == method.Name)));
     }
-
-    /// <summary>Whether a method's body calls, or takes the address of, anything matching <paramref name="target"/>.</summary>
-    /// <remarks>
-    /// Walks the body one instruction at a time, skipping each operand by its declared size,
-    /// so that an operand's bytes are never mistaken for an instruction.
-    /// </remarks>
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2026:RequiresUnreferencedCode",
-        Justification = "The subject is every method body in an assembly, which cannot be named " +
-                        "statically, and the suite is not trimmed.")]
-    private static bool Calls(MethodBase method, Func<MethodBase, bool> target)
-    {
-        byte[]? body = method.GetMethodBody()?.GetILAsByteArray();
-        if (body is null)
-        {
-            return false;
-        }
-
-        int offset = 0;
-        while (offset < body.Length)
-        {
-            short value = body[offset] == 0xFE
-                ? (short)(0xFE00 | body[offset + 1])
-                : body[offset];
-            OpCode code = OpCodesByValue[value];
-            offset += code.Size;
-
-            if (code.OperandType == OperandType.InlineMethod)
-            {
-                int token = BitConverter.ToInt32(body, offset);
-                if (Resolve(method, token) is { } called && target(called))
-                {
-                    return true;
-                }
-            }
-
-            offset += OperandSize(code, body, offset);
-        }
-
-        return false;
-    }
-
-    [UnconditionalSuppressMessage(
-        "Trimming",
-        "IL2026:RequiresUnreferencedCode",
-        Justification = "The subject is every method body in an assembly, which cannot be named " +
-                        "statically, and the suite is not trimmed.")]
-    private static MethodBase? Resolve(MethodBase method, int token)
-    {
-        Type[]? typeArguments = method.DeclaringType is { IsGenericType: true } declaring
-            ? declaring.GetGenericArguments()
-            : null;
-        Type[]? methodArguments = method.IsGenericMethod ? method.GetGenericArguments() : null;
-
-        try
-        {
-            return method.Module.ResolveMethod(token, typeArguments, methodArguments);
-        }
-        catch (ArgumentException)
-        {
-            // A reference into an assembly this process never loaded cannot be resolved, and
-            // cannot be the accessor, which lives in an assembly that is loaded.
-            return null;
-        }
-    }
-
-    private static int OperandSize(OpCode code, byte[] body, int offset) => code.OperandType switch
-    {
-        OperandType.InlineNone => 0,
-        OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
-        OperandType.InlineVar => 2,
-        OperandType.InlineI8 or OperandType.InlineR => 8,
-        OperandType.InlineSwitch => 4 + (4 * BitConverter.ToInt32(body, offset)),
-        _ => 4,
-    };
 }

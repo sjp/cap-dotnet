@@ -29,7 +29,9 @@ namespace Cap.Primitives.Interop;
 /// </remarks>
 internal static class PlatformOps
 {
-    private static IPlatformOps s_current = CreateForHostPlatform();
+    // Volatile because a substitution made on one test's thread is read by whatever thread
+    // opens the next root by path.
+    private static volatile IPlatformOps s_current = CreateForHostPlatform();
 
     // Initialised with the platform rather than on first query, so that a listener attached
     // to the meter sees the instruments as soon as anything has been resolved.
@@ -47,6 +49,13 @@ internal static class PlatformOps
     /// substitutes changes what every root opened by path during its run resolves through,
     /// so it must not run in parallel with tests that open roots on the real host. Handles
     /// already open are unaffected: each keeps the implementation that issued it.
+    /// <para>
+    /// Two substitutions that overlap are undone innermost first or not at all. Disposing a
+    /// scope after something else has replaced the host throws and leaves the host as it is,
+    /// because putting the earlier implementation back then would leave the later one's
+    /// owner running on a host it did not choose, and a stale one installed for the rest of
+    /// the process once it finished.
+    /// </para>
     /// </remarks>
     public static SubstitutionScope Substitute(IPlatformOps replacement)
     {
@@ -54,7 +63,7 @@ internal static class PlatformOps
 
         IPlatformOps previous = s_current;
         s_current = replacement;
-        return new SubstitutionScope(previous);
+        return new SubstitutionScope(previous, replacement);
     }
 
     /// <summary>
@@ -96,16 +105,35 @@ internal static class PlatformOps
     internal readonly struct SubstitutionScope : IDisposable
     {
         private readonly IPlatformOps _previous;
+        private readonly IPlatformOps _replacement;
 
-        internal SubstitutionScope(IPlatformOps previous) => _previous = previous;
+        internal SubstitutionScope(IPlatformOps previous, IPlatformOps replacement)
+        {
+            _previous = previous;
+            _replacement = replacement;
+        }
 
         /// <summary>Puts the previous implementation back.</summary>
+        /// <exception cref="InvalidOperationException">
+        /// The host is no longer the implementation this scope installed: another substitution
+        /// made since is still in force.
+        /// </exception>
         public void Dispose()
         {
-            if (_previous is not null)
+            if (_previous is null)
             {
-                s_current = _previous;
+                return;
             }
+
+            if (!ReferenceEquals(s_current, _replacement))
+            {
+                throw new InvalidOperationException(
+                    "The host was replaced again before this substitution was undone. Two " +
+                    "substitutions overlapped, which means two tests that replace the host ran " +
+                    "at once; they belong in one collection.");
+            }
+
+            s_current = _previous;
         }
     }
 }

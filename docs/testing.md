@@ -331,6 +331,23 @@ share one sees what every other test wrote to it.
 
 Each `CapTempDir.New` draws a directory of its own, so tests on disk do not collide either.
 
+The library's own suites have one exception, which code using the library does not meet. A
+few of their tests replace the host implementation that every root opened by path resolves
+through, or read its process-wide counters. That slot is one for the whole process, so in a
+test assembly where any class replaces or reads it, every class that opens a root by path
+(`Dir.Open`, `Dir.TryOpen`, `Dir.FromHandle`, `CapTempDir.New`, the suites' `ScratchTree`) or
+touches the host has to run in the assembly's serialising collection: `DirTestGroup` in
+`Cap.Std.Tests`, `PlatformOpsTestGroup` in `Cap.Primitives.Tests`, `CorpusGroup` in
+`Cap.Escape.Tests` and `WasiHost.Tests`. The alternative is to make the whole assembly one
+collection, as `Cap.Stress.Tests` and `Cap.Fuzz.Tests` do. A class left out compiles and
+passes on a quiet machine, then fails now and then in CI when it overlaps a replacement. So
+`CollectionDisciplineTests`, compiled into every test assembly from `tests/Shared`, reads the
+compiled assembly and fails when such a class is outside the group, following calls through
+helpers, lambdas and async bodies. In an assembly where nothing replaces or reads the host,
+such as `Cap.Fs.Ext.Tests`, roots are opened from every class at once and the rule holds
+trivially. Two replacements that overlap anyway are refused when the first one is undone
+out of order, rather than leaving a stale host installed.
+
 ## Coverage of this library
 
 This section is for contributors to the library itself, not for testing code that uses it.
