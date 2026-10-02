@@ -541,6 +541,52 @@ jobs:
           $line >> $env:GITHUB_STEP_SUMMARY
 
   # ---------------------------------------------------------------------------------
+  # Fuzzing proper is nightly, and Cap.Fuzz.Tests already compiles the targets and replays
+  # their saved inputs on every change. What only build/fuzz/run.sh does is fetch and build
+  # the libFuzzer driver against its pinned digest and instrument the assemblies with
+  # SharpFuzz, so this runs it briefly on two targets. Between them they drive both of the
+  # instrumented assemblies: cap-path drives Cap.Primitives and resolution-memory drives
+  # Cap.Std.Testing. The driver is built on every run rather than cached, so a wrong digest
+  # fails here and not at the next night.
+  #
+  # Each run starts from an empty corpus, and libFuzzer has to keep at least one input it
+  # generated. It keeps an input only for reaching a branch no earlier input reached, and
+  # the only branches it can see in the target are the ones SharpFuzz instrumented, so with
+  # no instrumentation it keeps none. The `cov:` figure libFuzzer prints is no use for this:
+  # it counts the driver's own code and is the same with instrumentation or without.
+  # ---------------------------------------------------------------------------------
+  fuzz-smoke:
+    name: fuzz harness smoke
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('global.json', '**/Directory.*.props', '**/*.csproj', '.config/dotnet-tools.json') }}
+          restore-keys: nuget-${{ github.job }}-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Fuzz each target briefly and check that coverage reached libFuzzer
+        run: |
+          for target in cap-path resolution-memory; do
+            echo "::group::$target"
+            build/fuzz/run.sh "$target" 45 "$RUNNER_TEMP/fuzz-corpus" 2>&1 | tee "$RUNNER_TEMP/fuzz-$target.log"
+            echo "::endgroup::"
+            added=$(sed -n 's/^stat::new_units_added:[[:space:]]*//p' "$RUNNER_TEMP/fuzz-$target.log")
+            if [ "${added:-0}" -eq 0 ]; then
+              echo "::error::$target kept no inputs from an empty corpus, so libFuzzer saw no coverage from the instrumented assemblies"
+              exit 1
+            fi
+            echo "$target kept $added inputs."
+          done
+
+  # ---------------------------------------------------------------------------------
   # Each leg's reports land in coverage/coverage-<leg name>, and every leg of build-test that
   # is not passes_only is listed, so a leg whose reports went missing fails the gate rather
   # than leaving it to judge a smaller union. Add a leg here when adding one to the matrix.

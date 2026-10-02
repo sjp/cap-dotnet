@@ -9,7 +9,8 @@ There are two tools for this, and they complement each other.
 - **Fuzzing** runs libFuzzer against the code with branch coverage switched on. It keeps any
   input that reaches code no earlier input reached, and mutates from there. It finds deep and
   odd paths, but its findings are raw bytes, and it needs an hour to get anywhere. It runs
-  nightly, never on a pull request.
+  nightly. A pull request runs the harness only briefly, to check that it still builds and
+  still gets coverage back (see [On every change](#on-every-change)).
 - **Property tests** generate structured inputs with CsCheck — strings built from the
   characters path rules are about, trees built from a handful of names — and shrink a failure
   to the smallest input that still fails. They run on every change at two thousand cases per
@@ -146,6 +147,22 @@ CAPDOTNET_PROPERTY_ITERATIONS=1000000 dotnet test tests/Cap.Fuzz.Tests
 
 When a property fails, CsCheck prints the shrunk input and a seed. Setting the environment
 variable `CsCheck_Seed` to that seed replays exactly that case.
+
+## On every change
+
+The `fuzz-smoke` job in `.github/workflows/ci.yml` runs `build/fuzz/run.sh` for 45 seconds
+each on `cap-path` and `resolution-memory`. Between them, those two targets drive both
+instrumented assemblies. The job is there to catch a broken harness: a wrong driver digest, a
+clang flag the runner's compiler refuses, a SharpFuzz release that no longer works with the
+SDK, or a change to `Cap.Primitives` or `Cap.Std.Testing` that SharpFuzz cannot instrument.
+The driver is built from source on every run, so its digest is checked every time.
+
+Each target starts from an empty corpus, and the job fails unless libFuzzer's final
+`stat::new_units_added` is above zero. libFuzzer keeps an input only when it reaches a branch
+that no earlier input reached. The only branches it can see in the target are the ones
+SharpFuzz instrumented, so with no instrumentation it keeps nothing. Do not use the `cov:`
+figure for this check. It counts the driver's own code and stays the same whether the target
+is instrumented or not.
 
 ## On the schedule
 
