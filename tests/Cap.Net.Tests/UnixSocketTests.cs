@@ -213,6 +213,51 @@ public sealed class UnixSocketTests : IDisposable
         Assert.False(File.Exists(Join(_tree.HostPath, "..", "elsewhere.sock")));
     }
 
+    /// <summary>A name the socket address cannot hold is refused, and nothing is created.</summary>
+    /// <remarks>
+    /// The address is <c>/proc/self/fd/N/</c> and the name, in 107 bytes, so a name of 100
+    /// leaves no room for the prefix whatever <c>N</c> is. Truncating it would bind a
+    /// different name, so the refusal is the only answer, and it is reported as the name
+    /// being too long rather than as whatever the socket call would have said.
+    /// </remarks>
+    [Fact]
+    public void A_name_that_does_not_fit_the_address_is_refused()
+    {
+        RequireSupport();
+
+        Dir root = _tree.Directory;
+        string name = new('a', 100);
+
+        PathTooLongException refused = Assert.Throws<PathTooLongException>(() => CapUnixListener.Bind(root, name));
+
+        Assert.Equal(CapErrorKind.NameTooLong, CapIOException.KindOf(refused));
+        Assert.Contains("100 bytes", refused.Message, StringComparison.Ordinal);
+        Assert.Matches(@"had room for \d+\.", refused.Message);
+        Assert.False(root.Exists(name));
+    }
+
+    /// <summary>A long name that fits binds, however long the directories above it are.</summary>
+    /// <remarks>
+    /// Only the last component is written into the address; the directories ahead of it are
+    /// opened by the walk and stand in it as a descriptor number. So a path far longer than
+    /// the address binds as long as its last component fits.
+    /// </remarks>
+    [Fact]
+    public void A_long_name_that_fits_binds_beneath_a_long_path()
+    {
+        RequireSupport();
+
+        Dir root = _tree.Directory;
+        string directory = new('d', 200);
+        string name = new('s', 60);
+        using Dir nested = root.CreateDir(directory);
+
+        using CapUnixListener listener = CapUnixListener.Bind(root, Join(directory, name));
+        using CapUnixStream client = CapUnixStream.Connect(nested, name);
+
+        Assert.True(client.CanRead);
+    }
+
     /// <summary>Closing a listener leaves the name where it was.</summary>
     /// <remarks>
     /// Removing it acts on the name rather than on the object, and by the time a process is

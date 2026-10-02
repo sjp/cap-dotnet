@@ -163,6 +163,13 @@ internal static class UnixSocketNaming
     /// </summary>
     /// <param name="holder">The directory a confined resolution has already arrived at.</param>
     /// <param name="name">The single component the socket is to take.</param>
+    /// <param name="nameBudget">
+    /// How many bytes of name the address had room for on this attempt, or zero when the
+    /// attempt failed before that was known. Reported because it is not a constant: the
+    /// address carries the copied descriptor's number, so the room left for the name shrinks
+    /// as the process holds more descriptors, and a caller told only that a name was too
+    /// long would have no way to see why the same name fitted a moment ago.
+    /// </param>
     /// <remarks>
     /// <para>
     /// Takes a copy of the directory descriptor rather than borrowing the caller's, because
@@ -176,8 +183,11 @@ internal static class UnixSocketNaming
     /// the way fails the bind instead of redirecting it.
     /// </para>
     /// </remarks>
-    public static CapResult<UnixSocketName> ForBind(SafeDirHandle holder, ReadOnlySpan<char> name)
+    public static CapResult<UnixSocketName> ForBind(
+        SafeDirHandle holder, ReadOnlySpan<char> name, out int nameBudget)
     {
+        nameBudget = 0;
+
         if (!IsSupported || !holder.Backend.IssuesKernelHandles)
         {
             return CapResult<UnixSocketName>.Fail(CapError.FromCategory(CapErrorCategory.NotSupported));
@@ -201,6 +211,10 @@ internal static class UnixSocketNaming
             anchor.Dispose();
             return CapResult<UnixSocketName>.Fail(HandleLease.ClosedError);
         }
+
+        // The separator ahead of the name is part of the overhead, which is why the empty
+        // name is described with one appended rather than measured on its own.
+        nameBudget = AddressLimit - (PathEncoding.GetByteCount(Describe(lease.Descriptor, name: default)) + 1);
 
         string address = Describe(lease.Descriptor, name);
         if (PathEncoding.GetByteCount(address) > AddressLimit)

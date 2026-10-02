@@ -93,13 +93,39 @@ internal static class UnixSocketReach
 
         using (directory)
         {
+            int nameBudget = 0;
             CapResult<UnixSocketName> named = creating
-                ? UnixSocketNaming.ForBind(directory, component)
+                ? UnixSocketNaming.ForBind(directory, component, out nameBudget)
                 : UnixSocketNaming.ForConnect(directory, component);
 
-            return named.IsSuccess
-                ? named.Value
-                : throw FailureTranslation.ToException(named.Error, path, ExpectedTarget.Name);
+            if (named.IsSuccess)
+            {
+                return named.Value;
+            }
+
+            if (creating && named.Error.Category == CapErrorCategory.NameTooLong)
+            {
+                throw AddressTooLong(path, component, nameBudget, named.Error);
+            }
+
+            throw FailureTranslation.ToException(named.Error, path, ExpectedTarget.Name);
         }
     }
+
+    /// <summary>Explains a name that does not fit the address a bind has to write.</summary>
+    /// <remarks>
+    /// The same type every other name that is too long is reported as, so a caller sorting
+    /// failures by reason does not need to know this one came from a socket. What differs is
+    /// the message: the limit is the kernel's socket address rather than the filesystem's,
+    /// and it moves with the number of descriptors the process holds, so the figure that
+    /// applied is quoted rather than left for the caller to work out.
+    /// </remarks>
+    private static PathTooLongException AddressTooLong(
+        string path, string component, int nameBudget, CapError error) =>
+        new(
+            $"'{path}' cannot be bound: its last component is {PathEncoding.GetByteCount(component)} " +
+            $"bytes and the socket address had room for {nameBudget}. The address is written " +
+            "as /proc/self/fd/N/<name> and the kernel holds 107 bytes of it, so the room left " +
+            "for the name shrinks as the process holds more descriptors. Only the last component " +
+            $"counts against it; the directories above it do not. ({error})");
 }

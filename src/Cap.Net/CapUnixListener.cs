@@ -59,6 +59,16 @@ public sealed class CapUnixListener : IDisposable
     /// neither followed nor replaced, so the socket is never created where it points.
     /// </para>
     /// <para>
+    /// <strong>How long the last component can be.</strong> The kernel's socket address holds
+    /// 107 bytes, and the address written here is <c>/proc/self/fd/N/</c> followed by the last
+    /// component, where <c>N</c> is a descriptor this call duplicates from the holding
+    /// directory. That leaves about 89 bytes of UTF-8 for the name in a process with fewer
+    /// than a thousand descriptors open, and one fewer for each further digit <c>N</c> needs,
+    /// so a name close to the limit can bind in one process and fail in a busier one. The
+    /// directories ahead of the last component do not count against it. A name that does not
+    /// fit is refused rather than truncated, and nothing is created.
+    /// </para>
+    /// <para>
     /// Safe to call from any thread. Two binds racing for the same name are settled by the
     /// filesystem: one creates it and the other finds it taken.
     /// </para>
@@ -69,6 +79,10 @@ public sealed class CapUnixListener : IDisposable
     /// <exception cref="PlatformNotSupportedException"><see cref="IsSupported"/> is false.</exception>
     /// <exception cref="SandboxEscapeException">
     /// <paramref name="path"/> names something outside what <paramref name="dir"/> covers.
+    /// </exception>
+    /// <exception cref="PathTooLongException">
+    /// The last component of <paramref name="path"/> does not fit the socket address. The
+    /// message gives the number of bytes there was room for.
     /// </exception>
     /// <exception cref="SocketException">The name is taken, or the socket could not be created.</exception>
     public static CapUnixListener Bind(Dir dir, string path, int backlog = DefaultBacklog)

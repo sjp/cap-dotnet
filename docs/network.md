@@ -282,6 +282,25 @@ has to be on the host's filesystem. A handle on a filesystem held in memory has 
 descriptor to name, and connecting or binding beneath one throws `CapIOException` with
 `CapErrorKind.NotSupported`, even where `IsSupported` is true.
 
+### How long a socket's name can be
+
+The kernel's address for a socket in this domain holds 107 bytes, and binding writes it as
+`/proc/self/fd/N/<name>`, where `N` is a descriptor duplicated from the holding directory. The
+last component therefore gets what is left: about 89 bytes of UTF-8 while the process holds
+fewer than a thousand descriptors, and one byte fewer for each further digit `N` needs. The
+directories above it do not count, because they were opened rather than written into the
+address. A name near the limit can bind in a quiet process and fail in a busy one.
+
+A name that does not fit is refused rather than truncated, since a truncated address names a
+different socket. `CapUnixListener.Bind` throws `PathTooLongException` (which
+`CapIOException.KindOf` reports as `CapErrorKind.NameTooLong`), the message says how many
+bytes there was room for, and nothing is created. Connecting has no such limit: it opens the
+name first and writes only the descriptor into the address.
+
+The limit could be held steady by moving the duplicated descriptor to a reserved low number,
+but that needs a process-wide reservation for a few bytes of name, so the budget is left to
+move and documented instead.
+
 ### Closing a listener leaves the name
 
 As it does for every other program that binds one. Removing it is `Dir.DeleteFile`, and it is

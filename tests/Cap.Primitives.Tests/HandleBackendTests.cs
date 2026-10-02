@@ -202,7 +202,7 @@ public sealed class HandleBackendTests : IDisposable
         using SafeDirHandle simulated = OpenSimulated(ops, "sandbox");
         int handlesBefore = ops.OpenHandleCount;
 
-        Assert.Equal(CapErrorCategory.NotSupported, UnixSocketNaming.ForBind(simulated, "listener").Error.Category);
+        Assert.Equal(CapErrorCategory.NotSupported, UnixSocketNaming.ForBind(simulated, "listener", out _).Error.Category);
         Assert.Equal(CapErrorCategory.NotSupported, UnixSocketNaming.ForConnect(simulated, "listener").Error.Category);
         Assert.Equal(handlesBefore, ops.OpenHandleCount);
     }
