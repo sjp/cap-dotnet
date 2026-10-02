@@ -589,6 +589,16 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void The_directory_name_matches_the_full_name_spelling()
+    {
+        string path = P("a", "b");
+
+        Assert.Equal(Fs.FileInfo.New(path).DirectoryName, Fs.Path.GetDirectoryName(path));
+        Assert.Equal(Fs.DirectoryInfo.New(P("a")).FullName, Fs.Path.GetDirectoryName(path));
+        Assert.Equal(Root, Fs.Path.GetDirectoryName(P("a")));
+    }
+
+    [Fact]
     public void File_info_describes_a_file()
     {
         Fs.Directory.CreateDirectory(P("d"));

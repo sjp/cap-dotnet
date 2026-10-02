@@ -9,7 +9,8 @@ namespace Cap.IO.Abstractions;
 /// The members that are string functions, such as <c>GetFileName</c> and
 /// <c>GetExtension</c>, are the platform's own. <c>Combine</c> and <c>Join</c> follow the
 /// platform's rules but write the namespace's separator, so that a path built with them is
-/// spelled the way the paths the adapter hands back are. The members that depend on where the root
+/// spelled the way the paths the adapter hands back are, and <c>GetDirectoryName</c> does the
+/// same for the part of a path it keeps. The members that depend on where the root
 /// is, such as <c>IsPathFullyQualified</c>, <c>GetPathRoot</c>, <c>GetFullPath</c> and
 /// <c>GetRelativePath</c>, answer for the virtual namespace, and never consult the host's
 /// working directory.
@@ -56,9 +57,9 @@ internal sealed class PathAdapter(DirFileSystem fs) : IPath
 
     public bool EndsInDirectorySeparator(string path) => Path.EndsInDirectorySeparator(path);
 
-    public ReadOnlySpan<char> GetDirectoryName(ReadOnlySpan<char> path) => Path.GetDirectoryName(path);
+    public ReadOnlySpan<char> GetDirectoryName(ReadOnlySpan<char> path) => fs.Paths.GetDirectoryName(path);
 
-    public string? GetDirectoryName(string? path) => Path.GetDirectoryName(path);
+    public string? GetDirectoryName(string? path) => fs.Paths.GetDirectoryName(path);
 
     public ReadOnlySpan<char> GetExtension(ReadOnlySpan<char> path) => Path.GetExtension(path);
 

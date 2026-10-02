@@ -160,6 +160,62 @@ public sealed class VirtualPathTests
         Assert.Equal(name, Posix.LastName(path));
     }
 
+    [Theory]
+    [InlineData("/a/b", "/a")]
+    [InlineData("/a", "/")]
+    [InlineData("/", null)]
+    [InlineData("a", "")]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("/a/b/", "/a/b")]
+    [InlineData(@"\a\b", "/a")]
+    [InlineData(@"/a\\b//c", "/a/b")]
+    [InlineData("//a/b", "//a")]
+    public void A_directory_name_is_written_with_the_namespace_separator(string path, string? directory)
+    {
+        Assert.Equal(directory, WindowsSlash.GetDirectoryName(path));
+    }
+
+    [Fact]
+    public void A_directory_name_on_another_drive_is_left_to_the_platform()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Only Windows reads a drive letter as rooted.");
+        Assert.Equal(@"D:\x", WindowsSlash.GetDirectoryName(@"D:\x\y"));
+        Assert.Equal(@"D:\x", WindowsDrive.GetDirectoryName("D:/x/y"));
+    }
+
+    [Theory]
+    [InlineData(@"C:\a\b", @"C:\a")]
+    [InlineData(@"C:\a", @"C:\")]
+    [InlineData(@"C:\", null)]
+    [InlineData("C:/a/b", @"C:\a")]
+    [InlineData(@"\a", @"\")]
+    public void A_drive_directory_name_is_as_windows_spells_it(string path, string? directory)
+    {
+        Assert.Equal(directory, WindowsDrive.GetDirectoryName(path));
+    }
+
+    [Theory]
+    [InlineData("/a/b", "/a")]
+    [InlineData("/a//b//c", "/a/b")]
+    [InlineData("//a/b", "/a")]
+    [InlineData(@"/a\b", "/")]
+    [InlineData("   ", "")]
+    public void A_posix_directory_name_is_as_unix_spells_it(string path, string? directory)
+    {
+        Assert.Equal(directory, Posix.GetDirectoryName(path));
+    }
+
+    [Theory]
+    [InlineData(@"/a\\b//c", @"/a\\b")]
+    [InlineData("/a", "/")]
+    [InlineData("/", "")]
+    [InlineData("a", "")]
+    public void A_directory_name_from_a_span_is_a_slice_of_the_callers_path(string path, string directory)
+    {
+        Assert.Equal(directory, WindowsSlash.GetDirectoryName(path.AsSpan()).ToString());
+    }
+
     [Fact]
     public void Combining_writes_the_namespace_separator_whatever_the_host()
     {

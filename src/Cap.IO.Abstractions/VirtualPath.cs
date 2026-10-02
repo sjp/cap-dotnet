@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Cap.IO.Abstractions;
 
 /// <summary>
@@ -314,6 +316,55 @@ internal sealed class VirtualPath
     }
 
     /// <summary>
+    /// The directory part of a path as <see cref="Path.GetDirectoryName(string)"/> gives it,
+    /// with separators written as this namespace writes them.
+    /// </summary>
+    /// <remarks>
+    /// The platform's own collapses doubled separators in what it returns and, on Windows,
+    /// rewrites <c>/</c> as <c>\</c>, which is not this namespace's separator when the root is
+    /// <c>/</c>; the result would then disagree with every <c>FullName</c> the adapter hands
+    /// back. This one does the same tidying but writes <see cref="Separator"/>. A trailing
+    /// separator is not trimmed first, so <c>/a/b/</c> gives <c>/a/b</c>, as it does there. A
+    /// path rooted outside the namespace is left to the platform, whose spelling it already is.
+    /// </remarks>
+    public string? GetDirectoryName(string? path)
+    {
+        if (path is null || IsEffectivelyEmpty(path))
+        {
+            return null;
+        }
+
+        if (RootLength(path) == 0 && IsForeignRooted(path))
+        {
+            return Path.GetDirectoryName(path);
+        }
+
+        int end = DirectoryNameEnd(path);
+        return end < 0 ? null : NormalizeSeparators(path.AsSpan(0, end));
+    }
+
+    /// <summary>
+    /// The directory part of a path as <see cref="Path.GetDirectoryName(ReadOnlySpan{char})"/>
+    /// gives it: a slice of the caller's own characters, with the root found as this namespace
+    /// finds it.
+    /// </summary>
+    public ReadOnlySpan<char> GetDirectoryName(ReadOnlySpan<char> path)
+    {
+        if (IsEffectivelyEmpty(path))
+        {
+            return [];
+        }
+
+        if (RootLength(path) == 0 && IsForeignRooted(path))
+        {
+            return Path.GetDirectoryName(path);
+        }
+
+        int end = DirectoryNameEnd(path);
+        return end < 0 ? [] : path[..end];
+    }
+
+    /// <summary>
     /// A path made absolute against a base and folded lexically: <c>.</c> and empty
     /// components dropped, and each <c>..</c> removing the name before it, never climbing
     /// above the root.
@@ -436,6 +487,70 @@ internal sealed class VirtualPath
 
         return true;
     }
+
+    /// <summary>
+    /// Where the directory part of a path ends: before its last name and the separators ahead
+    /// of that name, but never inside the root. Minus one for the root itself.
+    /// </summary>
+    private int DirectoryNameEnd(ReadOnlySpan<char> path)
+    {
+        int root = RootLength(path);
+        int end = path.Length;
+        if (end <= root)
+        {
+            return -1;
+        }
+
+        do
+        {
+            end--;
+        }
+        while (end > root && !IsSeparator(path[end]));
+
+        while (end > root && IsSeparator(path[end - 1]))
+        {
+            end--;
+        }
+
+        return end;
+    }
+
+    /// <summary>
+    /// A path with each run of separators written as one of this namespace's, as
+    /// <c>System.IO</c> tidies one; under Windows rules a doubled leading separator is kept,
+    /// as it is there.
+    /// </summary>
+    private string NormalizeSeparators(ReadOnlySpan<char> path)
+    {
+        StringBuilder normalized = new(path.Length);
+        int start = 0;
+        if (_windows && path.Length > 0 && IsSeparator(path[0]))
+        {
+            normalized.Append(Separator);
+            start = 1;
+        }
+
+        for (int i = start; i < path.Length; i++)
+        {
+            if (!IsSeparator(path[i]))
+            {
+                normalized.Append(path[i]);
+            }
+            else if (i + 1 == path.Length || !IsSeparator(path[i + 1]))
+            {
+                normalized.Append(Separator);
+            }
+        }
+
+        return normalized.ToString();
+    }
+
+    /// <summary>
+    /// Whether a path is one <c>System.IO</c> treats as no path at all: empty, or under Windows
+    /// rules made only of spaces.
+    /// </summary>
+    private bool IsEffectivelyEmpty(ReadOnlySpan<char> path) =>
+        path.IsEmpty || (_windows && !path.ContainsAnyExcept(' '));
 
     /// <summary>The names of a virtual absolute path after lexical folding.</summary>
     private List<string> Components(string absolute)
