@@ -47,7 +47,8 @@ internal static class Descriptions
 
     /// <summary>
     /// Reads a time of what a path names, following a final link; the missing-entry time
-    /// when there is nothing there, as <c>System.IO</c> answers.
+    /// when it cannot be described, as <c>System.IO</c> answers for any failure. An escape
+    /// is still refused.
     /// </summary>
     public static DateTime GetTime(DirFileSystem fs, string path, TimeKind kind, bool utc) =>
         fs.Run(path, Expected.Any, request =>
@@ -56,7 +57,7 @@ internal static class Descriptions
             {
                 return TimeOf(fs.Describe(request, followLink: true), kind, utc);
             }
-            catch (Exception e) when (e is FileNotFoundException or DirectoryNotFoundException)
+            catch (Exception e) when (e is (IOException and not SandboxEscapeException) or UnauthorizedAccessException)
             {
                 return Missing(utc);
             }

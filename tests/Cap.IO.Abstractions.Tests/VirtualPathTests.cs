@@ -141,6 +141,11 @@ public sealed class VirtualPathTests
     [InlineData("/a/b", "/a/c/d", "../c/d")]
     [InlineData("/a", "/a", ".")]
     [InlineData("/a/b", "/", "../..")]
+    [InlineData("/a", "/a/b/", "b/")]
+    [InlineData("/a/b/c", "/a/x/", "../../x/")]
+    [InlineData("/a/b", "/a/", "..")]
+    [InlineData("/a", "/a/", ".")]
+    [InlineData("/a", "/a/b/.", "b")]
     public void A_relative_path_is_worked_out_lexically(string from, string to, string relative)
     {
         Assert.Equal(relative, Posix.GetRelativePath(from, to, "/", StringComparison.Ordinal));

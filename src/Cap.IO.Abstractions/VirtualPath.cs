@@ -383,7 +383,17 @@ internal sealed class VirtualPath
         }
 
         steps.AddRange(toNames.Skip(common));
-        return steps.Count == 0 ? "." : string.Join(Separator, steps);
+        if (steps.Count == 0)
+        {
+            return ".";
+        }
+
+        // System.IO carries a trailing separator over only when some of the target is left
+        // after the common part: "/a" to "/a/b/" is "b/", but "/a/b" to "/a/" is "..".
+        string relative = string.Join(Separator, steps);
+        return toNames.Count > common && path.Length > 0 && IsSeparator(path[^1])
+            ? string.Concat(relative, Separator.ToString())
+            : relative;
     }
 
     /// <summary>The virtual scratch directory, spelled as a directory.</summary>

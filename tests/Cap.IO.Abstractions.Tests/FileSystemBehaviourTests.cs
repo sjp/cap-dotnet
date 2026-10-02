@@ -719,6 +719,15 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void A_time_through_a_file_component_is_the_missing_time()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "a");
+
+        Assert.Equal(DateTime.FromFileTimeUtc(0), Fs.File.GetLastWriteTimeUtc(P("a.txt", "x")));
+        Assert.Equal(DateTime.FromFileTimeUtc(0), Fs.FileInfo.New(P("a.txt", "x")).LastWriteTimeUtc);
+    }
+
+    [Fact]
     public void A_symbolic_link_is_read_through()
     {
         TestLinks.Require(_fixture.SupportsLinks);
