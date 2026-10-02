@@ -299,3 +299,27 @@ on every change.
   promise the filesystem will accept that much.
 - The first directory handle is opened with the process's own authority and follows links;
   everything after is confined.
+
+## Where it is tested
+
+Every change runs the suites on these hosts (`.github/workflows/ci.yml`). Runner images are
+GitHub's current ones (`ubuntu-latest`, `windows-latest`, `macos-latest`) except where a leg
+names a version, so an image update reaches the suite without a change here.
+
+| Platform | Architecture | C library / version | What runs |
+|---|---|---|---|
+| Linux, `openat2` | x86-64 | glibc | every suite and the samples, with a bind mount; again with `openat2` refused by seccomp (`EPERM`); the in-memory walk backend |
+| Linux, forced walk | x86-64 | glibc | every suite and the samples with `openat2` turned off; again with it refused as `ENOSYS`; the in-memory confined backend |
+| Linux | AArch64 | glibc | every suite and the samples, with a bind mount |
+| Linux | x86-64 | musl (Alpine) | `Cap.Primitives.Tests` and the escape corpus, with a bind mount |
+| Linux | x86-64 | glibc | the escape corpus on tmpfs, ext4, overlayfs and a case-insensitive vfat |
+| Windows | x86-64 | Server 2025 (`windows-latest`) | every suite and the samples, with 8.3 names on; link creation again in Developer Mode; the in-memory backends |
+| Windows | x86-64 | Server 2022 | the same as the leg above |
+| macOS | Apple silicon | `macos-latest` | every suite and the samples |
+| macOS | x86-64, under Rosetta | `macos-latest` | `Cap.Primitives.Tests`, `Cap.Std.Tests`, `Cap.Fs.Ext.Tests` and the escape corpus, as an Intel process |
+
+Nightly (`.github/workflows/nightly.yml`) adds 32-bit ARM under glibc and musl, emulated, and
+the stress races at full size on Linux x86-64 and AArch64, Windows and macOS. The Intel macOS
+leg runs under Rosetta rather than on an Intel runner: it is the C library's Intel entry
+points and calling convention that the backend's second set of imports depends on, and
+Rosetta runs those as an Intel Mac would.

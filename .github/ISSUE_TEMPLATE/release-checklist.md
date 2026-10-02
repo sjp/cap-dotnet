@@ -13,8 +13,9 @@ See [docs/releasing.md](../../docs/releasing.md) for the process and the version
 ## The boundary still holds
 
 - [ ] **CI** is green on the commit to tag, on every leg: the escape corpus on Linux (openat2
-      and the forced fallback), Linux arm64, Windows, and macOS both natively and as an Intel
-      process under Rosetta (the step that runs the suites as x64); the escape corpus on each
+      and the forced fallback), Linux arm64, Linux on musl (Alpine), Windows (latest and
+      Server 2022), and macOS both natively and as an Intel process under Rosetta (the step
+      that runs the suites as x64); the escape corpus on each
       filesystem; the runs with openat2 denied; and the package jobs. The release workflow
       refuses a commit with no successful `push` or `workflow_dispatch` CI run.
 - [ ] **NativeAOT and trimming** jobs are green on all three platforms.

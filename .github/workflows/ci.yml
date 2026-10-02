@@ -53,6 +53,10 @@ jobs:
             # fallback -- tests still pass, and the fast path is never exercised again.
           - name: windows-x64
             os: windows-latest
+          # The release before windows-latest, still the most common server a library like this
+          # is deployed to. Same steps as the leg above, on an older kernel and NTFS driver.
+          - name: windows-x64 (Server 2022)
+            os: windows-2022
           - name: windows-x64 (in memory)
             os: windows-latest
             passes_only: true
@@ -281,6 +285,66 @@ jobs:
           path: "**/*.cobertura.xml"
           if-no-files-found: ignore
 
+  # ---------------------------------------------------------------------------------
+  # The Linux backend calls the C library for openat, fcntl, fstatfs and syscall itself, and
+  # every other Linux leg on every change runs on glibc. musl declares some of those
+  # differently and is what Alpine-based containers ship, so the resolver's tests and the
+  # escape corpus run again on it: published for linux-musl-x64 here and run in the runtime's
+  # Alpine image, as the nightly 32-bit ARM legs are.
+  #
+  # The bind mount is made on the runner, where sudo is, and reaches the container through the
+  # volume that holds it. The container runs as the runner's own user, because the escape
+  # corpus refuses to run where file permissions can be bypassed, and a container's default
+  # user can. The checkout is mounted at its own path so the tests that read the docs find
+  # the repository above the published assemblies.
+  # ---------------------------------------------------------------------------------
+  musl:
+    name: linux-x64 (musl, Alpine)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Publish the tests for linux-musl-x64
+        run: |
+          for project in Cap.Primitives.Tests Cap.Escape.Tests; do
+            dotnet publish "tests/$project/$project.csproj" --configuration Release \
+              --runtime linux-musl-x64 --self-contained --output "artifacts/musl/$project"
+          done
+
+      - name: Prepare a bind mount for the escape corpus
+        run: |
+          mount="$(build/ci/prepare-bind-mount.sh "$RUNNER_TEMP")"
+          echo "CAPDOTNET_TEST_BIND_MOUNT=$mount" >> "$GITHUB_ENV"
+
+      - name: Run the tests on musl
+        run: |
+          status=0
+          for project in Cap.Primitives.Tests Cap.Escape.Tests; do
+            echo "::group::$project"
+            docker run --rm \
+              --user "$(id -u):$(id -g)" \
+              --env HOME=/tmp \
+              --env CI \
+              --env CAPDOTNET_TEST_BIND_MOUNT \
+              --env CAPDOTNET_EXPECT_BIND_MOUNT=1 \
+              --env CAPDOTNET_EXPECT_HOST_FEATURES=Symlinks,HardLinks,ProcessFilesystem,PosixNames,SpecialFiles \
+              --volume "$PWD:$PWD" \
+              --volume "$RUNNER_TEMP:$RUNNER_TEMP" \
+              --workdir "$PWD/artifacts/musl/$project" \
+              mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine \
+              "./$project" \
+              || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
   filesystems:
     name: escape corpus on ${{ matrix.fs }}
     runs-on: ubuntu-latest
@@ -503,6 +567,7 @@ jobs:
           "coverage-linux-x64 (forced fallback)"
           coverage-linux-arm64
           coverage-windows-x64
+          "coverage-windows-x64 (Server 2022)"
           coverage-macos-arm64
 
   # Cap.IO.Abstractions depends on a minimum of each System.IO.Abstractions package, so a
