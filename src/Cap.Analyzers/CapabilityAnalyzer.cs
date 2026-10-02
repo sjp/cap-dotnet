@@ -421,8 +421,8 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
 
         private bool IsJoined(IOperation value)
         {
-            // Entirely constant: written out by the programmer, nothing arrived from elsewhere.
-            if (value.ConstantValue.HasValue)
+            // Entirely fixed: written out by the programmer, nothing arrived from elsewhere.
+            if (IsFixed(value))
             {
                 return false;
             }
@@ -464,6 +464,50 @@ public sealed class CapabilityAnalyzer : DiagnosticAnalyzer
                     return false;
             }
         }
+
+        /// <summary>
+        /// Whether a string is built only from parts the program itself fixes: compile-time
+        /// constants and the separator fields of <see cref="System.IO.Path"/>, put together with
+        /// <c>+</c>, interpolation, or the joining calls <see cref="IsJoined"/> recognises.
+        /// </summary>
+        /// <remarks>
+        /// The compiler folds <c>+</c> and interpolation of constants by itself, but not a
+        /// separator field or a call, so <c>Path.Combine("users", "alice.txt")</c> and
+        /// <c>"users" + Path.DirectorySeparatorChar + "alice.txt"</c> are decided here.
+        /// </remarks>
+        private bool IsFixed(IOperation operation)
+        {
+            operation = Unwrap(operation);
+            if (operation.ConstantValue.HasValue)
+            {
+                return true;
+            }
+
+            return operation switch
+            {
+                IFieldReferenceOperation => IsSeparator(operation),
+                IInvocationOperation { TargetMethod.Name: "ToString", Arguments.IsEmpty: true, Instance: { } instance } =>
+                    IsFixed(instance),
+                IInvocationOperation invocation =>
+                    IsJoiningCall(invocation.TargetMethod) && invocation.Arguments.All(a => IsFixed(a.Value)),
+                IBinaryOperation { OperatorKind: BinaryOperatorKind.Add } binary =>
+                    IsFixed(binary.LeftOperand) && IsFixed(binary.RightOperand),
+                IInterpolatedStringOperation interpolated => interpolated.Parts.All(part => part switch
+                {
+                    IInterpolatedStringTextOperation => true,
+                    IInterpolationOperation hole => IsFixed(hole.Expression),
+                    _ => false,
+                }),
+                IArrayCreationOperation { Initializer: { } initializer } =>
+                    initializer.ElementValues.All(IsFixed),
+                ICollectionExpressionOperation collection => collection.Elements.All(IsFixed),
+                _ => false,
+            };
+        }
+
+        private bool IsJoiningCall(IMethodSymbol method) =>
+            (SymbolEqualityComparer.Default.Equals(method.ContainingType, path) && method.Name is "Combine" or "Join")
+            || (SymbolEqualityComparer.Default.Equals(method.ContainingType, stringType) && method.Name is "Concat" or "Join");
 
         private bool ContainsSeparator(IOperation operation)
         {

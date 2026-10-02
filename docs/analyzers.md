@@ -177,8 +177,10 @@ The rule looks at the argument as written at the call, when the parameter takes 
 `Path.Combine`, `Path.Join`, `+`, `string.Concat` and interpolation that put a `/` or `\`
 between parts, and `string.Join` with a separator. It does not report:
 
-- a path that is entirely constant (`"users/alice.txt"`, or constants joined together), since
-  nothing in it arrived from elsewhere;
+- a path that is entirely constant (`"users/alice.txt"`, or constants joined together with
+  `+`, interpolation, `Path.Combine`, `Path.Join`, `string.Concat` or `string.Join`, at any
+  depth), since nothing in it arrived from elsewhere. `Path.DirectorySeparatorChar` and
+  `Path.AltDirectorySeparatorChar` count as constants here;
 - a path built on an earlier line and passed in a variable, because it does not follow data
   flow;
 - the path given to a method that takes an `AmbientAuthority` token, such as `Dir.Open`,
