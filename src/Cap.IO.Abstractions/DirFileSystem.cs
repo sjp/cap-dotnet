@@ -425,23 +425,21 @@ public sealed class DirFileSystem : IFileSystem
                 append: mode == FileMode.Append);
             try
             {
-                // A stream over a file the system completes work on only borrows the file,
-                // which costs nothing, so the file stays here to be stored through: the stream
-                // beneath cannot be asked to. A stream that appends borrows it too, since on
-                // Windows it is given a handle that can only append, which may not change the
-                // length, so its length is changed through the file. Any other stream takes
-                // the handle, and on the host is a FileStream, which can be stored through.
+                // A stream that appends writes through the file, the only way every write
+                // lands at the end on every platform (see AppendingStream), so it borrows the
+                // file, which is stored through. So does a stream over a file the system
+                // completes work on, which costs nothing, since the stream beneath cannot be
+                // asked to store. Any other stream takes the handle, and on the host is a
+                // FileStream, which can.
                 bool isAsync = (options & FileOptions.Asynchronous) != 0;
                 bool appends = mode == FileMode.Append;
                 bool borrows = isAsync || appends;
-                Stream stream = file.AsStream(leaveOpen: borrows, bufferSize: bufferSize);
-                long appendStart = -1;
-                if (appends && stream.CanSeek)
-                {
-                    appendStart = stream.Seek(0, SeekOrigin.End);
-                }
+                Stream stream = appends
+                    ? new AppendingStream(file)
+                    : file.AsStream(leaveOpen: isAsync, bufferSize: bufferSize);
+                long appendStart = appends ? stream.Seek(0, SeekOrigin.End) : -1;
 
-                Action? sync = isAsync
+                Action? sync = borrows
                     ? () => file.Flush(toDisk: true)
                     : stream is FileStream host ? () => host.Flush(flushToDisk: true) : null;
                 return new DirFileSystemStream(

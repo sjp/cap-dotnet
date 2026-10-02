@@ -1,4 +1,3 @@
-using Cap.Std;
 using System.IO.Abstractions;
 
 namespace Cap.IO.Abstractions;
@@ -25,9 +24,7 @@ namespace Cap.IO.Abstractions;
 /// A stream opened to append is given <paramref name="appendStart"/>, the length the file had
 /// when it was opened. As on a <see cref="FileStream"/>, seeking before it or setting the
 /// length below it is refused with <see cref="IOException"/>, so what the file held is never
-/// overwritten or cut; <c>-1</c> means the stream was not opened to append. Its length is
-/// changed through <paramref name="file"/>, since on Windows the stream beneath holds a
-/// handle that can only append, which the system does not let change the length.
+/// overwritten or cut; <c>-1</c> means the stream was not opened to append.
 /// </para>
 /// </remarks>
 internal sealed class DirFileSystemStream(
@@ -88,21 +85,6 @@ internal sealed class DirFileSystemStream(
         if (appendStart >= 0 && value >= 0 && value < appendStart)
         {
             throw new IOException("Unable to truncate data that previously existed in a file opened in Append mode.");
-        }
-
-        if (appendStart >= 0 && file is CapFile owner)
-        {
-            // What is buffered is written first, so it lands before the cut rather than after,
-            // and a position past the new end is brought back to it, as a FileStream's is.
-            ArgumentOutOfRangeException.ThrowIfNegative(value);
-            Flush();
-            owner.SetLength(value);
-            if (base.Position > value)
-            {
-                base.Seek(value, SeekOrigin.Begin);
-            }
-
-            return;
         }
 
         base.SetLength(value);
