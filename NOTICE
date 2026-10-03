@@ -7,7 +7,7 @@ Third-party material
 
 The packages contain no code, test data or other material taken from another project.
 
-cap-dotnet is a port of cap-std (https://github.com/bytecodealliance/cap-std), which is
+cap-dotnet is a port of cap-std (https://github.com/sunfishcode/cap-std), which is
 licensed Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT. What this repository takes from
 cap-std is its design: the idea of a directory handle as the authority, and the shape of the
 API built on it. That is re-expressed in C# from scratch. cap-std's test suite was used as a

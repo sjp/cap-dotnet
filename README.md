@@ -4,7 +4,7 @@
 [![Nightly](https://github.com/sjp/cap-dotnet/actions/workflows/nightly.yml/badge.svg)](https://github.com/sjp/cap-dotnet/actions/workflows/nightly.yml)
 
 A capability-based filesystem API for .NET — a native port of
-[cap-std](https://github.com/bytecodealliance/cap-std).
+[cap-std](https://github.com/sunfishcode/cap-std).
 
 ## The check you have already written
 

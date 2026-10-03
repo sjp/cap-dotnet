@@ -1,7 +1,7 @@
 # cap-dotnet
 
 A capability-based filesystem API for .NET, ported from
-[cap-std](https://github.com/bytecodealliance/cap-std).
+[cap-std](https://github.com/sunfishcode/cap-std).
 
 A `Dir` is an open directory and the authority to reach what is beneath it, and nothing
 else. A path handed to it is resolved against the directory handle, never as a string. A

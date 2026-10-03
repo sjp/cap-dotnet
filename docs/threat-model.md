@@ -252,7 +252,7 @@ making one follows nothing, just as removing one doesn't.
 ### 4.3 Windows name handling
 
 This is where cap-std itself shipped a CVE
-([GHSA-hxf5-99xg-86hw](https://github.com/bytecodealliance/cap-std/security/advisories/GHSA-hxf5-99xg-86hw),
+([GHSA-hxf5-99xg-86hw](https://github.com/sunfishcode/cap-std/security/advisories/GHSA-hxf5-99xg-86hw),
 Windows device filenames escaping the sandbox), so it gets its own section rather than a
 bullet.
 
