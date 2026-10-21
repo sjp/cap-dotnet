@@ -3,7 +3,7 @@
 	"image": "mcr.microsoft.com/devcontainers/base:trixie",
 	"features": {
 		"ghcr.io/devcontainers/features/dotnet:2": {
-			"version": "10.0.401"
+			"version": "10.0.402"
 		},
 		"ghcr.io/devcontainers/features/node:2": {
 			"version": "26"
