@@ -32,10 +32,24 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
     public static TheoryData<string> OnThisHost => new(Backends.OnThisHost);
 
     /// <summary>
-    /// The most redirections per million the Linux walk may come to on the nightly run: an
-    /// order of magnitude above the five per million docs/threat-model.md §6.1 publishes.
+    /// The most redirections per million the Linux walk's median run may come to on the nightly
+    /// run: an order of magnitude above the five per million docs/threat-model.md §6.1 publishes.
     /// </summary>
     private const int RedirectionsPerMillionBound = 50;
+
+    /// <summary>
+    /// How many times the mid-path rename race is run on the Linux walk at the nightly size, so
+    /// that the bound is held against the median run rather than a single one. Odd, so the
+    /// median is one of the runs.
+    /// </summary>
+    /// <remarks>
+    /// The rate is heavy-tailed. Most runs of a million come to a few tens or fewer, but about
+    /// one in six comes to between one and two hundred, with the same code on the same machine,
+    /// so a bound on a single run fails on those nights and says nothing about the window. The
+    /// median of seven exceeds the bound only if four of the seven do, which a window that has
+    /// really grown makes certain and the tail alone makes rare.
+    /// </remarks>
+    private const int WalkRateRuns = 7;
 
     /// <summary>
     /// A directory swapped back and forth with a link pointing outside, in a tight loop, is
@@ -120,6 +134,40 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
     [MemberData(nameof(OnThisHost))]
     public void A_rename_in_the_middle_of_a_path_redirects_only_to_objects_inside(string backend)
     {
+        // docs/threat-model.md §6.1 publishes the walk's rate as a handful per million and asks
+        // the reader to carry away its order. Below the nightly size the count is too small to
+        // say anything about a rate, so the order is held only there, an order of magnitude
+        // above the published figure, and against the median of several runs: one run in
+        // several lands far above the rest without anything having changed.
+        bool measured = backend == Backends.LinuxWalk && StressSettings.Iterations >= 1_000_000;
+        int runs = measured ? WalkRateRuns : 1;
+
+        List<double> perMillion = [];
+        for (int run = 1; run <= runs; run++)
+        {
+            string race = runs == 1 ? "directory renamed mid-path" : $"directory renamed mid-path, run {run} of {runs}";
+            Tally tally = FightRenameMidPath(backend, race);
+            perMillion.Add(tally[Outcome.Redirected] * 1_000_000.0 / tally.Attempts);
+        }
+
+        if (measured)
+        {
+            double median = perMillion.Order().ElementAt(runs / 2);
+            string each = string.Join(", ", perMillion.Select(rate => rate.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)));
+            output.WriteLine($"directory renamed mid-path on {backend}: median {median:F1} redirections per million over {runs} runs ({each})");
+            Assert.True(
+                median <= RedirectionsPerMillionBound,
+                $"The walk's median run was steered {median:F1} times per million, more than the {RedirectionsPerMillionBound} " +
+                $"that is an order of magnitude above the handful docs/threat-model.md §6.1 publishes: the residual " +
+                $"window has grown, or the published figure needs remeasuring. Runs, per million: {each}.");
+        }
+    }
+
+    /// <summary>
+    /// Fights the mid-path rename race once, in an arena of its own, and returns its counts.
+    /// </summary>
+    private Tally FightRenameMidPath(string backend, string race)
+    {
         using StressArena arena = new();
 
         string p = arena.Inside("p");
@@ -142,7 +190,7 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
 
         Tally tally = Race.Fight(
             output,
-            "directory renamed mid-path",
+            race,
             backend,
             arena,
             () => new ThreadAdversary(() =>
@@ -170,26 +218,14 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
                 $"at any single instant, which a kernel-atomic resolution cannot do. {tally}");
         }
 
-        // docs/threat-model.md §6.1 publishes the walk's rate as a handful per million and asks
-        // the reader to carry away its order. Below the nightly size the count is too small to
-        // say anything about a rate, so the order is held only there, an order of magnitude
-        // above the published figure.
-        if (backend == Backends.LinuxWalk && StressSettings.Iterations >= 1_000_000)
-        {
-            double perMillion = tally[Outcome.Redirected] * 1_000_000.0 / tally.Attempts;
-            Assert.True(
-                perMillion <= RedirectionsPerMillionBound,
-                $"The walk was steered {perMillion:F1} times per million, more than the {RedirectionsPerMillionBound} " +
-                $"that is an order of magnitude above the handful docs/threat-model.md §6.1 publishes: the residual " +
-                $"window has grown, or the published figure needs remeasuring. {tally}");
-        }
-
         if (!bothSeen)
         {
             Tally.NotFought(
                 $"In {tally.Attempts} attempts only one of the two directories was ever reached through p, " +
                 $"so the renames never landed while the race was being run. {tally}");
         }
+
+        return tally;
     }
 
     /// <summary>

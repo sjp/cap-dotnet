@@ -590,8 +590,11 @@ replaces the last component of a write, came to between a third and two thirds o
 refused as escapes on both backends, and none reaching outside.
 
 The nightly run holds the window to that order. From a million attempts up, the component
-walk on Linux fails if it is steered more than fifty times per million, an order of magnitude
-above the figure above, and `openat2` fails if it is steered at all, at any count. A race the
+walk on Linux runs the race seven times and fails if the median run is steered more than fifty
+times per million, an order of magnitude above the figure above, and `openat2` fails if it is
+steered at all, at any count. The median is held rather than any one run because the rate is
+heavy-tailed: with nothing changed, about one run in six comes to between one and two hundred
+per million, while the rest stay in the tens or below. A race the
 attacker never got into skips on the per-change run, where the scheduler may not interleave
 the two sides in ten thousand attempts, but fails on the nightly run, which exists to fight it.
 
