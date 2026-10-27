@@ -26,7 +26,7 @@ public sealed class CapPathPropertyTests
         (1, Gen.Char));
 
     /// <summary>Fragments that mean something to one set of rules or the other.</summary>
-    private static readonly Gen<string> PathFragment = Gen.OneOfConst(
+    private static readonly Gen<string> PathFragment = Gen.OneOf(
         "/", "\\", "//", "\\\\", ".", "..", "...", "a", "b.txt", " ", "C:", "c:", "\\\\?\\", "//./", "\\??\\",
         "CON", "con", "Nul", "AUX.txt", "PRN .x", "COM1", "lpt9", "COM¹", "LPT²", "CONIN$", "conout$", "COM0",
         "cOm10", "CONIN", "file:stream", "::$DATA", "\0", "a.", "a ", " ");
@@ -90,7 +90,7 @@ public sealed class CapPathPropertyTests
     public void A_path_built_from_names_parses_back_to_those_names()
     {
         Gen<string> name = Gen.String[Gen.Char["abcxyz0189_-~"], 1, 12];
-        Gen<string> separator = Gen.OneOfConst("/", "//", "/./", "/./././", "\\", "\\.\\", "/\\");
+        Gen<string> separator = Gen.OneOf("/", "//", "/./", "/./././", "\\", "\\.\\", "/\\");
 
         Gen.Select(name.Array[1, 8], separator.Array[8], Gen.Bool, Syntaxes).Sample(
             (names, separators, trailing, syntax) =>

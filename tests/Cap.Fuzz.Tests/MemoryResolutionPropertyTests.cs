@@ -24,7 +24,7 @@ namespace Cap.Fuzz.Tests;
 /// </remarks>
 public sealed class MemoryResolutionPropertyTests
 {
-    private static readonly Gen<string> Word = Gen.OneOfConst([.. ResolutionScenario.Words]);
+    private static readonly Gen<string> Word = Gen.OneOf([.. ResolutionScenario.Words]);
 
     private static readonly Gen<string> RelativeText =
         Word.Array[0, 7].Select(words => string.Join('/', words));
@@ -72,7 +72,7 @@ public sealed class MemoryResolutionPropertyTests
     public void Link_heavy_trees_resolve_as_the_walk_resolves_them()
     {
         Gen<TopologyEntry> entry = Gen.Select(
-                Gen.OneOfConst(EntryKind.SymbolicLink, EntryKind.SymbolicLink, EntryKind.SymbolicLink, EntryKind.Directory),
+                Gen.OneOf(EntryKind.SymbolicLink, EntryKind.SymbolicLink, EntryKind.SymbolicLink, EntryKind.Directory),
                 Gen.Int[0, 15],
                 Word,
                 LinkTarget)
@@ -110,7 +110,7 @@ public sealed class MemoryResolutionPropertyTests
     public void Without_links_the_confined_open_agrees_with_the_text()
     {
         Gen<TopologyEntry> entry = Gen.Select(
-                Gen.OneOfConst(EntryKind.Directory, EntryKind.Directory, EntryKind.File, EntryKind.MountPoint),
+                Gen.OneOf(EntryKind.Directory, EntryKind.Directory, EntryKind.File, EntryKind.MountPoint),
                 Gen.Int[0, 15],
                 Word)
             .Select((kind, parent, name) => new TopologyEntry(kind, parent, name));
