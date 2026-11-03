@@ -32,7 +32,9 @@ namespace Cap.Fuzz.Targets;
 /// <para>
 /// And, because the confined open and the walk are meant to reach the same verdict when
 /// nothing changes the tree underneath them, it must agree with the walk: the same success
-/// or the same reason for failing, and on success the same object.
+/// or the same reason for failing, and on success the same object. The one exception is the
+/// kernel's own: text as long as <c>PATH_MAX</c> is refused as too long by the confined open
+/// before it looks anything up, and there it must be.
 /// </para>
 /// <para>
 /// The operations go through the library's own choice of resolver, with a handle from an
@@ -83,13 +85,54 @@ internal static class MemoryResolutionTarget
         Require(ResolutionChecks.Describe(outside) == outsideBefore, $"{shown} changed something outside the sandbox.");
         ResolutionChecks.RequireNoClimbWithoutLinks(scenario, path, outcome.Succeeded, shown);
 
+        // The walk is still run and checked, but on text the kernel takes whole and refuses for
+        // length the two cannot agree: the walk never holds more than one name, and finds the
+        // first missing one where the confined open has looked nothing up.
         ResolutionOutcome walk = ResolutionWalkTarget.Check(scenario)!.Value;
+        if (OverPathMax(path, scenario))
+        {
+            Require(
+                outcome.Category == CapErrorCategory.NameTooLong,
+                $"{shown} {outcome} through the confined open in memory, which is handed text the kernel refuses as too long.");
+            return outcome;
+        }
+
         Require(
             outcome == walk,
             $"{shown} {outcome} through the confined open in memory but {walk} through the walk, " +
             $"in a tree of [{string.Join(", ", scenario.Entries)}].");
 
         return outcome;
+    }
+
+    /// <summary>
+    /// Whether the text the library hands the confined open for the scenario's operation is as
+    /// long as the kernel's <c>PATH_MAX</c> or longer, measured as the syntax's system measures
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// That text is the path's normal spelling, and for a parent resolution only what comes
+    /// ahead of the last name, unless that name is <c>..</c> and the whole path is resolved.
+    /// </remarks>
+    private static bool OverPathMax(CapPath path, ResolutionScenario scenario)
+    {
+        char[] normal = new char[path.Raw.Length];
+        ReadOnlySpan<char> text = normal.AsSpan(0, path.WriteNormal(normal));
+        if (scenario.Operation == ResolutionOperation.ResolveParent)
+        {
+            if (!CapPath.TrySplitLastComponent(text, scenario.Syntax, out ReadOnlySpan<char> prefix, out ReadOnlySpan<char> name))
+            {
+                return false;
+            }
+
+            if (!name.SequenceEqual(".."))
+            {
+                text = prefix;
+            }
+        }
+
+        int length = scenario.Syntax == CapPathSyntax.Windows ? text.Length : PathEncoding.GetByteCount(text);
+        return length >= InMemoryPlatformOps.LinuxPathMax;
     }
 
     /// <summary>

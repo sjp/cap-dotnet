@@ -205,6 +205,55 @@ public sealed class MemoryResolutionPropertyTests
         }
     }
 
+    /// <summary>
+    /// The one difference between the two resolvers that is meant to be there: the confined
+    /// open refuses the text it is handed as too long when it measures <c>PATH_MAX</c> or more,
+    /// before looking anything up, where the walk never holds more than one name and so finds
+    /// the first missing one. Anything shorter than that limit still has to agree.
+    /// </summary>
+    /// <remarks>
+    /// The first case is the shape the nightly run found: an empty tree and a path over the
+    /// limit, which the walk refused as missing and the confined open as too long.
+    /// </remarks>
+    [Fact]
+    public void Only_text_the_kernel_would_refuse_for_length_is_refused_for_it()
+    {
+        static string Words(int count, string word) => string.Join('/', Enumerable.Repeat(word, count));
+
+        string a250 = new('a', 250);
+        string replacement85 = new('�', 85);
+        const ConfinedResolveOptions Refusing = ConfinedResolveOptions.RefuseSymlinks | ConfinedResolveOptions.RefuseMountCrossing;
+
+        (ResolutionScenario Scenario, CapErrorCategory Expected)[] cases =
+        [
+            (new([], Words(300, ResolutionScenario.OutsideFileName), ResolutionOperation.OpenDirectory, Refusing), CapErrorCategory.NameTooLong),
+            (new([], Words(17, a250), ResolutionOperation.OpenFile, ConfinedResolveOptions.None, CapPathSyntax.Windows), CapErrorCategory.NameTooLong),
+
+            // 4095 bytes is under the limit, which counts the terminating NUL; 4096 is not.
+            (new([], Words(16, a250) + "/" + new string('b', 4095 - (16 * 251)), ResolutionOperation.OpenDirectory, ConfinedResolveOptions.None), CapErrorCategory.NotFound),
+            (new([], Words(16, a250) + "/" + new string('b', 4096 - (16 * 251)), ResolutionOperation.OpenDirectory, ConfinedResolveOptions.None), CapErrorCategory.NameTooLong),
+
+            // A parent resolution hands over only what comes ahead of the last name, so a path
+            // over the limit whose prefix is under it is resolved as far as the walk gets.
+            (new([], Words(18, a250), ResolutionOperation.ResolveParent, ConfinedResolveOptions.None), CapErrorCategory.NameTooLong),
+            (new([], Words(17, a250), ResolutionOperation.ResolveParent, ConfinedResolveOptions.None), CapErrorCategory.NotFound),
+
+            // What is measured is the normal spelling, without the steps that name nothing.
+            (new([], string.Concat(Enumerable.Repeat("./", 2100)) + "missing", ResolutionOperation.OpenFile, ConfinedResolveOptions.None), CapErrorCategory.NotFound),
+
+            // Measured in bytes under Unix rules and in UTF-16 units under Windows rules.
+            (new([], Words(17, replacement85), ResolutionOperation.OpenDirectory, ConfinedResolveOptions.None), CapErrorCategory.NameTooLong),
+            (new([], Words(17, replacement85), ResolutionOperation.OpenDirectory, ConfinedResolveOptions.None, CapPathSyntax.Windows), CapErrorCategory.NotFound),
+        ];
+
+        foreach ((ResolutionScenario scenario, CapErrorCategory expected) in cases)
+        {
+            ResolutionOutcome? outcome = MemoryResolutionTarget.Check(scenario);
+            Assert.True(outcome is not null, $"{Show(scenario)} did not parse.");
+            Assert.True(outcome.Value.Category == expected, $"{Show(scenario)} {outcome.Value}, not {expected}.");
+        }
+    }
+
     private static string Show(ResolutionScenario scenario) =>
         $"{InvariantViolation.Show(scenario.Path)} ({scenario.Operation}, {scenario.Options}, {scenario.Syntax}) in a tree of [{string.Join(", ", scenario.Entries)}]";
 }

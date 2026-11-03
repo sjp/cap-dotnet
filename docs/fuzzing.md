@@ -84,8 +84,14 @@ refuses to be asked about any directory outside the sandbox.
 It must also **agree with the walk**. When nothing changes the tree during resolution, the
 confined open and the walk are meant to reach the same verdict. So the same scenario goes
 through the walk as well, and both must succeed and reach the same object, or both must fail
-for the same reason. There is no list of permitted differences: when the two disagreed, the
-code that differed from the kernel was fixed. The property tests run this over general trees,
+for the same reason. There is one permitted difference, and it is the kernel's: the confined
+open takes the whole path at once and refuses text of `PATH_MAX` (4096) or more as too long
+before it looks anything up, where the walk never holds more than one name. The text measured
+is what the library hands over, which is the path's normal spelling, and for a parent
+resolution only what comes ahead of the last name. It is measured in UTF-8 bytes under POSIX
+rules and in UTF-16 units under Windows rules. On such text the confined open must fail with
+`NameTooLong`, and the walk is still run and held to its own checks. Otherwise, when the two
+disagreed, the code that differed from the kernel was fixed. The property tests run this over general trees,
 over trees made mostly of links (where the two resolvers keep their accounts differently), and
 over trees without links, compared with reading the path as text.
 

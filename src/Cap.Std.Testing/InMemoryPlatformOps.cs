@@ -56,7 +56,7 @@ internal sealed class InMemoryPlatformOps : IPlatformOps
     /// Linux's limit, in bytes and counting the terminating NUL, on a path handed to it in one
     /// piece, which also bounds what a symbolic link can store.
     /// </summary>
-    private const int LinuxPathMax = 4096;
+    internal const int LinuxPathMax = 4096;
 
     /// <summary>As many links as one ambient open follows, as Linux allows in one lookup.</summary>
     private const int MaxAmbientLinks = 40;
