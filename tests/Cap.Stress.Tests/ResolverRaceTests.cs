@@ -33,9 +33,15 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
 
     /// <summary>
     /// The most redirections per million the Linux walk's median run may come to on the nightly
-    /// run: an order of magnitude above the five per million docs/threat-model.md §6.1 publishes.
+    /// run: several times the highest median docs/threat-model.md §6.1 publishes for any host.
     /// </summary>
-    private const int RedirectionsPerMillionBound = 50;
+    /// <remarks>
+    /// The rate depends on the host as much as on the walk. The same code has come to medians
+    /// of 5, 68 and 179 per million on three Linux hosts, so a bound near any one of them fails
+    /// when a runner image moves to a newer kernel, with nothing in the walk changed. This one
+    /// sits above that spread and still fails if a change widens the window several-fold.
+    /// </remarks>
+    private const int RedirectionsPerMillionBound = 1_000;
 
     /// <summary>
     /// How many times the mid-path rename race is run on the Linux walk at the nightly size, so
@@ -134,11 +140,11 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
     [MemberData(nameof(OnThisHost))]
     public void A_rename_in_the_middle_of_a_path_redirects_only_to_objects_inside(string backend)
     {
-        // docs/threat-model.md §6.1 publishes the walk's rate as a handful per million and asks
-        // the reader to carry away its order. Below the nightly size the count is too small to
-        // say anything about a rate, so the order is held only there, an order of magnitude
-        // above the published figure, and against the median of several runs: one run in
-        // several lands far above the rest without anything having changed.
+        // docs/threat-model.md §6.1 publishes the walk's rate as a range across hosts, from a
+        // handful to a few hundred per million. Below the nightly size the count is too small to
+        // say anything about a rate, so the range is held only there, several times above its
+        // top, and against the median of several runs: one run in several lands far above the
+        // rest without anything having changed.
         bool measured = backend == Backends.LinuxWalk && StressSettings.Iterations >= 1_000_000;
         int runs = measured ? WalkRateRuns : 1;
 
@@ -158,8 +164,8 @@ public sealed class ResolverRaceTests(ITestOutputHelper output)
             Assert.True(
                 median <= RedirectionsPerMillionBound,
                 $"The walk's median run was steered {median:F1} times per million, more than the {RedirectionsPerMillionBound} " +
-                $"that is an order of magnitude above the handful docs/threat-model.md §6.1 publishes: the residual " +
-                $"window has grown, or the published figure needs remeasuring. Runs, per million: {each}.");
+                $"that is several times the highest median docs/threat-model.md §6.1 publishes for any host: the residual " +
+                $"window has grown, or this host needs measuring and adding there. Runs, per million: {each}.");
         }
     }
 

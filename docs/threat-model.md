@@ -574,27 +574,35 @@ job summary.
 The window is measured by one race built for the purpose. Two directories take turns at `p`,
 and whichever is not in place has its `q` swapped for a stale one and back, so that at every
 instant the path `p/q/f` names a fresh file. Reaching a stale file means resolution saw `p`
-at one moment and `q` at another. On Linux, over a million resolutions (8 processors, one
-attacker thread):
+at one moment and `q` at another. On Linux, over a million resolutions with one attacker
+thread, `openat2` reached the file the path named every time on every host, and nothing ever
+reached outside. How often the component walk was steered to a different file inside depends
+on the host:
 
-| Backend | Reached the file the path named | Steered to a different file inside | Reached outside |
+| Host | `openat2` steered | Component walk steered, per million | Reached outside |
 |---|--:|--:|--:|
-| `openat2` | 1,000,000 | 0 | 0 |
-| component walk | 999,995 | 5 | 0 |
+| 8 processors, the first measurement | 0 | 5 | 0 |
+| GitHub-hosted `ubuntu-latest` x64 runner, nightly | 0 | median 68 of seven runs (34–102) | 0 |
+| 8-processor arm64 VM on a 7.0 kernel | 0 | median 179 of seven runs (132–257) | 0 |
 
 The rate depends on how fast the attacker can make its changes relative to the resolution,
-so the number to carry away is its order — a handful per million against an attacker doing
-nothing else — and not its exact value. The same run's other races, where the attacker swaps a
+and on how the kernel and the scheduler interleave the two. The same code on two hosts has
+come out more than thirty times apart. The figure to carry away is therefore the range,
+somewhere between a handful and a few hundred per million against an attacker doing nothing
+else, and not any one value. The same run's other races, where the attacker swaps a
 directory for a link pointing outside, recreates a component as another kind of object, or
 replaces the last component of a write, came to between a third and two thirds of attempts
 refused as escapes on both backends, and none reaching outside.
 
-The nightly run holds the window to that order. From a million attempts up, the component
-walk on Linux runs the race seven times and fails if the median run is steered more than fifty
-times per million, an order of magnitude above the figure above, and `openat2` fails if it is
-steered at all, at any count. The median is held rather than any one run because the rate is
-heavy-tailed: with nothing changed, about one run in six comes to between one and two hundred
-per million, while the rest stay in the tens or below. A race the
+The nightly run holds the window to that range. From a million attempts up, the component
+walk on Linux runs the race seven times and fails if the median run is steered more than a
+thousand times per million, several times the highest median measured on any host above, and
+`openat2` fails if it is steered at all, at any count. The bound sits above the spread
+between hosts rather than near one host's figure, because a runner image moved to a newer
+kernel is not a regression in the walk. It still catches the walk taking a step that widens the
+window several-fold, which is the regression it is there for. The median is held rather than
+any one run because the rate is also heavy-tailed on a single host: with nothing changed, about
+one run in six lands several times above the rest. A race the
 attacker never got into skips on the per-change run, where the scheduler may not interleave
 the two sides in ten thousand attempts, but fails on the nightly run, which exists to fight it.
 
