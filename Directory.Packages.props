@@ -60,7 +60,10 @@
   </ItemGroup>
 
   <ItemGroup Label="Benchmarking">
-    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <!-- A preview: 0.15.8, the newest stable release, has no runtime moniker for net11.0 and
+         throws "GetRuntimeVersion not implemented for NotRecognized" before running anything.
+         Move to the first stable release that knows net11.0. -->
+    <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
   </ItemGroup>
 
 </Project>
