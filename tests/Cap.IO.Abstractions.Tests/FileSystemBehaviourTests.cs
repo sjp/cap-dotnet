@@ -243,6 +243,7 @@ public abstract class FileSystemBehaviourTests : IDisposable
     [Fact]
     public void A_hard_link_is_a_second_name_for_the_same_file()
     {
+        MockDiffers("hard links cannot be created.");
         Fs.File.WriteAllText(P("a.txt"), "one");
 
         IFileSystemInfo link = Fs.File.CreateHardLink(P("b.txt"), P("a.txt"));
@@ -257,6 +258,7 @@ public abstract class FileSystemBehaviourTests : IDisposable
     [Fact]
     public void A_file_info_becomes_a_hard_link()
     {
+        MockDiffers("hard links cannot be created.");
         Fs.File.WriteAllText(P("a.txt"), "one");
         IFileInfo info = Fs.FileInfo.New(P("b.txt"));
 
@@ -269,6 +271,7 @@ public abstract class FileSystemBehaviourTests : IDisposable
     [Fact]
     public void A_hard_link_needs_a_file_to_link_and_a_free_name()
     {
+        MockDiffers("hard links cannot be created.");
         Fs.File.WriteAllText(P("a.txt"), "one");
         Fs.File.WriteAllText(P("taken.txt"), "two");
         Fs.Directory.CreateDirectory(P("d"));
