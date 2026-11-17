@@ -454,6 +454,8 @@ public abstract class EscapeTests : IDisposable
         yield return E("IFile.Create(String, Int32, FileOptions) path", F, R, (fs, p) => fs.File.Create(p, 4096, FileOptions.None));
         yield return E("IFile.CreateSymbolicLink(String, String) path", F, R, (fs, p) => fs.File.CreateSymbolicLink(p, "a.txt"));
         yield return E("IFile.CreateSymbolicLink(String, String) pathToTarget", F, Outcome.Stored, (fs, p) => fs.File.CreateSymbolicLink("link", p));
+        yield return E("IFile.CreateHardLink(String, String) path", F, R, (fs, p) => fs.File.CreateHardLink(p, "a.txt"));
+        yield return E("IFile.CreateHardLink(String, String) pathToTarget", F, R, (fs, p) => fs.File.CreateHardLink("link", p));
         yield return E("IFile.CreateText(String) path", F, R, (fs, p) => fs.File.CreateText(p));
         yield return E("IFile.Decrypt(String) path", F, Outcome.Unsupported, Do((fs, p) => fs.File.Decrypt(p)));
         yield return E("IFile.Delete(String) path", F, R, Do((fs, p) => fs.File.Delete(p)));
@@ -577,6 +579,7 @@ public abstract class EscapeTests : IDisposable
 
         // IFileSystemInfo, IFileInfo and IDirectoryInfo, over a path inside and given one outside
         yield return E("IFileSystemInfo.CreateAsSymbolicLink(String) pathToTarget", F, Outcome.Stored, Do((fs, p) => fs.FileInfo.New("link").CreateAsSymbolicLink(p)));
+        yield return E("IFileInfo.CreateAsHardLink(String) pathToTarget", F, R, Do((fs, p) => fs.FileInfo.New("link").CreateAsHardLink(p)));
         yield return E("IFileInfo.CopyTo(String) destFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").CopyTo(p));
         yield return E("IFileInfo.CopyTo(String, Boolean) destFileName", F, R, (fs, p) => fs.FileInfo.New("a.txt").CopyTo(p, true));
         yield return E("IFileInfo.MoveTo(String) destFileName", F, R, Do((fs, p) => fs.FileInfo.New("a.txt").MoveTo(p)));
@@ -670,6 +673,7 @@ public abstract class EscapeTests : IDisposable
         yield return E("IFileInfo.CopyTo(String)", R, info => File(info).CopyTo("copy.txt"));
         yield return E("IFileInfo.CopyTo(String, Boolean)", R, info => File(info).CopyTo("copy.txt", true));
         yield return E("IFileInfo.Create()", R, info => File(info).Create());
+        yield return E("IFileInfo.CreateAsHardLink(String)", R, Do(info => File(info).CreateAsHardLink("a.txt")));
         yield return E("IFileInfo.CreateText()", R, info => File(info).CreateText());
         yield return E("IFileInfo.Decrypt()", U, Do(info => File(info).Decrypt()));
         yield return E("IFileInfo.Encrypt()", U, Do(info => File(info).Encrypt()));

@@ -299,6 +299,8 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
     public SafeFileHandle OpenHandle(string path, FileMode mode, FileAccess access, FileShare share, FileOptions options, long preallocationSize) =>
         throw Unsupported.OpenHandle();
 
+    public SafeFileHandle OpenNullHandle() => throw Unsupported.OpenNullHandle();
+
     public FileSystemStream OpenRead(string path) => fs.OpenStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
 
     public StreamReader OpenText(string path) => Reader(path, Encoding.UTF8);
@@ -504,6 +506,36 @@ internal sealed class FileAdapter(DirFileSystem fs) : IFile
 
             fs.Dir.CreateSymlink(request.Relative, pathToTarget);
         });
+
+        return new FileInfoAdapter(fs, path);
+    }
+
+    public IFileSystemInfo CreateHardLink(string path, string pathToTarget)
+    {
+        Request link = fs.Resolve(path, nameof(path));
+        Request target = fs.Resolve(pathToTarget, nameof(pathToTarget));
+        try
+        {
+            // The root is a directory, which System.IO is refused access to link; and it
+            // cannot be given up as the new name.
+            if (target.IsRoot)
+            {
+                throw Failures.Denied(target.Virtual);
+            }
+
+            if (link.IsRoot)
+            {
+                throw Failures.RootIsFixed(link.Virtual);
+            }
+
+            // System.IO links a final symbolic link itself rather than what it points at,
+            // which is what the Dir does unless asked to follow.
+            fs.Dir.CreateHardLink(target.Relative, fs.Dir, link.Relative);
+        }
+        catch (Exception e) when (fs.TranslateRename(e, target, link, Expected.File) is { } translated)
+        {
+            throw translated;
+        }
 
         return new FileInfoAdapter(fs, path);
     }

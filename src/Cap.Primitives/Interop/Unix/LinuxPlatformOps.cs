@@ -1842,7 +1842,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapError.FromCategory(CapErrorCategory.IsADirectory);
         }
 
-        ClearNonBlockingUnlessFile(fd, flags, type);
+        ClearNonBlockingUnlessDirectory(fd, flags, type);
         return CapError.Success;
     }
 
@@ -1886,7 +1886,7 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             return CapResult<OpenedNode>.Fail(error);
         }
 
-        ClearNonBlockingUnlessFile(fd, flags, type);
+        ClearNonBlockingUnlessDirectory(fd, flags, type);
 
         return CapResult<OpenedNode>.Ok(type == CapNodeType.Directory
             ? new OpenedNode(new SafeDirHandle(fd, this, CapAccess.Read))
@@ -2034,20 +2034,25 @@ internal sealed class LinuxPlatformOps : IPlatformOps
         _ = LinuxNative.Fcntl(fd, LinuxConstants.F_SETFL, flags & ~LinuxConstants.O_NONBLOCK);
 
     /// <summary>
-    /// Removes the non-blocking flag from a descriptor of a kind whose reads and writes it
-    /// would change.
+    /// Removes the non-blocking flag from every descriptor that is handed back as a file.
     /// </summary>
     /// <remarks>
-    /// A regular file and a directory are left with it. On either, the kernel never waits in
-    /// a read or a write for anyone else to act, so there is no wait for the flag to cut
-    /// short and nothing it changes; the framework, too, reports such a handle as the
-    /// synchronous one it is. Everything else — FIFOs, sockets, devices, and a kind the
-    /// platform would not name — can wait, and is given back the blocking behaviour a
-    /// handle is expected to have.
+    /// <para>
+    /// FIFOs, sockets, devices, and a kind the platform would not name can wait in a read or
+    /// a write, and are given back the blocking behaviour a handle is expected to have.
+    /// </para>
+    /// <para>
+    /// A regular file is cleared too, although the kernel never makes a read or a write on
+    /// one wait. The framework reads the flag off the descriptor when it wraps one: from
+    /// .NET 11 a handle that carries it reports itself asynchronous, and
+    /// <see cref="RandomAccess"/> then reads and writes it at its current position rather
+    /// than at the offset it was given. A directory is left with it, since it is never
+    /// wrapped as a <see cref="SafeFileHandle"/> and nothing reads or writes through it.
+    /// </para>
     /// </remarks>
-    private static void ClearNonBlockingUnlessFile(int fd, int flags, CapNodeType type)
+    private static void ClearNonBlockingUnlessDirectory(int fd, int flags, CapNodeType type)
     {
-        if (type is not (CapNodeType.File or CapNodeType.Directory))
+        if (type is not CapNodeType.Directory)
         {
             ClearNonBlocking(fd, flags);
         }

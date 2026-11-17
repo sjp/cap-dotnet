@@ -432,6 +432,7 @@ public abstract class DifferenceTests : IDisposable
 
         Refused(() => Fs.File.OpenHandle("a.txt"));
         Refused(() => Fs.File.OpenHandle("a.txt", FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.None, 0));
+        Refused(() => Fs.File.OpenNullHandle());
     }
 
     [Fact]
@@ -522,6 +523,7 @@ public abstract class DifferenceTests : IDisposable
         "IFile IFile.GetLastWriteTimeUtc(SafeFileHandle)",
         "IFile IFile.GetUnixFileMode(SafeFileHandle)",
         "IFile IFile.OpenHandle(String, FileMode, FileAccess, FileShare, FileOptions, Int64)",
+        "IFile IFile.OpenNullHandle()",
         "IFile IFile.SetAttributes(SafeFileHandle, FileAttributes)",
         "IFile IFile.SetAttributes(String, FileAttributes)",
         "IFile IFile.SetCreationTime(SafeFileHandle, DateTime)",

@@ -318,12 +318,12 @@ run-to-run noise.
 
 ## Compiler floor
 
-The analyzer needs .NET SDK 10.0.100 or later, which is also the oldest SDK that can build
-against the `net10.0` packages. A compiler loads an analyzer only if the analyzer was built
+The analyzer needs .NET SDK 11.0.100 or later, which is also the oldest SDK that can build
+against the `net11.0` packages. A compiler loads an analyzer only if the analyzer was built
 against a compiler version no newer than its own. An older compiler reports `CS9057` and
 builds without the analyzer, so every `CAP` rule goes quiet, `[assembly: CapabilityStrict]`
 included, and a warning is the only sign. So the analyzer is built against the compiler in SDK
-10.0.100 (`Microsoft.CodeAnalysis.CSharp` 5.0.0), not the one this repository builds with.
+11.0.100 (`Microsoft.CodeAnalysis.CSharp` 5.12.0), not the one this repository builds with.
 Dependabot does not raise that pin, because a newer pin raises the floor. `Directory.Packages.props`
 says what else has to move with it.
 
@@ -341,7 +341,7 @@ promised defaults in a real build. With nothing configured, `CAP0003` and `CAP00
 and `File.*` is left alone. With `[assembly: CapabilityStrict]`, `File.*` and the rest are
 errors and the build fails. No build may report `CS9057`, and the package must make it an
 error. CI runs the script on every change twice, once with the SDK in `global.json` and once
-with SDK 10.0.100 building the consumer (`CAP_CONSUMER_SDK`), so the floor is exercised
+with SDK 11.0.100 building the consumer (`CAP_CONSUMER_SDK`), so the floor is exercised
 instead of only stated.
 
 [`build/ci/verify-package-install.sh`](../build/ci/verify-package-install.sh) covers the
