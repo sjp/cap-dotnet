@@ -173,6 +173,8 @@ test is skipped for it. The skips are:
 - creating a directory beneath a file does not throw. `System.IO`, and `DirFileSystem`,
   throw `DirectoryNotFoundException`;
 - a symbolic link to a target that does not exist cannot be created;
+- a hard link cannot be created: `File.CreateHardLink` and `FileInfo.CreateAsHardLink`
+  throw `NotSupportedException`;
 - `Directory.SetCurrentDirectory` accepts a directory that does not exist;
 - a relative symbolic link target is taken against the current directory rather than the
   directory holding the link;
