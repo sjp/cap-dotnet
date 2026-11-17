@@ -156,8 +156,8 @@ repository signature to every package it accepts, which changes the `.nupkg` fil
 assemblies in it:
 
 ```bash
-gh attestation verify ~/.nuget/packages/cap.std/0.2.0/lib/net10.0/Cap.Std.dll --repo sjp/cap-dotnet
-gh attestation verify ~/.nuget/packages/cap.std/0.2.0/lib/net10.0/Cap.Primitives.dll --repo sjp/cap-dotnet
+gh attestation verify ~/.nuget/packages/cap.std/0.2.0/lib/net11.0/Cap.Std.dll --repo sjp/cap-dotnet
+gh attestation verify ~/.nuget/packages/cap.std/0.2.0/lib/net11.0/Cap.Primitives.dll --repo sjp/cap-dotnet
 gh attestation verify ~/.nuget/packages/cap.std/0.2.0/analyzers/dotnet/cs/Cap.Analyzers.dll --repo sjp/cap-dotnet
 ```
 

@@ -122,18 +122,19 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
     }
 
     /// <summary>
-    /// A regular file opened for reading costs the open and one question about what it
-    /// reached, and nothing else.
+    /// A regular file opened for reading costs the open, one question about what it reached,
+    /// and one call to clear the non-blocking flag, and nothing else.
     /// </summary>
     /// <remarks>
     /// The question is the one that keeps a directory from being handed back as a file, and
-    /// it cannot be dropped. What must not come back is the flag work around it: a regular
-    /// file is indifferent to the non-blocking flag the open was issued with, so clearing it
-    /// is two syscalls spent on every open for nothing.
+    /// it cannot be dropped. Nor can the flag be left on: the framework would take the
+    /// handle for an asynchronous one and read it at its position rather than at an offset.
+    /// What must not come back is reading the flags before writing them, which spends a
+    /// second syscall to learn what the open was issued with.
     /// </remarks>
     [Fact]
     [SupportedOSPlatform("linux")]
-    public void A_regular_file_open_costs_one_confined_open_and_one_stat()
+    public void A_regular_file_open_costs_one_confined_open_one_stat_and_one_fcntl()
     {
         (LinuxPlatformOps ops, string marker) = PrepareFileTrace();
         File.WriteAllText(Path.Combine(_root, marker), "content");
@@ -149,9 +150,12 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
 
         string[] after = CallsBetweenOpenAndClose(log, marker);
         Assert.True(
-            Count(after, "statx(") == 1 && Count(after, "fcntl(") == 0,
+            Count(after, "statx(") == 1 &&
+            Count(after, "fcntl(") == 1 &&
+            !after.Any(line => line.Contains("F_GETFL", StringComparison.Ordinal)),
             "A read-only open of a regular file should be followed by exactly one statx and " +
-            "no fcntl before its handle is closed. Calls:\n" + string.Join('\n', after));
+            "one fcntl, which sets the flags without reading them first, before its handle " +
+            "is closed. Calls:\n" + string.Join('\n', after));
     }
 
     /// <summary>
@@ -251,7 +255,9 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
     /// Every thread of the process is traced, and each line starts with the number of the
     /// thread that made it, so the calls of the one thread that matters are picked out by
     /// that. A call the tracer saw interrupted is split over two lines, the second of which
-    /// carries its result; only the line that begins a call is counted.
+    /// carries its result; only the line that begins a call is counted. The open's own result
+    /// is therefore read from its resumed line when it was interrupted, which the tracer pads
+    /// with spaces before the "=", and never from a later call that happens to return.
     /// </remarks>
     private static string[] CallsBetweenOpenAndClose(string[] log, string marker)
     {
@@ -262,14 +268,15 @@ public sealed partial class ConfinedOpenSyscallTests : IDisposable
         Assert.True(open >= 0, "The traced open never appeared in the log.");
 
         string thread = log[open][..log[open].IndexOf(' ', StringComparison.Ordinal)] + " ";
-        int returned = Array.FindIndex(
-            log,
-            open,
-            line => line.StartsWith(thread, StringComparison.Ordinal) &&
-                    line.Contains(") = ", StringComparison.Ordinal));
+        int returned = log[open].EndsWith("<unfinished ...>", StringComparison.Ordinal)
+            ? Array.FindIndex(
+                log,
+                open + 1,
+                line => line.StartsWith(thread + "<... openat2 resumed>", StringComparison.Ordinal))
+            : open;
         Assert.True(returned >= 0, "The traced open never returned in the log.");
 
-        string result = log[returned][(log[returned].LastIndexOf(") = ", StringComparison.Ordinal) + 4)..];
+        string result = log[returned][(log[returned].LastIndexOf("= ", StringComparison.Ordinal) + 2)..];
         string fd = new(result.TakeWhile(char.IsAsciiDigit).ToArray());
         Assert.True(fd.Length > 0, "The traced open failed: " + log[returned]);
 

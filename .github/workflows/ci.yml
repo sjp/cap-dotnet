@@ -272,7 +272,7 @@ jobs:
           status=0
           for project in Cap.Primitives.Tests Cap.Std.Tests Cap.Fs.Ext.Tests Cap.Escape.Tests; do
             echo "::group::$project (x64)"
-            arch -x86_64 "$x64/dotnet" exec "tests/$project/bin/Release/net10.0/$project.dll" || status=1
+            arch -x86_64 "$x64/dotnet" exec "tests/$project/bin/Release/net11.0/$project.dll" || status=1
             echo "::endgroup::"
           done
           exit $status
@@ -658,8 +658,8 @@ jobs:
           # The oldest SDK the analyzer is built to load in (docs/analyzers.md, "Compiler
           # floor"). Raise it together with Microsoft.CodeAnalysis.CSharp in
           # Directory.Packages.props.
-          - name: SDK 10.0.100
-            consumer-sdk: "10.0.100"
+          - name: SDK 11.0.100
+            consumer-sdk: "11.0.100"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6

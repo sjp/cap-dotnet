@@ -370,7 +370,7 @@ Every assembly accepts these options:
 An option the platform does not know makes every assembly report *Zero tests ran* with exit
 code 5. That covers a misspelling and an option from an extension that is not referenced, and
 `dotnet test` does not say which option was refused. To see the reason, run one assembly
-directly, `tests/<Project>/bin/Release/net10.0/<Project> <options>`, which prints
+directly, `tests/<Project>/bin/Release/net11.0/<Project> <options>`, which prints
 `error: unknown option`. `Cap.Escape.Aot.Tests` is built on xunit's ahead-of-time runner
 instead of the platform, so it takes neither `--coverage` nor `--report-trx`. Run its published
 executable with xunit's own options, such as `-xml results.xml`.

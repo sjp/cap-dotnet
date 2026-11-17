@@ -199,7 +199,7 @@ dotnet build CapDotnet.slnx
 dotnet test  CapDotnet.slnx
 ```
 
-Requires the .NET 10 SDK (see `global.json`). Tests run on Microsoft.Testing.Platform and
+Requires the .NET 11 SDK (see `global.json`). Tests run on Microsoft.Testing.Platform and
 **must not be run with the power to bypass file permissions** — every test assembly asserts
 this at startup, because negative containment tests can pass for the wrong reason when the
 process outranks the permission system. On Unix that means not running as root. On Windows

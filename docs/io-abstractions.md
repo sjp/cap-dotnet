@@ -147,7 +147,7 @@ test checks that every row has one and that no such test names a row missing fro
 | Setting a creation time | supported | `NotSupportedException`. Access and write times can be set |
 | Reading an access time the filesystem does not keep | on Linux, whatever placeholder the kernel left in the field | the last-write time, which a reader comparing times can make sense of |
 | Members that take a `SafeFileHandle`, `RandomAccess`, and `Wrap` on the factories | supported | `NotSupportedException`: the handle, or the host path inside a `FileInfo`, `DirectoryInfo` or `FileStream`, was not opened beneath the `Dir` |
-| `File.OpenHandle` | supported | `NotSupportedException`: nothing in the adapter accepts the handle back. `File.Open` returns a stream that reads and writes at any position |
+| `File.OpenHandle`, `File.OpenNullHandle` | supported | `NotSupportedException`: nothing in the adapter accepts the handle back, and the null device is opened by host path. `File.Open` returns a stream that reads and writes at any position |
 | `DriveInfo`, `FileSystemWatcher`, `FileVersionInfo`, access control lists, `Encrypt`, `Decrypt` | supported | `NotSupportedException`, saying why |
 
 The members that throw `NotSupportedException` do so for every argument, and the exception

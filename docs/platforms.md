@@ -36,7 +36,7 @@ what a program moving between Linux, macOS and Windows will notice.
 
 ## Windows
 
-**Minimum version: whatever .NET 10 runs on**, which is Windows 10 version 1607 and Windows
+**Minimum version: whatever .NET 11 runs on**, which is Windows 10 version 1607 and Windows
 Server 2016. Where the backend asks for something newer than that, it falls back to the older
 form when a system or filesystem does not offer it:
 

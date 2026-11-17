@@ -291,6 +291,12 @@ internal sealed class FileInfoAdapter(DirFileSystem fs, string path) : FileSyste
         Refresh();
     }
 
+    public void CreateAsHardLink(string pathToTarget)
+    {
+        Fs.File.CreateHardLink(Request, pathToTarget);
+        Refresh();
+    }
+
     public void MoveTo(string destFileName) => MoveTo(destFileName, overwrite: false);
 
     public void MoveTo(string destFileName, bool overwrite)

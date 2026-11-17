@@ -22,7 +22,7 @@
 # below would otherwise tell apart from a rule that is simply off. Every build here refuses
 # CS9057 outright.
 #
-# Usage: [CAP_CONSUMER_SDK=10.0.100] verify-analyzer-package.sh [work-dir]
+# Usage: [CAP_CONSUMER_SDK=11.0.100] verify-analyzer-package.sh [work-dir]
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -57,7 +57,7 @@ cat > "$consumer/Consumer.csproj" <<EOF
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>

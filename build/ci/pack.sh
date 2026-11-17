@@ -94,7 +94,7 @@ for id in "${packages[@]}"; do
     continue
   fi
 
-  for file in LICENSE NOTICE README.md "lib/net10.0/$id.dll" "lib/net10.0/$id.xml"; do
+  for file in LICENSE NOTICE README.md "lib/net11.0/$id.dll" "lib/net11.0/$id.xml"; do
     has "$id" "$file" || fail "$id does not carry $file"
   done
 
@@ -150,7 +150,7 @@ for id in "${packages[@]}"; do
   fi
 
   if [[ "$id" != Cap.Std ]]; then
-    if has "$id" lib/net10.0/Cap.Primitives.dll; then
+    if has "$id" lib/net11.0/Cap.Primitives.dll; then
       fail "$id carries its own copy of Cap.Primitives"
     fi
   fi
@@ -159,7 +159,7 @@ done
 has Cap.Std.Testing buildTransitive/Cap.Std.Testing.targets \
   || fail "Cap.Std.Testing does not carry buildTransitive/Cap.Std.Testing.targets"
 
-for file in lib/net10.0/Cap.Primitives.dll lib/net10.0/Cap.Primitives.xml analyzers/dotnet/cs/Cap.Analyzers.dll buildTransitive/Cap.Std.targets; do
+for file in lib/net11.0/Cap.Primitives.dll lib/net11.0/Cap.Primitives.xml analyzers/dotnet/cs/Cap.Analyzers.dll buildTransitive/Cap.Std.targets; do
   has Cap.Std "$file" || fail "Cap.Std does not carry $file"
 done
 

@@ -241,6 +241,46 @@ public abstract class FileSystemBehaviourTests : IDisposable
     }
 
     [Fact]
+    public void A_hard_link_is_a_second_name_for_the_same_file()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "one");
+
+        IFileSystemInfo link = Fs.File.CreateHardLink(P("b.txt"), P("a.txt"));
+
+        Assert.True(link.Exists);
+        Assert.Equal("b.txt", link.Name);
+        Assert.Null(link.LinkTarget);
+        Fs.File.WriteAllText(P("b.txt"), "two");
+        Assert.Equal("two", Fs.File.ReadAllText(P("a.txt")));
+    }
+
+    [Fact]
+    public void A_file_info_becomes_a_hard_link()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "one");
+        IFileInfo info = Fs.FileInfo.New(P("b.txt"));
+
+        info.CreateAsHardLink(P("a.txt"));
+
+        Assert.True(info.Exists);
+        Assert.Equal("one", Fs.File.ReadAllText(P("b.txt")));
+    }
+
+    [Fact]
+    public void A_hard_link_needs_a_file_to_link_and_a_free_name()
+    {
+        Fs.File.WriteAllText(P("a.txt"), "one");
+        Fs.File.WriteAllText(P("taken.txt"), "two");
+        Fs.Directory.CreateDirectory(P("d"));
+
+        Assert.Throws<FileNotFoundException>(() => Fs.File.CreateHardLink(P("b.txt"), P("missing")));
+        IOException taken = Assert.ThrowsAny<IOException>(() => Fs.File.CreateHardLink(P("taken.txt"), P("a.txt")));
+        Assert.IsNotType<FileNotFoundException>(taken);
+        Assert.Throws<UnauthorizedAccessException>(() => Fs.File.CreateHardLink(P("c.txt"), P("d")));
+        Assert.Equal("two", Fs.File.ReadAllText(P("taken.txt")));
+    }
+
+    [Fact]
     public void Copying_copies_and_refuses_an_existing_destination()
     {
         Fs.File.WriteAllText(P("a.txt"), "one");
