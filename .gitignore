@@ -59,6 +59,8 @@ dlldata.c
 
 # Benchmark Results
 BenchmarkDotNet.Artifacts/
+# BenchmarkDotNet 0.16 builds each benchmark project in a .bdn folder beside it.
+.bdn/
 
 # .NET
 project.lock.json
