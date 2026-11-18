@@ -2310,20 +2310,37 @@ internal sealed class LinuxPlatformOps : IPlatformOps
             Resolve = (ulong)ResolveFor(options & ~ConfinedResolveOptions.RefuseMountCrossing),
         };
 
-        Interlocked.Increment(ref _confinedOpenAttempts);
-
         long result;
-        int errno = 0;
-        unsafe
+        int errno;
+        for (int attempt = 0; ; attempt++)
         {
-            fixed (byte* name = path)
+            Interlocked.Increment(ref _confinedOpenAttempts);
+
+            errno = 0;
+            unsafe
             {
-                result = LinuxNative.OpenAt2(LinuxConstants.SYS_openat2, root, name, &how, OpenHow.Size);
-                if (result < 0)
+                fixed (byte* name = path)
                 {
-                    errno = Marshal.GetLastPInvokeError();
+                    result = LinuxNative.OpenAt2(LinuxConstants.SYS_openat2, root, name, &how, OpenHow.Size);
+                    if (result < 0)
+                    {
+                        errno = Marshal.GetLastPInvokeError();
+                    }
                 }
             }
+
+            // The kernel abandons a scoped resolution that steps through `..` while a rename
+            // anywhere on the system is in progress, and asks to be called again. Reading that
+            // as "did not leave the root" would report an escape as a mount crossing whenever
+            // the host happened to be renaming something, so the question is asked again, as
+            // the open that is being classified does.
+            if (ConfinedRetryPolicy.ShouldRetry(errno, attempt))
+            {
+                Interlocked.Increment(ref _confinedOpenRaceRetries);
+                continue;
+            }
+
+            break;
         }
 
         if (result >= 0)
