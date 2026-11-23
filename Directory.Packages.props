@@ -30,8 +30,8 @@
     implements every member the new minimum declares.
   -->
   <ItemGroup Label="Runtime (Cap.IO.Abstractions only)">
-    <PackageVersion Include="TestableIO.System.IO.Abstractions" Version="[23.0.0,)" />
-    <PackageVersion Include="Testably.Abstractions.FileSystem.Interface" Version="[11.0.0,)" />
+    <PackageVersion Include="TestableIO.System.IO.Abstractions" Version="23.1.0" />
+    <PackageVersion Include="Testably.Abstractions.FileSystem.Interface" Version="11.1.0" />
   </ItemGroup>
 
   <ItemGroup Label="Testing">
@@ -43,12 +43,12 @@
       version xunit.v3 brings in, so the reporter does not move the platform under the runner.
     -->
     <PackageVersion Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.3" />
-    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.1" />
     <PackageVersion Include="CsCheck" Version="5.0.1" />
     <PackageVersion Include="Moq" Version="4.21.0" />
-    <PackageVersion Include="TestableIO.System.IO.Abstractions.TestingHelpers" Version="23.0.0" />
-    <PackageVersion Include="TestableIO.System.IO.Abstractions.Wrappers" Version="23.0.0" />
-    <PackageVersion Include="Testably.Abstractions" Version="11.0.0" />
+    <PackageVersion Include="TestableIO.System.IO.Abstractions.TestingHelpers" Version="23.1.0" />
+    <PackageVersion Include="TestableIO.System.IO.Abstractions.Wrappers" Version="23.1.0" />
+    <PackageVersion Include="Testably.Abstractions" Version="11.1.0" />
   </ItemGroup>
 
   <ItemGroup Label="Fuzzing">
